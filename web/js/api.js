@@ -89,7 +89,7 @@ const API = {
     // AI
     getAIRecommendations: (customerId) => 
         apiCall(`/ai/recommendations/${customerId}`),
-    analyizeFace: (imageData) => 
+    analyzeFace: (imageData) => 
         apiCall('/ai/analyze-face', {
             method: 'POST',
             body: JSON.stringify({ image: imageData })
