@@ -1,0 +1,271 @@
+:root {
+  --bg: #0a0a0a;
+  --panel: #1a1a1a;
+  --panel-2: #252525;
+  --text: #ffffff;
+  --muted: #b7b7b7;
+  --gold: #a99941;
+  --border: rgba(255, 255, 255, 0.1);
+  --success: #4caf50;
+  --warning: #ff9800;
+  --danger: #e74c3c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  background: #0f0f0f;
+  border-right: 1px solid var(--border);
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--panel);
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  color: var(--gold);
+}
+
+.brand h1 {
+  font-size: 16px;
+  margin: 0;
+  letter-spacing: 1px;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.nav button {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.nav button.active {
+  background: var(--panel);
+  border-color: var(--border);
+}
+
+.nav button span {
+  opacity: 0.7;
+  font-size: 12px;
+  display: block;
+  font-weight: 500;
+}
+
+.main {
+  padding: 28px 32px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.header h2 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.badge {
+  border: 1px solid var(--border);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.grid.stats {
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.card.gradient {
+  background: linear-gradient(135deg, var(--panel), var(--panel-2));
+}
+
+.card h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.card .value {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.card .meta {
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.meta.success {
+  color: var(--success);
+}
+
+.meta.warning {
+  color: var(--warning);
+}
+
+.section-title {
+  margin: 24px 0 12px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.list-item {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: #fff;
+  color: #000;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+
+.list-item h4 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.list-item p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.list-item .time {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 10px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.tag {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  display: inline-block;
+}
+
+.tag.success {
+  background: rgba(76, 175, 80, 0.2);
+  color: var(--success);
+}
+
+.tag.warning {
+  background: rgba(255, 152, 0, 0.2);
+  color: var(--warning);
+}
+
+.tag.info {
+  background: rgba(33, 150, 243, 0.2);
+  color: #2196f3;
+}
+
+.progress {
+  height: 8px;
+  background: #111;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress span {
+  display: block;
+  height: 100%;
+}
+
+@media (max-width: 960px) {
+  .app {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .nav {
+    flex-direction: row;
+  }
+
+  .nav button {
+    min-width: 140px;
+  }
+}

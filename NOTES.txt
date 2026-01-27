@@ -1,0 +1,47 @@
+Firebase setup notes (configure later):
+1) Run FlutterFire CLI to generate firebase_options.dart.
+	- flutterfire configure
+2) Add google-services.json (Android) in android/app/ and GoogleService-Info.plist (iOS) in ios/Runner/.
+3) Enable Email/Password + Google providers in Firebase Auth.
+4) For Android: add SHA-1/SHA-256 to Firebase console.
+5) For Web: add web config in firebase_options.dart.
+6) After setup, run: flutter pub get
+
+
+
+logo proper picture
+ai impleemntation
+payment page
+
+---
+WEB PORTAL (ADMIN + RECEPTIONIST)
+- Location: web_portal/
+- Admin dashboard: web_portal/admin/index.html
+- Receptionist dashboard: web_portal/receptionist/index.html
+- Shared styles: web_portal/assets/styles.css
+- PHP API placeholders: web_portal/api/admin_dashboard.php, web_portal/api/receptionist_dashboard.php
+- DB connection helper: web_portal/api/db.php (PDO + env variables)
+
+IMPORTANT REMINDERS
+1) Update DB credentials via environment variables:
+	DB_HOST, DB_NAME, DB_USER, DB_PASS
+2) Replace placeholder JSON in PHP endpoints with MySQL queries.
+3) Keep admin/receptionist on web only (mobile app stays for customers).
+4) Add authentication/authorization before exposing admin/receptionist pages publicly.
+5) If hosting PHP, ensure the server can serve index.html and run PHP in /api.
+
+NEXT STEPS
+1) Decide where the web portal will be hosted (local XAMPP/WAMP, shared hosting, or VPS).
+2) Create MySQL schema (users, appointments, services, payments, audit_logs, barbers, walkins).
+3) Implement real API queries in /api/* using db.php.
+4) Wire JS to real API responses and remove fallback data.
+5) Add login for admin/receptionist (PHP session or JWT).
+6) Update mobile app to remove admin/receptionist routes if needed.
+
+---
+CURRENT LOCATIONS (GIT + DATABASE)
+- Git repo root: (this folder) tatis_barbershop
+- Flutter mobile app: /mobile-app/
+- Web admin/receptionist: /web-admin/
+- PHP API: /api/
+- Database files (schemas/migrations): /database/

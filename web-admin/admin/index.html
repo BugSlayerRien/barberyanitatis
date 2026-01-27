@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tatis Barbershop | Admin Dashboard</title>
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-badge">TB</div>
+          <div>
+            <h1>ADMIN</h1>
+            <div class="badge">Barberya ni Tatis</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="active" data-view="dashboard">Dashboard<span>Overview & activity</span></button>
+          <button data-view="users">Manage Users<span>Customers & staff</span></button>
+          <button data-view="audit">Audit Logs<span>Recent actions</span></button>
+          <button data-view="analytics">Analytics<span>Performance</span></button>
+          <button data-view="services">Manage Services<span>Catalog</span></button>
+          <button data-view="settings">System Settings<span>Notifications</span></button>
+          <button data-view="logout">Logout<span>Exit</span></button>
+        </nav>
+      </aside>
+      <main class="main">
+        <div class="header">
+          <h2>Admin Dashboard</h2>
+          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+        </div>
+
+        <section id="dashboard-view">
+          <div class="grid stats" id="stats-grid"></div>
+
+          <div class="section-title">Recent Activity</div>
+          <div class="list" id="activity-list"></div>
+        </section>
+
+        <section id="users-view" hidden>
+          <div class="section-title">Manage Users</div>
+          <div class="card">
+            <p>Use the admin panel to manage users (Customers, Barbers, Receptionists, Admins). Hook this view to the MySQL API when ready.</p>
+          </div>
+        </section>
+
+        <section id="audit-view" hidden>
+          <div class="section-title">Audit Logs</div>
+          <div class="card">
+            <p>Audit activity feed will display actions like user creation, appointment changes, and payment updates.</p>
+          </div>
+        </section>
+
+        <section id="analytics-view" hidden>
+          <div class="section-title">Analytics</div>
+          <div class="card">
+            <p>Analytics charts (monthly revenue, bookings, services performance) will be displayed here.</p>
+          </div>
+        </section>
+
+        <section id="services-view" hidden>
+          <div class="section-title">Manage Services</div>
+          <div class="card">
+            <p>Edit service catalog, pricing, and availability for the barbershop.</p>
+          </div>
+        </section>
+
+        <section id="settings-view" hidden>
+          <div class="section-title">System Settings</div>
+          <div class="card">
+            <p>Configure email notifications, operational hours, and security settings.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
