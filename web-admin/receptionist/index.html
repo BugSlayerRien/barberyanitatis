@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tatis Barbershop | Receptionist Dashboard</title>
+    <link rel="stylesheet" href="../assets/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-badge">TB</div>
+          <div>
+            <h1>RECEPTIONIST</h1>
+            <div class="badge">Barberya ni Tatis</div>
+          </div>
+        </div>
+        <nav class="nav">
+          <button class="active" data-view="analytics">AI Analytics<span>Walk-ins & KPIs</span></button>
+          <button data-view="appointments">Appointments<span>Today</span></button>
+          <button data-view="walkins">Walk-ins<span>Queue</span></button>
+          <button data-view="tracking">Tracking<span>Service status</span></button>
+          <button data-view="barbers">Barbers<span>Team list</span></button>
+          <button data-view="logout">Logout<span>Exit</span></button>
+        </nav>
+      </aside>
+      <main class="main">
+        <div class="header">
+          <h2>Receptionist Dashboard</h2>
+          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+        </div>
+
+        <section id="analytics-view">
+          <div class="grid stats" id="analytics-stats"></div>
+          <div class="section-title">Today Summary</div>
+          <div class="card">
+            <p>Monitor walk-ins, appointments, and service progress. Connect this view to the MySQL API for live data.</p>
+          </div>
+        </section>
+
+        <section id="appointments-view" hidden>
+          <div class="section-title">Today’s Appointments</div>
+          <div class="card">
+            <table class="table" id="appointments-table"></table>
+          </div>
+        </section>
+
+        <section id="walkins-view" hidden>
+          <div class="section-title">Walk-in Queue</div>
+          <div class="card">
+            <table class="table" id="walkins-table"></table>
+          </div>
+        </section>
+
+        <section id="tracking-view" hidden>
+          <div class="section-title">Tracking</div>
+          <div class="list" id="tracking-list"></div>
+        </section>
+
+        <section id="barbers-view" hidden>
+          <div class="section-title">Barbers</div>
+          <div class="list" id="barbers-list"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
