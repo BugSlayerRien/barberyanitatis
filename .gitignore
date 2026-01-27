@@ -1,0 +1,115 @@
+.DS_Store
+.idea/
+.vscode/
+*.log
+*.swp
+*.swo
+*~
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+*.iml
+*.class
+*.dex
+*.apk
+*.ap_
+*.aab
+
+# iOS
+*.ipa
+*.dSYM.zip
+*.dSYM
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+
+# Android
+*.jks
+*.keystore
+local.properties
+.gradle/
+gradle-wrapper.jar
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Environment files
+.env
+.env.local
+.env.production
+*.env
+
+# Database
+*.sql.gz
+*.sql.backup
+
+# Uploads
+uploads/*
+!uploads/.gitkeep
+
+# Logs
+logs/
+*.log
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# AI Models
+ai-models/models/*.h5
+ai-models/models/*.pkl
+ai-models/models/*.pt
+ai-models/datasets/*
+!ai-models/datasets/.gitkeep
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.code-workspace
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.swp
+
+# Coverage
+coverage/
+*.coverage
+.nyc_output/
+htmlcov/

@@ -1,0 +1,64 @@
+name: barbershop_app
+description: AI-powered barbershop management mobile app
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State Management
+  provider: ^6.1.1
+  
+  # Networking
+  dio: ^5.3.3
+  http: ^1.1.0
+  
+  # Local Storage
+  shared_preferences: ^2.2.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  
+  # Image Handling
+  image_picker: ^1.0.4
+  image_cropper: ^5.0.0
+  cached_network_image: ^3.3.0
+  
+  # UI Components
+  flutter_svg: ^2.0.9
+  shimmer: ^3.0.0
+  
+  # Date/Time
+  intl: ^0.18.1
+  table_calendar: ^3.0.9
+  
+  # Authentication
+  flutter_secure_storage: ^9.0.0
+  
+  # Utilities
+  path_provider: ^2.1.1
+  url_launcher: ^6.2.1
+  
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/images/
+    - assets/fonts/
+  
+  # fonts:
+  #   - family: CustomFont
+  #     fonts:
+  #       - asset: assets/fonts/CustomFont-Regular.ttf
+  #       - asset: assets/fonts/CustomFont-Bold.ttf
+  #         weight: 700
