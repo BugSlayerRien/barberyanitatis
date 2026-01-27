@@ -1,0 +1,82 @@
+.dashboard-container {
+    padding: 30px;
+}
+
+/* Stats Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.stat-card {
+    background-color: var(--card-bg);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.stat-icon {
+    font-size: 48px;
+}
+
+.stat-details h3 {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 5px;
+}
+
+.stat-number {
+    font-size: 32px;
+    font-weight: bold;
+    color: var(--primary-color);
+}
+
+/* Dashboard Grid */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+}
+
+.dashboard-card {
+    background-color: var(--card-bg);
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-card h3 {
+    margin-bottom: 15px;
+    color: var(--primary-color);
+}
+
+/* Chart Canvas */
+canvas {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Lists */
+.appointment-list,
+.service-list,
+.stylist-list {
+    list-style: none;
+}
+
+.appointment-list li,
+.service-list li,
+.stylist-list li {
+    padding: 10px;
+    border-bottom: 1px solid #eee;
+}
+
+.appointment-list li:last-child,
+.service-list li:last-child,
+.stylist-list li:last-child {
+    border-bottom: none;
+}
