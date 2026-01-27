@@ -156,9 +156,8 @@
 
         async function loadDashboardData() {
             try {
-                // Fetch dashboard metrics
-                const response = await fetch('http://localhost:3000/api/analytics/dashboard');
-                const data = await response.json();
+                // Fetch dashboard metrics using API object
+                const data = await API.getDashboard();
                 
                 // Update stats
                 if (data.success) {
