@@ -111,6 +111,8 @@ def recommend_hairstyle():
         return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
+    import os
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
     print('Starting AI Recommendation Service...')
-    print('Service available at http://localhost:5000')
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    print(f'Service available at http://localhost:5000 (Debug: {debug_mode})')
+    app.run(host='0.0.0.0', port=5000, debug=debug_mode)

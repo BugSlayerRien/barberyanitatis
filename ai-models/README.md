@@ -39,17 +39,36 @@ cd ai-models
 pip install -r requirements.txt
 ```
 
-### 2. Download Pre-trained Models
+### 2. Configure Environment (Optional)
+
+Create a `.env` file or set environment variables:
+
+```bash
+# Enable debug mode (development only, never in production)
+export FLASK_DEBUG=false
+
+# Port configuration
+export PORT=5000
+```
+
+### 3. Download Pre-trained Models
 
 ```bash
 python scripts/download_models.py
 ```
 
-### 3. Start the AI Service
+### 4. Start the AI Service
 
 ```bash
+# Production mode (recommended)
+python src/app.py
+
+# Development mode with debug (use with caution)
+export FLASK_DEBUG=true
 python src/app.py
 ```
+
+**Security Note**: Never run with `FLASK_DEBUG=true` in production as it exposes debugging endpoints that could allow arbitrary code execution.
 
 The service will run on `http://localhost:5000`
 
