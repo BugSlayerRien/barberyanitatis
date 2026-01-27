@@ -23,3 +23,29 @@ function get_db_connection(): PDO
 
     return new PDO($dsn, $user, $pass, $options);
 }
+
+function json_response(array $data, int $status = 200): void
+{
+    http_response_code($status);
+    header('Content-Type: application/json');
+    echo json_encode($data);
+    exit;
+}
+
+function get_json_input(): array
+{
+    $raw = file_get_contents('php://input');
+    if ($raw === false || trim($raw) === '') {
+        return [];
+    }
+
+    $data = json_decode($raw, true);
+    return is_array($data) ? $data : [];
+}
+
+function require_method(string $method): void
+{
+    if ($_SERVER['REQUEST_METHOD'] !== $method) {
+        json_response(['error' => 'Method not allowed'], 405);
+    }
+}

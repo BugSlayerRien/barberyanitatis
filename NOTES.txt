@@ -15,12 +15,12 @@ payment page
 
 ---
 WEB PORTAL (ADMIN + RECEPTIONIST)
-- Location: web_portal/
-- Admin dashboard: web_portal/admin/index.html
-- Receptionist dashboard: web_portal/receptionist/index.html
-- Shared styles: web_portal/assets/styles.css
-- PHP API placeholders: web_portal/api/admin_dashboard.php, web_portal/api/receptionist_dashboard.php
-- DB connection helper: web_portal/api/db.php (PDO + env variables)
+- Location: web-admin/
+- Admin dashboard: web-admin/admin/index.html
+- Receptionist dashboard: web-admin/receptionist/index.html
+- Shared styles: web-admin/assets/styles.css
+- PHP API: api/admin_dashboard.php, api/receptionist_dashboard.php
+- DB connection helper: api/db.php (PDO + env variables)
 
 IMPORTANT REMINDERS
 1) Update DB credentials via environment variables:
@@ -45,3 +45,15 @@ CURRENT LOCATIONS (GIT + DATABASE)
 - Web admin/receptionist: /web-admin/
 - PHP API: /api/
 - Database files (schemas/migrations): /database/
+
+---
+DATABASE SCHEMA (MYSQL)
+- File: /database/schema.sql
+- Tables:
+	roles, users, userRoles,
+	barbers, services, haircuts,
+	favorites,
+	appointments, appointmentServices, scheduleTemplates,
+	payments, transactions,
+	feedback,
+	notifications, deviceTokens, auditLogs
