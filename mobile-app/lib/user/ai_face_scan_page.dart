@@ -1,10 +1,39 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'dashboard_page.dart';
 import 'quiz_upload.dart';
 import 'widgets/app_top_bar.dart';
 
-class AiFaceScanPage extends StatelessWidget {
+class AiFaceScanPage extends StatefulWidget {
   const AiFaceScanPage({super.key});
+
+  @override
+  State<AiFaceScanPage> createState() => _AiFaceScanPageState();
+}
+
+class _AiFaceScanPageState extends State<AiFaceScanPage> {
+  final ImagePicker _picker = ImagePicker();
+  XFile? _scanImage;
+
+  Future<void> _startScan() async {
+    final file = await _picker.pickImage(source: ImageSource.camera);
+    if (file == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Camera cancelled.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _scanImage = file;
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Scan captured. Uploading to AI...')),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,17 +67,32 @@ class AiFaceScanPage extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: Colors.white12),
               ),
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.center_focus_strong, size: 44, color: Colors.white),
-                    SizedBox(height: 10),
-                    Text('Start AI Face Scan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    SizedBox(height: 6),
-                    Text('Keep your face centered and well-lit', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                  ],
-                ),
+              child: Center(
+                child: _scanImage == null
+                    ? const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.center_focus_strong, size: 44, color: Colors.white),
+                          SizedBox(height: 10),
+                          Text('Start AI Face Scan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                          SizedBox(height: 6),
+                          Text('Keep your face centered and well-lit', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                        ],
+                      )
+                    : Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.check_circle, size: 40, color: Colors.white),
+                          const SizedBox(height: 8),
+                          Text(
+                            _scanImage!.name,
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 6),
+                          const Text('Scan ready', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
               ),
             ),
             const SizedBox(height: 16),
@@ -56,11 +100,7 @@ class AiFaceScanPage extends StatelessWidget {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('AI scan starting soon (API pending).')),
-                      );
-                    },
+                    onPressed: _startScan,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black,

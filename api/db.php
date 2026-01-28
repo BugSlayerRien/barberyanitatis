@@ -8,7 +8,7 @@ declare(strict_types=1);
 function get_db_connection(): PDO
 {
     $host = getenv('DB_HOST') ?: 'localhost';
-    $db = getenv('DB_NAME') ?: 'tatis_barbershop';
+    $db = getenv('DB_NAME') ?: 'barberyanitatis';
     $user = getenv('DB_USER') ?: 'root';
     $pass = getenv('DB_PASS') ?: '';
     $charset = 'utf8mb4';

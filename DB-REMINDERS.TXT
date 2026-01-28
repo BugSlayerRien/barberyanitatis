@@ -1,0 +1,76 @@
+AI-FRIENDLY TABLE MEANING (READ THIS CAREFULLY)
+
+This section is written for another AI so it doesn’t hallucinate features.
+
+users / roles / userRoles
+Authentication & authorization only
+Barbers are NOT users
+Roles control API access (client, admin, receptionist)
+
+barbers
+Represents physical workers
+Used only for scheduling & workload
+No login, no dashboard
+
+services
+One service per appointment
+Duration drives time computation
+
+haircuts / hairstyleVariants
+Haircuts = conceptual styles
+Variants = pre-generated AI outputs
+Reuse images to save tokens
+AI selects best variant, does NOT regenerate unless missing
+
+appointments
+Created only by mobile app
+Always auto-scheduled by AI unless user overrides
+Status lifecycle enforced
+
+appointmentParticipants
+Solves “father + 2 kids” problem
+No extra users
+AI multiplies service duration
+
+appointmentBarbers
+Supports multiple barbers per appointment
+Enables least-busy-barber logic
+Required for analytics
+
+walkIns
+Created only by kiosk
+No schedule, no user
+Immediate queue entry
+
+appointmentQueue
+Unified FIFO queue
+Receptionist controls progress
+Barbers never touch system
+
+payments
+One payment per appointment
+Refund max 50% (business rule)
+No partial payments
+
+barberLeaves / shopClosures
+Hard constraints for AI scheduling
+AI must skip these automatically
+
+adminSettings
+AI reads this table at runtime
+No hardcoded rules
+
+Examples:
+bufferMinutes
+cancellationWindowHours
+kioskEnabled
+maxDailyAppointments
+
+---
+SCHEMA CONFIRMATION (JAN 28, 2026)
+- New tables added: locations, kioskDevices
+- Barbers are resources only (no login)
+- users.email is NOT NULL
+- scheduleTemplates.dayOfWeek is TEXT (Mon–Sun enum)
+- appointmentQueue keeps walkInID but we focus appointments first
+- appointmentBarbers is OPTIONAL
