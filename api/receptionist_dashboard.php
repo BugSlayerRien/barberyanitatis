@@ -1,77 +1,75 @@
 <?php
-// Receptionist dashboard API (placeholder data)
+// Receptionist dashboard API (real data)
 
 declare(strict_types=1);
-header('Content-Type: application/json');
+require_once __DIR__ . '/db.php';
 
-$response = [
-    'stats' => [
-        ['title' => 'Walk-ins', 'value' => '0', 'change' => 'No walk-ins yet', 'changeType' => 'info'],
-        ['title' => 'Appointments', 'value' => '3', 'change' => '3 scheduled today', 'changeType' => 'success'],
-        ['title' => 'In Progress', 'value' => '1', 'change' => 'Active services', 'changeType' => 'warning'],
-        ['title' => 'Available Barbers', 'value' => '2', 'change' => 'On shift', 'changeType' => 'success'],
-    ],
-    'appointments' => [
-        [
-            'name' => 'Jessica Davis',
-            'service' => 'Precision Cut & Style',
-            'time' => '10:00 AM',
-            'duration' => '90 min',
-            'price' => '₱100',
-            'status' => 'CONFIRMED',
-            'barber' => 'Mike Chen',
-        ],
-        [
-            'name' => 'Maria Rodriguez',
-            'service' => 'Color Transformation',
-            'time' => '2:00 PM',
-            'duration' => '180 min',
-            'price' => '₱150',
-            'status' => 'PENDING',
-            'barber' => 'Sarah Johnson',
-        ],
-        [
-            'name' => 'Sarah Johnson',
-            'service' => 'Luxury Treatment',
-            'time' => '5:00 PM',
-            'duration' => '120 min',
-            'price' => '₱200',
-            'status' => 'CONFIRMED',
-            'barber' => 'Emma Rodriguez',
-        ],
-    ],
-    'walkins' => [],
-    'tracking' => [
-        [
-            'name' => 'Alex Brown',
-            'service' => 'Haircut & Styling',
-            'status' => 'IN PROGRESS',
-            'progress' => 0.65,
-            'timeRemaining' => '15 min remaining',
-            'color' => '#4caf50',
-        ],
-        [
-            'name' => 'Jessica White',
-            'service' => 'Color Treatment',
-            'status' => 'WAITING',
-            'progress' => 0,
-            'timeRemaining' => 'Waiting',
-            'color' => '#2196f3',
-        ],
-        [
-            'name' => 'Michael Johnson',
-            'service' => 'Beard Trim',
-            'status' => 'COMPLETED',
-            'progress' => 1,
-            'timeRemaining' => 'Completed',
-            'color' => '#9e9e9e',
-        ],
-    ],
-    'barbers' => [
-        ['name' => 'Mike Chen', 'specialty' => 'Precision Cuts', 'rating' => 4.9, 'experience' => '8 years'],
-        ['name' => 'Sarah Johnson', 'specialty' => 'Color Expert', 'rating' => 4.8, 'experience' => '6 years'],
-        ['name' => 'Emma Rodriguez', 'specialty' => 'Styling Specialist', 'rating' => 4.7, 'experience' => '5 years'],
-    ],
-];
+try {
+    $pdo = get_db_connection();
 
-echo json_encode($response);
+    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkIns WHERE DATE(createdAt) = CURRENT_DATE()');
+    $walkInsTodayStmt->execute();
+    $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
+
+    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointmentDate = CURRENT_DATE()');
+    $appointmentsTodayStmt->execute();
+    $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
+
+    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM appointmentQueue WHERE status = 'InProgress'");
+    $inProgressStmt->execute();
+    $inProgress = (int)$inProgressStmt->fetchColumn();
+
+    $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE isActive = 1');
+    $activeBarbersStmt->execute();
+    $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
+
+    $appointmentsStmt = $pdo->prepare(
+        'SELECT a.appointmentID, u.fullName AS name, s.serviceName AS service, a.startTime AS time,
+                s.durationMinutes AS duration, s.price, a.status
+         FROM appointments a
+         JOIN users u ON a.userID = u.userID
+         JOIN services s ON a.serviceID = s.serviceID
+         WHERE a.appointmentDate = CURRENT_DATE()
+         ORDER BY a.startTime ASC'
+    );
+    $appointmentsStmt->execute();
+    $appointments = $appointmentsStmt->fetchAll();
+
+    $walkinsStmt = $pdo->prepare(
+        'SELECT w.walkInID, s.serviceName AS service, w.participantCount, w.createdAt
+         FROM walkIns w
+         JOIN services s ON w.serviceID = s.serviceID
+         WHERE DATE(w.createdAt) = CURRENT_DATE()
+         ORDER BY w.createdAt ASC'
+    );
+    $walkinsStmt->execute();
+    $walkins = $walkinsStmt->fetchAll();
+
+    $barbersStmt = $pdo->prepare('SELECT barberID, fullName FROM barbers WHERE isActive = 1 ORDER BY fullName');
+    $barbersStmt->execute();
+    $barbers = array_map(function ($row) {
+        return [
+            'name' => $row['fullName'],
+            'specialty' => 'N/A',
+            'rating' => null,
+            'experience' => 'N/A',
+        ];
+    }, $barbersStmt->fetchAll());
+
+    $response = [
+        'stats' => [
+            ['title' => 'Walk-ins', 'value' => (string)$walkInsToday, 'change' => '', 'changeType' => 'info'],
+            ['title' => 'Appointments', 'value' => (string)$appointmentsToday, 'change' => '', 'changeType' => 'success'],
+            ['title' => 'In Progress', 'value' => (string)$inProgress, 'change' => '', 'changeType' => 'warning'],
+            ['title' => 'Available Barbers', 'value' => (string)$activeBarbers, 'change' => '', 'changeType' => 'success'],
+        ],
+        'appointments' => $appointments,
+        'walkins' => $walkins,
+        'tracking' => [],
+        'barbers' => $barbers,
+    ];
+
+    json_response($response);
+} catch (PDOException $e) {
+    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+}

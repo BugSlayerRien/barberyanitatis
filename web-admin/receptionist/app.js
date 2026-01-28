@@ -20,79 +20,29 @@ navButtons.forEach((button) => {
   });
 });
 
-const fallbackData = {
-  stats: [
-    { title: "Walk-ins", value: "0", change: "No walk-ins yet", changeType: "info" },
-    { title: "Appointments", value: "3", change: "3 scheduled today", changeType: "success" },
-    { title: "In Progress", value: "1", change: "Active services", changeType: "warning" },
-    { title: "Available Barbers", value: "2", change: "On shift", changeType: "success" },
-  ],
-  appointments: [
-    {
-      name: "Jessica Davis",
-      service: "Precision Cut & Style",
-      time: "10:00 AM",
-      duration: "90 min",
-      price: "₱100",
-      status: "CONFIRMED",
-      barber: "Mike Chen",
-    },
-    {
-      name: "Maria Rodriguez",
-      service: "Color Transformation",
-      time: "2:00 PM",
-      duration: "180 min",
-      price: "₱150",
-      status: "PENDING",
-      barber: "Sarah Johnson",
-    },
-    {
-      name: "Sarah Johnson",
-      service: "Luxury Treatment",
-      time: "5:00 PM",
-      duration: "120 min",
-      price: "₱200",
-      status: "CONFIRMED",
-      barber: "Emma Rodriguez",
-    },
-  ],
-  walkins: [],
-  tracking: [
-    {
-      name: "Alex Brown",
-      service: "Haircut & Styling",
-      status: "IN PROGRESS",
-      progress: 0.65,
-      timeRemaining: "15 min remaining",
-      color: "#4caf50",
-    },
-    {
-      name: "Jessica White",
-      service: "Color Treatment",
-      status: "WAITING",
-      progress: 0,
-      timeRemaining: "Waiting",
-      color: "#2196f3",
-    },
-    {
-      name: "Michael Johnson",
-      service: "Beard Trim",
-      status: "COMPLETED",
-      progress: 1,
-      timeRemaining: "Completed",
-      color: "#9e9e9e",
-    },
-  ],
-  barbers: [
-    { name: "Mike Chen", specialty: "Precision Cuts", rating: 4.9, experience: "8 years" },
-    { name: "Sarah Johnson", specialty: "Color Expert", rating: 4.8, experience: "6 years" },
-    { name: "Emma Rodriguez", specialty: "Styling Specialist", rating: 4.7, experience: "5 years" },
-  ],
-};
+function requireReceptionist() {
+  const rolesRaw = sessionStorage.getItem("roles");
+  if (!rolesRaw) {
+    window.location.href = "../login.html";
+    return false;
+  }
+
+  const roles = JSON.parse(rolesRaw).map((role) => role.toLowerCase());
+  if (!roles.includes("receptionist") && !roles.includes("admin")) {
+    window.location.href = "../login.html";
+    return false;
+  }
+
+  return true;
+}
 
 function renderStats(stats) {
   const grid = document.getElementById("analytics-stats");
   grid.innerHTML = "";
+  if (!stats || stats.length === 0) {
+    grid.innerHTML = "<div class=\"card\">No stats available.</div>";
+    return;
+  }
   stats.forEach((stat) => {
     const card = document.createElement("div");
     card.className = "card";
@@ -107,7 +57,7 @@ function renderStats(stats) {
 
 function renderAppointments(appointments) {
   const table = document.getElementById("appointments-table");
-  if (!appointments.length) {
+  if (!appointments || !appointments.length) {
     table.innerHTML = "<tr><td>No appointments today.</td></tr>";
     return;
   }
@@ -146,7 +96,7 @@ function renderAppointments(appointments) {
 
 function renderWalkins(walkins) {
   const table = document.getElementById("walkins-table");
-  if (!walkins.length) {
+  if (!walkins || !walkins.length) {
     table.innerHTML = "<tr><td>No walk-ins yet.</td></tr>";
     return;
   }
@@ -180,6 +130,10 @@ function renderWalkins(walkins) {
 function renderTracking(items) {
   const list = document.getElementById("tracking-list");
   list.innerHTML = "";
+  if (!items || !items.length) {
+    list.innerHTML = "<div class=\"card\">No tracking data.</div>";
+    return;
+  }
   items.forEach((item) => {
     const card = document.createElement("div");
     card.className = "card";
@@ -199,6 +153,10 @@ function renderTracking(items) {
 function renderBarbers(items) {
   const list = document.getElementById("barbers-list");
   list.innerHTML = "";
+  if (!items || !items.length) {
+    list.innerHTML = "<div class=\"card\">No barbers available.</div>";
+    return;
+  }
   items.forEach((item) => {
     const card = document.createElement("div");
     card.className = "card gradient";
@@ -213,21 +171,22 @@ function renderBarbers(items) {
 }
 
 async function loadDashboard() {
+  if (!requireReceptionist()) return;
   try {
     const response = await fetch("../../api/receptionist_dashboard.php");
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
-    renderStats(data.stats ?? fallbackData.stats);
-    renderAppointments(data.appointments ?? fallbackData.appointments);
-    renderWalkins(data.walkins ?? fallbackData.walkins);
-    renderTracking(data.tracking ?? fallbackData.tracking);
-    renderBarbers(data.barbers ?? fallbackData.barbers);
+    renderStats(data.stats ?? []);
+    renderAppointments(data.appointments ?? []);
+    renderWalkins(data.walkins ?? []);
+    renderTracking(data.tracking ?? []);
+    renderBarbers(data.barbers ?? []);
   } catch (error) {
-    renderStats(fallbackData.stats);
-    renderAppointments(fallbackData.appointments);
-    renderWalkins(fallbackData.walkins);
-    renderTracking(fallbackData.tracking);
-    renderBarbers(fallbackData.barbers);
+    renderStats([]);
+    renderAppointments([]);
+    renderWalkins([]);
+    renderTracking([]);
+    renderBarbers([]);
   }
 
   document.getElementById("last-updated").textContent = new Date().toLocaleString();

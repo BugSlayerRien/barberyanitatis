@@ -1,6 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
+import 'package:http/http.dart' as http;
 import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
 import 'forgot_password_page.dart';
@@ -17,7 +18,10 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
+  static const String _apiBaseUrl = 'http://localhost/barberyanitatis/api';
+
   bool _isLogin = true;
+  bool _isLoading = false;
   // Login controllers
   final TextEditingController _loginUser = TextEditingController();
   final TextEditingController _loginPass = TextEditingController();
@@ -35,26 +39,126 @@ class _AuthPageState extends State<AuthPage> {
   bool _obscureReg2 = true;
   bool _rememberMe = false;
 
-  Future<void> _signInWithGoogle() async {
-    try {
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) return;
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-      if (!mounted) return;
+  Future<void> _login() async {
+    final email = _loginUser.text.trim();
+    final password = _loginPass.text;
+
+    if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Google sign-in successful')),
+        const SnackBar(content: Text('Please enter email and password.')),
       );
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'login',
+          'email': email,
+          'password': password,
+        }),
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
+
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['error']?.toString() ?? 'Login failed.')),
+        );
+        return;
+      }
+
+      final roles = (data['user']?['roles'] as List<dynamic>? ?? [])
+          .map((role) => role.toString().toLowerCase())
+          .toList();
+
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
+
+      if (roles.contains('admin')) {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
+      } else if (roles.contains('receptionist')) {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()));
+      } else {
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Google sign-in failed: $e')),
+        SnackBar(content: Text('Login failed: $e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _register() async {
+    final firstName = _firstName.text.trim();
+    final lastName = _lastName.text.trim();
+    final email = _regEmail.text.trim();
+    final phone = _phone.text.trim();
+    final password = _regPass.text;
+    final confirm = _confirm.text;
+
+    if (firstName.isEmpty || lastName.isEmpty || email.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete all required fields.')),
+      );
+      return;
+    }
+
+    if (password != confirm) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'register',
+          'fullName': '$firstName $lastName',
+          'email': email,
+          'password': password,
+          'phone': phone,
+          'roleName': 'Customer',
+        }),
+      );
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
+
+      if (response.statusCode != 201) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['error']?.toString() ?? 'Registration failed.')),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registration successful. Please sign in.')),
+      );
+      setState(() => _isLogin = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registration failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -154,7 +258,7 @@ class _AuthPageState extends State<AuthPage> {
         TextField(
           controller: _loginUser,
           style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter username (Customer, Recep, or Admin)'),
+          decoration: _fieldDecoration('Enter your email'),
         ),
         const SizedBox(height: 12),
         TextField(
@@ -190,59 +294,9 @@ class _AuthPageState extends State<AuthPage> {
         ),
         const SizedBox(height: 16),
         ElevatedButton(
-          onPressed: () {
-            final u = _loginUser.text.trim();
-            final p = _loginPass.text;
-            if (u == 'Customer' && p == 'Cust123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
-            } else if (u == 'recep' && p == 'recep123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()));
-            } else if (u == 'admin' && p == 'admin123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
-            } else {
-              showDialog<void>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: const Color(0xFF1A1A1A),
-                  title: const Text('Login failed', style: TextStyle(color: Colors.white)),
-                  content: const Text('Invalid username or password.', style: TextStyle(color: Colors.white70)),
-                  actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
-                ),
-              );
-            }
-          },
+          onPressed: _isLoading ? null : _login,
           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: const Text('SIGN IN', style: TextStyle(fontWeight: FontWeight.bold)),
-        ),
-        const SizedBox(height: 16),
-        // OR CONTINUE WITH
-        const Row(
-          children: [
-            Expanded(child: Divider(color: Colors.white24)),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Text('OR CONTINUE WITH', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500)),
-            ),
-            Expanded(child: Divider(color: Colors.white24)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        // Google sign-in button inside the container
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _signInWithGoogle,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white24),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-            icon: const Icon(Icons.language, size: 18),
-            label: const Text('Continue with Google'),
-          ),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN', style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         Row(
@@ -285,12 +339,9 @@ class _AuthPageState extends State<AuthPage> {
         TextField(controller: _confirm, obscureText: _obscureReg2, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Confirm your password', suffix: IconButton(icon: Icon(_obscureReg2 ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureReg2 = !_obscureReg2)))),
         const SizedBox(height: 18),
         ElevatedButton(
-          onPressed: () {
-            // UX-only: just close back to previous screen
-            setState(() => _isLogin = true);
-          },
+          onPressed: _isLoading ? null : _register,
           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: const Text('SIGN UP', style: TextStyle(fontWeight: FontWeight.bold)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN UP', style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         Row(

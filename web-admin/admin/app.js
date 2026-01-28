@@ -21,38 +21,29 @@ navButtons.forEach((button) => {
   });
 });
 
-const fallbackData = {
-  stats: [
-    { title: "Total Users", value: "1,247", change: "+12% from last month", changeType: "success" },
-    { title: "Active Services", value: "12", change: "2 new this week", changeType: "success" },
-    { title: "Monthly Revenue", value: "₱45,680", change: "+8% from last month", changeType: "success" },
-    { title: "Pending Appointments", value: "23", change: "Requires attention", changeType: "warning" },
-  ],
-  activities: [
-    {
-      icon: "👤",
-      title: "New user registration",
-      description: "Jessica Martinez registered 5 minutes ago",
-      time: "JUST NOW",
-    },
-    {
-      icon: "₱",
-      title: "Payment received",
-      description: "₱750 payment for luxury treatment",
-      time: "15 min ago",
-    },
-    {
-      icon: "📅",
-      title: "Service booking",
-      description: "Color transformation booked for tomorrow",
-      time: "1 hour ago",
-    },
-  ],
-};
+function requireAdmin() {
+  const rolesRaw = sessionStorage.getItem("roles");
+  if (!rolesRaw) {
+    window.location.href = "../login.html";
+    return false;
+  }
+
+  const roles = JSON.parse(rolesRaw).map((role) => role.toLowerCase());
+  if (!roles.includes("admin")) {
+    window.location.href = "../login.html";
+    return false;
+  }
+
+  return true;
+}
 
 function renderStats(stats) {
   const grid = document.getElementById("stats-grid");
   grid.innerHTML = "";
+  if (!stats || stats.length === 0) {
+    grid.innerHTML = "<div class=\"card\">No stats available.</div>";
+    return;
+  }
   stats.forEach((stat) => {
     const card = document.createElement("div");
     card.className = "card";
@@ -68,6 +59,10 @@ function renderStats(stats) {
 function renderActivities(activities) {
   const list = document.getElementById("activity-list");
   list.innerHTML = "";
+  if (!activities || activities.length === 0) {
+    list.innerHTML = "<div class=\"card\">No recent activity.</div>";
+    return;
+  }
   activities.forEach((activity) => {
     const item = document.createElement("div");
     item.className = "card gradient list-item";
@@ -84,15 +79,16 @@ function renderActivities(activities) {
 }
 
 async function loadDashboard() {
+  if (!requireAdmin()) return;
   try {
     const response = await fetch("../../api/admin_dashboard.php");
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
-    renderStats(data.stats ?? fallbackData.stats);
-    renderActivities(data.activities ?? fallbackData.activities);
+    renderStats(data.stats ?? []);
+    renderActivities(data.activities ?? []);
   } catch (error) {
-    renderStats(fallbackData.stats);
-    renderActivities(fallbackData.activities);
+    renderStats([]);
+    renderActivities([]);
   }
 
   const now = new Date();
