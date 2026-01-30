@@ -1,65 +1,66 @@
-CURRENT DATABASE REMINDERS (FOCUS: AI HAIRSTYLE SCANNER)
+CURRENT DATABASE REMINDERS (UPDATED SCHEMA)
 
 SYSTEM RULES (DON'T BREAK THESE)
 1) All apps (mobile, web, kiosk) use PHP API only.
 2) Flutter/web NEVER access MySQL directly.
 3) Keep data normalized; avoid duplicates.
 4) Barbers are USERS in this schema (barbers.userID).
-5) Appointments store a primary barber + services via appointmentServices.
+5) Appointments are unified: APPOINTMENT or WALKIN.
 
 CORE TABLE PURPOSES
 users / roles / userRoles
 - Auth + role control (Customer, Admin, Receptionist)
 
-barbers
-- Staff linked to users; scheduling + analytics
+barbers / barberProfiles
+- Barbers linked to users (availability + profile data)
 
-services
-- Duration + price define time blocks and billing
+serviceCategories / services
+- Services grouped by category
 
-haircuts / hairstyleVariants
-- Haircuts = style definitions
-- Variants = AI-generated images saved for reuse
+haircuts
+- Main library used for AI scan results
+- faceShape + imageUrl are stored here
 
 favorites
-- Favorites link user to either barber or haircut
+- User favorites (haircut or barber)
 
 appointments / appointmentServices
-- Created by mobile app
-- appointmentServices allows multiple services per booking
-- Status is the analytics truth
+- Unified flow for walk‑ins and appointments
+- appointmentServices handles multiple services
+
+walkInQueue
+- Queue for walk‑in appointments
 
 scheduleTemplates
-- Weekly availability
+- Barber weekly schedules + slot duration
 
 payments / transactions
-- Single payment per appointment + refund tracking
+- Payment records for analytics
 
-feedback
-- Post-appointment rating
+feedback / notifications / deviceTokens / auditLogs
+- Ratings, system messages, devices, audits
 
-notifications / deviceTokens / auditLogs
-- Push + audit trail
+kioskDevices / systemConfig / referenceTables
+- Kiosk registry and configurable rules
 
 AI HAIRSTYLE SCANNER FLOW (MAIN FEATURE)
 1) Mobile opens camera and captures image.
 2) Upload to /api/ai_scan.php (multipart/form-data).
-3) Backend analyzes face/hair and finds hairstyleVariants.
-4) If not found, generate and store new variants.
-5) Results returned to client and reusable for future requests.
+3) Backend analyzes face/hair and maps to haircuts.faceShape.
+4) Return matching haircuts (imageUrl + description).
+5) User saves favorites if they like the result.
 
 TABLES USED BY AI SCAN
 - haircuts
-- hairstyleVariants
-- favorites (save results)
+- favorites
 - auditLogs (optional)
 
 DATA CONSISTENCY NOTES
-- All bookings/payment/feedback link to appointments.
-- All AI outputs saved in hairstyleVariants.
+- All booking/payment/feedback link to appointments.
+- All AI results come from haircuts library.
 - No duplicated service or haircut names in other tables.
 
 NEXT IMPLEMENTATION FOCUS
+- Seed haircuts + imageUrl values
 - Finish /api/ai_scan.php with real AI provider calls
-- Seed haircuts + hairstyleVariants
-- Wire mobile UI to display variants and save favorites
+- Wire mobile UI to display haircuts and allow save

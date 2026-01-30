@@ -9,7 +9,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['list', 'variants', 'create'], true)) {
+if (!in_array($action, ['list', 'listByFaceShape', 'create'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -17,55 +17,47 @@ try {
     $pdo = get_db_connection();
 
     if ($action === 'list') {
-        $stmt = $pdo->prepare('SELECT haircutID, haircutName, description, referenceImage FROM haircuts ORDER BY haircutName');
+        $stmt = $pdo->prepare('SELECT haircutID, haircutName, faceShape, description, imageUrl FROM haircuts ORDER BY haircutName');
         $stmt->execute();
         json_response(['haircuts' => $stmt->fetchAll()]);
     }
 
-    if ($action === 'variants') {
-        $haircutID = (int)($input['haircutID'] ?? 0);
+    if ($action === 'listByFaceShape') {
         $faceShape = trim((string)($input['faceShape'] ?? ''));
-        $hairType = trim((string)($input['hairType'] ?? ''));
-
-        if ($haircutID <= 0) {
-            json_response(['error' => 'Invalid haircutID'], 422);
-        }
 
         $stmt = $pdo->prepare(
-            'SELECT variantID, haircutID, faceShape, hairType, imagePath
-             FROM hairstyleVariants
-             WHERE haircutID = :haircutID
-               AND (:faceShape = "" OR faceShape = :faceShape)
-               AND (:hairType = "" OR hairType = :hairType)
-             ORDER BY variantID DESC'
+            'SELECT haircutID, haircutName, faceShape, description, imageUrl
+             FROM haircuts
+             WHERE (:faceShape = "" OR faceShape = :faceShape OR faceShape IS NULL)
+             ORDER BY haircutName'
         );
         $stmt->execute([
-            ':haircutID' => $haircutID,
             ':faceShape' => $faceShape,
-            ':hairType' => $hairType,
         ]);
 
-        json_response(['variants' => $stmt->fetchAll()]);
+        json_response(['haircuts' => $stmt->fetchAll()]);
     }
 
     if ($action === 'create') {
         // TODO: enforce admin role
         $haircutName = trim((string)($input['haircutName'] ?? ''));
         $description = trim((string)($input['description'] ?? ''));
-        $referenceImage = trim((string)($input['referenceImage'] ?? ''));
+        $faceShape = trim((string)($input['faceShape'] ?? ''));
+        $imageUrl = trim((string)($input['imageUrl'] ?? ''));
 
         if ($haircutName === '') {
             json_response(['error' => 'haircutName is required'], 422);
         }
 
         $stmt = $pdo->prepare(
-            'INSERT INTO haircuts (haircutName, description, referenceImage)
-             VALUES (:haircutName, :description, :referenceImage)'
+            'INSERT INTO haircuts (haircutName, faceShape, description, imageUrl)
+             VALUES (:haircutName, :faceShape, :description, :imageUrl)'
         );
         $stmt->execute([
             ':haircutName' => $haircutName,
+            ':faceShape' => $faceShape !== '' ? $faceShape : null,
             ':description' => $description !== '' ? $description : null,
-            ':referenceImage' => $referenceImage !== '' ? $referenceImage : null,
+            ':imageUrl' => $imageUrl !== '' ? $imageUrl : null,
         ]);
 
         json_response(['message' => 'Haircut created', 'haircutID' => (int)$pdo->lastInsertId()], 201);

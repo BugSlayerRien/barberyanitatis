@@ -1,5 +1,5 @@
 <?php
-// AI Face Scan API (image upload -> hairstyle variants)
+// AI Face Scan API (image upload -> haircuts)
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
@@ -24,33 +24,31 @@ if ($provider === '' || $apiKey === '') {
 // Placeholder: integrate external AI provider here.
 // Suggested flow:
 // 1) Upload image to provider for face + hair analysis.
-// 2) Receive faceShape + hairType.
-// 3) Query hairstyleVariants by (haircutID, faceShape, hairType).
-// 4) Return a list of imagePath for client display.
+// 2) Receive faceShape.
+// 3) Query haircuts by faceShape (or fallback to all).
+// 4) Return a list of imageUrl for client display.
 
 try {
     $pdo = get_db_connection();
 
-    $query = 'SELECT hv.variantID, hv.imagePath, h.haircutName
-              FROM hairstyleVariants hv
-              JOIN haircuts h ON hv.haircutID = h.haircutID
-              WHERE (hv.faceShape = :faceShape OR :faceShape = \'\')
-                AND (hv.hairType = :hairType OR :hairType = \'\')
-              LIMIT 12';
+        $query = 'SELECT haircutID, haircutName, faceShape, description, imageUrl
+                            FROM haircuts
+                            WHERE (:faceShape = \'\' OR faceShape = :faceShape OR faceShape IS NULL)
+                            ORDER BY haircutName
+                            LIMIT 12';
     $stmt = $pdo->prepare($query);
     $stmt->execute([
         ':faceShape' => $faceShape,
-        ':hairType' => $hairType,
     ]);
 
-    $variants = $stmt->fetchAll();
+        $haircuts = $stmt->fetchAll();
 
     json_response([
         'message' => 'Scan received',
         'userID' => $userID,
         'faceShape' => $faceShape,
         'hairType' => $hairType,
-        'variants' => $variants,
+        'haircuts' => $haircuts,
     ]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);

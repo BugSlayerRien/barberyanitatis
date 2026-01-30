@@ -17,24 +17,30 @@ try {
     $pdo = get_db_connection();
 
     if ($action === 'create') {
-        $customerID = (int)($input['customerID'] ?? 0);
+        $userID = (int)($input['userID'] ?? 0);
         $barberID = (int)($input['barberID'] ?? 0);
+        $appointmentType = strtoupper(trim((string)($input['appointmentType'] ?? 'APPOINTMENT')));
         $appointmentDate = trim((string)($input['appointmentDate'] ?? ''));
         $appointmentTime = trim((string)($input['appointmentTime'] ?? ''));
         $serviceIDs = $input['serviceIDs'] ?? [];
 
-        if ($customerID <= 0 || $barberID <= 0 || $appointmentDate === '' || $appointmentTime === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
+        if ($userID <= 0 || $appointmentDate === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
             json_response(['error' => 'Missing or invalid booking details'], 422);
+        }
+
+        if (!in_array($appointmentType, ['APPOINTMENT', 'WALKIN'], true)) {
+            json_response(['error' => 'Invalid appointmentType'], 422);
         }
 
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare('INSERT INTO appointments (customerID, barberID, appointmentDate, appointmentTime) VALUES (:customerID, :barberID, :appointmentDate, :appointmentTime)');
+        $stmt = $pdo->prepare('INSERT INTO appointments (userID, barberID, appointmentType, appointmentDate, appointmentTime) VALUES (:userID, :barberID, :appointmentType, :appointmentDate, :appointmentTime)');
         $stmt->execute([
-            ':customerID' => $customerID,
-            ':barberID' => $barberID,
+            ':userID' => $userID,
+            ':barberID' => $barberID > 0 ? $barberID : null,
+            ':appointmentType' => $appointmentType,
             ':appointmentDate' => $appointmentDate,
-            ':appointmentTime' => $appointmentTime,
+            ':appointmentTime' => $appointmentTime !== '' ? $appointmentTime : null,
         ]);
 
         $appointmentID = (int)$pdo->lastInsertId();
@@ -60,21 +66,58 @@ try {
     }
 
     if ($action === 'listByCustomer') {
-        $customerID = (int)($input['customerID'] ?? 0);
-        if ($customerID <= 0) {
-            json_response(['error' => 'Invalid customerID'], 422);
+        $userID = (int)($input['userID'] ?? 0);
+        if ($userID <= 0) {
+            json_response(['error' => 'Invalid userID'], 422);
         }
 
         $stmt = $pdo->prepare(
-            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status, b.barberID, u.fullName AS barberName
+            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status, a.appointmentType,
+                    b.barberID, bu.fullName AS barberName
              FROM appointments a
-             JOIN barbers b ON a.barberID = b.barberID
-             JOIN users u ON b.userID = u.userID
-             WHERE a.customerID = :customerID
+             LEFT JOIN barbers b ON a.barberID = b.barberID
+             LEFT JOIN users bu ON b.userID = bu.userID
+             WHERE a.userID = :userID
              ORDER BY a.appointmentDate DESC, a.appointmentTime DESC'
         );
-        $stmt->execute([':customerID' => $customerID]);
+        $stmt->execute([':userID' => $userID]);
         $appointments = $stmt->fetchAll();
+
+        if (count($appointments) === 0) {
+            json_response(['appointments' => []]);
+        }
+
+        $appointmentIds = array_map(fn($row) => (int)$row['appointmentID'], $appointments);
+        $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
+
+        $serviceStmt = $pdo->prepare(
+            "SELECT aps.appointmentID, s.serviceID, s.serviceName, s.durationMinutes, s.price
+             FROM appointmentServices aps
+             JOIN services s ON aps.serviceID = s.serviceID
+             WHERE aps.appointmentID IN ($inClause)"
+        );
+        $serviceStmt->execute($appointmentIds);
+        $serviceRows = $serviceStmt->fetchAll();
+
+        $serviceMap = [];
+        foreach ($serviceRows as $row) {
+            $aid = (int)$row['appointmentID'];
+            if (!isset($serviceMap[$aid])) {
+                $serviceMap[$aid] = [];
+            }
+            $serviceMap[$aid][] = [
+                'serviceID' => (int)$row['serviceID'],
+                'serviceName' => $row['serviceName'],
+                'durationMinutes' => (int)$row['durationMinutes'],
+                'price' => (string)$row['price'],
+            ];
+        }
+
+        $appointments = array_map(function ($row) use ($serviceMap) {
+            $aid = (int)$row['appointmentID'];
+            $row['services'] = $serviceMap[$aid] ?? [];
+            return $row;
+        }, $appointments);
 
         json_response(['appointments' => $appointments]);
     }
