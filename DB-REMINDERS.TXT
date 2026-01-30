@@ -1,76 +1,65 @@
-AI-FRIENDLY TABLE MEANING (READ THIS CAREFULLY)
+CURRENT DATABASE REMINDERS (FOCUS: AI HAIRSTYLE SCANNER)
 
-This section is written for another AI so it doesn’t hallucinate features.
+SYSTEM RULES (DON'T BREAK THESE)
+1) All apps (mobile, web, kiosk) use PHP API only.
+2) Flutter/web NEVER access MySQL directly.
+3) Keep data normalized; avoid duplicates.
+4) Barbers are USERS in this schema (barbers.userID).
+5) Appointments store a primary barber + services via appointmentServices.
 
+CORE TABLE PURPOSES
 users / roles / userRoles
-Authentication & authorization only
-Barbers are NOT users
-Roles control API access (client, admin, receptionist)
+- Auth + role control (Customer, Admin, Receptionist)
 
 barbers
-Represents physical workers
-Used only for scheduling & workload
-No login, no dashboard
+- Staff linked to users; scheduling + analytics
 
 services
-One service per appointment
-Duration drives time computation
+- Duration + price define time blocks and billing
 
 haircuts / hairstyleVariants
-Haircuts = conceptual styles
-Variants = pre-generated AI outputs
-Reuse images to save tokens
-AI selects best variant, does NOT regenerate unless missing
+- Haircuts = style definitions
+- Variants = AI-generated images saved for reuse
 
-appointments
-Created only by mobile app
-Always auto-scheduled by AI unless user overrides
-Status lifecycle enforced
+favorites
+- Favorites link user to either barber or haircut
 
-appointmentParticipants
-Solves “father + 2 kids” problem
-No extra users
-AI multiplies service duration
+appointments / appointmentServices
+- Created by mobile app
+- appointmentServices allows multiple services per booking
+- Status is the analytics truth
 
-appointmentBarbers
-Supports multiple barbers per appointment
-Enables least-busy-barber logic
-Required for analytics
+scheduleTemplates
+- Weekly availability
 
-walkIns
-Created only by kiosk
-No schedule, no user
-Immediate queue entry
+payments / transactions
+- Single payment per appointment + refund tracking
 
-appointmentQueue
-Unified FIFO queue
-Receptionist controls progress
-Barbers never touch system
+feedback
+- Post-appointment rating
 
-payments
-One payment per appointment
-Refund max 50% (business rule)
-No partial payments
+notifications / deviceTokens / auditLogs
+- Push + audit trail
 
-barberLeaves / shopClosures
-Hard constraints for AI scheduling
-AI must skip these automatically
+AI HAIRSTYLE SCANNER FLOW (MAIN FEATURE)
+1) Mobile opens camera and captures image.
+2) Upload to /api/ai_scan.php (multipart/form-data).
+3) Backend analyzes face/hair and finds hairstyleVariants.
+4) If not found, generate and store new variants.
+5) Results returned to client and reusable for future requests.
 
-adminSettings
-AI reads this table at runtime
-No hardcoded rules
+TABLES USED BY AI SCAN
+- haircuts
+- hairstyleVariants
+- favorites (save results)
+- auditLogs (optional)
 
-Examples:
-bufferMinutes
-cancellationWindowHours
-kioskEnabled
-maxDailyAppointments
+DATA CONSISTENCY NOTES
+- All bookings/payment/feedback link to appointments.
+- All AI outputs saved in hairstyleVariants.
+- No duplicated service or haircut names in other tables.
 
----
-SCHEMA CONFIRMATION (JAN 28, 2026)
-- New tables added: locations, kioskDevices
-- Barbers are resources only (no login)
-- users.email is NOT NULL
-- scheduleTemplates.dayOfWeek is TEXT (Mon–Sun enum)
-- appointmentQueue keeps walkInID but we focus appointments first
-- appointmentBarbers is OPTIONAL
+NEXT IMPLEMENTATION FOCUS
+- Finish /api/ai_scan.php with real AI provider calls
+- Seed haircuts + hairstyleVariants
+- Wire mobile UI to display variants and save favorites
