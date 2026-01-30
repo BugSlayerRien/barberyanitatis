@@ -4,68 +4,81 @@ SYSTEM RULES (DON'T BREAK THESE)
 1) All apps (mobile, web, kiosk) use PHP API only.
 2) Flutter/web NEVER access MySQL directly.
 3) Keep data normalized; avoid duplicates.
+4) Use snake_case column names as defined in /database/schema.sql.
 
-CORE TABLE PURPOSES
-users
-- All system users; role is stored in users.role (enum)
+CORE TABLE PURPOSES (LATEST)
+1) USER MANAGEMENT
+- users: registered customers (mobile app). Login + profile info + status.
+- user_profiles: AI-detected attributes for recommendations.
+- staff_users: admin/receptionist accounts for web dashboards.
 
-roles / userRoles
-- Role dictionary + optional mapping table
+2) BARBER MANAGEMENT
+- barbers: barber credentials, profiles, specialties, ratings.
 
-barbers
-- Barber profile linked to users
+3) HAIRSTYLE CATALOG (AI DATASET)
+- hairstyles: master catalog (metadata).
+- hairstyle_variants: AI-ready images per face shape/hair texture + barber instructions.
 
-services / serviceCategories
-- Service library + categories
+4) SERVICES & PRICING
+- services: menu with base_duration/base_price + category.
 
-haircuts
-- AI hairstyle library (faceShape + imagePath + isActive)
+5) AI SCAN (KIOSK)
+- kiosk_sessions: temporary scan sessions and analysis attributes.
+- kiosk_recommendations: top-5 variant matches per session.
 
-favorites
-- User favorites (haircut or barber)
+6) APPOINTMENTS (MOBILE)
+- appointments: future bookings with booking_code and time range.
+- appointment_details: linked services + chosen hairstyle variant.
 
-scheduleTemplates / scheduleExceptions
-- Recurring schedules + exceptions
+7) TIME SLOT MANAGEMENT
+- time_slots: 35-minute slots linked to appointments.
 
-appointments / appointmentServices
-- Appointment records + related services
+8) WALK-IN QUEUE (KIOSK)
+- walkin_queue: live queue + status.
+- walkin_service_details: services + variant chosen for walk-ins.
 
-walkIns
-- Walk‑in tracking (separate from appointments)
+9) PAYMENTS
+- payments: unified payments for appointments or walk-ins.
 
-payments / transactions
-- Payment records + references
+10) FEEDBACK
+- feedback: detailed ratings by category.
 
-feedback / notifications / deviceTokens
-- Ratings, messages, device tokens
+11) NOTIFICATIONS
+- notifications: unified notifications for users/barbers/admin.
 
-aiRecommendations
-- Store AI recommendations per user for analytics
+12) USER PREFERENCES & HISTORY
+- user_favorites: saved variants/barbers.
+- user_history: historical haircut/service records.
 
-appointmentStatusHistory
-- Track status transitions
+13) ANALYTICS & REPORTS
+- daily_analytics, barber_performance: metrics.
 
-auditLogs
-- System audit trail
+14) SYSTEM MANAGEMENT
+- system_settings, audit_logs: system configs + audit trail.
 
-AI HAIRSTYLE SCANNER FLOW (MAIN FEATURE)
-1) Mobile opens camera and captures image.
-2) Upload to /api/ai_scan.php (multipart/form-data).
-3) Backend analyzes face/hair and maps to haircuts.faceShape.
-4) Return matching haircuts (imagePath).
-5) Save recommendations to aiRecommendations.
+15) DISPLAY VIEW
+- queue_display: merged appointment + walk-in queue view.
+
+AI HAIRSTYLE SCANNER FLOW (KIOSK)
+1) Kiosk captures image and posts to /api/ai_scan.php (multipart/form-data).
+2) Backend analyzes face/hair (provider integration pending).
+3) Create kiosk_sessions (expires in 2 hours).
+4) Select top 5 hairstyle_variants by face_shape + hair_texture.
+5) Insert kiosk_recommendations with rank_position + match_score.
+6) Return session_id + recommendations to kiosk UI.
 
 TABLES USED BY AI SCAN
-- haircuts
-- aiRecommendations
-- favorites (when user saves)
+- kiosk_sessions
+- kiosk_recommendations
+- hairstyle_variants
+- hairstyles
 
 DATA CONSISTENCY NOTES
-- All booking/payment/feedback link to appointments.
-- All AI results come from haircuts library.
-- No duplicated service or haircut names in other tables.
+- payments must link to appointment_id or queue_id (one required).
+- appointment_details.variant_id is required.
+- walkin_service_details.variant_id is required.
 
 NEXT IMPLEMENTATION FOCUS
-- Seed haircuts + imagePath values
-- Finish /api/ai_scan.php with real AI provider calls
-- Wire mobile UI to display haircuts and allow save
+- Implement real AI provider in /api/ai_scan.php.
+- Seed hairstyle_variants with real image URLs.
+- Wire kiosk UI to select a recommended variant.

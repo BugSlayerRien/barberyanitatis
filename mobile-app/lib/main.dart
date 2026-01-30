@@ -3,6 +3,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'user/auth_page.dart';
 import 'user/splash_page.dart';
+import 'kiosk/kiosk_home_page.dart';
 
 // --- 1. Define Custom Colors ---
 const Color kGoldColor = Color(0xFFA99941);
@@ -41,6 +42,9 @@ class TatisBarbershopApp extends StatelessWidget {
           labelLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.labelLarge),
         ),
       ),
+      routes: {
+        '/kiosk': (_) => const KioskHomePage(),
+      },
       home: const SplashPage(),
     );
   }

@@ -7,33 +7,36 @@ require_once __DIR__ . '/db.php';
 require_method('POST');
 
 $input = get_json_input();
-$haircutID = (int)($input['haircutID'] ?? 0);
+$variantID = (int)($input['variantID'] ?? 0);
 
-if ($haircutID <= 0) {
-    json_response(['error' => 'Invalid haircutID'], 422);
+if ($variantID <= 0) {
+    json_response(['error' => 'Invalid variantID'], 422);
 }
 
 try {
     $pdo = get_db_connection();
 
     $stmt = $pdo->prepare(
-        'SELECT haircutID, haircutName, faceShape, imagePath, isActive
-         FROM haircuts
-         WHERE haircutID = :haircutID AND isActive = 1'
+        'SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
+                hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
+                hs.style_name, hs.style_code
+         FROM hairstyle_variants hv
+         JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+         WHERE hv.variant_id = :variant_id AND hs.is_active = 1'
     );
-    $stmt->execute([':haircutID' => $haircutID]);
-    $haircut = $stmt->fetch();
+    $stmt->execute([':variant_id' => $variantID]);
+    $variant = $stmt->fetch();
 
-    if (!$haircut) {
+    if (!$variant) {
         json_response([
-            'message' => 'Haircut not found.',
-            'haircut' => null,
+            'message' => 'Variant not found.',
+            'variant' => null,
         ], 404);
     }
 
     json_response([
-        'message' => 'Haircut found',
-        'haircut' => $haircut,
+        'message' => 'Variant found',
+        'variant' => $variant,
     ]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);

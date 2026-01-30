@@ -20,34 +20,74 @@ try {
         $userID = (int)($input['userID'] ?? 0);
         $barberID = (int)($input['barberID'] ?? 0);
         $appointmentDate = trim((string)($input['appointmentDate'] ?? ''));
-        $appointmentTime = trim((string)($input['appointmentTime'] ?? ''));
+        $startTime = trim((string)($input['startTime'] ?? ''));
+        $endTime = trim((string)($input['endTime'] ?? ''));
+        $items = $input['items'] ?? null;
         $serviceIDs = $input['serviceIDs'] ?? [];
+        $variantID = (int)($input['variantID'] ?? 0);
 
-        if ($userID <= 0 || $barberID <= 0 || $appointmentDate === '' || $appointmentTime === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
+        if ($userID <= 0 || $barberID <= 0 || $appointmentDate === '' || $startTime === '' || $endTime === '') {
             json_response(['error' => 'Missing or invalid booking details'], 422);
+        }
+
+        if (!is_array($items)) {
+            if (!is_array($serviceIDs) || count($serviceIDs) === 0 || $variantID <= 0) {
+                json_response(['error' => 'Missing serviceIDs or variantID'], 422);
+            }
+            $items = array_map(fn($id) => ['serviceID' => (int)$id, 'variantID' => $variantID], $serviceIDs);
         }
 
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare('INSERT INTO appointments (userID, barberID, appointmentDate, appointmentTime) VALUES (:userID, :barberID, :appointmentDate, :appointmentTime)');
+        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = :appointment_date');
+        $countStmt->execute([':appointment_date' => $appointmentDate]);
+        $sequence = (int)$countStmt->fetchColumn() + 1;
+        $bookingCode = 'APP-' . date('Ymd', strtotime($appointmentDate)) . '-' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO appointments (booking_code, user_id, barber_id, appointment_date, start_time, end_time)
+             VALUES (:booking_code, :user_id, :barber_id, :appointment_date, :start_time, :end_time)'
+        );
         $stmt->execute([
-            ':userID' => $userID,
-            ':barberID' => $barberID,
-            ':appointmentDate' => $appointmentDate,
-            ':appointmentTime' => $appointmentTime,
+            ':booking_code' => $bookingCode,
+            ':user_id' => $userID,
+            ':barber_id' => $barberID,
+            ':appointment_date' => $appointmentDate,
+            ':start_time' => $startTime,
+            ':end_time' => $endTime,
         ]);
 
         $appointmentID = (int)$pdo->lastInsertId();
 
-        $linkStmt = $pdo->prepare('INSERT INTO appointmentServices (appointmentID, serviceID) VALUES (:appointmentID, :serviceID)');
-        foreach ($serviceIDs as $serviceID) {
-            $serviceID = (int)$serviceID;
-            if ($serviceID <= 0) {
+        $priceStmt = $pdo->prepare('SELECT base_price FROM services WHERE service_id = :service_id');
+        $linkStmt = $pdo->prepare(
+            'INSERT INTO appointment_details (appointment_id, service_id, variant_id, selected_view, special_instructions, final_price)
+             VALUES (:appointment_id, :service_id, :variant_id, :selected_view, :special_instructions, :final_price)'
+        );
+
+        foreach ($items as $item) {
+            $serviceID = (int)($item['serviceID'] ?? 0);
+            $variantIDItem = (int)($item['variantID'] ?? 0);
+            $selectedView = trim((string)($item['selectedView'] ?? 'Front'));
+            $specialInstructions = trim((string)($item['specialInstructions'] ?? ''));
+            $finalPrice = $item['finalPrice'] ?? null;
+
+            if ($serviceID <= 0 || $variantIDItem <= 0) {
                 continue;
             }
+
+            if ($finalPrice === null || $finalPrice === '') {
+                $priceStmt->execute([':service_id' => $serviceID]);
+                $finalPrice = (float)($priceStmt->fetchColumn() ?: 0);
+            }
+
             $linkStmt->execute([
-                ':appointmentID' => $appointmentID,
-                ':serviceID' => $serviceID,
+                ':appointment_id' => $appointmentID,
+                ':service_id' => $serviceID,
+                ':variant_id' => $variantIDItem,
+                ':selected_view' => $selectedView !== '' ? $selectedView : 'Front',
+                ':special_instructions' => $specialInstructions !== '' ? $specialInstructions : null,
+                ':final_price' => $finalPrice,
             ]);
         }
 
@@ -56,6 +96,7 @@ try {
         json_response([
             'message' => 'Appointment created',
             'appointmentID' => $appointmentID,
+            'bookingCode' => $bookingCode,
         ], 201);
     }
 
@@ -66,51 +107,69 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status,
-                b.barberID, bu.fullName AS barberName
+            'SELECT a.appointment_id, a.booking_code, a.appointment_date, a.start_time, a.end_time, a.status,
+                    b.barber_id, b.full_name AS barber_name
              FROM appointments a
-             JOIN barbers b ON a.barberID = b.barberID
-             JOIN users bu ON b.userID = bu.userID
-             WHERE a.userID = :userID
-             ORDER BY a.appointmentDate DESC, a.appointmentTime DESC'
+             JOIN barbers b ON a.barber_id = b.barber_id
+             WHERE a.user_id = :user_id
+             ORDER BY a.appointment_date DESC, a.start_time DESC'
         );
-        $stmt->execute([':userID' => $userID]);
+        $stmt->execute([':user_id' => $userID]);
         $appointments = $stmt->fetchAll();
 
         if (count($appointments) === 0) {
             json_response(['appointments' => []]);
         }
 
-        $appointmentIds = array_map(fn($row) => (int)$row['appointmentID'], $appointments);
+        $appointmentIds = array_map(fn($row) => (int)$row['appointment_id'], $appointments);
         $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
 
         $serviceStmt = $pdo->prepare(
-            "SELECT aps.appointmentID, s.serviceID, s.serviceName, s.durationMinutes, s.price
-             FROM appointmentServices aps
-             JOIN services s ON aps.serviceID = s.serviceID
-             WHERE aps.appointmentID IN ($inClause)"
+            "SELECT ad.appointment_id, s.service_id, s.service_name, s.base_duration, s.base_price,
+                    ad.variant_id, ad.selected_view, ad.final_price,
+                    hv.face_shape, hv.hair_texture, hv.front_view_url, hs.style_name
+             FROM appointment_details ad
+             JOIN services s ON ad.service_id = s.service_id
+             JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
+             JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+             WHERE ad.appointment_id IN ($inClause)"
         );
         $serviceStmt->execute($appointmentIds);
         $serviceRows = $serviceStmt->fetchAll();
 
         $serviceMap = [];
         foreach ($serviceRows as $row) {
-            $aid = (int)$row['appointmentID'];
+            $aid = (int)$row['appointment_id'];
             if (!isset($serviceMap[$aid])) {
                 $serviceMap[$aid] = [];
             }
             $serviceMap[$aid][] = [
-                'serviceID' => (int)$row['serviceID'],
-                'serviceName' => $row['serviceName'],
-                'durationMinutes' => (int)$row['durationMinutes'],
-                'price' => (string)$row['price'],
+                'serviceID' => (int)$row['service_id'],
+                'serviceName' => $row['service_name'],
+                'durationMinutes' => (int)$row['base_duration'],
+                'price' => (string)$row['final_price'],
+                'variantID' => (int)$row['variant_id'],
+                'selectedView' => $row['selected_view'],
+                'hairstyleName' => $row['style_name'],
+                'faceShape' => $row['face_shape'],
+                'hairTexture' => $row['hair_texture'],
+                'frontViewUrl' => $row['front_view_url'],
             ];
         }
 
         $appointments = array_map(function ($row) use ($serviceMap) {
-            $aid = (int)$row['appointmentID'];
-            $row['services'] = $serviceMap[$aid] ?? [];
-            return $row;
+            $aid = (int)$row['appointment_id'];
+            return [
+                'appointmentID' => $aid,
+                'bookingCode' => $row['booking_code'],
+                'appointmentDate' => $row['appointment_date'],
+                'startTime' => $row['start_time'],
+                'endTime' => $row['end_time'],
+                'status' => $row['status'],
+                'barberID' => (int)$row['barber_id'],
+                'barberName' => $row['barber_name'],
+                'services' => $serviceMap[$aid] ?? [],
+            ];
         }, $appointments);
 
         json_response(['appointments' => $appointments]);

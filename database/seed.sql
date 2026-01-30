@@ -1,17 +1,61 @@
--- Seed roles and admin user
--- NOTE: Replace the password hash with a real bcrypt hash.
--- Generate with PHP: php -r "echo password_hash('Admin@123', PASSWORD_BCRYPT);"
+-- Seed core data for the latest schema
+-- NOTE: Replace the password hashes with real bcrypt hashes.
+-- Generate with PHP: php -r "echo password_hash('Password@123', PASSWORD_BCRYPT);"
 
-INSERT INTO roles (roleName) VALUES ('Admin'), ('Receptionist'), ('Customer')
-ON DUPLICATE KEY UPDATE roleName = VALUES(roleName);
+-- Users (mobile customers)
+INSERT INTO users (email, password_hash, full_name, phone, gender)
+VALUES
+	('user1@barberyanitatis.com', '<<BCRYPT_HASH>>', 'Juan Dela Cruz', '09171234567', 'Male'),
+	('user2@barberyanitatis.com', '<<BCRYPT_HASH>>', 'Maria Santos', '09179876543', 'Female');
 
--- Replace <<BCRYPT_HASH>> with the generated hash.
-INSERT INTO users (fullName, email, passwordHash, phone)
-VALUES ('System Admin', 'admin@barberyanitatis.com', '<<BCRYPT_HASH>>', '');
+-- Staff accounts (admin/receptionist)
+INSERT INTO staff_users (email, password_hash, full_name, role)
+VALUES
+	('admin@barberyanitatis.com', '<<BCRYPT_HASH>>', 'System Admin', 'Admin'),
+	('reception@barberyanitatis.com', '<<BCRYPT_HASH>>', 'Front Desk', 'Receptionist');
 
-INSERT INTO userRoles (userID, roleID)
-SELECT u.userID, r.roleID
+-- User profiles (AI attributes)
+INSERT INTO user_profiles (user_id, face_shape, hair_texture, hair_density, hair_length, last_scan_date)
+SELECT u.user_id, 'Oval', 'Straight', 'Medium', 'Short', CURDATE()
 FROM users u
-JOIN roles r ON r.roleName = 'Admin'
-WHERE u.email = 'admin@barberyanitatis.com'
-ON DUPLICATE KEY UPDATE roleID = VALUES(roleID);
+WHERE u.email = 'user1@barberyanitatis.com';
+
+-- Barbers
+INSERT INTO barbers (barber_code, full_name, email, password_hash, specialty, years_experience, bio)
+VALUES
+	('B-001', 'Miguel Cruz', 'miguel@barberyanitatis.com', '<<BCRYPT_HASH>>', 'Fade & Taper', 6, 'Specialist in modern fades.'),
+	('B-002', 'Leo Garcia', 'leo@barberyanitatis.com', '<<BCRYPT_HASH>>', 'Classic Cut', 8, 'Clean classic styles and beard trims.');
+
+-- Services
+INSERT INTO services (service_code, service_name, description, base_duration, base_price, category)
+VALUES
+	('SV-001', 'Precision Cut', 'Classic precision haircut', 45, 350.00, 'Haircut'),
+	('SV-002', 'Skin Fade', 'Modern skin fade', 50, 400.00, 'Haircut'),
+	('SV-003', 'Beard Trim', 'Beard shaping and trim', 20, 200.00, 'Beard');
+
+-- Hairstyles
+INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance)
+VALUES
+	('HS-001', 'Textured Crop', 'Short textured crop with tapered sides', 'Male', 'Easy', 'Medium'),
+	('HS-002', 'Classic Pompadour', 'Volume on top with clean sides', 'Male', 'Medium', 'High');
+
+-- Hairstyle variants
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Oval', 'Straight',
+			 '/assets/hairstyles/texture_crop_front.jpg', '/assets/hairstyles/texture_crop_side.jpg', '/assets/hairstyles/texture_crop_back.jpg',
+			 'Use #1 fade on sides, textured scissors on top.', '#1/#2', 'Matte clay', 35, 0.85
+FROM hairstyles h
+WHERE h.style_code = 'HS-001';
+
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Square', 'Wavy',
+			 '/assets/hairstyles/pompadour_front.jpg', '/assets/hairstyles/pompadour_side.jpg', '/assets/hairstyles/pompadour_back.jpg',
+			 'Tapered sides with volume on top.', '#2/#3', 'Pomade', 45, 0.82
+FROM hairstyles h
+WHERE h.style_code = 'HS-002';

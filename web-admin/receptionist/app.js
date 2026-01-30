@@ -118,7 +118,7 @@ function renderWalkins(walkins) {
               <td>${item.name}</td>
               <td>${item.service}</td>
               <td>${item.waitTime}</td>
-              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "InService" ? "warning" : "info"}">${item.status}</span></td>
+              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "InProgress" ? "warning" : "info"}">${item.status}</span></td>
             </tr>
           `,
         )
@@ -140,7 +140,7 @@ function renderTracking(items) {
     card.innerHTML = `
       <h4>${item.name}</h4>
       <p>${item.service}</p>
-      <div class="tag ${item.status === "WAITING" ? "info" : item.status === "IN PROGRESS" ? "success" : "warning"}">${item.status}</div>
+      <div class="tag ${item.status === "Waiting" ? "info" : item.status === "InProgress" ? "success" : "warning"}">${item.status}</div>
       <div class="progress" style="margin-top: 8px;">
         <span style="width: ${item.progress * 100}%; background: ${item.color};"></span>
       </div>

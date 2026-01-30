@@ -7,75 +7,78 @@ require_once __DIR__ . '/db.php';
 try {
     $pdo = get_db_connection();
 
-    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkIns WHERE visitDate = CURRENT_DATE()');
+    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE()');
     $walkInsTodayStmt->execute();
     $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
 
-    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointmentDate = CURRENT_DATE()');
+    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE()');
     $appointmentsTodayStmt->execute();
     $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
 
-    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM walkIns WHERE status = 'InService'");
+    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM walkin_queue WHERE status = 'InProgress'");
     $inProgressStmt->execute();
     $inProgress = (int)$inProgressStmt->fetchColumn();
 
-    $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE isAvailable = 1');
+    $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE is_active = 1');
     $activeBarbersStmt->execute();
     $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
 
     $appointmentsStmt = $pdo->prepare(
-        'SELECT a.appointmentID, u.fullName AS name,
-                GROUP_CONCAT(s.serviceName SEPARATOR ", ") AS service,
-                a.appointmentTime AS time,
-                SUM(s.durationMinutes) AS duration,
-                SUM(s.price) AS price,
+        'SELECT a.appointment_id, u.full_name AS name,
+                GROUP_CONCAT(s.service_name SEPARATOR ", ") AS service,
+                a.start_time AS time,
+                SUM(s.base_duration) AS duration,
+                SUM(ad.final_price) AS price,
                 a.status,
-                bu.fullName AS barber
+                b.full_name AS barber
          FROM appointments a
-         JOIN users u ON a.userID = u.userID
-         JOIN barbers b ON a.barberID = b.barberID
-         JOIN users bu ON b.userID = bu.userID
-         JOIN appointmentServices aps ON a.appointmentID = aps.appointmentID
-         JOIN services s ON aps.serviceID = s.serviceID
-         WHERE a.appointmentDate = CURRENT_DATE()
-         GROUP BY a.appointmentID, u.fullName, a.appointmentTime, a.status, bu.fullName
-         ORDER BY a.appointmentTime ASC'
+         JOIN users u ON a.user_id = u.user_id
+         JOIN barbers b ON a.barber_id = b.barber_id
+         JOIN appointment_details ad ON a.appointment_id = ad.appointment_id
+         JOIN services s ON ad.service_id = s.service_id
+         WHERE a.appointment_date = CURRENT_DATE()
+         GROUP BY a.appointment_id, u.full_name, a.start_time, a.status, b.full_name
+         ORDER BY a.start_time ASC'
     );
     $appointmentsStmt->execute();
     $appointments = $appointmentsStmt->fetchAll();
 
     $walkinsStmt = $pdo->prepare(
-        'SELECT w.walkInID,
-                COALESCE(w.customerName, "Walk-in") AS name,
-                w.status
-         FROM walkIns w
-         WHERE w.visitDate = CURRENT_DATE()
-         ORDER BY w.walkInID ASC'
+        'SELECT wq.queue_id,
+                CONCAT("Walk-in #", RIGHT(wq.queue_number, 3)) AS name,
+                GROUP_CONCAT(s.service_name SEPARATOR ", ") AS service,
+                wq.wait_time_minutes,
+                wq.status
+         FROM walkin_queue wq
+         JOIN walkin_service_details wsd ON wq.queue_id = wsd.queue_id
+         JOIN services s ON wsd.service_id = s.service_id
+         WHERE DATE(wq.created_at) = CURRENT_DATE()
+         GROUP BY wq.queue_id, wq.queue_number, wq.wait_time_minutes, wq.status
+         ORDER BY wq.queue_id ASC'
     );
     $walkinsStmt->execute();
     $walkins = array_map(function ($row) {
         return [
             'name' => $row['name'],
-            'service' => 'Walk-in',
-            'waitTime' => '',
+            'service' => $row['service'] ?? 'Walk-in',
+            'waitTime' => $row['wait_time_minutes'] !== null ? $row['wait_time_minutes'] . ' min' : '',
             'status' => $row['status'],
         ];
     }, $walkinsStmt->fetchAll());
 
     $barbersStmt = $pdo->prepare(
-        'SELECT b.barberID, u.fullName
-         FROM barbers b
-         JOIN users u ON b.userID = u.userID
-         WHERE b.isAvailable = 1
-         ORDER BY u.fullName'
+        'SELECT barber_id, full_name, specialty, rating, years_experience
+         FROM barbers
+         WHERE is_active = 1
+         ORDER BY full_name'
     );
     $barbersStmt->execute();
     $barbers = array_map(function ($row) {
         return [
-            'name' => $row['fullName'],
-            'specialty' => 'N/A',
-            'rating' => null,
-            'experience' => 'N/A',
+            'name' => $row['full_name'],
+            'specialty' => $row['specialty'] ?? 'N/A',
+            'rating' => $row['rating'],
+            'experience' => $row['years_experience'] !== null ? $row['years_experience'] . ' yrs' : 'N/A',
         ];
     }, $barbersStmt->fetchAll());
 
