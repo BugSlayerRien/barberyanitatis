@@ -26,22 +26,36 @@ if ($provider === '' || $apiKey === '') {
 // 1) Upload image to provider for face + hair analysis.
 // 2) Receive faceShape.
 // 3) Query haircuts by faceShape (or fallback to all).
-// 4) Return a list of imageUrl for client display.
+// 4) Return a list of imagePath for client display.
 
 try {
     $pdo = get_db_connection();
 
-        $query = 'SELECT haircutID, haircutName, faceShape, description, imageUrl
-                            FROM haircuts
-                            WHERE (:faceShape = \'\' OR faceShape = :faceShape OR faceShape IS NULL)
-                            ORDER BY haircutName
-                            LIMIT 12';
+        $query = 'SELECT haircutID, haircutName, faceShape, imagePath, isActive
+                  FROM haircuts
+                  WHERE isActive = 1 AND (:faceShape = \'\' OR faceShape = :faceShape OR faceShape IS NULL)
+                  ORDER BY haircutName
+                  LIMIT 12';
     $stmt = $pdo->prepare($query);
     $stmt->execute([
         ':faceShape' => $faceShape,
     ]);
 
         $haircuts = $stmt->fetchAll();
+
+        if ($userID > 0) {
+            $recStmt = $pdo->prepare(
+                'INSERT INTO aiRecommendations (userID, haircutID, confidenceScore)
+                 VALUES (:userID, :haircutID, :confidenceScore)'
+            );
+            foreach ($haircuts as $row) {
+                $recStmt->execute([
+                    ':userID' => $userID,
+                    ':haircutID' => (int)$row['haircutID'],
+                    ':confidenceScore' => 0.0,
+                ]);
+            }
+        }
 
     json_response([
         'message' => 'Scan received',

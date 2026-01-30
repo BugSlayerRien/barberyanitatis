@@ -20,7 +20,6 @@ try {
         $fullName = trim((string)($input['fullName'] ?? ''));
         $email = trim((string)($input['email'] ?? ''));
         $password = (string)($input['password'] ?? '');
-        $phone = trim((string)($input['phone'] ?? ''));
         $roleName = trim((string)($input['roleName'] ?? 'Customer'));
 
         if ($fullName === '' || $email === '' || $password === '') {
@@ -31,12 +30,12 @@ try {
 
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare('INSERT INTO users (fullName, email, passwordHash, phone) VALUES (:fullName, :email, :passwordHash, :phone)');
+        $stmt = $pdo->prepare('INSERT INTO users (fullName, email, passwordHash, role) VALUES (:fullName, :email, :passwordHash, :role)');
         $stmt->execute([
             ':fullName' => $fullName,
             ':email' => $email,
             ':passwordHash' => $passwordHash,
-            ':phone' => $phone !== '' ? $phone : null,
+            ':role' => $roleName,
         ]);
 
         $userId = (int)$pdo->lastInsertId();
@@ -62,7 +61,6 @@ try {
                 'userID' => $userId,
                 'fullName' => $fullName,
                 'email' => $email,
-                'phone' => $phone,
                 'role' => $roleName,
             ],
         ], 201);
@@ -76,7 +74,7 @@ try {
             json_response(['error' => 'Missing email or password'], 422);
         }
 
-        $stmt = $pdo->prepare('SELECT userID, fullName, email, passwordHash FROM users WHERE email = :email AND isActive = 1');
+        $stmt = $pdo->prepare('SELECT userID, fullName, email, passwordHash, role FROM users WHERE email = :email AND isActive = 1');
         $stmt->execute([':email' => $email]);
         $user = $stmt->fetch();
 
@@ -84,9 +82,7 @@ try {
             json_response(['error' => 'Invalid credentials'], 401);
         }
 
-        $rolesStmt = $pdo->prepare('SELECT r.roleName FROM userRoles ur JOIN roles r ON ur.roleID = r.roleID WHERE ur.userID = :userID');
-        $rolesStmt->execute([':userID' => $user['userID']]);
-        $roles = $rolesStmt->fetchAll();
+        $roles = [$user['role']];
 
         json_response([
             'message' => 'Login successful',
@@ -94,7 +90,7 @@ try {
                 'userID' => (int)$user['userID'],
                 'fullName' => $user['fullName'],
                 'email' => $user['email'],
-                'roles' => array_map(fn($row) => $row['roleName'], $roles),
+                'roles' => $roles,
             ],
         ]);
     }

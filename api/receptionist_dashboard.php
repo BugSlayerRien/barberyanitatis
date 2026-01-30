@@ -7,7 +7,7 @@ require_once __DIR__ . '/db.php';
 try {
     $pdo = get_db_connection();
 
-    $walkInsTodayStmt = $pdo->prepare("SELECT COUNT(*) FROM appointments WHERE appointmentType = 'WALKIN' AND appointmentDate = CURRENT_DATE()");
+    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkIns WHERE visitDate = CURRENT_DATE()');
     $walkInsTodayStmt->execute();
     $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
 
@@ -15,7 +15,7 @@ try {
     $appointmentsTodayStmt->execute();
     $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
 
-    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM appointments WHERE status = 'IN_CONSULTATION'");
+    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM walkIns WHERE status = 'InService'");
     $inProgressStmt->execute();
     $inProgress = (int)$inProgressStmt->fetchColumn();
 
@@ -29,32 +29,38 @@ try {
                 a.appointmentTime AS time,
                 SUM(s.durationMinutes) AS duration,
                 SUM(s.price) AS price,
-                a.status
+                a.status,
+                bu.fullName AS barber
          FROM appointments a
          JOIN users u ON a.userID = u.userID
+         JOIN barbers b ON a.barberID = b.barberID
+         JOIN users bu ON b.userID = bu.userID
          JOIN appointmentServices aps ON a.appointmentID = aps.appointmentID
          JOIN services s ON aps.serviceID = s.serviceID
-         WHERE a.appointmentDate = CURRENT_DATE() AND a.appointmentType = "APPOINTMENT"
-         GROUP BY a.appointmentID, u.fullName, a.appointmentTime, a.status
+         WHERE a.appointmentDate = CURRENT_DATE()
+         GROUP BY a.appointmentID, u.fullName, a.appointmentTime, a.status, bu.fullName
          ORDER BY a.appointmentTime ASC'
     );
     $appointmentsStmt->execute();
     $appointments = $appointmentsStmt->fetchAll();
 
     $walkinsStmt = $pdo->prepare(
-        'SELECT a.appointmentID AS walkInID,
-                GROUP_CONCAT(s.serviceName SEPARATOR ", ") AS service,
-                a.createdAt,
-                a.status
-         FROM appointments a
-         JOIN appointmentServices aps ON a.appointmentID = aps.appointmentID
-         JOIN services s ON aps.serviceID = s.serviceID
-         WHERE a.appointmentDate = CURRENT_DATE() AND a.appointmentType = "WALKIN"
-         GROUP BY a.appointmentID, a.createdAt, a.status
-         ORDER BY a.createdAt ASC'
+        'SELECT w.walkInID,
+                COALESCE(w.customerName, "Walk-in") AS name,
+                w.status
+         FROM walkIns w
+         WHERE w.visitDate = CURRENT_DATE()
+         ORDER BY w.walkInID ASC'
     );
     $walkinsStmt->execute();
-    $walkins = $walkinsStmt->fetchAll();
+    $walkins = array_map(function ($row) {
+        return [
+            'name' => $row['name'],
+            'service' => 'Walk-in',
+            'waitTime' => '',
+            'status' => $row['status'],
+        ];
+    }, $walkinsStmt->fetchAll());
 
     $barbersStmt = $pdo->prepare(
         'SELECT b.barberID, u.fullName
@@ -80,7 +86,17 @@ try {
             ['title' => 'In Progress', 'value' => (string)$inProgress, 'change' => '', 'changeType' => 'warning'],
             ['title' => 'Available Barbers', 'value' => (string)$activeBarbers, 'change' => '', 'changeType' => 'success'],
         ],
-        'appointments' => $appointments,
+        'appointments' => array_map(function ($row) {
+            return [
+                'name' => $row['name'],
+                'service' => $row['service'],
+                'time' => $row['time'],
+                'duration' => $row['duration'],
+                'price' => $row['price'],
+                'status' => $row['status'],
+                'barber' => $row['barber'],
+            ];
+        }, $appointments),
         'walkins' => $walkins,
         'tracking' => [],
         'barbers' => $barbers,

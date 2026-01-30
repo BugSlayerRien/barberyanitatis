@@ -9,12 +9,12 @@ try {
 
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
     $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE isActive = 1')->fetchColumn();
-    $pendingAppointments = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE status = 'WAITING'")->fetchColumn();
+    $pendingAppointments = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE status = 'Scheduled'")->fetchColumn();
 
     $monthlyRevenueStmt = $pdo->prepare(
         "SELECT COALESCE(SUM(amount), 0)
          FROM payments
-         WHERE paymentStatus = 'PAID'
+         WHERE status = 'Paid'
            AND YEAR(createdAt) = YEAR(CURRENT_DATE())
            AND MONTH(createdAt) = MONTH(CURRENT_DATE())"
     );

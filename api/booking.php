@@ -19,28 +19,22 @@ try {
     if ($action === 'create') {
         $userID = (int)($input['userID'] ?? 0);
         $barberID = (int)($input['barberID'] ?? 0);
-        $appointmentType = strtoupper(trim((string)($input['appointmentType'] ?? 'APPOINTMENT')));
         $appointmentDate = trim((string)($input['appointmentDate'] ?? ''));
         $appointmentTime = trim((string)($input['appointmentTime'] ?? ''));
         $serviceIDs = $input['serviceIDs'] ?? [];
 
-        if ($userID <= 0 || $appointmentDate === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
+        if ($userID <= 0 || $barberID <= 0 || $appointmentDate === '' || $appointmentTime === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
             json_response(['error' => 'Missing or invalid booking details'], 422);
-        }
-
-        if (!in_array($appointmentType, ['APPOINTMENT', 'WALKIN'], true)) {
-            json_response(['error' => 'Invalid appointmentType'], 422);
         }
 
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare('INSERT INTO appointments (userID, barberID, appointmentType, appointmentDate, appointmentTime) VALUES (:userID, :barberID, :appointmentType, :appointmentDate, :appointmentTime)');
+        $stmt = $pdo->prepare('INSERT INTO appointments (userID, barberID, appointmentDate, appointmentTime) VALUES (:userID, :barberID, :appointmentDate, :appointmentTime)');
         $stmt->execute([
             ':userID' => $userID,
-            ':barberID' => $barberID > 0 ? $barberID : null,
-            ':appointmentType' => $appointmentType,
+            ':barberID' => $barberID,
             ':appointmentDate' => $appointmentDate,
-            ':appointmentTime' => $appointmentTime !== '' ? $appointmentTime : null,
+            ':appointmentTime' => $appointmentTime,
         ]);
 
         $appointmentID = (int)$pdo->lastInsertId();
@@ -72,11 +66,11 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status, a.appointmentType,
-                    b.barberID, bu.fullName AS barberName
+            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status,
+                b.barberID, bu.fullName AS barberName
              FROM appointments a
-             LEFT JOIN barbers b ON a.barberID = b.barberID
-             LEFT JOIN users bu ON b.userID = bu.userID
+             JOIN barbers b ON a.barberID = b.barberID
+             JOIN users bu ON b.userID = bu.userID
              WHERE a.userID = :userID
              ORDER BY a.appointmentDate DESC, a.appointmentTime DESC'
         );

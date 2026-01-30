@@ -17,7 +17,7 @@ try {
     $pdo = get_db_connection();
 
     if ($action === 'list') {
-        $stmt = $pdo->prepare('SELECT haircutID, haircutName, faceShape, description, imageUrl FROM haircuts ORDER BY haircutName');
+        $stmt = $pdo->prepare('SELECT haircutID, haircutName, faceShape, imagePath, isActive FROM haircuts WHERE isActive = 1 ORDER BY haircutName');
         $stmt->execute();
         json_response(['haircuts' => $stmt->fetchAll()]);
     }
@@ -26,9 +26,9 @@ try {
         $faceShape = trim((string)($input['faceShape'] ?? ''));
 
         $stmt = $pdo->prepare(
-            'SELECT haircutID, haircutName, faceShape, description, imageUrl
+            'SELECT haircutID, haircutName, faceShape, imagePath, isActive
              FROM haircuts
-             WHERE (:faceShape = "" OR faceShape = :faceShape OR faceShape IS NULL)
+             WHERE isActive = 1 AND (:faceShape = "" OR faceShape = :faceShape OR faceShape IS NULL)
              ORDER BY haircutName'
         );
         $stmt->execute([
@@ -41,23 +41,23 @@ try {
     if ($action === 'create') {
         // TODO: enforce admin role
         $haircutName = trim((string)($input['haircutName'] ?? ''));
-        $description = trim((string)($input['description'] ?? ''));
         $faceShape = trim((string)($input['faceShape'] ?? ''));
-        $imageUrl = trim((string)($input['imageUrl'] ?? ''));
+        $imagePath = trim((string)($input['imagePath'] ?? ''));
+        $isActive = isset($input['isActive']) ? (int)$input['isActive'] : 1;
 
         if ($haircutName === '') {
             json_response(['error' => 'haircutName is required'], 422);
         }
 
         $stmt = $pdo->prepare(
-            'INSERT INTO haircuts (haircutName, faceShape, description, imageUrl)
-             VALUES (:haircutName, :faceShape, :description, :imageUrl)'
+            'INSERT INTO haircuts (haircutName, faceShape, imagePath, isActive)
+             VALUES (:haircutName, :faceShape, :imagePath, :isActive)'
         );
         $stmt->execute([
             ':haircutName' => $haircutName,
             ':faceShape' => $faceShape !== '' ? $faceShape : null,
-            ':description' => $description !== '' ? $description : null,
-            ':imageUrl' => $imageUrl !== '' ? $imageUrl : null,
+            ':imagePath' => $imagePath !== '' ? $imagePath : null,
+            ':isActive' => $isActive,
         ]);
 
         json_response(['message' => 'Haircut created', 'haircutID' => (int)$pdo->lastInsertId()], 201);

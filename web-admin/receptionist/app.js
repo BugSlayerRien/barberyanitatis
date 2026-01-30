@@ -84,7 +84,7 @@ function renderAppointments(appointments) {
               <td>${item.time}</td>
               <td>${item.duration}</td>
               <td>${item.price}</td>
-              <td><span class="tag ${item.status === "CONFIRMED" ? "success" : "warning"}">${item.status}</span></td>
+              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "Scheduled" ? "info" : "warning"}">${item.status}</span></td>
               <td>${item.barber}</td>
             </tr>
           `,
@@ -118,7 +118,7 @@ function renderWalkins(walkins) {
               <td>${item.name}</td>
               <td>${item.service}</td>
               <td>${item.waitTime}</td>
-              <td><span class="tag info">${item.status}</span></td>
+              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "InService" ? "warning" : "info"}">${item.status}</span></td>
             </tr>
           `,
         )

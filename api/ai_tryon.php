@@ -17,9 +17,9 @@ try {
     $pdo = get_db_connection();
 
     $stmt = $pdo->prepare(
-        'SELECT haircutID, haircutName, faceShape, description, imageUrl
+        'SELECT haircutID, haircutName, faceShape, imagePath, isActive
          FROM haircuts
-         WHERE haircutID = :haircutID'
+         WHERE haircutID = :haircutID AND isActive = 1'
     );
     $stmt->execute([':haircutID' => $haircutID]);
     $haircut = $stmt->fetch();
