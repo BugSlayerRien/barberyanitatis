@@ -1,0 +1,57 @@
+CURRENT SYSTEM FUNCTIONS (MOBILE + WEB)
+
+MOBILE APP (CLIENT)
+1) Auth
+- Register customer (email/password/phone/gender) via /api/auth.php
+- Login customer via /api/auth.php
+- User session stored in memory (userID, roles)
+
+2) AI Scan + Recommendations
+- Capture/upload image from mobile
+- POST /api/ai_scan.php (multipart)
+- Returns top 5 hairstyle variants + preview URLs
+- Scan results screen shows front/side/back preview + recommendation list
+ - CV pipeline: MediaPipe face detection + face mesh + heuristic hair attributes
+ - CV JSON sent to LLM (Gemini/OpenAI) for ranking when configured
+ - Web camera requires https or localhost permission
+
+3) Hairstyle Library
+- GET listByFaceShape via /api/haircuts.php
+- UI shows real variants with images and details
+- Detail page uses front/side/back images for preview
+
+4) Booking Flow
+- Select barber via /api/barbers.php
+- Select date and view slots via /api/time_slots.php
+- Select service via /api/services.php
+- Create appointment via /api/booking.php
+- List appointments via /api/booking.php (listByCustomer)
+
+5) Favorites
+- Saved haircuts from /api/favorites.php (listByUser)
+
+WEB APP (ADMIN)
+1) Dashboard
+- View totals and activity via /api/admin_dashboard.php
+
+WEB APP (RECEPTIONIST)
+1) Dashboard
+- View today’s walk-ins and appointments via /api/receptionist_dashboard.php
+
+WEB APP (LOGIN)
+- Admin/Receptionist login via /api/auth.php (staff_users)
+
+KIOSK (WALK-IN TERMINAL)
+1) AI Scan + Recommendations
+- Upload image to /api/ai_scan.php
+- Receive kiosk session + top 5 hairstyle variants
+
+2) Selection Flow
+- Select recommendation via /api/kiosk.php (selectRecommendation)
+- Fetch session + recommendations via /api/kiosk.php (getSession)
+
+NOTES
+- All platforms use PHP API; no direct DB access.
+- Staff roles are stored in staff_users.
+- Customer accounts are stored in users.
+ - AI provider/key configured via env vars or local override in api/ai_scan.php.

@@ -1,0 +1,3 @@
+DROP DATABASE IF EXISTS barberyanitatis;
+CREATE DATABASE barberyanitatis;
+USE barberyanitatis;

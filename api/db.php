@@ -5,9 +5,18 @@
 
 declare(strict_types=1);
 
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: Content-Type, Authorization');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+
+if (isset($_SERVER['REQUEST_METHOD']) && $_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
 function get_db_connection(): PDO
 {
-    $host = getenv('DB_HOST') ?: 'localhost';
+    $host = getenv('DB_HOST') ?: '127.0.0.1';
     $db = getenv('DB_NAME') ?: 'barberyanitatis';
     $user = getenv('DB_USER') ?: 'root';
     $pass = getenv('DB_PASS') ?: '';

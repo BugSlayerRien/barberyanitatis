@@ -32,16 +32,17 @@ try {
 
         $hairTexture = trim((string)($input['hairTexture'] ?? ''));
 
-        $stmt = $pdo->prepare(
-            'SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
-                    hv.confidence_score, hs.style_name, hs.style_code
-             FROM hairstyle_variants hv
-             JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
-             WHERE hs.is_active = 1
-               AND (:face_shape = "" OR hv.face_shape = :face_shape)
-               AND (:hair_texture = "" OR hv.hair_texture = :hair_texture)
-             ORDER BY hv.confidence_score DESC, hs.style_name'
-        );
+                $stmt = $pdo->prepare(
+                        'SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
+                                        hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
+                                        hs.style_name, hs.style_code, hs.description
+                         FROM hairstyle_variants hv
+                         JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+                         WHERE hs.is_active = 1
+                             AND (:face_shape = "" OR hv.face_shape = :face_shape)
+                             AND (:hair_texture = "" OR hv.hair_texture = :hair_texture)
+                         ORDER BY hv.confidence_score DESC, hs.style_name'
+                );
         $stmt->execute([
             ':face_shape' => $faceShape,
             ':hair_texture' => $hairTexture,

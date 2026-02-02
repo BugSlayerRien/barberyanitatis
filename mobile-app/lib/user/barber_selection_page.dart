@@ -1,8 +1,12 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'calendar_page.dart';
 import 'top_picks_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
+import 'api_config.dart';
 
 class BarberSelectionPage extends StatefulWidget {
   const BarberSelectionPage({super.key});
@@ -13,36 +17,56 @@ class BarberSelectionPage extends StatefulWidget {
 
 class _BarberSelectionPageState extends State<BarberSelectionPage> {
   int _selectedIndex = 0;
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _barbers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBarbers();
+  }
+
+  Future<void> _loadBarbers() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'list'}),
+      );
+
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      if (response.statusCode != 200) {
+        setState(() {
+          _error = data['error']?.toString() ?? 'Failed to load barbers.';
+          _loading = false;
+        });
+        return;
+      }
+
+      final barbers = (data['barbers'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      setState(() {
+        _barbers = barbers;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load barbers: $e';
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final barbers = [
-      {
-        'name': 'Anyone Available',
-        'specialty': 'FASTEST',
-        'initials': 'AA',
-        'color': Colors.black,
-      },
-      {
-        'name': 'Mike Chen',
-        'specialty': 'Classic & Trendy Styles',
-        'initials': 'MC',
-        'color': Colors.black,
-      },
-      {
-        'name': 'Emma Rodriguez',
-        'specialty': 'Creative Styling',
-        'initials': 'ER',
-        'color': Colors.black,
-      },
-      {
-        'name': 'Sarah Johnson',
-        'specialty': 'Modern Cuts & Color',
-        'initials': 'SJ',
-        'color': Colors.black,
-      },
-    ];
-
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
@@ -54,12 +78,19 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
         ),
         title: const Text('Select Barber', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
-      body: ListView.builder(
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : _error != null
+              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
+              : ListView.builder(
         padding: const EdgeInsets.all(20),
-        itemCount: barbers.length,
+        itemCount: _barbers.length,
         itemBuilder: (context, index) {
-          final barber = barbers[index];
-          final isAnyoneAvailable = index == 0;
+          final barber = _barbers[index];
+          final barberName = barber['full_name']?.toString() ?? 'Barber';
+          final initials = barberName.isNotEmpty
+              ? barberName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join()
+              : 'B';
 
           return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -71,19 +102,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isAnyoneAvailable ? Colors.white : Colors.white10,
-                  width: isAnyoneAvailable ? 2 : 1,
-                ),
-                boxShadow: isAnyoneAvailable
-                    ? [
-                        BoxShadow(
-                          color: Colors.white.withOpacity(0.2),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
-                        ),
-                      ]
-                    : null,
+                border: Border.all(color: Colors.white10, width: 1),
               ),
                 child: Row(
                 children: [
@@ -91,12 +110,12 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                     width: 80,
                     height: 80,
                     decoration: BoxDecoration(
-                      color: barber['color'] as Color,
+                      color: Colors.black,
                       shape: BoxShape.circle,
                     ),
                     child: Center(
                       child: Text(
-                        barber['initials'] as String,
+                        initials,
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -114,7 +133,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                           children: [
                             Flexible(
                               child: Text(
-                                barber['name'] as String,
+                                barberName,
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
@@ -123,29 +142,11 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                            if (isAnyoneAvailable) ...[
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Text(
-                                  'FASTEST',
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 10,
-                                  ),
-                                ),
-                              ),
-                            ],
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          barber['specialty'] as String,
+                          barber['specialty']?.toString() ?? 'General',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontSize: 12,
@@ -162,7 +163,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                         onPressed: () {
                           showDialog(
                             context: context,
-                            builder: (_) => BarberStatsDialog(barberName: barber['name'] as String, todayCuts: barbers[index]['name'] == 'Anyone Available' ? 2 : 0), // Pass a sample 'todayCuts'
+                            builder: (_) => BarberStatsDialog(barberName: barberName, todayCuts: 0),
                           );
                         },
                         style: TextButton.styleFrom(
@@ -174,7 +175,12 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                       GestureDetector(
                         onTap: () {
                           Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => CalendarPage(barberName: barber['name'] as String)),
+                            MaterialPageRoute(
+                              builder: (_) => CalendarPage(
+                                barberId: barber['barber_id'] is int ? barber['barber_id'] as int : int.tryParse('${barber['barber_id']}') ?? 0,
+                                barberName: barberName,
+                              ),
+                            ),
                           );
                         },
                         child: Container(

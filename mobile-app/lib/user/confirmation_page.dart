@@ -3,7 +3,18 @@ import 'barber_selection_page.dart';
 import 'dashboard_page.dart';
 
 class ConfirmationPage extends StatefulWidget {
-  const ConfirmationPage({super.key});
+  final String? frontViewUrl;
+  final String? sideViewUrl;
+  final String? backViewUrl;
+  final String styleName;
+
+  const ConfirmationPage({
+    super.key,
+    this.frontViewUrl,
+    this.sideViewUrl,
+    this.backViewUrl,
+    required this.styleName,
+  });
 
   @override
   State<ConfirmationPage> createState() => _ConfirmationPageState();
@@ -13,7 +24,6 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
   late AnimationController _animationController;
   late List<Animation<double>> _scaleAnimations;
   late PageController _pageController;
-  bool _showBeforeAfter = false;
 
   @override
   void initState() {
@@ -43,9 +53,11 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
 
   @override
   Widget build(BuildContext context) {
-    final beforeImages = ['assets/images/jeoleft.jpg', 'assets/images/jeo_front.jpg', 'assets/images/jeo ai haircut.jpg'];
-    final afterImages = ['assets/images/kalbo.png', 'assets/images/tatishaircut.jpg', 'assets/images/jeo ai haircut after.jpg'];
-    final images = _showBeforeAfter ? afterImages : beforeImages;
+    final images = [
+      widget.sideViewUrl,
+      widget.frontViewUrl,
+      widget.backViewUrl,
+    ];
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -63,8 +75,8 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'See Your New Look',
+                  Text(
+                    widget.styleName,
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 26,
@@ -78,65 +90,6 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
                   ),
                   const SizedBox(height: 20),
 
-                  // Before/After Toggle
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _showBeforeAfter = false;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: !_showBeforeAfter ? Colors.white : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.white,
-                              width: !_showBeforeAfter ? 0 : 2,
-                            ),
-                          ),
-                          child: Text(
-                            'Before',
-                            style: TextStyle(
-                              color: !_showBeforeAfter ? Colors.black : Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _showBeforeAfter = true;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                          decoration: BoxDecoration(
-                            color: _showBeforeAfter ? Colors.white : Colors.transparent,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: Colors.white,
-                              width: _showBeforeAfter ? 0 : 2,
-                            ),
-                          ),
-                          child: Text(
-                            'After',
-                            style: TextStyle(
-                              color: _showBeforeAfter ? Colors.black : Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
                   const SizedBox(height: 28),
 
                   // Swipeable Images Carousel with Navigation Buttons
@@ -180,13 +133,16 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
                                 itemCount: images.length,
                                 itemBuilder: (context, index) {
                                   final labels = ['Left Side', 'Front View', 'Right Side'];
+                                  final imageUrl = images[index];
                                   return ScaleTransition(
                                     scale: _scaleAnimations[index],
                                     child: Container(
                                       margin: const EdgeInsets.symmetric(horizontal: 8),
                                       decoration: BoxDecoration(
                                         borderRadius: BorderRadius.circular(14),
-                                        image: DecorationImage(image: AssetImage(images[index]), fit: BoxFit.cover),
+                                        image: imageUrl != null && imageUrl.isNotEmpty
+                                            ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
+                                            : null,
                                         border: Border.all(color: Colors.white, width: 2),
                                       ),
                                       child: Container(

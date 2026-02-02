@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
@@ -13,7 +14,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   String _username = 'Customer';
   String _email = 'customer@gmail.com';
-  File? _profileImage;
+  XFile? _profileImage;
   bool _isEditingUsername = false;
   late TextEditingController _usernameController;
 
@@ -34,7 +35,7 @@ class _ProfilePageState extends State<ProfilePage> {
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
       setState(() {
-        _profileImage = File(image.path);
+        _profileImage = image;
       });
     }
   }
@@ -73,9 +74,11 @@ class _ProfilePageState extends State<ProfilePage> {
                   ),
                 ),
                 child: _profileImage != null
-                    ? ClipOval(
-                        child: Image.file(_profileImage!, fit: BoxFit.cover),
-                      )
+                  ? ClipOval(
+                    child: kIsWeb
+                      ? Image.network(_profileImage!.path, fit: BoxFit.cover)
+                      : Image.file(File(_profileImage!.path), fit: BoxFit.cover),
+                    )
                     : Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,

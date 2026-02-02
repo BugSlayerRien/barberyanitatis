@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'ai_face_scan_page.dart';
+import 'quiz_upload.dart';
 
 class QuizHairTypePage extends StatefulWidget {
   const QuizHairTypePage({super.key});
@@ -58,7 +58,7 @@ class _QuizHairTypePageState extends State<QuizHairTypePage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _hairType == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AiFaceScanPage())),
+                          onPressed: _hairType == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizUploadPage())),
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
                           child: const Text('Continue'),
                         ),

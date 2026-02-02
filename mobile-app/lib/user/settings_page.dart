@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -11,7 +12,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  File? _profileImage;
+  XFile? _profileImage;
   final TextEditingController _nameController = TextEditingController(text: 'Customer');
   final TextEditingController _phoneController = TextEditingController(text: '0912 345 6789');
   final String _email = 'customer@gmail.com';
@@ -30,7 +31,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final ImagePicker picker = ImagePicker();
     final XFile? image = await picker.pickImage(source: ImageSource.gallery);
     if (image != null) {
-      setState(() => _profileImage = File(image.path));
+      setState(() => _profileImage = image);
     }
   }
 
@@ -63,8 +64,12 @@ class _SettingsPageState extends State<SettingsPage> {
                     border: Border.all(color: Colors.white, width: 2),
                     color: const Color(0xFF1A1A1A),
                   ),
-                  child: _profileImage != null
-                      ? ClipOval(child: Image.file(_profileImage!, fit: BoxFit.cover))
+                    child: _profileImage != null
+                      ? ClipOval(
+                        child: kIsWeb
+                          ? Image.network(_profileImage!.path, fit: BoxFit.cover)
+                          : Image.file(File(_profileImage!.path), fit: BoxFit.cover),
+                      )
                       : const Icon(Icons.camera_alt, color: Colors.white70, size: 36),
                 ),
               ),

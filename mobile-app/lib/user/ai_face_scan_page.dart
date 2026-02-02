@@ -1,8 +1,16 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import 'dashboard_page.dart';
 import 'quiz_upload.dart';
 import 'widgets/app_top_bar.dart';
+import 'api_config.dart';
+import 'scan_results_page.dart';
+import 'user_session.dart';
+import 'web_camera_picker.dart';
 
 class AiFaceScanPage extends StatefulWidget {
   const AiFaceScanPage({super.key});
@@ -16,23 +24,94 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
   XFile? _scanImage;
 
   Future<void> _startScan() async {
-    final file = await _picker.pickImage(source: ImageSource.camera);
+    if (kIsWeb) {
+      final supported = await isWebCameraSupported();
+      if (!supported) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Web camera requires https/localhost and permission. Use upload instead.')),
+        );
+        return;
+      }
+    }
+
+    final file = kIsWeb
+        ? await pickWebCameraImage()
+        : await _picker.pickImage(source: ImageSource.camera);
     if (file == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Camera cancelled.')),
+        const SnackBar(content: Text('Camera cancelled or not supported.')),
       );
       return;
     }
 
-    setState(() {
-      _scanImage = file;
-    });
+    setState(() => _scanImage = file);
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Scan captured. Uploading to AI...')),
     );
+
+    await _uploadScan(file);
+  }
+
+  Future<void> _uploadScan(XFile file) async {
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
+      );
+      if (kIsWeb) {
+        final bytes = await file.readAsBytes();
+        request.files.add(http.MultipartFile.fromBytes(
+          'image',
+          bytes,
+          filename: file.name,
+        ));
+      } else {
+        request.files.add(await http.MultipartFile.fromPath('image', file.path));
+      }
+
+      if (UserSession.userId != null) {
+        request.fields['userID'] = UserSession.userId.toString();
+      }
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (!mounted) return;
+
+        final data = response.body.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+          : <String, dynamic>{};
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['error']?.toString() ?? 'AI scan failed.')),
+        );
+        return;
+      }
+
+      final recommendations = (data['recommendations'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      UserSession.lastScan = data;
+      UserSession.lastRecommendations = recommendations;
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ScanResultsPage(
+            imageUrl: data['imageUrl']?.toString() ?? '',
+            recommendations: recommendations,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI scan failed: $e')),
+      );
+    }
   }
 
   @override
@@ -41,7 +120,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
-        onBack: () => Navigator.of(context).pop(),
+        onBack: () => Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardPage()),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -58,6 +139,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
               'face shape, hair texture, and style preferences with high accuracy.',
               style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
             ),
+            if (kIsWeb) ...[
+              const SizedBox(height: 6),
+              const Text(
+                'Web camera requires https or localhost permission.',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 16),
             Container(
               height: 190,

@@ -1,66 +1,45 @@
-AI HAIRSTYLE RECOMMENDER – IMPLEMENTATION PLAN (PRACTICAL)
+
+AI HAIRSTYLE RECOMMENDER – SIMPLE PLAN (NO COMPLEXITY)
 
 GOAL
-Give users a face/hair scan, then show hairstyle try‑on results. If a suitable style isn’t found, the user can pick from your own haircut library (manual selection) and still try it on.
+- After scan, show a preview of the haircut (front + side) and top 5 recommendations.
+- If the user dislikes all 5, only then let them pick from the library/assets.
 
-PHASE 1: USE EXISTING HAIRSTYLE LIBRARY (FAST MVP)
-1) Mobile captures a camera photo (already implemented).
-2) Upload image to /api/ai_scan.php (multipart/form‑data).
-3) Backend runs face + hair analysis:
-	- Face shape detection (oval/round/square/heart)
-	- Hair type detection (straight/wavy/curly/coily)
-4) Query hairstyleVariants table to match (faceShape, hairType).
-5) Return top 6–12 variants for immediate display.
+SIMPLE FLOW (MVP)
+1) Scan photo (mobile camera or upload).
+2) POST /api/ai_scan.php (multipart).
+3) Backend detects face shape + hair texture.
+4) Query hairstyle_variants (face_shape + hair_texture) and return top 5.
+5) UI shows:
+   - Preview tabs: Front / Side / Back
+   - Top 5 list (tap to preview another)
+6) If user taps “Choose from library”, show full list from /api/haircuts.php and use assets.
 
-PHASE 2: USER‑CHOSEN HAIRCUT TRY‑ON (LIBRARY EXPANSION)
-If user doesn’t like results:
-1) Show full haircut library list (haircuts table + images).
-2) User selects a haircut.
-3) Backend generates try‑on using image‑to‑image (prompt + controlnet/segmentation) OR overlays a prepared variant.
-4) Save result as a new hairstyleVariants row.
+TRY-ON WITHOUT COMPLEXITY
+- Use pre-generated images in hairstyle_variants (front/side/back).
+- No real-time image generation needed.
+- Just show the stored images as “preview”.
 
-RECOMMENDED TECH STACK
-Face + Hair Analysis:
-- MediaPipe Face Mesh (local) OR Azure Face API (cloud)
-- Hair type classifier (simple ML model or heuristic based on texture)
+API MINIMUM
+- POST /api/ai_scan.php -> returns top 5 variants with front/side/back URLs.
+- POST /api/haircuts.php (action=listByFaceShape or list) -> returns library variants.
 
-Try‑On Generation (Pick One):
-Option A: Pre‑generated assets only (cheap, fast)
-- Make variants for each haircut x faceShape x hairType
-- Store images in /assets/ai/ or cloud storage
+ONLY USE LIBRARY WHEN:
+- No recommendations returned, or
+- User presses “Choose from library”.
 
-Option B: Generate on demand (higher quality)
-- Use Stability/Replicate SDXL img2img + hair segmentation mask
-- Store generated output in hairstyleVariants for reuse
+NEXT STEPS
+- Seed more variants (front/side/back) in hairstyle_variants.
+- Ensure PUBLIC_BASE_URL so images resolve in web/mobile.
 
-DATABASE USAGE
-- haircuts: list of base styles
-- hairstyleVariants: all generated or pre‑made outputs
-- favorites: user saves a try‑on
-- auditLogs: log AI events for analytics
 
-API ENDPOINTS
-- POST /api/ai_scan.php (multipart) -> returns variants
-- POST /api/ai_tryon.php (future) -> generate try‑on for selected haircut
-- GET /api/haircuts.php (future) -> list haircut library
 
-QUALITY + COST CONTROL
-- Cache outputs: if a variant exists, reuse it
-- Limit generation: max N new variants/day
-- Offer manual selection when AI cannot detect face/hair
 
-USER FLOW (SIMPLE)
-1) Scan face
-2) See auto recommendations
-3) If none fit, choose from haircut library
-4) Try‑on generated or pre‑made
-5) Save favorite
 
-NEXT BUILD STEPS
-1) Seed haircuts + hairstyleVariants
-2) Implement /api/ai_scan.php with real provider
-3) Add /api/haircuts.php for library list
-4) Add try‑on endpoint or use pre‑generated assets
+
+
+
+
 
 PROVIDER RECOMMENDATION (BEGINNER‑FRIENDLY)
 Option 1 (Easiest + practical):

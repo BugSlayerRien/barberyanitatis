@@ -7,9 +7,10 @@ import 'ai_face_scan_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'user_session.dart';
 
 class HairstyleDetailPage extends StatefulWidget {
-  final Map<String, String> style;
+  final Map<String, dynamic> style;
 
   const HairstyleDetailPage({required this.style, super.key});
 
@@ -60,7 +61,9 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
               Container(
                 height: 380,
                 decoration: BoxDecoration(
-                  image: DecorationImage(image: AssetImage(widget.style['image']!), fit: BoxFit.cover),
+                  image: widget.style['image'] != null && widget.style['image'].toString().isNotEmpty
+                      ? DecorationImage(image: NetworkImage(widget.style['image'].toString()), fit: BoxFit.cover)
+                      : null,
                 ),
                 child: Container(
                   decoration: BoxDecoration(
@@ -88,7 +91,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.style['name']!,
+                                widget.style['name']?.toString() ?? 'Style',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 28,
@@ -101,7 +104,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                                   const Icon(Icons.star, color: Colors.white, size: 18),
                                   const SizedBox(width: 6),
                                   Text(
-                                    widget.style['rating']!,
+                                    widget.style['rating']?.toString() ?? '★★★★★',
                                     style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
                                   ),
                                 ],
@@ -150,7 +153,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                             ],
                           ),
                           const SizedBox(height: 16),
-                          ...(widget.style['details']!.split('\n').map(
+                          ...((widget.style['details']?.toString() ?? '').split('\n').where((line) => line.trim().isNotEmpty).map(
                             (detail) => Padding(
                               padding: const EdgeInsets.only(bottom: 12),
                               child: Row(
@@ -184,8 +187,20 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     // Buttons
                     ElevatedButton(
                       onPressed: () {
+                        final variantId = widget.style['variantId'];
+                        if (variantId is int) {
+                          UserSession.selectedVariantId = variantId;
+                          UserSession.selectedStyleName = widget.style['name']?.toString();
+                        }
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const ConfirmationPage()),
+                          MaterialPageRoute(
+                            builder: (_) => ConfirmationPage(
+                              frontViewUrl: widget.style['frontViewUrl']?.toString(),
+                              sideViewUrl: widget.style['sideViewUrl']?.toString(),
+                              backViewUrl: widget.style['backViewUrl']?.toString(),
+                              styleName: widget.style['name']?.toString() ?? 'Style',
+                            ),
+                          ),
                         );
                       },
                       style: ElevatedButton.styleFrom(

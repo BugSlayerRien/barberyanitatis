@@ -1,9 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import 'dashboard_page.dart';
 import 'widgets/app_top_bar.dart';
+import 'api_config.dart';
+import 'scan_results_page.dart';
+import 'user_session.dart';
+import 'web_camera_picker.dart';
 
 class QuizUploadPage extends StatefulWidget {
   const QuizUploadPage({super.key});
@@ -19,6 +26,103 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
     final ImagePicker picker = ImagePicker();
     final XFile? img = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1000, maxHeight: 1000);
     if (img != null) setState(() => _picked = img);
+  }
+
+  Future<void> _captureImage() async {
+    final ImagePicker picker = ImagePicker();
+    try {
+      if (kIsWeb) {
+        final supported = await isWebCameraSupported();
+        if (!supported) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Web camera requires https/localhost and permission. Use Upload if unavailable.')),
+          );
+          return;
+        }
+      }
+
+      final XFile? img = kIsWeb
+          ? await pickWebCameraImage()
+          : await picker.pickImage(source: ImageSource.camera, maxWidth: 1000, maxHeight: 1000);
+      if (img != null) setState(() => _picked = img);
+      if (kIsWeb && img == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera capture cancelled or not supported on this browser.')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Camera not available on this device.')),
+      );
+    }
+  }
+
+  Future<void> _uploadScan() async {
+    if (_picked == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please upload a photo first.')),
+      );
+      return;
+    }
+
+    try {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
+      );
+      if (kIsWeb) {
+        final bytes = await _picked!.readAsBytes();
+        request.files.add(http.MultipartFile.fromBytes(
+          'image',
+          bytes,
+          filename: _picked!.name,
+        ));
+      } else {
+        request.files.add(await http.MultipartFile.fromPath('image', _picked!.path));
+      }
+      if (UserSession.userId != null) {
+        request.fields['userID'] = UserSession.userId.toString();
+      }
+
+      final streamed = await request.send();
+      final response = await http.Response.fromStream(streamed);
+      if (!mounted) return;
+
+        final data = response.body.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+          : <String, dynamic>{};
+      if (response.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['error']?.toString() ?? 'AI scan failed.')),
+        );
+        return;
+      }
+
+      final recommendations = (data['recommendations'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      UserSession.lastScan = data;
+      UserSession.lastRecommendations = recommendations;
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => ScanResultsPage(
+            imageUrl: data['imageUrl']?.toString() ?? '',
+            recommendations: recommendations,
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI scan failed: $e')),
+      );
+    }
   }
 
   @override
@@ -69,6 +173,14 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                   const Text('AI FACE SCAN', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
                   const Text('Scan your face to get your best haircut match', style: TextStyle(color: Colors.white70)),
+                  if (kIsWeb) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Web camera requires https or localhost permission.',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                   const SizedBox(height: 16),
                   Container(
                     height: 180,
@@ -92,18 +204,27 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                   ),
 
                   const SizedBox(height: 12),
+                  ElevatedButton.icon(
+                    onPressed: _captureImage,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
+                    icon: const Icon(Icons.camera_alt, size: 18),
+                    label: const Text('Start Camera Scan'),
+                  ),
+                  const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: _pickImage,
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
                     icon: const Icon(Icons.cloud_upload, size: 18),
-                    label: Text(_picked == null ? 'Upload Photo (optional)' : 'Change Upload'),
+                    label: Text(_picked == null ? 'Upload Photo' : 'Change Upload'),
                   ),
 
                   if (_picked != null) ...[
                     const SizedBox(height: 10),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity, height: 160),
+                      child: kIsWeb
+                          ? Image.network(_picked!.path, fit: BoxFit.cover, width: double.infinity, height: 160)
+                          : Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity, height: 160),
                     ),
                   ],
 
@@ -120,14 +241,7 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: () {
-                            // Submit - navigate to dashboard
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Quiz submitted')));
-                            Navigator.of(context).pushAndRemoveUntil(
-                              MaterialPageRoute(builder: (_) => const DashboardPage()),
-                              (route) => false,
-                            );
-                          },
+                          onPressed: _uploadScan,
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
                           child: const Text('SUBMIT'),
                         ),

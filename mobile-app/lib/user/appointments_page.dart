@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'completed_appointment_detail.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
@@ -6,6 +9,8 @@ import 'ai_face_scan_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'api_config.dart';
+import 'user_session.dart';
 
 class AppointmentsPage extends StatefulWidget {
   const AppointmentsPage({super.key});
@@ -15,67 +20,91 @@ class AppointmentsPage extends StatefulWidget {
 }
 
 class _AppointmentsPageState extends State<AppointmentsPage> {
-  int _selectedTab = 0; // 0 = Upcoming, 1 = Completed
+  int _selectedTab = 0;
+  List<Map<String, dynamic>> _upcomingAppointments = [];
+  List<Map<String, dynamic>> _completedAppointments = [];
+  bool _loading = true;
+  String? _error;
 
-  final List<Map<String, dynamic>> _upcomingAppointments = [
-    {
-      'service': 'Haircut & Style',
-      'barber': 'with Sarah Johnson',
-      'date': 'Sep 12, 2025',
-      'time': '10:00 AM',
-      'duration': '45 min',
-      'price': '₱100',
-      'rating': null,
-    },
-    {
-      'service': 'Hair Color',
-      'barber': 'with Maria Garcia',
-      'date': 'Sep 15, 2025',
-      'time': '2:00 PM',
-      'duration': '2 hours',
-      'price': '₱120',
-      'rating': null,
-    },
-    {
-      'service': 'Deep Conditioning',
-      'barber': 'with Lisa Chen',
-      'date': 'Sep 18, 2025',
-      'time': '11:00 AM',
-      'duration': '30 min',
-      'price': '₱80',
-      'rating': null,
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadAppointments();
+  }
 
-  final List<Map<String, dynamic>> _completedAppointments = [
-    {
-      'service': 'Haircut & Blowout',
-      'barber': 'with Sarah Johnson',
-      'date': 'Aug 28, 2025',
-      'time': '3:00 PM',
-      'duration': '1 hour',
-      'price': '₱100',
-      'rating': '★★★★★',
-    },
-    {
-      'service': 'Highlights',
-      'barber': 'with Maria Garcia',
-      'date': 'Aug 15, 2025',
-      'time': '1:00 PM',
-      'duration': '3 hours',
-      'price': '₱180',
-      'rating': '★★★★☆',
-    },
-    {
-      'service': 'Trim',
-      'barber': 'with Lisa Chen',
-      'date': 'Jul 30, 2025',
-      'time': '10:30 AM',
-      'duration': '30 min',
-      'price': '₱90',
-      'rating': '★★★★★',
-    },
-  ];
+  Future<void> _loadAppointments() async {
+    if (UserSession.userId == null) {
+      setState(() {
+        _loading = false;
+        _error = 'Please sign in again.';
+      });
+      return;
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'listByCustomer',
+          'userID': UserSession.userId,
+        }),
+      );
+
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      if (response.statusCode != 200) {
+        setState(() {
+          _error = data['error']?.toString() ?? 'Failed to load appointments.';
+          _loading = false;
+        });
+        return;
+      }
+
+      final items = (data['appointments'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+
+      final upcoming = <Map<String, dynamic>>[];
+      final completed = <Map<String, dynamic>>[];
+
+      for (final appt in items) {
+        final services = (appt['services'] as List<dynamic>? ?? []);
+        final firstService = services.isNotEmpty ? services.first as Map : <String, dynamic>{};
+
+        final mapped = {
+          'service': firstService['serviceName']?.toString() ?? 'Service',
+          'barber': 'with ${appt['barberName'] ?? ''}',
+          'date': appt['appointmentDate']?.toString() ?? '',
+          'time': appt['startTime']?.toString() ?? '',
+          'duration': firstService['durationMinutes'] != null ? '${firstService['durationMinutes']} min' : '—',
+          'price': firstService['price'] != null ? '₱${firstService['price']}' : '₱0',
+          'rating': appt['status'] == 'Completed' ? '★★★★★' : null,
+        };
+
+        if ((appt['status']?.toString() ?? '') == 'Completed') {
+          completed.add(mapped);
+        } else {
+          upcoming.add(mapped);
+        }
+      }
+
+      setState(() {
+        _upcomingAppointments = upcoming;
+        _completedAppointments = completed;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load appointments: $e';
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -161,6 +190,11 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
             ),
             const SizedBox(height: 24),
 
+            if (_loading)
+              const Center(child: CircularProgressIndicator(color: Colors.white))
+            else if (_error != null)
+              Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
+            else
             // Appointments List with switch animation
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),

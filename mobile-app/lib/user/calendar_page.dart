@@ -1,10 +1,15 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'time_slot_page.dart';
+import 'api_config.dart';
 
 class CalendarPage extends StatefulWidget {
+  final int barberId;
   final String barberName;
 
-  const CalendarPage({required this.barberName, super.key});
+  const CalendarPage({required this.barberId, required this.barberName, super.key});
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
@@ -13,41 +18,45 @@ class CalendarPage extends StatefulWidget {
 class _CalendarPageState extends State<CalendarPage> {
   late DateTime _selectedDate;
   late DateTime _currentMonth;
-  final Map<int, bool> _dateAvailability = {
-    1: true,
-    2: true,
-    3: false,
-    4: true,
-    5: true,
-    6: false,
-    7: true,
-    8: true,
-    9: true,
-    10: true,
-    11: false,
-    12: true,
-    13: true,
-    14: true,
-    15: false,
-    16: true,
-    17: true,
-    18: true,
-    19: true,
-    20: false,
-    21: true,
-    22: true,
-    23: true,
-    24: true,
-    25: false,
-    26: true,
-    27: true,
-  };
+  int _availableSlots = 0;
+  bool _loadingSlots = false;
 
   @override
   void initState() {
     super.initState();
-    _currentMonth = DateTime(2025, 12);
-    _selectedDate = DateTime(2025, 12, 1);
+    _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
+    _selectedDate = DateTime.now();
+    _fetchSlotCount();
+  }
+
+  Future<void> _fetchSlotCount() async {
+    setState(() => _loadingSlots = true);
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'listByBarberDate',
+          'barberID': widget.barberId,
+          'slotDate': _formatDate(_selectedDate),
+        }),
+      );
+
+      final data = response.body.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+          : <String, dynamic>{};
+      if (response.statusCode == 200) {
+        final slots = (data['slots'] as List<dynamic>? ?? []);
+        final available = slots.where((slot) => (slot as Map)['status'] == 'Available').length;
+        setState(() => _availableSlots = available);
+      }
+    } catch (_) {
+      // ignore
+    } finally {
+      if (mounted) {
+        setState(() => _loadingSlots = false);
+      }
+    }
   }
 
   @override
@@ -77,8 +86,6 @@ class _CalendarPageState extends State<CalendarPage> {
               style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 24),
-
-            // Calendar Card
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
@@ -93,12 +100,11 @@ class _CalendarPageState extends State<CalendarPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Month Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'December 2025',
+                        _monthLabel(_currentMonth),
                         style: const TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -120,8 +126,6 @@ class _CalendarPageState extends State<CalendarPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-
-                  // Weekday Headers
                   GridView.count(
                     crossAxisCount: 7,
                     shrinkWrap: true,
@@ -138,8 +142,6 @@ class _CalendarPageState extends State<CalendarPage> {
                     ),
                   ),
                   const SizedBox(height: 8),
-
-                  // Calendar Days
                   GridView.count(
                     crossAxisCount: 7,
                     shrinkWrap: true,
@@ -156,33 +158,27 @@ class _CalendarPageState extends State<CalendarPage> {
                         daysInMonth,
                         (index) {
                           final day = index + 1;
-                          final isAvailable = _dateAvailability[day] ?? true;
-                          final isSelected = _selectedDate.day == day;
+                          final isSelected = _selectedDate.day == day && _selectedDate.month == _currentMonth.month;
 
                           return GestureDetector(
-                            onTap: isAvailable
-                                ? () {
-                                    setState(() => _selectedDate = DateTime(_currentMonth.year, _currentMonth.month, day));
-                                  }
-                                : null,
+                            onTap: () {
+                              setState(() => _selectedDate = DateTime(_currentMonth.year, _currentMonth.month, day));
+                              _fetchSlotCount();
+                            },
                             child: Container(
                               decoration: BoxDecoration(
-                                gradient: isAvailable
-                                    ? LinearGradient(
-                                        colors: isSelected
-                                            ? [Colors.white, Colors.white]
-                                            : [const Color(0xFF4CAF50), const Color(0xFF45a049)],
-                                      )
-                                    : LinearGradient(
-                                        colors: [const Color(0xFFE74C3C), const Color(0xFFC0392B)],
-                                      ),
+                                gradient: LinearGradient(
+                                  colors: isSelected
+                                      ? [Colors.white, Colors.white]
+                                      : [const Color(0xFF1A1A1A), const Color(0xFF252525)],
+                                ),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Center(
                                 child: Text(
                                   day.toString(),
                                   style: TextStyle(
-                                    color: isSelected ? Colors.black : Colors.white,
+                                    color: isSelected ? Colors.black : Colors.white70,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 14,
                                   ),
@@ -198,8 +194,6 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
             ),
             const SizedBox(height: 24),
-
-            // Legend
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
@@ -212,47 +206,25 @@ class _CalendarPageState extends State<CalendarPage> {
                 border: Border.all(color: Colors.white, width: 1),
               ),
               child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [const Color(0xFF4CAF50), const Color(0xFF45a049)]),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text('Available', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
+                  Text(
+                    'Available slots for ${_formatDate(_selectedDate)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
-                  Row(
-                    children: [
-                      Container(
-                        width: 20,
-                        height: 20,
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(colors: [const Color(0xFFE74C3C), const Color(0xFFC0392B)]),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text('Unavailable', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                    ],
-                  ),
+                  _loadingSlots
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text('$_availableSlots', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
             const SizedBox(height: 32),
-
-            // Continue Button
             ElevatedButton(
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => TimeSlotPage(
+                      barberId: widget.barberId,
                       barberName: widget.barberName,
                       selectedDate: _selectedDate,
                     ),
@@ -264,7 +236,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 minimumSize: const Size.fromHeight(56),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 8,
-                shadowColor: Colors.white.withOpacity(0.3),
+                shadowColor: Colors.white.withOpacity(0.4),
               ),
               child: const Text(
                 'Continue',
@@ -281,5 +253,27 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
       ),
     );
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _monthLabel(DateTime date) {
+    const months = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${months[date.month - 1]} ${date.year}';
   }
 }

@@ -6,6 +6,8 @@ import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
 import 'forgot_password_page.dart';
 import 'quiz_gender.dart';
+import 'api_config.dart';
+import 'user_session.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
 const Color kGoldColor = Colors.white;
@@ -18,7 +20,7 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  static const String _apiBaseUrl = 'http://localhost/barberyanitatis/api';
+  final String _apiBaseUrl = ApiConfig.baseUrl;
 
   bool _isLogin = true;
   bool _isLoading = false;
@@ -73,9 +75,15 @@ class _AuthPageState extends State<AuthPage> {
         return;
       }
 
-      final roles = (data['user']?['roles'] as List<dynamic>? ?? [])
+        final user = data['user'] as Map<String, dynamic>? ?? {};
+        final roles = (user['roles'] as List<dynamic>? ?? [])
           .map((role) => role.toString().toLowerCase())
           .toList();
+
+        UserSession.userId = user['userID'] is int ? user['userID'] as int : int.tryParse('${user['userID']}');
+        UserSession.fullName = user['fullName']?.toString();
+        UserSession.email = user['email']?.toString();
+        UserSession.roles = roles;
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
 

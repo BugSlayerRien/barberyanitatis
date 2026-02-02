@@ -1,0 +1,29 @@
+1) Mobile app (client)
+2) Web app (admin/receptionist)
+3) Kiosk app (walk-in terminal)
+
+All platforms must connect to a single PHP REST API backend and a MySQL database.
+
+Your task:
+- Design database interactions that are consistent across the entire system
+- Ensure Flutter never directly accesses the database
+- All CRUD operations must go through API endpoints
+- Respect role-based access control
+- Ensure data entered in one platform is immediately usable by others
+- Maintain referential integrity and avoid data duplication
+- Ensure all appointment, service, hairstyle, and user data can be used for analytics
+
+Provide:
+1) API endpoint definitions per feature
+2) Database tables involved per endpoint
+3) Validation and error handling rules
+4) Example request and response payloads (JSON)
+5) Notes on how changes reflect across mobile, web, and kiosk
+
+Assume:
+- Flutter (frontend)
+- PHP (backend)
+- MySQL (database)
+- Git/GitHub is used for version control
+
+Do not simplify. Do not omit backend logic. Ensure the flow is functional end-to-end.
