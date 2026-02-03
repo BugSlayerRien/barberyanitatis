@@ -1,0 +1,10 @@
+<IfModule mod_headers.c>
+  Header set Access-Control-Allow-Origin "*"
+  Header set Access-Control-Allow-Methods "GET, OPTIONS"
+  Header set Access-Control-Allow-Headers "Origin, Content-Type, Accept"
+</IfModule>
+
+<IfModule mod_mime.c>
+  AddType image/jpeg .jpg .jpeg
+  AddType image/png .png
+</IfModule>

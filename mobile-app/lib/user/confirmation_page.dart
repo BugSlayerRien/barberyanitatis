@@ -188,33 +188,6 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
                   ),
                   const SizedBox(height: 20),
 
-                  if (_generatedImage != null || _generating || _generateError != null) ...[
-                    Container(
-                      width: double.infinity,
-                      height: 260,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111111),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: _generatedImage != null
-                            ? Image.memory(_generatedImage!, fit: BoxFit.cover)
-                            : Center(
-                                child: _generating
-                                    ? const CircularProgressIndicator(color: Colors.white)
-                                    : Text(
-                                        _generateError ?? 'AI preview unavailable',
-                                        style: const TextStyle(color: Colors.white70, fontSize: 12),
-                                        textAlign: TextAlign.center,
-                                      ),
-                              ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                  ],
-
                   const SizedBox(height: 28),
 
                   // Swipeable Images Carousel with Navigation Buttons

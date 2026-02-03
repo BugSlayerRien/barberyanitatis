@@ -21,7 +21,7 @@ class BarberSelectionPage extends StatefulWidget {
 }
 
 class _BarberSelectionPageState extends State<BarberSelectionPage> {
-  int _selectedIndex = 0;
+  int _selectedIndex = 1;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _barbers = [];
@@ -246,7 +246,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
         },
       ),
       bottomNavigationBar: AppBottomNavBar(
-        currentIndex: 1,
+        currentIndex: _selectedIndex,
         onTap: (index) {
           setState(() => _selectedIndex = index);
           if (index == 0) {

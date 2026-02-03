@@ -68,6 +68,36 @@ function to_data_url(string $pathOrUrl): array
     return ['data:' . $mime . ';base64,' . $base64, ''];
 }
 
+function decode_data_url(string $dataUrl): array
+{
+    if (strpos($dataUrl, 'data:') !== 0) {
+        return ['', ''];
+    }
+    if (!preg_match('/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/', $dataUrl, $matches)) {
+        return ['', ''];
+    }
+    return [$matches[2], $matches[1]];
+}
+
+function store_generated_image(string $base64, string $mime): array
+{
+    $uploadDir = __DIR__ . '/../uploads/generated';
+    if (!is_dir($uploadDir)) {
+        mkdir($uploadDir, 0775, true);
+    }
+    $ext = $mime === 'image/png' ? 'png' : 'jpg';
+    $filename = 'tryon_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
+    $targetPath = $uploadDir . '/' . $filename;
+    $decoded = base64_decode($base64, true);
+    if ($decoded === false || $decoded === '') {
+        return ['', ''];
+    }
+    if (file_put_contents($targetPath, $decoded) === false) {
+        return ['', ''];
+    }
+    return ['/uploads/generated/' . $filename, $filename];
+}
+
 function replicate_post(string $token, string $endpoint, array $payload): array
 {
     $ch = curl_init($endpoint);
@@ -116,12 +146,7 @@ try {
             json_response(['error' => 'imageUrl is required'], 422);
         }
 
-        $replicateToken = trim((string)(getenv('REPLICATE_API_TOKEN') ?: ($_ENV['REPLICATE_API_TOKEN'] ?? $_SERVER['REPLICATE_API_TOKEN'] ?? '')));
-        if ($replicateToken === '') {
-            json_response(['error' => 'REPLICATE_API_TOKEN not configured'], 500);
-        }
-
-        $version = '2e4785a4d80dadf580077b2244c8d7c05d8e3faac04a04c02d8e099dd2876789';
+        $provider = strtolower(trim((string)(getenv('FREE_TRYON_PROVIDER') ?: ($_ENV['FREE_TRYON_PROVIDER'] ?? $_SERVER['FREE_TRYON_PROVIDER'] ?? 'facechain'))));
         $negative = $negativePrompt !== '' ? $negativePrompt : 'cartoon, anime, blurry, low quality';
 
         [$imageDataUrl, $imageErr] = to_data_url($imageUrl);
@@ -129,69 +154,159 @@ try {
             json_response(['error' => 'Failed to read image for try-on', 'details' => $imageErr], 422);
         }
 
-        $payload = [
-            'version' => $version,
-            'input' => [
+        $httpCode = 0;
+        $raw = '';
+        if ($provider === 'instantid') {
+            $endpoint = trim((string)(getenv('INSTANTID_ENDPOINT') ?: ($_ENV['INSTANTID_ENDPOINT'] ?? $_SERVER['INSTANTID_ENDPOINT'] ?? '')));
+            if ($endpoint === '') {
+                json_response([
+                    'error' => 'InstantID endpoint not configured',
+                    'hint' => 'Set INSTANTID_ENDPOINT to your InstantID service URL.',
+                ], 500);
+            }
+
+            $payload = [
                 'image' => $imageDataUrl,
                 'prompt' => $prompt,
                 'negative_prompt' => $negative,
-                'num_steps' => 30,
-                'guidance_scale' => 7.5,
+            ];
+
+            [$code, $raw, $err] = replicate_post('', $endpoint, $payload);
+            if ($raw === false || $code < 200 || $code >= 300) {
+                json_response([
+                    'error' => 'InstantID request failed',
+                    'details' => $err !== '' ? $err : $raw,
+                    'hint' => 'Ensure your InstantID service is running and reachable.',
+                ], 502);
+            }
+
+            $response = json_decode((string)$raw, true);
+            $imageBase64 = $response['imageBase64'] ?? '';
+            $imageUrl = $response['imageUrl'] ?? '';
+            $dataUrl = $response['dataUrl'] ?? '';
+            if ($imageBase64 === '' && $imageUrl === '' && $dataUrl === '') {
+                json_response(['error' => 'InstantID did not return an image', 'details' => $raw], 502);
+            }
+            if ($imageBase64 === '' && $dataUrl !== '') {
+                [$decoded, $mime] = decode_data_url((string)$dataUrl);
+                if ($decoded !== '') {
+                    $imageBase64 = $decoded;
+                }
+            }
+            if ($imageBase64 !== '') {
+                [$publicUrl] = store_generated_image($imageBase64, 'image/png');
+                json_response([
+                    'message' => 'Image generated',
+                    'imageBase64' => $imageBase64,
+                    'imageUrl' => $publicUrl,
+                    'provider' => 'instantid',
+                ]);
+            }
+            json_response([
+                'message' => 'Image generated',
+                'imageUrl' => $imageUrl,
+                'provider' => 'instantid',
+            ]);
+        }
+
+        if ($provider === 'fooocus') {
+            $endpoint = trim((string)(getenv('FREE_TRYON_FOOOCUS_ENDPOINT') ?: ($_ENV['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? 'https://fc.aitianhu.space/api/v1/generation/generate-image')));
+            $payload = [
+                'prompt' => $prompt,
+                'negative_prompt' => $negative,
+                'image_prompts' => [
+                    [
+                        'image' => $imageDataUrl,
+                        'weight' => 1.0,
+                        'type' => 'face',
+                    ],
+                ],
+                'performance' => 'Speed',
+                'aspect_ratio' => '1:1',
+                'sharpness' => 2,
+                'seed' => random_int(1, 999999999),
+            ];
+            $ch = curl_init($endpoint);
+            curl_setopt_array($ch, [
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                CURLOPT_POSTFIELDS => json_encode($payload),
+                CURLOPT_TIMEOUT => 90,
+            ]);
+            $raw = curl_exec($ch);
+            $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
+            curl_close($ch);
+            if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
+                // Fall back to facechain if Fooocus is unavailable
+                $provider = 'facechain';
+            } else {
+                $response = json_decode((string)$raw, true);
+                $imageBase64 = $response['images'][0] ?? '';
+                if ($imageBase64 === '') {
+                    $provider = 'facechain';
+                } else {
+                    [$publicUrl] = store_generated_image($imageBase64, 'image/png');
+                    json_response([
+                        'message' => 'Image generated',
+                        'imageBase64' => $imageBase64,
+                        'imageUrl' => $publicUrl,
+                        'provider' => 'fooocus-free',
+                    ]);
+                }
+            }
+        }
+
+        $endpoint = trim((string)(getenv('FREE_TRYON_FACECHAIN_ENDPOINT') ?: ($_ENV['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? 'https://facechain-plus.hf.space/api/predict')));
+        $payload = [
+            'data' => [
+                $imageDataUrl,
+                $prompt . ', detailed face, sharp features',
+                $negative,
+                20,
+                7,
             ],
         ];
-
-        [$code, $raw, $err] = replicate_post($replicateToken, 'https://api.replicate.com/v1/predictions', $payload);
-        if ($raw === false || $code < 200 || $code >= 300) {
-            json_response(['error' => 'Replicate request failed', 'details' => $err !== '' ? $err : $raw], 502);
+        $headers = ['Content-Type: application/json'];
+        $hfToken = trim((string)(getenv('HF_TOKEN') ?: ($_ENV['HF_TOKEN'] ?? $_SERVER['HF_TOKEN'] ?? '')));
+        if ($hfToken !== '') {
+            $headers[] = 'Authorization: Bearer ' . $hfToken;
         }
-
+        $ch = curl_init($endpoint);
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_HTTPHEADER => $headers,
+            CURLOPT_POSTFIELDS => json_encode($payload),
+            CURLOPT_TIMEOUT => 90,
+        ]);
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlError = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false || $httpCode < 200 || $httpCode >= 300) {
+            json_response([
+                'error' => 'FaceChain request failed',
+                'details' => $curlError !== '' ? $curlError : $raw,
+                'hint' => 'Check FREE_TRYON_PROVIDER/FREE_TRYON_FACECHAIN_ENDPOINT and HF_TOKEN if required.',
+            ], 502);
+        }
         $response = json_decode((string)$raw, true);
-        $predictionId = $response['id'] ?? '';
-        if ($predictionId === '') {
-            json_response(['error' => 'Replicate did not return a prediction id'], 502);
+        $dataUrl = $response['data'][0] ?? '';
+        if (!is_string($dataUrl) || $dataUrl === '') {
+            json_response(['error' => 'FaceChain did not return an image', 'details' => $raw], 502);
         }
-
-        $status = $response['status'] ?? 'starting';
-        $outputUrl = '';
-        $tries = 0;
-        while ($tries < 30 && $status !== 'succeeded' && $status !== 'failed' && $status !== 'canceled') {
-            sleep(2);
-            [$gCode, $gRaw, $gErr] = replicate_get($replicateToken, 'https://api.replicate.com/v1/predictions/' . $predictionId);
-            if ($gRaw === false || $gCode < 200 || $gCode >= 300) {
-                json_response(['error' => 'Replicate polling failed', 'details' => $gErr !== '' ? $gErr : $gRaw], 502);
-            }
-            $poll = json_decode((string)$gRaw, true);
-            $status = $poll['status'] ?? $status;
-            if ($status === 'succeeded') {
-                $output = $poll['output'] ?? [];
-                if (is_array($output) && isset($output[0])) {
-                    $outputUrl = (string)$output[0];
-                }
-                break;
-            }
-            if ($status === 'failed' || $status === 'canceled') {
-                json_response(['error' => 'Replicate generation failed', 'details' => $poll['error'] ?? $status], 502);
-            }
-            $tries++;
+        [$imageBase64, $mime] = decode_data_url($dataUrl);
+        if ($imageBase64 === '') {
+            json_response(['error' => 'FaceChain returned invalid image data'], 502);
         }
-
-        if ($outputUrl === '') {
-            json_response(['error' => 'Replicate did not return an output image'], 502);
-        }
-
-        [$outputDataUrl, $outputErr] = to_data_url($outputUrl);
-        if ($outputDataUrl === '') {
-            json_response(['error' => 'Failed to download generated image', 'details' => $outputErr], 502);
-        }
-
-        $base64Pos = strpos($outputDataUrl, 'base64,');
-        $imageBase64 = $base64Pos !== false ? substr($outputDataUrl, $base64Pos + 7) : '';
-
+        [$publicUrl] = store_generated_image($imageBase64, $mime !== '' ? $mime : 'image/png');
         json_response([
             'message' => 'Image generated',
             'imageBase64' => $imageBase64,
-            'imageUrl' => $outputUrl,
-            'provider' => 'replicate-instantid',
+            'imageUrl' => $publicUrl,
+            'provider' => 'facechain-free',
         ]);
     }
 

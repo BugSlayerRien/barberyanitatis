@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 import 'package:flutter/foundation.dart';
@@ -6,12 +8,13 @@ import 'confirmation_page.dart';
 import 'appointments_page.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
-import '../kiosk/kiosk_home_page.dart';
+import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'user_session.dart';
+import 'api_config.dart';
 
 class HairstyleDetailPage extends StatefulWidget {
   final Map<String, dynamic> style;
@@ -27,6 +30,8 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   final Map<String, Future<Uint8List>> _webImageCache = {};
+  bool _isFavorite = false;
+  bool _savingFavorite = false;
 
   @override
   void initState() {
@@ -36,6 +41,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
     _animationController.forward();
+    _loadFavoriteStatus();
   }
 
   @override
@@ -78,6 +84,77 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
         return Image.memory(snapshot.data!, fit: BoxFit.cover);
       },
     );
+  }
+
+  int? _getVariantId() {
+    final value = widget.style['variantId'];
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  Future<void> _loadFavoriteStatus() async {
+    final userId = UserSession.userId;
+    final variantId = _getVariantId();
+    if (userId == null || variantId == null) {
+      return;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'status', 'userID': userId, 'variantID': variantId}),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() => _isFavorite = data['isFavorite'] == true);
+    } catch (_) {
+      // Ignore
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    final userId = UserSession.userId;
+    final variantId = _getVariantId();
+    if (userId == null || variantId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login required to save haircuts.')),
+      );
+      return;
+    }
+    if (_savingFavorite) return;
+    setState(() => _savingFavorite = true);
+    try {
+      final action = _isFavorite ? 'remove' : 'add';
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action, 'userID': userId, 'variantID': variantId}),
+      );
+      if (!mounted) return;
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        setState(() => _isFavorite = !_isFavorite);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_isFavorite ? 'Saved to bookmarks.' : 'Removed from bookmarks.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update saved haircuts.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update saved haircuts: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _savingFavorite = false);
+      }
+    }
   }
 
   @override
@@ -155,6 +232,31 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                                     widget.style['rating']?.toString() ?? '★★★★★',
                                     style: const TextStyle(color: Color(0xFFA99941), fontSize: 14, fontWeight: FontWeight.w600),
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  ElevatedButton.icon(
+                                    onPressed: _savingFavorite ? null : _toggleFavorite,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: _isFavorite ? Colors.white : Colors.transparent,
+                                      foregroundColor: _isFavorite ? Colors.black : Colors.white,
+                                      side: const BorderSide(color: Colors.white, width: 1),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    ),
+                                    icon: Icon(_isFavorite ? Icons.bookmark : Icons.bookmark_border, size: 18),
+                                    label: Text(_isFavorite ? 'Saved' : 'Save'),
+                                  ),
+                                  if (_savingFavorite)
+                                    const Padding(
+                                      padding: EdgeInsets.only(left: 10),
+                                      child: SizedBox(
+                                        height: 14,
+                                        width: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ],
@@ -301,7 +403,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
           } else if (index == 1) {
             Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),

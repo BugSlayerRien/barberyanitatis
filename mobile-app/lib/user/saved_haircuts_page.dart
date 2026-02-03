@@ -125,10 +125,10 @@ class SavedHaircutsPage extends StatelessWidget {
                             end: Alignment.bottomRight,
                           ),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFF37022).withOpacity(0.2), width: 1),
+                          border: Border.all(color: Colors.white10, width: 1),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFFF37022).withOpacity(0.1),
+                              color: Colors.black.withOpacity(0.2),
                               blurRadius: 12,
                               offset: const Offset(0, 6),
                             ),
@@ -201,7 +201,7 @@ class SavedHaircutsPage extends StatelessWidget {
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFA99941).withOpacity(0.2), width: 1),
+                border: Border.all(color: Colors.white10, width: 1),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -209,10 +209,10 @@ class SavedHaircutsPage extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFA99941).withOpacity(0.2),
+                      color: Colors.white10,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.favorite, color: Color(0xFFA99941), size: 20),
+                    child: const Icon(Icons.favorite, color: Colors.white, size: 20),
                   ),
                   const SizedBox(width: 12),
                   Expanded(

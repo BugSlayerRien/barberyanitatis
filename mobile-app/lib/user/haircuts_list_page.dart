@@ -8,7 +8,7 @@ import 'hairstyle_detail_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
-import '../kiosk/kiosk_home_page.dart';
+import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
@@ -47,7 +47,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/haircuts.php'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'listByFaceShape'}),
+        body: jsonEncode({'action': 'listLibrary'}),
       );
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
@@ -59,16 +59,13 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         return;
       }
 
-      final variants = (data['variants'] as List<dynamic>? ?? [])
+        final variants = (data['hairstyles'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
 
-      final mapped = variants.map(_mapVariant).toList();
-      final categorySet = mapped
-          .map((item) => item['hairTexture']?.toString() ?? '')
-          .where((value) => value.isNotEmpty)
-          .toSet();
-      final categories = ['All', ...categorySet.toList()..sort()];
+            final mapped = variants.map(_mapVariant).toList();
+            const ordered = ['Straight', 'Wavy', 'Curly', 'Coily', 'Mixed'];
+            final categories = ['All', ...ordered];
 
       setState(() {
         _allStyles = mapped;
@@ -166,7 +163,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
           } else if (index == 1) {
             Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
@@ -278,13 +275,14 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
+    final hairTexture = _normalizeTexture((variant['hair_texture'] ?? '').toString());
     return {
       'name': variant['style_name']?.toString() ?? 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
       'image': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
-      'hairTexture': variant['hair_texture']?.toString() ?? '',
+      'hairTexture': hairTexture.isNotEmpty ? hairTexture : 'Mixed',
       'faceShape': variant['face_shape']?.toString() ?? '',
       'frontViewUrl': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
       'sideViewUrl': ApiConfig.resolveImageUrl(variant['side_view_url']?.toString() ?? ''),
@@ -331,7 +329,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   String _buildDetails(Map<String, dynamic> variant) {
     final instructions = variant['barber_instructions']?.toString();
     final faceShape = variant['face_shape']?.toString();
-    final hairTexture = variant['hair_texture']?.toString();
+    final hairTexture = _normalizeTexture(variant['hair_texture']?.toString() ?? '');
     final details = <String>[];
     if (instructions != null && instructions.isNotEmpty) {
       details.add(instructions);
@@ -343,6 +341,22 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       details.add('Hair texture: $hairTexture');
     }
     return details.join('\n');
+  }
+
+  String _normalizeTexture(String value) {
+    final normalized = value.trim().toLowerCase();
+    switch (normalized) {
+      case 'straight':
+        return 'Straight';
+      case 'wavy':
+        return 'Wavy';
+      case 'curly':
+        return 'Curly';
+      case 'coily':
+        return 'Coily';
+      default:
+        return '';
+    }
   }
 
   String _scoreToRating(double score) {

@@ -1,4 +1,6 @@
 
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -11,8 +13,9 @@ import 'user_session.dart';
 class ScanResultsPage extends StatefulWidget {
   final String imageUrl;
   final List<Map<String, dynamic>> recommendations;
+  final String? summary;
 
-  const ScanResultsPage({super.key, required this.imageUrl, required this.recommendations});
+  const ScanResultsPage({super.key, required this.imageUrl, required this.recommendations, this.summary});
 
   @override
   State<ScanResultsPage> createState() => _ScanResultsPageState();
@@ -22,12 +25,41 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
   int _selectedIndex = 0;
   String _selectedView = 'front';
   final Map<String, Future<Uint8List>> _webImageCache = {};
+  bool _isGenerating = false;
+  String? _generatedImageUrl;
+  String? _generatedImageBase64;
+  bool? _aiStatusOk;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAiStatus();
+  }
+
+  Future<void> _loadAiStatus() async {
+    try {
+      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/ai_status.php'));
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        if (!mounted) return;
+        setState(() => _aiStatusOk = false);
+        return;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final tryon = data['tryon'] as Map<String, dynamic>? ?? {};
+      final configured = tryon['configured'] == true;
+      if (!mounted) return;
+      setState(() => _aiStatusOk = configured);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _aiStatusOk = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final hasRecommendations = widget.recommendations.isNotEmpty;
     final selected = hasRecommendations ? widget.recommendations[_selectedIndex] : null;
-    final previewUrl = _resolvePreviewUrl(selected);
+    final previewUrl = _generatedImageUrl ?? _resolvePreviewUrl(selected);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -56,10 +88,38 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
               'Preview the recommended hairstyle from different angles. You can also choose another style below.',
               style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
             ),
+            if ((widget.summary ?? '').trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF161616),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('AI Overview', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Text(widget.summary!, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 20),
             _buildPreview(previewUrl, selected),
             const SizedBox(height: 16),
             _buildViewSelector(),
+            const SizedBox(height: 12),
+            if (hasRecommendations)
+              const Text('Using pre-generated hairstyle images.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            if (_generatedImageUrl != null || _generatedImageBase64 != null)
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text('Showing AI-generated preview', style: TextStyle(color: Colors.white54, fontSize: 12)),
+              ),
             const SizedBox(height: 20),
             if (!hasRecommendations)
               _buildEmptyState(context)
@@ -102,6 +162,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
   Widget _buildPreview(String? previewUrl, Map<String, dynamic>? selected) {
     final styleName = (selected?['style_name'] ?? 'Preview') as String;
     final score = selected?['confidence_score'];
+    final reason = selected?['rank_reason']?.toString();
     return Container(
       height: 320,
       width: double.infinity,
@@ -115,7 +176,9 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (previewUrl != null)
+            if (_generatedImageBase64 != null)
+              Image.memory(base64Decode(_generatedImageBase64!), fit: BoxFit.cover)
+            else if (previewUrl != null)
               kIsWeb
                   ? _buildWebImage(previewUrl)
                   : Image(image: _buildImageProvider(previewUrl), fit: BoxFit.cover)
@@ -141,6 +204,11 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
                     Text(styleName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                     if (score != null)
                       Text('Match: ${(double.tryParse(score.toString()) ?? 0) * 100.0 ~/ 1}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    if (reason != null && reason.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(reason, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                      ),
                   ],
                 ),
               ),
@@ -188,6 +256,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
           final item = widget.recommendations[index];
           final styleName = item['style_name'] ?? 'Style';
           final score = item['confidence_score'] ?? '';
+          final reason = item['rank_reason']?.toString() ?? '';
           final thumbUrl = _resolveImage(item['front_view_url']);
 
           return GestureDetector(
@@ -221,6 +290,8 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
                       children: [
                         Text(styleName.toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                         Text('Score: $score', style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                        if (reason.isNotEmpty)
+                          Text(reason, style: const TextStyle(color: Colors.white54, fontSize: 11)),
                       ],
                     ),
                   ),
@@ -231,6 +302,77 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
         }),
       ],
     );
+  }
+
+  Future<void> _generateAiPreview(Map<String, dynamic> selected) async {
+    if (_isGenerating) return;
+    if (_aiStatusOk == false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('AI preview is unavailable. Check AI status settings.')),
+      );
+      return;
+    }
+    final styleName = selected['style_name']?.toString() ?? 'hairstyle';
+    final imageUrl = widget.imageUrl;
+    if (imageUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing scan image for AI preview.')),
+      );
+      return;
+    }
+    setState(() => _isGenerating = true);
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/ai_tryon.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'instantId',
+          'prompt': 'Apply hairstyle: $styleName',
+          'imageUrl': imageUrl,
+          'negativePrompt': 'blurry, low quality, distorted face',
+        }),
+      );
+      if (!mounted) return;
+      if (response.statusCode != 200) {
+        final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+        final error = data['error']?.toString() ?? 'AI preview failed.';
+        final details = data['details']?.toString();
+        final hint = data['hint']?.toString();
+        final messageParts = [error];
+        if (details != null && details.isNotEmpty) {
+          messageParts.add(details);
+        }
+        if (hint != null && hint.isNotEmpty) {
+          messageParts.add(hint);
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${messageParts.join(' ')} (${response.statusCode})')),
+        );
+        return;
+      }
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      final generatedUrl = data['imageUrl']?.toString();
+      final generatedBase64 = data['imageBase64']?.toString();
+      if ((generatedUrl == null || generatedUrl.isEmpty) && (generatedBase64 == null || generatedBase64.isEmpty)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('AI preview did not return an image.')),
+        );
+        return;
+      }
+      setState(() {
+        _generatedImageUrl = generatedUrl;
+        _generatedImageBase64 = generatedBase64;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('AI preview failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isGenerating = false);
+      }
+    }
   }
 
   Widget _buildEmptyState(BuildContext context) {

@@ -183,7 +183,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                 },
                           child: Container(
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: isSelected ? const Color(0xFFA99941) : Colors.white,
                               borderRadius: BorderRadius.circular(8),
                               border: isPast ? Border.all(color: Colors.black12) : null,
                             ),
@@ -191,7 +191,9 @@ class _CalendarPageState extends State<CalendarPage> {
                               child: Text(
                                 day.toString(),
                                 style: TextStyle(
-                                  color: isPast ? Colors.black26 : Colors.black,
+                                  color: isPast
+                                      ? Colors.black26
+                                      : (isSelected ? Colors.white : Colors.black),
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),

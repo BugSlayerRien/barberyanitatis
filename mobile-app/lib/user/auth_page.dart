@@ -247,7 +247,7 @@ class _AuthPageState extends State<AuthPage> {
                                 color: !_isLogin ? kGoldColor : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text('SIGN UP (REGISTER)', style: TextStyle(color: !_isLogin ? Colors.black : Colors.white)),
+                              child: Text('SIGN UP', style: TextStyle(color: !_isLogin ? Colors.black : Colors.white)),
                             ),
                           ),
                         ],

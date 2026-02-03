@@ -9,7 +9,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if ($action !== 'create' && $action !== 'listByCustomer') {
+if (!in_array($action, ['create', 'listByCustomer', 'cancel'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -192,6 +192,22 @@ try {
         }, $appointments);
 
         json_response(['appointments' => $appointments]);
+    }
+
+    if ($action === 'cancel') {
+        $appointmentID = (int)($input['appointmentID'] ?? 0);
+        if ($appointmentID <= 0) {
+            json_response(['error' => 'Invalid appointmentID'], 422);
+        }
+
+        $stmt = $pdo->prepare(
+            "UPDATE appointments
+             SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+             WHERE appointment_id = :appointment_id"
+        );
+        $stmt->execute([':appointment_id' => $appointmentID]);
+
+        json_response(['message' => 'Appointment cancelled']);
     }
 } catch (PDOException $e) {
     if (isset($pdo) && $pdo->inTransaction()) {

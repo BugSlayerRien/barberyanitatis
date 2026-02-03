@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
-import '../kiosk/kiosk_home_page.dart';
+import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
 import 'haircuts_list_page.dart';
 import 'widgets/app_top_bar.dart';
@@ -335,7 +335,7 @@ class _DashboardPageState extends State<DashboardPage> {
             );
           } else if (index == 2) {
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const KioskHomePage()),
+              MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
             );
           } else if (index == 3) {
             Navigator.of(context).push(

@@ -39,7 +39,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
           const SizedBox(width: 16),
           Image.asset(
             'assets/images/TATIS.png',
-            height: 26,
+            height: 32,
           ),
         ],
       ),

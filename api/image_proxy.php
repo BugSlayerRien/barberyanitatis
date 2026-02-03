@@ -28,6 +28,13 @@ $root = dirname(__DIR__);
 $relative = ltrim($path, '/');
 $fullPath = $root . '/' . $relative;
 
+if (!is_file($fullPath) && (strpos($relative, 'assets/') === 0)) {
+    $altPath = $root . '/database/' . $relative;
+    if (is_file($altPath)) {
+        $fullPath = $altPath;
+    }
+}
+
 if (!is_file($fullPath)) {
     json_response(['error' => 'File not found'], 404);
 }

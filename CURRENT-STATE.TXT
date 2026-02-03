@@ -5,23 +5,27 @@ MOBILE APP (CLIENT) - DB-TIED FEATURES WORKING
 - Register customer via /api/auth.php (users)
 - Login customer via /api/auth.php (users/staff_users/barbers)
 
-2) AI Scan + Recommendations (library-based)
+2) AI Face Scan + Hair Recommender
 - Upload image to /api/ai_scan.php (multipart)
 - CV pipeline runs (MediaPipe) and returns hair attributes
+- Optional Gemini analysis for face + hair attributes
 - Pulls hairstyle variants from DB (hairstyles + hairstyle_variants)
-- Returns up to 4 recommendations
+- Returns up to 8 ranked recommendations + AI summary
 
 3) Hairstyle Library
-- listByFaceShape via /api/haircuts.php (hairstyles + hairstyle_variants)
+- listLibrary via /api/haircuts.php (hairstyles + top variant)
 - Detail page uses front/side/back URLs from DB
+- Library filters by hair texture folders (Straight/Wavy/Curly/Coily/Mixed)
 
 4) Barbers & Services
 - List barbers via /api/barbers.php (barbers)
 - List services via /api/services.php (services)
 - List time slots via /api/time_slots.php (time_slots)
 
-5) Favorites
-- List favorites via /api/favorites.php (user_favorites + hairstyle_variants + hairstyles)
+5) Favorites / Bookmarks
+- Save or remove haircut variants via /api/favorites.php (add/remove/status)
+- List favorites via /api/favorites.php (listByUser)
+- Saved Haircuts page pulls from user_favorites
 
 WEB APP (ADMIN)
 1) Dashboard
@@ -40,22 +44,23 @@ KIOSK (WALK-IN TERMINAL)
 - Select recommendation via /api/kiosk.php (selectRecommendation)
 - Fetch session via /api/kiosk.php (getSession)
 
-CURRENT ISSUES
-1) Flutter web image rendering throws Same-Origin Policy errors for image cards.
-	- Proxy endpoint added (api/image_proxy.php), but still seeing SOP errors.
-2) AI image generation shows "Image generation failed" on Confirmation page.
-	- Wired Imagen 3 in api/ai_tryon.php, but needs API response troubleshooting.
-3) ScanResultsPage not currently used in upload flow; navigation goes to Dashboard instead.
+MISSING COMPONENTS / TO-DO
+1) Image rendering on Flutter web
+- Same-Origin Policy errors still occur on image cards
+- Ensure proxy endpoint returns correct Content-Type and CORS headers
+- Force proxy URLs for all web images
 
-NEXT STEPS
-1) Fix web image SOP:
-	- Verify proxy endpoint returns correct Content-Type and CORS headers.
-	- Ensure Flutter web always uses proxy URLs for images.
-2) Wire ScanResultsPage if needed:
-	- Update QuizUploadPage to navigate to ScanResultsPage after scan.
-3) Face-preserving AI try-on:
-	- Integrate an image-conditioned model (e.g., InstantID/ControlNet) that accepts the user photo + hairstyle reference.
-	- Add new API endpoint for conditioned generation and update Flutter to send the scan image and selected hairstyle.
+2) AI preview generation
+- Confirmation page still shows "Image generation failed"
+- Fix api/ai_tryon.php request/response handling
+
+3) Scan flow navigation
+- ScanResultsPage not always used after upload
+- Update quiz upload flow to navigate to ScanResultsPage
+
+4) Dataset coverage
+- New hairstyles need full variant coverage (front/side/back assets per style)
+- Add real assets for each new haircut instead of placeholder reuse
 
 NOTES
 - All platforms use PHP API; no direct DB access.

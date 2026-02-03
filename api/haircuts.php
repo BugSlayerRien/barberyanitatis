@@ -9,7 +9,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['list', 'listByFaceShape', 'create'], true)) {
+if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'create'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -51,6 +51,26 @@ try {
         ]);
 
         json_response(['variants' => $stmt->fetchAll()]);
+    }
+
+    if ($action === 'listLibrary') {
+        $stmt = $pdo->prepare(
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active,
+                    hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
+                    hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
+             FROM hairstyles hs
+             LEFT JOIN hairstyle_variants hv ON hv.variant_id = (
+                SELECT hv2.variant_id
+                FROM hairstyle_variants hv2
+                WHERE hv2.hairstyle_id = hs.hairstyle_id
+                ORDER BY hv2.confidence_score DESC, hv2.variant_id ASC
+                LIMIT 1
+             )
+             WHERE hs.is_active = 1
+             ORDER BY hs.style_name'
+        );
+        $stmt->execute();
+        json_response(['hairstyles' => $stmt->fetchAll()]);
     }
 
     if ($action === 'create') {

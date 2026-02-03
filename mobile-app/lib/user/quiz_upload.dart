@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,7 +10,8 @@ import 'dashboard_page.dart';
 import 'api_config.dart';
 import 'scan_results_page.dart';
 import 'user_session.dart';
-import 'web_camera_picker.dart';
+import 'web_camera_view_stub.dart'
+  if (dart.library.html) 'web_camera_view.dart';
 
 class QuizUploadPage extends StatefulWidget {
   const QuizUploadPage({super.key});
@@ -19,55 +21,154 @@ class QuizUploadPage extends StatefulWidget {
 }
 
 class _QuizUploadPageState extends State<QuizUploadPage> {
-  XFile? _picked;
+  final ImagePicker _picker = ImagePicker();
+  XFile? _scanImage;
+  Uint8List? _scanBytes;
+  final WebCameraController _webCamera = WebCameraController();
+  bool _cameraReady = false;
   bool _isSubmitting = false;
+  bool _isStartingCamera = false;
+  String _statusMessage = 'Ready to scan.';
+  String? _debugMessage;
 
-  Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? img = await picker.pickImage(source: ImageSource.gallery, maxWidth: 1000, maxHeight: 1000);
-    if (img != null) setState(() => _picked = img);
+  @override
+  void dispose() {
+    _webCamera.stop();
+    super.dispose();
   }
 
-  Future<void> _captureImage() async {
-    final ImagePicker picker = ImagePicker();
+  Future<void> _startCamera() async {
+    if (!kIsWeb) {
+      setState(() {
+        _statusMessage = 'Opening camera...';
+        _debugMessage = 'Start camera requested (non-web).';
+      });
+      return;
+    }
+    if (_isStartingCamera) {
+      return;
+    }
+    _isStartingCamera = true;
     try {
-      if (kIsWeb) {
-        final supported = await isWebCameraSupported();
-        if (!supported) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Web camera requires https/localhost and permission. Use Upload if unavailable.')),
-          );
-          return;
-        }
+      setState(() => _debugMessage = 'Start camera requested (web).');
+      final started = await _webCamera.start();
+      if (!mounted) return;
+      setState(() => _cameraReady = started);
+      if (started) {
+        setState(() => _statusMessage = 'Camera started.');
       }
-
-      final XFile? img = kIsWeb
-          ? await pickWebCameraImage()
-          : await picker.pickImage(source: ImageSource.camera, maxWidth: 1000, maxHeight: 1000);
-      if (img != null) setState(() => _picked = img);
-      if (kIsWeb && img == null) {
-        if (!mounted) return;
+      if (!started) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Camera capture cancelled or not supported on this browser.')),
+          const SnackBar(content: Text('Web camera unavailable. Use Take Photo to capture instead.')),
         );
       }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Camera not available on this device.')),
+        const SnackBar(content: Text('Camera preview failed. Use Take Photo to capture instead.')),
       );
+    } finally {
+      _isStartingCamera = false;
     }
   }
 
-  Future<void> _uploadScan() async {
-    if (_picked == null) {
+  Future<void> _pickImage() async {
+    final XFile? img = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 1200, maxHeight: 1200);
+    if (img != null) {
+      setState(() {
+        _scanImage = img;
+        _scanBytes = null;
+        _statusMessage = 'Photo selected from gallery.';
+          _debugMessage = 'Gallery image selected.';
+      });
+    }
+  }
+
+  Future<void> _capturePhoto() async {
+    if (kIsWeb) {
+      if (_webCamera.isStreaming) {
+        final bytes = await _webCamera.capture();
+        if (bytes == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Capture failed. Try again.')),
+          );
+          return;
+        }
+        if (!mounted) return;
+        setState(() {
+          _scanImage = null;
+          _scanBytes = bytes;
+          _statusMessage = 'Photo captured from camera.';
+          _debugMessage = 'Captured image from web camera stream.';
+        });
+        return;
+      }
+      final file = await _picker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200);
+      if (file == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Camera capture cancelled or not supported.')),
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _scanImage = file;
+        _scanBytes = null;
+        _statusMessage = 'Photo captured from camera.';
+        _debugMessage = 'Captured image using browser camera picker.';
+      });
+      return;
+    }
+
+    final file = await _picker.pickImage(source: ImageSource.camera, maxWidth: 1200, maxHeight: 1200);
+    if (file == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please upload a photo first.')),
+        const SnackBar(content: Text('Camera cancelled or not supported.')),
       );
       return;
     }
+    setState(() {
+      _scanImage = file;
+      _scanBytes = null;
+      _statusMessage = 'Photo captured from camera.';
+      _debugMessage = 'Captured image from device camera.';
+    });
+  }
+
+  Future<void> _submitScan() async {
+    if (_scanImage == null && _scanBytes == null) {
+      if (kIsWeb && _webCamera.isStreaming) {
+        final bytes = await _webCamera.capture();
+        if (bytes != null) {
+          if (!mounted) return;
+          setState(() {
+            _scanImage = null;
+            _scanBytes = bytes;
+            _statusMessage = 'Photo captured from camera.';
+          });
+        }
+      }
+    }
+
+    if (_scanImage == null && _scanBytes == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Capture a photo first.')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Scan captured. Uploading to AI...')),
+    );
+    setState(() {
+      _statusMessage = 'Uploading scan to AI...';
+      _debugMessage = 'Submitting scan to ai_scan.php';
+    });
 
     if (mounted) {
       setState(() => _isSubmitting = true);
@@ -78,15 +179,21 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
         'POST',
         Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
       );
-      if (kIsWeb) {
-        final bytes = await _picked!.readAsBytes();
+      if (kIsWeb && _scanBytes != null) {
+        request.files.add(http.MultipartFile.fromBytes(
+          'image',
+          _scanBytes!,
+          filename: 'scan.jpg',
+        ));
+      } else if (kIsWeb) {
+        final bytes = await _scanImage!.readAsBytes();
         request.files.add(http.MultipartFile.fromBytes(
           'image',
           bytes,
-          filename: _picked!.name,
+          filename: _scanImage!.name,
         ));
       } else {
-        request.files.add(await http.MultipartFile.fromPath('image', _picked!.path));
+        request.files.add(await http.MultipartFile.fromPath('image', _scanImage!.path));
       }
       if (UserSession.userId != null) {
         request.fields['userID'] = UserSession.userId.toString();
@@ -107,6 +214,10 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(message)),
         );
+        setState(() {
+          _statusMessage = message;
+          _debugMessage = 'HTTP ${response.statusCode} | body: ${response.body}';
+        });
         return;
       }
 
@@ -114,15 +225,21 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
         final imageUrl = data['imageUrl']?.toString() ?? '';
+        final summary = data['summary']?.toString();
 
       UserSession.lastScan = data;
       UserSession.lastRecommendations = recommendations;
+      setState(() {
+        _statusMessage = 'Scan complete. Found ${recommendations.length} recommendations.';
+        _debugMessage = 'HTTP ${response.statusCode} | keys: ${data.keys.join(', ')}';
+      });
 
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => ScanResultsPage(
             imageUrl: imageUrl,
             recommendations: recommendations,
+            summary: summary,
           ),
         ),
       );
@@ -131,6 +248,10 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('AI scan failed: $e')),
       );
+      setState(() {
+        _statusMessage = 'AI scan failed: $e';
+        _debugMessage = 'Exception: $e';
+      });
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -141,7 +262,7 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: const Color(0xFF0A0A0A),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -179,82 +300,101 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                   const SizedBox(height: 12),
                   const Text('Step 3 of 3', style: TextStyle(color: Colors.white54, fontSize: 12)),
                   const SizedBox(height: 6),
-                  const Text('AI FACE SCAN', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                  const Text('AI Face & Hair Scan', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 10),
-                  const Text('Scan your face to get your best haircut match', style: TextStyle(color: Colors.white70)),
-                  if (kIsWeb) ...[
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Web camera requires https or localhost permission.',
-                      style: TextStyle(color: Colors.white54, fontSize: 12),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
+                  const Text(
+                    'Scan your face to get your best haircut match',
+                    style: TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 16),
-                  Container(
-                    height: 180,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF111111),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white24),
+                  GestureDetector(
+                    onTap: (kIsWeb && !_cameraReady && _scanBytes == null && _scanImage == null) ? _startCamera : null,
+                    child: Container(
+                      height: 180,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF111111),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: _scanBytes != null
+                            ? Image.memory(_scanBytes!, fit: BoxFit.cover, width: double.infinity, height: 180)
+                            : (_scanImage != null
+                                ? (kIsWeb
+                                    ? Image.network(_scanImage!.path, fit: BoxFit.cover, width: double.infinity, height: 180)
+                                    : Image.file(File(_scanImage!.path), fit: BoxFit.cover, width: double.infinity, height: 180))
+                                : (kIsWeb && _cameraReady)
+                                    ? WebCameraView(controller: _webCamera)
+                                    : const Center(
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.center_focus_strong, size: 40, color: Colors.white),
+                                            SizedBox(height: 8),
+                                            Text('Tap to start camera', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                            SizedBox(height: 4),
+                                            Text('Position your face within the frame', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                          ],
+                                        ),
+                                      )),
+                      ),
                     ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: _picked == null
-                          ? const Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.center_focus_strong, size: 40, color: Colors.white),
-                                  SizedBox(height: 8),
-                                  Text('Start AI Face Scan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                                  SizedBox(height: 4),
-                                  Text('Position your face within the frame', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                                ],
-                              ),
-                            )
-                          : kIsWeb
-                              ? Image.network(_picked!.path, fit: BoxFit.cover, width: double.infinity, height: 180)
-                              : Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity, height: 180),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-                  ElevatedButton.icon(
-                    onPressed: _captureImage,
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-                    icon: const Icon(Icons.camera_alt, size: 18),
-                    label: const Text('Start Camera Scan'),
                   ),
                   const SizedBox(height: 10),
-                  OutlinedButton.icon(
-                    onPressed: _pickImage,
-                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                    icon: const Icon(Icons.cloud_upload, size: 18),
-                    label: Text(_picked == null ? 'Upload Photo' : 'Change Upload'),
-                  ),
-
-                  const SizedBox(height: 18),
                   Row(
                     children: [
+                      const Icon(Icons.info_outline, color: Colors.white54, size: 16),
+                      const SizedBox(width: 6),
                       Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                          child: const Text('Back'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: _isSubmitting ? null : _uploadScan,
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-                          child: _isSubmitting
-                              ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
-                              : const Text('SUBMIT'),
+                        child: Text(
+                          _isSubmitting ? 'Running scan... ${_statusMessage}' : _statusMessage,
+                          style: const TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                       ),
                     ],
+                  ),
+
+                  const SizedBox(height: 12),
+                  Center(
+                    child: InkResponse(
+                      onTap: _isSubmitting ? null : _capturePhoto,
+                      radius: 32,
+                      child: Container(
+                        height: 64,
+                        width: 64,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 8, offset: const Offset(0, 4)),
+                          ],
+                        ),
+                        child: const Icon(Icons.camera_alt, color: Colors.black, size: 28),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: _isSubmitting ? null : _submitScan,
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(44)),
+                    child: const Text('Run Scan'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton.icon(
+                    onPressed: _isSubmitting ? null : _pickImage,
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                    icon: const Icon(Icons.cloud_upload, size: 18),
+                    label: Text(_scanImage == null && _scanBytes == null ? 'Upload Photo Instead' : 'Change Upload'),
+                  ),
+
+                  const SizedBox(height: 18),
+                  OutlinedButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text('Back'),
                   ),
                 ],
               ),

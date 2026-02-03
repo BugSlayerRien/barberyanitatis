@@ -27,12 +27,6 @@ class _ScanScreenState extends State<ScanScreen> {
   String? _error;
 
   @override
-  void initState() {
-    super.initState();
-    _initCamera();
-  }
-
-  @override
   void dispose() {
     _cameraController?.dispose();
     super.dispose();
@@ -62,8 +56,18 @@ class _ScanScreenState extends State<ScanScreen> {
     }
   }
 
+  Future<void> _startCamera() async {
+    if (_cameraReady) return;
+    setState(() => _error = null);
+    await _initCamera();
+  }
+
   Future<void> _captureFromCamera() async {
-    if (kIsWeb && _cameraController != null && _cameraController!.value.isInitialized) {
+    if (kIsWeb) {
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
+        setState(() => _error = 'Start camera first.');
+        return;
+      }
       final file = await _cameraController!.takePicture();
       final bytes = await file.readAsBytes();
       if (!mounted) return;
@@ -170,7 +174,7 @@ class _ScanScreenState extends State<ScanScreen> {
                                 child: CameraPreview(_cameraController!),
                               )
                             : const Center(
-                                child: Text('Tap below to capture', style: TextStyle(color: Colors.white54)),
+                                child: Text('Start camera to preview', style: TextStyle(color: Colors.white54)),
                               )),
               ),
             ),
@@ -182,22 +186,31 @@ class _ScanScreenState extends State<ScanScreen> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _loading ? null : _captureFromCamera,
+                    onPressed: _loading ? null : (kIsWeb ? _startCamera : _captureFromCamera),
                     style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                    child: Text(kIsWeb ? 'Start Camera Scan' : 'Capture'),
+                    child: Text(kIsWeb ? 'Start Camera' : 'Capture'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _loading ? null : _runScan,
+                    onPressed: _loading ? null : _captureFromCamera,
                     style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-                    child: _loading
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
-                        : const Text('Scan'),
+                    child: const Text('Take Photo'),
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _loading ? null : _runScan,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                child: _loading
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2))
+                    : const Text('Run Scan'),
+              ),
             ),
           ],
         ),

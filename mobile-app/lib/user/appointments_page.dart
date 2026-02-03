@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import 'completed_appointment_detail.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
-import '../kiosk/kiosk_home_page.dart';
+import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
@@ -78,6 +78,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         final firstService = services.isNotEmpty ? services.first as Map : <String, dynamic>{};
 
         final mapped = {
+          'appointmentId': appt['appointmentID'],
           'service': firstService['hairstyleName']?.toString() ?? firstService['serviceName']?.toString() ?? 'Haircut',
           'barber': 'with ${appt['barberName'] ?? ''}',
           'date': appt['appointmentDate']?.toString() ?? '',
@@ -349,35 +350,10 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                           const SizedBox.shrink(),
                         Row(
                           children: [
-                            ElevatedButton(
-                              onPressed: () {},
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                              ),
-                              child: Text(
-                                isUpcoming ? 'Reschedule' : 'Book Again',
-                                style: const TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
                             // Upcoming: Cancel removes the appointment and shows snackbar
                             if (isUpcoming)
                               OutlinedButton(
-                                onPressed: () {
-                                  setState(() {
-                                    _upcomingAppointments.remove(appointment);
-                                  });
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                                    content: Text('Schedule cancelled'),
-                                  ));
-                                },
+                                onPressed: () => _showCancelModal(appointment),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: const Color(0xFFE74C3C),
                                   side: const BorderSide(color: Color(0xFFE74C3C), width: 1),
@@ -395,6 +371,24 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                             else
                               Row(
                                 children: [
+                                  ElevatedButton(
+                                    onPressed: () {},
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.white,
+                                      foregroundColor: Colors.black,
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    ),
+                                    child: const Text(
+                                      'Book Again',
+                                      style: TextStyle(
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
                                   TextButton(
                                     onPressed: () {
                                       Navigator.of(context).push(MaterialPageRoute(
@@ -449,7 +443,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           } else if (index == 1) {
             // already on Appointments
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
@@ -460,6 +454,130 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         },
       ),
     );
+  }
+
+  Future<void> _showCancelModal(Map<String, dynamic> appointment) async {
+    final reasons = [
+      'Scheduling conflict',
+      'Found another barber',
+      'Too far/transport issues',
+      'Not feeling well',
+      'Other',
+    ];
+    String selected = reasons.first;
+    final controller = TextEditingController();
+
+    final confirmed = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: const Color(0xFF111111),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Cancel Appointment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: selected,
+              dropdownColor: const Color(0xFF1A1A1A),
+              iconEnabledColor: Colors.white,
+              decoration: const InputDecoration(
+                labelText: 'Reason',
+                labelStyle: TextStyle(color: Colors.white70),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+              ),
+              items: reasons
+                  .map((reason) => DropdownMenuItem(value: reason, child: Text(reason, style: const TextStyle(color: Colors.white))))
+                  .toList(),
+              onChanged: (value) {
+                if (value != null) {
+                  selected = value;
+                }
+              },
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: controller,
+              maxLines: 2,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                hintText: 'Optional note',
+                hintStyle: TextStyle(color: Colors.white54),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white)),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(ctx).pop(false),
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                    child: const Text('Keep'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.of(ctx).pop(true),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    child: const Text('Cancel Appointment'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) {
+      controller.dispose();
+      return;
+    }
+
+    final reason = selected == 'Other' && controller.text.trim().isNotEmpty
+        ? controller.text.trim()
+        : selected;
+    controller.dispose();
+    await _cancelAppointment(appointment, reason);
+  }
+
+  Future<void> _cancelAppointment(Map<String, dynamic> appointment, String reason) async {
+    final appointmentId = appointment['appointmentId'];
+    if (appointmentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Missing appointment ID.')));
+      return;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'cancel',
+          'appointmentID': appointmentId,
+          'reason': reason,
+        }),
+      );
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      if (response.statusCode != 200) {
+        final message = data['error']?.toString() ?? 'Failed to cancel appointment.';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+        return;
+      }
+      setState(() {
+        _upcomingAppointments.remove(appointment);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Appointment cancelled')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to cancel appointment: $e')));
+    }
   }
 
   void _showFeedbackModal(BuildContext context, Map<String, dynamic> appointment) {
