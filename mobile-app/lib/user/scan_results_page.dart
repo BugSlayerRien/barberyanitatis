@@ -1,6 +1,10 @@
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'api_config.dart';
 import 'haircuts_list_page.dart';
+import 'dashboard_page.dart';
 import 'hairstyle_detail_page.dart';
 import 'user_session.dart';
 
@@ -17,6 +21,7 @@ class ScanResultsPage extends StatefulWidget {
 class _ScanResultsPageState extends State<ScanResultsPage> {
   int _selectedIndex = 0;
   String _selectedView = 'front';
+  final Map<String, Future<Uint8List>> _webImageCache = {};
 
   @override
   Widget build(BuildContext context) {
@@ -31,7 +36,9 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close, color: Colors.white, size: 28),
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const DashboardPage()),
+          ),
         ),
         title: const Text('AI Recommendations', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
@@ -102,34 +109,43 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white12),
-        image: previewUrl != null
-            ? DecorationImage(
-                image: NetworkImage(previewUrl),
-                fit: BoxFit.cover,
-              )
-            : null,
       ),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          gradient: LinearGradient(
-            begin: Alignment.bottomCenter,
-            end: Alignment.topCenter,
-            colors: [Colors.black.withOpacity(0.55), Colors.transparent],
-          ),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Align(
-          alignment: Alignment.bottomLeft,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(styleName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              if (score != null)
-                Text('Match: ${(double.tryParse(score.toString()) ?? 0) * 100.0 ~/ 1}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-            ],
-          ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (previewUrl != null)
+              kIsWeb
+                  ? _buildWebImage(previewUrl)
+                  : Image(image: _buildImageProvider(previewUrl), fit: BoxFit.cover)
+            else
+              Container(color: const Color(0xFF1A1A1A)),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [Colors.black.withOpacity(0.55), Colors.transparent],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(styleName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    if (score != null)
+                      Text('Match: ${(double.tryParse(score.toString()) ?? 0) * 100.0 ~/ 1}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -166,7 +182,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Top 5 recommendations', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        Text('Top ${widget.recommendations.length} recommendations', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         const SizedBox(height: 12),
         ...List.generate(widget.recommendations.length, (index) {
           final item = widget.recommendations[index];
@@ -186,15 +202,16 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(10),
-                      image: thumbUrl != null
-                          ? DecorationImage(image: NetworkImage(thumbUrl), fit: BoxFit.cover)
-                          : null,
-                      color: Colors.black,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: SizedBox(
+                      width: 56,
+                      height: 56,
+                      child: thumbUrl != null
+                          ? (kIsWeb
+                              ? _buildWebImage(thumbUrl)
+                              : Image(image: _buildImageProvider(thumbUrl), fit: BoxFit.cover))
+                          : Container(color: Colors.black),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -240,14 +257,14 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
 
   String? _resolvePreviewUrl(Map<String, dynamic>? selected) {
     if (selected == null) {
-      return null;
+      return _resolveImage(widget.imageUrl);
     }
     final key = _selectedView == 'front'
         ? 'front_view_url'
         : _selectedView == 'side'
             ? 'side_view_url'
             : 'back_view_url';
-    return _resolveImage(selected[key]);
+    return _resolveImage(selected[key]) ?? _resolveImage(widget.imageUrl);
   }
 
   String? _resolveImage(dynamic value) {
@@ -255,7 +272,42 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     if (url.isEmpty) {
       return null;
     }
+    if (url.startsWith('assets/')) {
+      return url;
+    }
     return ApiConfig.resolveImageUrl(url);
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
+    );
   }
 
   Map<String, dynamic> _toStyleMap(Map<String, dynamic> recommendation) {

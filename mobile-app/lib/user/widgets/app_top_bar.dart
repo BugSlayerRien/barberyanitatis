@@ -1,4 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import '../api_config.dart';
+import '../user_session.dart';
 
 class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final bool showBack;
@@ -23,7 +28,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       backgroundColor: Colors.transparent,
       elevation: 0,
       titleSpacing: 0,
-      leadingWidth: showBack ? 120 : 80,
+      leadingWidth: showBack ? 150 : 120,
       leading: Row(
         children: [
           if (showBack)
@@ -31,10 +36,10 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
               icon: const Icon(Icons.arrow_back, color: Colors.white),
               onPressed: onBack ?? () => Navigator.of(context).pop(),
             ),
+          const SizedBox(width: 16),
           Image.asset(
             'assets/images/TATIS.png',
             height: 26,
-            color: Colors.white,
           ),
         ],
       ),
@@ -51,7 +56,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
-  void _showNotifications(BuildContext context) {
+  Future<void> _showNotifications(BuildContext context) async {
+    final notifications = await _loadNotifications();
+    if (!context.mounted) return;
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF111111),
@@ -70,14 +77,45 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
                 style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
-              _notificationTile('Your appointment is confirmed', 'Sep 12 • 10:00 AM'),
-              _notificationTile('New AI styles available', 'Check your recommendations'),
-              _notificationTile('Welcome back!', 'Discover your next look'),
+              if (notifications.isEmpty)
+                const Text('No notifications yet.', style: TextStyle(color: Colors.white70, fontSize: 12))
+              else
+                ...notifications.map(
+                  (item) => _notificationTile(item['title'] ?? 'Update', item['subtitle'] ?? ''),
+                ),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<List<Map<String, String>>> _loadNotifications() async {
+    if (UserSession.userId == null) {
+      return [];
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'userID': UserSession.userId}),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return [];
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final rows = (data['notifications'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+      return rows
+          .map((row) => {
+                'title': row['title']?.toString() ?? 'Update',
+                'subtitle': row['subtitle']?.toString() ?? '',
+              })
+          .toList();
+    } catch (_) {
+      return [];
+    }
   }
 
   Widget _notificationTile(String title, String subtitle) {

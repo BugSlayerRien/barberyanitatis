@@ -32,20 +32,22 @@ try {
 
         $hairTexture = trim((string)($input['hairTexture'] ?? ''));
 
-                $stmt = $pdo->prepare(
-                        'SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
-                                        hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
-                                        hs.style_name, hs.style_code, hs.description
-                         FROM hairstyle_variants hv
-                         JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
-                         WHERE hs.is_active = 1
-                             AND (:face_shape = "" OR hv.face_shape = :face_shape)
-                             AND (:hair_texture = "" OR hv.hair_texture = :hair_texture)
-                         ORDER BY hv.confidence_score DESC, hs.style_name'
-                );
+        $stmt = $pdo->prepare(
+            'SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
+                    hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
+                    hs.style_name, hs.style_code, hs.description
+             FROM hairstyle_variants hv
+             JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+             WHERE hs.is_active = 1
+               AND (:face_shape_1 = "" OR hv.face_shape = :face_shape_2)
+               AND (:hair_texture_1 = "" OR hv.hair_texture = :hair_texture_2)
+             ORDER BY hv.confidence_score DESC, hs.style_name'
+        );
         $stmt->execute([
-            ':face_shape' => $faceShape,
-            ':hair_texture' => $hairTexture,
+            ':face_shape_1' => $faceShape,
+            ':face_shape_2' => $faceShape,
+            ':hair_texture_1' => $hairTexture,
+            ':hair_texture_2' => $hairTexture,
         ]);
 
         json_response(['variants' => $stmt->fetchAll()]);

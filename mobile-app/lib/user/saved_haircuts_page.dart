@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
@@ -8,6 +9,8 @@ import 'user_session.dart';
 
 class SavedHaircutsPage extends StatelessWidget {
   const SavedHaircutsPage({super.key});
+
+  static final Map<String, Future<Uint8List>> _webImageCache = {};
 
   Future<List<Map<String, dynamic>>> _loadFavorites() async {
     if (UserSession.userId == null) {
@@ -135,22 +138,27 @@ class SavedHaircutsPage extends StatelessWidget {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Expanded(
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                                  image: imageUrl.isNotEmpty
-                                      ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
-                                      : null,
-                                ),
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+                              child: ClipRRect(
+                                borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    if (imageUrl.isNotEmpty)
+                                      kIsWeb
+                                          ? _buildWebImage(imageUrl)
+                                          : Image(image: _buildImageProvider(imageUrl), fit: BoxFit.cover)
+                                    else
+                                      Container(color: const Color(0xFF111111)),
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.bottomCenter,
+                                          end: Alignment.topCenter,
+                                          colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+                                        ),
+                                      ),
                                     ),
-                                  ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -230,6 +238,38 @@ class SavedHaircutsPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
     );
   }
 }

@@ -31,10 +31,29 @@ try {
         }
 
         if (!is_array($items)) {
-            if (!is_array($serviceIDs) || count($serviceIDs) === 0 || $variantID <= 0) {
-                json_response(['error' => 'Missing serviceIDs or variantID'], 422);
+            if ($variantID <= 0) {
+                json_response(['error' => 'Missing variantID'], 422);
             }
+
+            if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
+                $defaultServiceId = (int)$pdo->query("SELECT service_id FROM services WHERE category = 'Haircut' AND is_active = 1 ORDER BY service_id LIMIT 1")->fetchColumn();
+                if ($defaultServiceId <= 0) {
+                    json_response(['error' => 'No haircut service configured'], 422);
+                }
+                $serviceIDs = [$defaultServiceId];
+            }
+
             $items = array_map(fn($id) => ['serviceID' => (int)$id, 'variantID' => $variantID], $serviceIDs);
+        }
+
+        $activeStmt = $pdo->prepare(
+            "SELECT COUNT(*) FROM appointments
+             WHERE user_id = :user_id
+               AND status IN ('Scheduled', 'CheckedIn', 'InProgress')"
+        );
+        $activeStmt->execute([':user_id' => $userID]);
+        if ((int)$activeStmt->fetchColumn() > 0) {
+            json_response(['error' => 'You already have an active appointment.'], 409);
         }
 
         $pdo->beginTransaction();

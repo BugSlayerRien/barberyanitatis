@@ -42,35 +42,83 @@
         <section id="users-view" hidden>
           <div class="section-title">Manage Users</div>
           <div class="card">
-            <p>Use the admin panel to manage users (Customers, Barbers, Receptionists, Admins). Hook this view to the MySQL API when ready.</p>
+            <h3>Customers</h3>
+            <div class="table" id="customers-table"></div>
+          </div>
+          <div class="card">
+            <h3>Barbers</h3>
+            <div class="table" id="barbers-table"></div>
+          </div>
+          <div class="card">
+            <h3>Receptionists</h3>
+            <div class="table" id="receptionists-table"></div>
+          </div>
+          <div class="card">
+            <h3>Admins</h3>
+            <div class="table" id="admins-table"></div>
           </div>
         </section>
 
         <section id="audit-view" hidden>
           <div class="section-title">Audit Logs</div>
-          <div class="card">
-            <p>Audit activity feed will display actions like user creation, appointment changes, and payment updates.</p>
-          </div>
+          <div class="list" id="audit-list"></div>
         </section>
 
         <section id="analytics-view" hidden>
           <div class="section-title">Analytics</div>
           <div class="card">
-            <p>Analytics charts (monthly revenue, bookings, services performance) will be displayed here.</p>
+            <h3>AI Business Summary</h3>
+            <p id="analytics-summary">Loading summary...</p>
+          </div>
+          <div class="card">
+            <h3>Key Metrics</h3>
+            <div class="grid stats" id="analytics-metrics"></div>
           </div>
         </section>
 
         <section id="services-view" hidden>
           <div class="section-title">Manage Services</div>
           <div class="card">
-            <p>Edit service catalog, pricing, and availability for the barbershop.</p>
+            <h3>Service Catalog</h3>
+            <div class="table" id="services-table"></div>
           </div>
         </section>
 
         <section id="settings-view" hidden>
           <div class="section-title">System Settings</div>
           <div class="card">
-            <p>Configure email notifications, operational hours, and security settings.</p>
+            <h3>Operations</h3>
+            <div class="form-grid">
+              <label>Email Notifications
+                <input type="checkbox" id="setting-email" />
+              </label>
+              <label>Open Time
+                <input type="time" id="setting-open" value="09:00" />
+              </label>
+              <label>Close Time
+                <input type="time" id="setting-close" value="18:00" />
+              </label>
+              <label>Force MFA
+                <input type="checkbox" id="setting-mfa" />
+              </label>
+              <label>Auto Backup
+                <input type="checkbox" id="setting-backup" />
+              </label>
+            </div>
+            <button class="btn" id="settings-save">Save Settings</button>
+          </div>
+          <div class="card">
+            <h3>Backup & Restore (CSV)</h3>
+            <div class="button-row">
+              <button class="btn" data-export="users">Export Users</button>
+              <button class="btn" data-export="barbers">Export Barbers</button>
+              <button class="btn" data-export="services">Export Services</button>
+              <button class="btn" data-export="appointments">Export Appointments</button>
+            </div>
+            <div class="upload-row">
+              <input type="file" id="services-csv" accept=".csv" />
+              <button class="btn" id="services-import">Import Services CSV</button>
+            </div>
           </div>
         </section>
       </main>

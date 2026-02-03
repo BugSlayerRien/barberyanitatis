@@ -8,7 +8,6 @@ import 'dashboard_page.dart';
 import 'quiz_upload.dart';
 import 'widgets/app_top_bar.dart';
 import 'api_config.dart';
-import 'scan_results_page.dart';
 import 'user_session.dart';
 import 'web_camera_picker.dart';
 
@@ -22,6 +21,7 @@ class AiFaceScanPage extends StatefulWidget {
 class _AiFaceScanPageState extends State<AiFaceScanPage> {
   final ImagePicker _picker = ImagePicker();
   XFile? _scanImage;
+  bool _isSubmitting = false;
 
   Future<void> _startScan() async {
     if (kIsWeb) {
@@ -57,6 +57,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
   }
 
   Future<void> _uploadScan(XFile file) async {
+    if (mounted) {
+      setState(() => _isSubmitting = true);
+    }
     try {
       final request = http.MultipartRequest(
         'POST',
@@ -85,8 +88,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
           ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
           : <String, dynamic>{};
       if (response.statusCode != 200) {
+        final details = data['details']?.toString();
+        final message = details != null && details.isNotEmpty
+            ? '${data['error']?.toString() ?? 'AI scan failed.'} ($details)'
+            : (data['error']?.toString() ?? 'AI scan failed.');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'AI scan failed.')),
+          SnackBar(content: Text(message)),
         );
         return;
       }
@@ -98,19 +105,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
       UserSession.lastScan = data;
       UserSession.lastRecommendations = recommendations;
 
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ScanResultsPage(
-            imageUrl: data['imageUrl']?.toString() ?? '',
-            recommendations: recommendations,
-          ),
-        ),
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DashboardPage()),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('AI scan failed: $e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -188,20 +194,24 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: _startScan,
+                    onPressed: _isSubmitting ? null : _startScan,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black,
                       minimumSize: const Size.fromHeight(48),
                     ),
-                    child: const Text('Start Scan'),
+                    child: _isSubmitting
+                        ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                        : const Text('Start Scan'),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: () {
+              onPressed: _isSubmitting
+                  ? null
+                  : () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const QuizUploadPage()),
                 );

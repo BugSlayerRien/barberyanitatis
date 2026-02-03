@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
@@ -8,6 +9,8 @@ import 'user_session.dart';
 
 class TopPicksPage extends StatelessWidget {
   const TopPicksPage({super.key});
+
+  static final Map<String, Future<Uint8List>> _webImageCache = {};
 
   Future<Map<String, dynamic>?> _loadTopPick() async {
     if (UserSession.userId == null) {
@@ -127,42 +130,53 @@ class TopPicksPage extends StatelessWidget {
                           children: [
                             Container(
                               height: 320,
-                              decoration: BoxDecoration(
-                                borderRadius: const BorderRadius.only(
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF111111),
+                                borderRadius: BorderRadius.only(
                                   topLeft: Radius.circular(16),
                                   topRight: Radius.circular(16),
                                 ),
-                                image: DecorationImage(
-                                  image: NetworkImage(topPicks['image'] as String),
-                                  fit: BoxFit.cover,
-                                ),
                               ),
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  borderRadius: const BorderRadius.only(
-                                    topLeft: Radius.circular(16),
-                                    topRight: Radius.circular(16),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: const BorderRadius.only(
+                                      topLeft: Radius.circular(16),
+                                      topRight: Radius.circular(16),
+                                    ),
+                                    child: kIsWeb
+                                        ? _buildWebImage(topPicks['image'] as String)
+                                        : Image(image: _buildImageProvider(topPicks['image'] as String), fit: BoxFit.cover),
                                   ),
-                                  gradient: LinearGradient(
-                                    begin: Alignment.bottomCenter,
-                                    end: Alignment.topCenter,
-                                    colors: [Colors.black.withOpacity(0.4), Colors.transparent],
-                                  ),
-                                ),
-                                child: Align(
-                                  alignment: Alignment.bottomRight,
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(16),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFA99941),
-                                        borderRadius: BorderRadius.circular(6),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(16),
+                                        topRight: Radius.circular(16),
                                       ),
-                                      child: const Icon(Icons.favorite, color: Colors.white, size: 20),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.bottomCenter,
+                                        end: Alignment.topCenter,
+                                        colors: [Colors.black.withOpacity(0.4), Colors.transparent],
+                                      ),
                                     ),
                                   ),
-                                ),
+                                  Align(
+                                    alignment: Alignment.bottomRight,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFA99941),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Icon(Icons.favorite, color: Colors.white, size: 20),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                             Padding(
@@ -195,15 +209,14 @@ class TopPicksPage extends StatelessWidget {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                         decoration: BoxDecoration(
-                                          gradient: LinearGradient(
-                                            colors: [const Color(0xFFA99941), const Color(0xFF8B7E3A)],
-                                          ),
+                                          color: Colors.white,
                                           borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFA99941), width: 1),
                                         ),
                                         child: Text(
                                           topPicks['rating'] as String,
                                           style: const TextStyle(
-                                            color: Colors.white,
+                                            color: Color(0xFFA99941),
                                             fontWeight: FontWeight.bold,
                                             fontSize: 14,
                                           ),
@@ -315,6 +328,38 @@ class TopPicksPage extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
     );
   }
 }

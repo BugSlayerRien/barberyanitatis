@@ -6,15 +6,23 @@ class PaymentPage extends StatefulWidget {
   final String date;
   final String time;
   final int amount;
+  final String haircutName;
 
-  const PaymentPage({super.key, required this.barberName, required this.date, required this.time, required this.amount});
+  const PaymentPage({
+    super.key,
+    required this.barberName,
+    required this.date,
+    required this.time,
+    required this.amount,
+    required this.haircutName,
+  });
 
   @override
   State<PaymentPage> createState() => _PaymentPageState();
 }
 
 class _PaymentPageState extends State<PaymentPage> {
-  int _selectedMethod = 0; // 0=Card,1=PayPal,2=Gcash/Qrph,3=GooglePay
+  int _selectedMethod = 0; // 0=Card,1=Gcash/Qrph
 
   @override
   Widget build(BuildContext context) {
@@ -38,31 +46,9 @@ class _PaymentPageState extends State<PaymentPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(colors: [Color(0xFF1A1A1A), Color(0xFF252525)]),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: Row(
-                children: [
-                  const CircleAvatar(backgroundColor: Colors.white, child: Icon(Icons.person, color: Colors.black)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(widget.barberName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        const SizedBox(height: 4),
-                        Text('${widget.date} • ${widget.time}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
+            const Text('Payment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20)),
+            const SizedBox(height: 12),
+            Text('${widget.date} • ${widget.time}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
             const SizedBox(height: 20),
 
             // Payment Methods
@@ -85,16 +71,8 @@ class _PaymentPageState extends State<PaymentPage> {
 
                   const SizedBox(height: 8),
 
-                  // PayPal
-                  _paymentMethodTile(1, title: 'PayPal', trailing: _paymentIcon('assets/images/paypal.png')),
-                  const SizedBox(height: 8),
-
                   // GCash / QRPh
-                  _paymentMethodTile(2, title: 'Gcash, Paymaya, QRPh', trailing: _paymentIcon('assets/images/gcash.png')),
-                  const SizedBox(height: 8),
-
-                  // Google Pay
-                  _paymentMethodTile(3, title: 'Google Pay', trailing: _paymentIcon('assets/images/google.png')),
+                  _paymentMethodTile(1, title: 'Gcash, Paymaya, QRPh', trailing: _paymentIcon('assets/images/gcash.png')),
                 ],
               ),
             ),
@@ -150,7 +128,7 @@ class _PaymentPageState extends State<PaymentPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text('Service', style: TextStyle(color: Colors.white70)),
+                      Text(widget.haircutName, style: const TextStyle(color: Colors.white70)),
                       Text('₱${servicePrice.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white)),
                     ],
                   ),

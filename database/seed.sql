@@ -46,7 +46,11 @@ VALUES
 INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance)
 VALUES
 	('HS-001', 'Textured Crop', 'Short textured crop with tapered sides', 'Male', 'Easy', 'Medium'),
-	('HS-002', 'Classic Pompadour', 'Volume on top with clean sides', 'Male', 'Medium', 'High');
+	('HS-002', 'Classic Pompadour', 'Volume on top with clean sides', 'Male', 'Medium', 'High'),
+	('HS-003', 'Low Taper', 'Clean taper with natural top', 'Male', 'Easy', 'Low'),
+	('HS-004', 'Buzz Cut', 'Short uniform cut with clean edges', 'Male', 'Easy', 'Low'),
+	('HS-005', 'Side Part', 'Classic side part with neat finish', 'Male', 'Medium', 'Medium'),
+	('HS-006', 'Quiff', 'Textured quiff with volume', 'Male', 'Medium', 'High');
 
 -- Hairstyle variants
 INSERT INTO hairstyle_variants (
@@ -68,3 +72,43 @@ SELECT h.hairstyle_id, 'Square', 'Wavy',
 			 'Tapered sides with volume on top.', '#2/#3', 'Pomade', 45, 0.82
 FROM hairstyles h
 WHERE h.style_code = 'HS-002';
+
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Oval', 'Straight',
+		 '/assets/hairstyles/low_taper_front.jpg', '/assets/hairstyles/low_taper_side.jpg', '/assets/hairstyles/low_taper_back.jpg',
+		 'Low taper on sides, natural top.', '#1/#2', 'Light wax', 30, 0.81
+FROM hairstyles h
+WHERE h.style_code = 'HS-003';
+
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Round', 'Straight',
+		 '/assets/hairstyles/buzz_front.jpg', '/assets/hairstyles/buzz_side.jpg', '/assets/hairstyles/buzz_back.jpg',
+		 'Uniform #2 buzz with clean edges.', '#2', 'None', 20, 0.78
+FROM hairstyles h
+WHERE h.style_code = 'HS-004';
+
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Square', 'Straight',
+		'/assets/hairstyles/sidepart_front.jpg', '/assets/hairstyles/sidepart_side.jpg', '/assets/hairstyles/sidepart_back.jpg',
+		'Side part with tapered sides.', '#2/#3', 'Pomade', 35, 0.80
+FROM hairstyles h
+WHERE h.style_code = 'HS-005';
+
+INSERT INTO hairstyle_variants (
+	hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,
+	barber_instructions, clipper_sizes, styling_products, estimated_minutes, confidence_score
+)
+SELECT h.hairstyle_id, 'Oval', 'Wavy',
+		'/assets/hairstyles/quiff_front.jpg', '/assets/hairstyles/quiff_side.jpg', '/assets/hairstyles/quiff_back.jpg',
+		'Textured quiff with volume.', '#2', 'Volumizing spray', 40, 0.79
+FROM hairstyles h
+WHERE h.style_code = 'HS-006';

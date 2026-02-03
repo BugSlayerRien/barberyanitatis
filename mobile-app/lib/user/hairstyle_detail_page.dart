@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'confirmation_page.dart';
 import 'appointments_page.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
-import 'ai_face_scan_page.dart';
+import '../kiosk/kiosk_home_page.dart';
+import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -22,6 +26,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  final Map<String, Future<Uint8List>> _webImageCache = {};
 
   @override
   void initState() {
@@ -37,6 +42,42 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   void dispose() {
     _animationController.dispose();
     super.dispose();
+  }
+
+  bool _hasImage(String? url) {
+    return url != null && url.isNotEmpty;
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
+    );
   }
 
   @override
@@ -60,19 +101,26 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
               // Large image with gradient overlay
               Container(
                 height: 380,
-                decoration: BoxDecoration(
-                  image: widget.style['image'] != null && widget.style['image'].toString().isNotEmpty
-                      ? DecorationImage(image: NetworkImage(widget.style['image'].toString()), fit: BoxFit.cover)
-                      : null,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                decoration: const BoxDecoration(color: Color(0xFF0A0A0A)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (_hasImage(widget.style['image']?.toString()))
+                      kIsWeb
+                          ? _buildWebImage(widget.style['image'].toString())
+                          : Image(image: _buildImageProvider(widget.style['image'].toString()), fit: BoxFit.cover)
+                    else
+                      Container(color: const Color(0xFF111111)),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
               const SizedBox(height: 20),
@@ -101,11 +149,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                               const SizedBox(height: 8),
                               Row(
                                 children: [
-                                  const Icon(Icons.star, color: Colors.white, size: 18),
+                                  const Icon(Icons.star, color: Color(0xFFA99941), size: 18),
                                   const SizedBox(width: 6),
                                   Text(
                                     widget.style['rating']?.toString() ?? '★★★★★',
-                                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(color: Color(0xFFA99941), fontSize: 14, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),
@@ -253,10 +301,10 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
           } else if (index == 1) {
             Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
           } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Placeholder tab - suggest: Saved styles or Notifications')),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
             );
           } else if (index == 4) {
             showAppMenuSheet(context);

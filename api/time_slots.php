@@ -9,12 +9,57 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if ($action !== 'listByBarberDate') {
+if (!in_array($action, ['listByBarberDate', 'suggestBestSlot'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
 try {
     $pdo = get_db_connection();
+
+    if ($action === 'suggestBestSlot') {
+        $bestStmt = $pdo->prepare(
+            "SELECT barber_id, slot_date, COUNT(*) AS available_count
+             FROM time_slots
+             WHERE status = 'Available' AND slot_date >= CURDATE()
+             GROUP BY barber_id, slot_date
+             ORDER BY available_count DESC, slot_date ASC
+             LIMIT 1"
+        );
+        $bestStmt->execute();
+        $best = $bestStmt->fetch();
+        if (!$best) {
+            json_response(['error' => 'No available slots found'], 404);
+        }
+
+        $timeStmt = $pdo->prepare(
+            "SELECT slot_time FROM time_slots
+             WHERE barber_id = :barber_id AND slot_date = :slot_date AND status = 'Available'
+             ORDER BY slot_time ASC LIMIT 1"
+        );
+        $timeStmt->execute([
+            ':barber_id' => $best['barber_id'],
+            ':slot_date' => $best['slot_date'],
+        ]);
+        $timeRow = $timeStmt->fetch();
+        if (!$timeRow) {
+            json_response(['error' => 'No available time for suggested slot'], 404);
+        }
+
+        $barberStmt = $pdo->prepare('SELECT barber_id, full_name, specialty FROM barbers WHERE barber_id = :barber_id');
+        $barberStmt->execute([':barber_id' => $best['barber_id']]);
+        $barber = $barberStmt->fetch();
+
+        json_response([
+            'suggestion' => [
+                'barberID' => (int)$best['barber_id'],
+                'barberName' => $barber['full_name'] ?? 'Barber',
+                'specialty' => $barber['specialty'] ?? null,
+                'slotDate' => $best['slot_date'],
+                'slotTime' => $timeRow['slot_time'],
+                'availableCount' => (int)$best['available_count'],
+            ],
+        ]);
+    }
 
     $barberID = (int)($input['barberID'] ?? 0);
     $slotDate = trim((string)($input['slotDate'] ?? ''));

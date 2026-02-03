@@ -1,57 +1,63 @@
 CURRENT SYSTEM FUNCTIONS (MOBILE + WEB)
 
-MOBILE APP (CLIENT)
+MOBILE APP (CLIENT) - DB-TIED FEATURES WORKING
 1) Auth
-- Register customer (email/password/phone/gender) via /api/auth.php
-- Login customer via /api/auth.php
-- User session stored in memory (userID, roles)
+- Register customer via /api/auth.php (users)
+- Login customer via /api/auth.php (users/staff_users/barbers)
 
-2) AI Scan + Recommendations
-- Capture/upload image from mobile
-- POST /api/ai_scan.php (multipart)
-- Returns top 5 hairstyle variants + preview URLs
-- Scan results screen shows front/side/back preview + recommendation list
- - CV pipeline: MediaPipe face detection + face mesh + heuristic hair attributes
- - CV JSON sent to LLM (Gemini/OpenAI) for ranking when configured
- - Web camera requires https or localhost permission
+2) AI Scan + Recommendations (library-based)
+- Upload image to /api/ai_scan.php (multipart)
+- CV pipeline runs (MediaPipe) and returns hair attributes
+- Pulls hairstyle variants from DB (hairstyles + hairstyle_variants)
+- Returns up to 4 recommendations
 
 3) Hairstyle Library
-- GET listByFaceShape via /api/haircuts.php
-- UI shows real variants with images and details
-- Detail page uses front/side/back images for preview
+- listByFaceShape via /api/haircuts.php (hairstyles + hairstyle_variants)
+- Detail page uses front/side/back URLs from DB
 
-4) Booking Flow
-- Select barber via /api/barbers.php
-- Select date and view slots via /api/time_slots.php
-- Select service via /api/services.php
-- Create appointment via /api/booking.php
-- List appointments via /api/booking.php (listByCustomer)
+4) Barbers & Services
+- List barbers via /api/barbers.php (barbers)
+- List services via /api/services.php (services)
+- List time slots via /api/time_slots.php (time_slots)
 
 5) Favorites
-- Saved haircuts from /api/favorites.php (listByUser)
+- List favorites via /api/favorites.php (user_favorites + hairstyle_variants + hairstyles)
 
 WEB APP (ADMIN)
 1) Dashboard
-- View totals and activity via /api/admin_dashboard.php
+- Aggregated stats via /api/admin_dashboard.php
 
 WEB APP (RECEPTIONIST)
 1) Dashboard
-- View today’s walk-ins and appointments via /api/receptionist_dashboard.php
-
-WEB APP (LOGIN)
-- Admin/Receptionist login via /api/auth.php (staff_users)
+- Today’s walk-ins/appointments via /api/receptionist_dashboard.php
 
 KIOSK (WALK-IN TERMINAL)
 1) AI Scan + Recommendations
 - Upload image to /api/ai_scan.php
-- Receive kiosk session + top 5 hairstyle variants
+- Stores kiosk session and recommendations (kiosk_sessions + kiosk_recommendations)
 
 2) Selection Flow
 - Select recommendation via /api/kiosk.php (selectRecommendation)
-- Fetch session + recommendations via /api/kiosk.php (getSession)
+- Fetch session via /api/kiosk.php (getSession)
+
+CURRENT ISSUES
+1) Flutter web image rendering throws Same-Origin Policy errors for image cards.
+	- Proxy endpoint added (api/image_proxy.php), but still seeing SOP errors.
+2) AI image generation shows "Image generation failed" on Confirmation page.
+	- Wired Imagen 3 in api/ai_tryon.php, but needs API response troubleshooting.
+3) ScanResultsPage not currently used in upload flow; navigation goes to Dashboard instead.
+
+NEXT STEPS
+1) Fix web image SOP:
+	- Verify proxy endpoint returns correct Content-Type and CORS headers.
+	- Ensure Flutter web always uses proxy URLs for images.
+2) Wire ScanResultsPage if needed:
+	- Update QuizUploadPage to navigate to ScanResultsPage after scan.
+3) Face-preserving AI try-on:
+	- Integrate an image-conditioned model (e.g., InstantID/ControlNet) that accepts the user photo + hairstyle reference.
+	- Add new API endpoint for conditioned generation and update Flutter to send the scan image and selected hairstyle.
 
 NOTES
 - All platforms use PHP API; no direct DB access.
-- Staff roles are stored in staff_users.
-- Customer accounts are stored in users.
- - AI provider/key configured via env vars or local override in api/ai_scan.php.
+- Staff roles are stored in staff_users. Customers are in users.
+- AI provider/key configured via env vars or local override in api/ai_scan.php.

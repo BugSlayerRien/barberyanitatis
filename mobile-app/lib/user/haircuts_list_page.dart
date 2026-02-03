@@ -1,12 +1,15 @@
 import 'dart:convert';
 
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
-import 'ai_face_scan_page.dart';
+import '../kiosk/kiosk_home_page.dart';
+import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -20,10 +23,11 @@ class HaircutsListPage extends StatefulWidget {
 }
 
 class _HaircutsListPageState extends State<HaircutsListPage> {
-  int _selectedTab = 0;
+  final Map<String, Future<Uint8List>> _webImageCache = {};
 
-  List<Map<String, dynamic>> _recommendedStyles = [];
-  List<Map<String, dynamic>> _trendyStyles = [];
+  List<Map<String, dynamic>> _allStyles = [];
+  List<String> _categories = const ['All'];
+  String _selectedCategory = 'All';
   bool _loading = true;
   String? _error;
 
@@ -60,10 +64,18 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
           .toList();
 
       final mapped = variants.map(_mapVariant).toList();
+      final categorySet = mapped
+          .map((item) => item['hairTexture']?.toString() ?? '')
+          .where((value) => value.isNotEmpty)
+          .toSet();
+      final categories = ['All', ...categorySet.toList()..sort()];
 
       setState(() {
-        _recommendedStyles = mapped.take(6).toList();
-        _trendyStyles = mapped.length > 6 ? mapped.skip(6).toList() : [];
+        _allStyles = mapped;
+        _categories = categories;
+        if (!_categories.contains(_selectedCategory)) {
+          _selectedCategory = 'All';
+        }
         _loading = false;
       });
     } catch (e) {
@@ -76,7 +88,9 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final styles = _selectedTab == 0 ? _recommendedStyles : _trendyStyles;
+    final styles = _selectedCategory == 'All'
+      ? _allStyles
+      : _allStyles.where((item) => item['hairTexture'] == _selectedCategory).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -93,69 +107,31 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
           children: [
             const SizedBox(height: 12),
 
-            // Tabs with gradient
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: const Color(0xFFF37022).withOpacity(0.2), width: 1),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedTab = 0),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          gradient: _selectedTab == 0
-                              ? const LinearGradient(colors: [Color(0xFFF37022), Color(0xFFFF8C42)])
-                              : null,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          'Recommended',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _selectedTab == 0 ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() => _selectedTab = 1),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          gradient: _selectedTab == 1
-                              ? const LinearGradient(colors: [Color(0xFFF37022), Color(0xFFFF8C42)])
-                              : null,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          'Trendy',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: _selectedTab == 1 ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
+            const Text(
+              'Haircut Library',
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Browse every haircut in the library if the recommended styles aren\'t for you.',
+              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+
+            SizedBox(
+              height: 64,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: _categories.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 10),
+                itemBuilder: (context, index) {
+                  final category = _categories[index];
+                  final selected = category == _selectedCategory;
+                  return _buildCategoryFolder(category, selected);
+                },
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
             if (_loading)
               const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Colors.white)))
@@ -190,10 +166,10 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
           } else if (index == 1) {
             Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
           } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Placeholder tab - suggest: Saved styles or Notifications')),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
             );
           } else if (index == 4) {
             showAppMenuSheet(context);
@@ -217,36 +193,34 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFF37022).withOpacity(0.2), width: 1),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFF37022).withOpacity(0.1),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          border: Border.all(color: Colors.white10, width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Image with overlay
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                  image: imageUrl.isNotEmpty
-                      ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
-                      : null,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (imageUrl.isNotEmpty)
+                      kIsWeb
+                          ? _buildWebImage(imageUrl)
+                          : Image(image: _buildImageProvider(imageUrl), fit: BoxFit.cover)
+                    else
+                      Container(color: const Color(0xFF111111)),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -260,13 +234,45 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                   const SizedBox(height: 4),
                   Text(style['description']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3)),
                   const SizedBox(height: 8),
-                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFF37022), fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFA99941), fontSize: 12, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
     );
   }
 
@@ -278,11 +284,48 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       'image': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
+      'hairTexture': variant['hair_texture']?.toString() ?? '',
+      'faceShape': variant['face_shape']?.toString() ?? '',
       'frontViewUrl': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
       'sideViewUrl': ApiConfig.resolveImageUrl(variant['side_view_url']?.toString() ?? ''),
       'backViewUrl': ApiConfig.resolveImageUrl(variant['back_view_url']?.toString() ?? ''),
       'variantId': variant['variant_id'],
     };
+  }
+
+  Widget _buildCategoryFolder(String label, bool selected) {
+    return GestureDetector(
+      onTap: () => setState(() => _selectedCategory = label),
+      child: Container(
+        width: 140,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          gradient: selected
+              ? const LinearGradient(colors: [Colors.white, Colors.white])
+              : const LinearGradient(colors: [Color(0xFF1A1A1A), Color(0xFF252525)]),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white24, width: 1),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.folder, color: selected ? Colors.black : Colors.white70, size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selected ? Colors.black : Colors.white,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   String _buildDetails(Map<String, dynamic> variant) {

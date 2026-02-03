@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dashboard_page.dart';
-import 'widgets/app_top_bar.dart';
 import 'api_config.dart';
 import 'scan_results_page.dart';
 import 'user_session.dart';
@@ -21,6 +20,7 @@ class QuizUploadPage extends StatefulWidget {
 
 class _QuizUploadPageState extends State<QuizUploadPage> {
   XFile? _picked;
+  bool _isSubmitting = false;
 
   Future<void> _pickImage() async {
     final ImagePicker picker = ImagePicker();
@@ -69,6 +69,10 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
       return;
     }
 
+    if (mounted) {
+      setState(() => _isSubmitting = true);
+    }
+
     try {
       final request = http.MultipartRequest(
         'POST',
@@ -96,15 +100,20 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
           ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
           : <String, dynamic>{};
       if (response.statusCode != 200) {
+        final details = data['details']?.toString();
+        final message = details != null && details.isNotEmpty
+            ? '${data['error']?.toString() ?? 'AI scan failed.'} ($details)'
+            : (data['error']?.toString() ?? 'AI scan failed.');
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'AI scan failed.')),
+          SnackBar(content: Text(message)),
         );
         return;
       }
 
-      final recommendations = (data['recommendations'] as List<dynamic>? ?? [])
+        final recommendations = (data['recommendations'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
+        final imageUrl = data['imageUrl']?.toString() ?? '';
 
       UserSession.lastScan = data;
       UserSession.lastRecommendations = recommendations;
@@ -112,7 +121,7 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) => ScanResultsPage(
-            imageUrl: data['imageUrl']?.toString() ?? '',
+            imageUrl: imageUrl,
             recommendations: recommendations,
           ),
         ),
@@ -122,6 +131,10 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('AI scan failed: $e')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
   }
 
@@ -129,10 +142,6 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppTopBar(
-        showBack: true,
-        onBack: () => Navigator.of(context).pop(),
-      ),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -189,17 +198,24 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: Colors.white24),
                     ),
-                    child: const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.center_focus_strong, size: 40, color: Colors.white),
-                          SizedBox(height: 8),
-                          Text('Start AI Face Scan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                          SizedBox(height: 4),
-                          Text('Position your face within the frame', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                        ],
-                      ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: _picked == null
+                          ? const Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.center_focus_strong, size: 40, color: Colors.white),
+                                  SizedBox(height: 8),
+                                  Text('Start AI Face Scan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  SizedBox(height: 4),
+                                  Text('Position your face within the frame', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                ],
+                              ),
+                            )
+                          : kIsWeb
+                              ? Image.network(_picked!.path, fit: BoxFit.cover, width: double.infinity, height: 180)
+                              : Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity, height: 180),
                     ),
                   ),
 
@@ -218,16 +234,6 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                     label: Text(_picked == null ? 'Upload Photo' : 'Change Upload'),
                   ),
 
-                  if (_picked != null) ...[
-                    const SizedBox(height: 10),
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: kIsWeb
-                          ? Image.network(_picked!.path, fit: BoxFit.cover, width: double.infinity, height: 160)
-                          : Image.file(File(_picked!.path), fit: BoxFit.cover, width: double.infinity, height: 160),
-                    ),
-                  ],
-
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -241,9 +247,11 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _uploadScan,
+                          onPressed: _isSubmitting ? null : _uploadScan,
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-                          child: const Text('SUBMIT'),
+                          child: _isSubmitting
+                              ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                              : const Text('SUBMIT'),
                         ),
                       ),
                     ],

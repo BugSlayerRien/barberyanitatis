@@ -29,5 +29,6 @@ Future<XFile?> pickWebCameraImageImpl() async {
 }
 
 Future<bool> isWebCameraSupportedImpl() async {
-  return html.window.isSecureContext && html.window.navigator.mediaDevices != null;
+  final isSecure = html.window.isSecureContext ?? false;
+  return isSecure && html.window.navigator.mediaDevices != null;
 }

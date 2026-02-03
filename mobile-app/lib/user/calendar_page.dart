@@ -19,13 +19,15 @@ class _CalendarPageState extends State<CalendarPage> {
   late DateTime _selectedDate;
   late DateTime _currentMonth;
   int _availableSlots = 0;
+  int _totalSlots = 0;
   bool _loadingSlots = false;
 
   @override
   void initState() {
     super.initState();
-    _currentMonth = DateTime(DateTime.now().year, DateTime.now().month);
-    _selectedDate = DateTime.now();
+    final now = DateTime.now();
+    _currentMonth = DateTime(now.year, now.month);
+    _selectedDate = DateTime(now.year, now.month, now.day);
     _fetchSlotCount();
   }
 
@@ -48,7 +50,10 @@ class _CalendarPageState extends State<CalendarPage> {
       if (response.statusCode == 200) {
         final slots = (data['slots'] as List<dynamic>? ?? []);
         final available = slots.where((slot) => (slot as Map)['status'] == 'Available').length;
-        setState(() => _availableSlots = available);
+        setState(() {
+          _availableSlots = available;
+          _totalSlots = slots.length;
+        });
       }
     } catch (_) {
       // ignore
@@ -64,6 +69,11 @@ class _CalendarPageState extends State<CalendarPage> {
     final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
     final firstDayWeekday = DateTime(_currentMonth.year, _currentMonth.month, 1).weekday;
     final weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    final today = DateTime.now();
+    final currentMonthKey = DateTime(today.year, today.month);
+    final canGoPrev = _currentMonth.isAfter(currentMonthKey);
+    final slotsTaken = (_totalSlots - _availableSlots).clamp(0, _totalSlots);
+    final takenColor = slotsTaken > 5 ? Colors.yellow : Colors.red;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -114,8 +124,10 @@ class _CalendarPageState extends State<CalendarPage> {
                       Row(
                         children: [
                           IconButton(
-                            onPressed: () => setState(() => _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1)),
-                            icon: const Icon(Icons.chevron_left, color: Colors.white),
+                            onPressed: canGoPrev
+                                ? () => setState(() => _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1))
+                                : null,
+                            icon: Icon(Icons.chevron_left, color: canGoPrev ? Colors.white : Colors.white24),
                           ),
                           IconButton(
                             onPressed: () => setState(() => _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1)),
@@ -151,43 +163,73 @@ class _CalendarPageState extends State<CalendarPage> {
                     crossAxisSpacing: 8,
                     children: [
                       ...List.generate(
-                        firstDayWeekday - 1,
+                        firstDayWeekday % 7,
                         (index) => const SizedBox.shrink(),
                       ),
-                      ...List.generate(
-                        daysInMonth,
-                        (index) {
-                          final day = index + 1;
-                          final isSelected = _selectedDate.day == day && _selectedDate.month == _currentMonth.month;
+                      ...List.generate(daysInMonth, (index) {
+                        final day = index + 1;
+                        final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+                        final isSelected = _selectedDate.day == day &&
+                            _selectedDate.month == _currentMonth.month &&
+                            _selectedDate.year == _currentMonth.year;
+                        final isPast = date.isBefore(DateTime(today.year, today.month, today.day));
 
-                          return GestureDetector(
-                            onTap: () {
-                              setState(() => _selectedDate = DateTime(_currentMonth.year, _currentMonth.month, day));
-                              _fetchSlotCount();
-                            },
-                            child: Container(
-                              decoration: BoxDecoration(
-                                gradient: LinearGradient(
-                                  colors: isSelected
-                                      ? [Colors.white, Colors.white]
-                                      : [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                                ),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Center(
-                                child: Text(
-                                  day.toString(),
-                                  style: TextStyle(
-                                    color: isSelected ? Colors.black : Colors.white70,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
+                        return GestureDetector(
+                          onTap: isPast
+                              ? null
+                              : () {
+                                  setState(() => _selectedDate = date);
+                                  _fetchSlotCount();
+                                },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: isPast ? Border.all(color: Colors.black12) : null,
+                            ),
+                            child: Center(
+                              child: Text(
+                                day.toString(),
+                                style: TextStyle(
+                                  color: isPast ? Colors.black26 : Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
                                 ),
                               ),
                             ),
-                          );
-                        },
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: takenColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Slots taken',
+                            style: TextStyle(color: Colors.white70, fontSize: 12),
+                          ),
+                        ],
                       ),
+                      _loadingSlots
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                          : Text('$slotsTaken', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ],
@@ -209,18 +251,26 @@ class _CalendarPageState extends State<CalendarPage> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'Available slots for ${_formatDate(_selectedDate)}',
+                    'Slots taken for ${_formatDate(_selectedDate)}',
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   _loadingSlots
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text('$_availableSlots', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      : Text('$slotsTaken', style: TextStyle(color: takenColor, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
             const SizedBox(height: 32),
             ElevatedButton(
               onPressed: () {
+                final today = DateTime.now();
+                final minDate = DateTime(today.year, today.month, today.day);
+                if (_selectedDate.isBefore(minDate)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please select a valid date.')),
+                  );
+                  return;
+                }
                 Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => TimeSlotPage(

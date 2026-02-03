@@ -121,6 +121,27 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address.')),
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Password must be at least 6 characters.')),
+      );
+      return;
+    }
+
+    if (phone.isNotEmpty && !_isValidPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid phone number.')),
+      );
+      return;
+    }
+
     if (password != confirm) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passwords do not match.')),
@@ -183,7 +204,7 @@ class _AuthPageState extends State<AuthPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo outside the card
-                Image.asset('assets/images/TATIS.png', height: 96, color: Colors.white),
+                Image.asset('assets/images/TATIS.png', height: 96),
                 const SizedBox(height: 12),
                 const Text(
                   'BARBERYA NI TATIS',
@@ -349,7 +370,7 @@ class _AuthPageState extends State<AuthPage> {
         ElevatedButton(
           onPressed: _isLoading ? null : _register,
           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN UP', style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT', style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         Row(
@@ -376,5 +397,14 @@ class _AuthPageState extends State<AuthPage> {
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       suffixIcon: suffix,
     );
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+  }
+
+  bool _isValidPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    return digits.length >= 7 && digits.length <= 15;
   }
 }

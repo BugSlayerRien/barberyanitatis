@@ -5,7 +5,8 @@ import 'package:http/http.dart' as http;
 import 'completed_appointment_detail.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
-import 'ai_face_scan_page.dart';
+import '../kiosk/kiosk_home_page.dart';
+import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -77,7 +78,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         final firstService = services.isNotEmpty ? services.first as Map : <String, dynamic>{};
 
         final mapped = {
-          'service': firstService['serviceName']?.toString() ?? 'Service',
+          'service': firstService['hairstyleName']?.toString() ?? firstService['serviceName']?.toString() ?? 'Haircut',
           'barber': 'with ${appt['barberName'] ?? ''}',
           'date': appt['appointmentDate']?.toString() ?? '',
           'time': appt['startTime']?.toString() ?? '',
@@ -448,10 +449,10 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           } else if (index == 1) {
             // already on Appointments
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const KioskHomePage()));
           } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Placeholder tab - suggest: Saved styles or Notifications')),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
             );
           } else if (index == 4) {
             showAppMenuSheet(context);

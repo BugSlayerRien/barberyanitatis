@@ -22,14 +22,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _slots = [];
-  List<Map<String, dynamic>> _services = [];
-  Map<String, dynamic>? _selectedService;
+  Map<String, dynamic>? _defaultService;
 
   @override
   void initState() {
     super.initState();
     _loadSlots();
-    _loadServices();
+    _loadDefaultService();
   }
 
   Future<void> _loadSlots() async {
@@ -60,9 +59,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       final slots = (data['slots'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
+      final normalized = _normalizeSlots(slots.isNotEmpty ? slots : _buildDefaultSlots());
 
       setState(() {
-        _slots = slots;
+        _slots = normalized;
         _loading = false;
       });
     } catch (e) {
@@ -73,7 +73,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     }
   }
 
-  Future<void> _loadServices() async {
+  Future<void> _loadDefaultService() async {
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/services.php'),
@@ -90,10 +90,14 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
 
+      final haircutService = services.firstWhere(
+        (service) => (service['category']?.toString() ?? '').toLowerCase() == 'haircut',
+        orElse: () => services.isNotEmpty ? services.first : <String, dynamic>{},
+      );
+
       if (mounted) {
         setState(() {
-          _services = services;
-          _selectedService = services.isNotEmpty ? services.first : null;
+          _defaultService = haircutService.isNotEmpty ? haircutService : null;
         });
       }
     } catch (_) {
@@ -173,29 +177,20 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
             ),
             const SizedBox(height: 16),
 
-            if (_services.isNotEmpty) ...[
-              const Text('Service', style: TextStyle(color: Colors.white70, fontSize: 12)),
+            if (UserSession.selectedStyleName != null || UserSession.selectedVariantId != null) ...[
+              const Text('Selected Haircut', style: TextStyle(color: Colors.white70, fontSize: 12)),
               const SizedBox(height: 8),
-              DropdownButtonFormField<Map<String, dynamic>>(
-                value: _selectedService,
-                dropdownColor: const Color(0xFF1A1A1A),
-                items: _services
-                    .map(
-                      (service) => DropdownMenuItem(
-                        value: service,
-                        child: Text(
-                          service['service_name']?.toString() ?? 'Service',
-                          style: const TextStyle(color: Colors.white),
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _selectedService = value),
-                decoration: const InputDecoration(
-                  filled: true,
-                  fillColor: Color(0xFF1A1A1A),
-                  border: OutlineInputBorder(),
-                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white10)),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white10),
+                ),
+                child: Text(
+                  UserSession.selectedStyleName ?? 'Selected haircut',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                 ),
               ),
               const SizedBox(height: 24),
@@ -208,57 +203,49 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
             else if (_slots.isEmpty)
               const Center(child: Text('No available slots for this date.', style: TextStyle(color: Colors.white70)))
             else
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: 2.5,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                children: _slots.map((slot) {
-                  final time = slot['slot_time']?.toString() ?? '';
-                  final isSelected = _selectedTime == time;
-                  final status = slot['status']?.toString() ?? 'Available';
-                  final isAvailable = status == 'Available';
-                  return GestureDetector(
-                    onTap: isAvailable ? () => setState(() => _selectedTime = time) : null,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: isSelected
-                            ? LinearGradient(colors: [Colors.white, Colors.white])
-                            : LinearGradient(
-                                colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isSelected ? Colors.white : Colors.white10,
-                          width: isSelected ? 2 : 1,
+              SizedBox(
+                height: 260,
+                child: ListView.separated(
+                  itemCount: _slots.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) {
+                    final slot = _slots[index];
+                    final time = slot['slot_time']?.toString() ?? '';
+                    final isSelected = _selectedTime == time;
+                    final status = slot['status']?.toString() ?? 'Available';
+                    final normalized = status.toLowerCase();
+                    final isAvailable = !(normalized == 'holiday' || normalized == 'unavailable' || normalized == 'booked');
+                    return GestureDetector(
+                      onTap: isAvailable ? () => setState(() => _selectedTime = time) : null,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 150),
+                        height: 50,
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.white
+                              : (isAvailable ? const Color(0xFF1A1A1A) : const Color(0xFF121212)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected ? Colors.white : Colors.white10,
+                            width: isSelected ? 2 : 1,
+                          ),
                         ),
-                        boxShadow: isSelected
-                            ? [
-                                BoxShadow(
-                                  color: Colors.white.withOpacity(0.3),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 6),
-                                ),
-                              ]
-                            : null,
-                      ),
-                      child: Center(
-                        child: Text(
-                          time,
-                          style: TextStyle(
-                            color: isSelected ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                        child: Center(
+                          child: Text(
+                            time,
+                            style: TextStyle(
+                              color: isSelected
+                                  ? Colors.black
+                                  : (isAvailable ? Colors.white : Colors.white38),
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                }).toList(),
+                    );
+                  },
+                ),
               ),
             const SizedBox(height: 32),
 
@@ -278,18 +265,18 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                         );
                         return;
                       }
-                      if (_selectedService == null) {
+                      if (_defaultService == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Select a service.')),
+                          const SnackBar(content: Text('No haircut service configured.')),
                         );
                         return;
                       }
 
-                      final serviceId = _selectedService!['service_id'] as int;
-                      final price = double.tryParse(_selectedService!['base_price']?.toString() ?? '') ?? 0;
+                      final serviceId = _defaultService!['service_id'] as int;
+                      final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
 
                       final startTime = _selectedTime ?? '';
-                      final duration = int.tryParse(_selectedService!['base_duration']?.toString() ?? '') ?? 0;
+                      final duration = int.tryParse(_defaultService!['base_duration']?.toString() ?? '') ?? 0;
                       final endTime = _addMinutes(startTime, duration);
 
                       final response = await http.post(
@@ -322,6 +309,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           date: _formatDisplayDate(widget.selectedDate),
                           time: _selectedTime ?? '',
                           amount: price.round(),
+                          haircutName: UserSession.selectedStyleName ?? 'Haircut',
                         ),
                       ));
                     }
@@ -372,5 +360,40 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     final endHour = (total ~/ 60) % 24;
     final endMinute = total % 60;
     return '${endHour.toString().padLeft(2, '0')}:${endMinute.toString().padLeft(2, '0')}:00';
+  }
+
+  List<Map<String, dynamic>> _buildDefaultSlots() {
+    final times = <String>[];
+    for (var hour = 9; hour <= 18; hour++) {
+      times.add('${hour.toString().padLeft(2, '0')}:00');
+    }
+    return times
+        .map((time) => {
+              'slot_time': time,
+              'status': 'Available',
+            })
+        .toList();
+  }
+
+  List<Map<String, dynamic>> _normalizeSlots(List<Map<String, dynamic>> slots) {
+    final Map<String, Map<String, dynamic>> byTime = {};
+    for (final slot in slots) {
+      final time = slot['slot_time']?.toString() ?? '';
+      if (time.isEmpty) {
+        continue;
+      }
+      final status = slot['status']?.toString() ?? 'Available';
+      if (!byTime.containsKey(time)) {
+        byTime[time] = slot;
+      } else {
+        final existing = byTime[time];
+        final existingStatus = existing?['status']?.toString() ?? 'Available';
+        if (existingStatus.toLowerCase() == 'available' && status.toLowerCase() != 'available') {
+          byTime[time] = slot;
+        }
+      }
+    }
+    final sortedKeys = byTime.keys.toList()..sort();
+    return sortedKeys.map((time) => byTime[time]!).toList();
   }
 }

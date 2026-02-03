@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
-import 'ai_face_scan_page.dart';
+import '../kiosk/kiosk_home_page.dart';
+import 'saved_haircuts_page.dart';
+import 'haircuts_list_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -23,15 +27,33 @@ class _DashboardPageState extends State<DashboardPage> {
   int _selectedTab = 0; // 0 = Recommended, 1 = Trendy
   int _selectedIndex = 0; // Home tab
 
+  bool _showWelcome = true;
+  Timer? _welcomeTimer;
+
   List<Map<String, dynamic>> _recommendedStyles = [];
   List<Map<String, dynamic>> _trendyStyles = [];
   bool _loading = true;
   String? _error;
+  final Map<String, Future<Uint8List>> _webImageCache = {};
 
   @override
   void initState() {
     super.initState();
     _loadStyles();
+    _welcomeTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _showWelcome = false;
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _welcomeTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadStyles() async {
@@ -39,6 +61,11 @@ class _DashboardPageState extends State<DashboardPage> {
       _loading = true;
       _error = null;
     });
+
+    final hasScan = UserSession.lastRecommendations.isNotEmpty;
+    final scanMapped = hasScan
+        ? UserSession.lastRecommendations.map(_mapVariant).toList()
+        : <Map<String, dynamic>>[];
 
     try {
       final response = await http.post(
@@ -50,7 +77,10 @@ class _DashboardPageState extends State<DashboardPage> {
       final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
       if (response.statusCode != 200) {
         setState(() {
-          _error = data['error']?.toString() ?? 'Failed to load hairstyles.';
+          final details = data['details']?.toString();
+          _error = details != null && details.isNotEmpty
+              ? '${data['error']?.toString() ?? 'Failed to load hairstyles.'} ($details)'
+              : (data['error']?.toString() ?? 'Failed to load hairstyles.');
           _loading = false;
         });
         return;
@@ -63,8 +93,13 @@ class _DashboardPageState extends State<DashboardPage> {
       final mapped = variants.map(_mapVariant).toList();
 
       setState(() {
-        _recommendedStyles = mapped.take(6).toList();
-        _trendyStyles = mapped.length > 6 ? mapped.skip(6).toList() : [];
+        if (hasScan) {
+          _recommendedStyles = scanMapped;
+          _trendyStyles = mapped;
+        } else {
+          _recommendedStyles = mapped.take(6).toList();
+          _trendyStyles = mapped.length > 6 ? mapped.skip(6).toList() : [];
+        }
         _loading = false;
       });
     } catch (e) {
@@ -78,6 +113,14 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     final styles = _selectedTab == 0 ? _recommendedStyles : _trendyStyles;
+    final faceShape = UserSession.lastScan?['faceShape']?.toString();
+    final hairTexture = UserSession.lastScan?['hairTexture']?.toString();
+    final bulletFace = (faceShape != null && faceShape.isNotEmpty)
+      ? 'Compliments your ${faceShape.toLowerCase()} face shape'
+      : 'Compliments your face shape';
+    final bulletTexture = (hairTexture != null && hairTexture.isNotEmpty)
+      ? 'Matches your ${hairTexture.toLowerCase()} hair texture'
+      : 'Matches your hair texture';
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -94,40 +137,52 @@ class _DashboardPageState extends State<DashboardPage> {
             const SizedBox(height: 12),
             
             // Welcome Card
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                UserSession.fullName != null ? 'Welcome ${UserSession.fullName}' : 'Welcome',
-                textAlign: TextAlign.left,
-                style: TextStyle(
-                  color: Colors.black,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.3,
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-            
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-              decoration: const BoxDecoration(
-                color: Colors.transparent,
-              ),
-              child: const Text(
-                'Choose Your Style',
-                style: TextStyle(
+            if (_showWelcome) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
                   color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
+                  borderRadius: BorderRadius.circular(20),
                 ),
+                child: Text(
+                  UserSession.fullName != null ? 'Welcome ${UserSession.fullName}' : 'Welcome',
+                  textAlign: TextAlign.left,
+                  style: const TextStyle(
+                    color: Colors.black,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 32),
+            ],
+            
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Choose Your Style',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const HaircutsListPage()),
+                      );
+                    },
+                    icon: const Icon(Icons.folder_open, color: Colors.white),
+                    tooltip: 'Haircut Library',
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -250,12 +305,12 @@ class _DashboardPageState extends State<DashboardPage> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  const Column(
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _BulletPoint('Compliments your oval face shape'),
+                      _BulletPoint(bulletFace),
                       SizedBox(height: 12),
-                      _BulletPoint('Matches your hair texture'),
+                      _BulletPoint(bulletTexture),
                       SizedBox(height: 12),
                       _BulletPoint('Low maintenance styling'),
                     ],
@@ -280,11 +335,11 @@ class _DashboardPageState extends State<DashboardPage> {
             );
           } else if (index == 2) {
             Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+              MaterialPageRoute(builder: (_) => const KioskHomePage()),
             );
           } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Placeholder tab - suggest: Saved styles or Notifications')),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
             );
           } else if (index == 4) {
             showAppMenuSheet(context);
@@ -315,22 +370,27 @@ class _DashboardPageState extends State<DashboardPage> {
           children: [
             // Image with overlay
             Expanded(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                  image: imageUrl.isNotEmpty
-                      ? DecorationImage(image: NetworkImage(imageUrl), fit: BoxFit.cover)
-                      : null,
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
-                    gradient: LinearGradient(
-                      begin: Alignment.bottomCenter,
-                      end: Alignment.topCenter,
-                      colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+              child: ClipRRect(
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(12), topRight: Radius.circular(12)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (imageUrl.isNotEmpty)
+                      kIsWeb
+                          ? _buildWebImage(imageUrl)
+                          : Image(image: _buildImageProvider(imageUrl), fit: BoxFit.cover)
+                    else
+                      Container(color: const Color(0xFF111111)),
+                    Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.bottomCenter,
+                          end: Alignment.topCenter,
+                          colors: [Colors.black.withOpacity(0.3), Colors.transparent],
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -344,7 +404,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   const SizedBox(height: 4),
                   Text(style['description']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3)),
                   const SizedBox(height: 8),
-                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFF37022), fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFA99941), fontSize: 12, fontWeight: FontWeight.w600)),
                 ],
               ),
             ),
@@ -356,17 +416,59 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
+    final rawFront = variant['front_view_url']?.toString() ?? '';
+    final rawSide = variant['side_view_url']?.toString() ?? '';
+    final rawBack = variant['back_view_url']?.toString() ?? '';
     return {
       'name': variant['style_name']?.toString() ?? 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
-      'image': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
+      'image': _normalizeImageUrl(rawFront),
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
-      'frontViewUrl': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
-      'sideViewUrl': ApiConfig.resolveImageUrl(variant['side_view_url']?.toString() ?? ''),
-      'backViewUrl': ApiConfig.resolveImageUrl(variant['back_view_url']?.toString() ?? ''),
+      'frontViewUrl': _normalizeImageUrl(rawFront),
+      'sideViewUrl': _normalizeImageUrl(rawSide),
+      'backViewUrl': _normalizeImageUrl(rawBack),
       'variantId': variant['variant_id'],
     };
+  }
+
+  String _normalizeImageUrl(String url) {
+    if (url.startsWith('assets/')) {
+      return url;
+    }
+    return ApiConfig.resolveImageUrl(url);
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
+    );
   }
 
   String _buildDetails(Map<String, dynamic> variant) {
