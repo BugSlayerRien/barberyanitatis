@@ -224,9 +224,9 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
       children: [
         _viewButton('Front', 'front'),
         const SizedBox(width: 8),
-        _viewButton('Side', 'side'),
+        _viewButton('Right', 'right'),
         const SizedBox(width: 8),
-        _viewButton('Back', 'back'),
+        _viewButton('Left', 'left'),
       ],
     );
   }
@@ -403,9 +403,9 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     }
     final key = _selectedView == 'front'
         ? 'front_view_url'
-        : _selectedView == 'side'
-            ? 'side_view_url'
-            : 'back_view_url';
+      : _selectedView == 'right'
+        ? 'side_view_url'
+        : 'back_view_url';
     return _resolveImage(selected[key]) ?? _resolveImage(widget.imageUrl);
   }
 
@@ -457,7 +457,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
       'name': recommendation['style_name']?.toString() ?? 'Style',
       'description': 'AI recommended based on your scan',
       'image': _resolveImage(recommendation['front_view_url']) ?? '',
-      'details': 'Face shape: ${recommendation['face_shape'] ?? 'N/A'}\nHair texture: ${recommendation['hair_texture'] ?? 'N/A'}',
+      'details': 'Great for your hair texture and face shape.\nFace shape: ${recommendation['face_shape'] ?? 'N/A'}\nHair texture: ${recommendation['hair_texture'] ?? 'N/A'}',
       'rating': _scoreToRating(recommendation['confidence_score']),
       'frontViewUrl': _resolveImage(recommendation['front_view_url']) ?? '',
       'sideViewUrl': _resolveImage(recommendation['side_view_url']) ?? '',

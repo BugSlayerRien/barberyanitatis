@@ -226,8 +226,6 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                               const SizedBox(height: 8),
                               Row(
                                 children: [
-                                  const Icon(Icons.star, color: Color(0xFFA99941), size: 18),
-                                  const SizedBox(width: 6),
                                   Text(
                                     widget.style['rating']?.toString() ?? '★★★★★',
                                     style: const TextStyle(color: Color(0xFFA99941), fontSize: 14, fontWeight: FontWeight.w600),

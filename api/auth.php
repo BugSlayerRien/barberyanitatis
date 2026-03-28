@@ -31,7 +31,8 @@ try {
 
         $stmt = $pdo->prepare(
             'INSERT INTO users (email, password_hash, full_name, phone, gender)
-             VALUES (:email, :password_hash, :full_name, :phone, :gender)'
+             VALUES (:email, :password_hash, :full_name, :phone, :gender)
+             RETURNING user_id'
         );
         $stmt->execute([
             ':email' => $email,
@@ -40,8 +41,7 @@ try {
             ':phone' => $phone !== '' ? $phone : null,
             ':gender' => $gender !== '' ? $gender : 'Male',
         ]);
-
-        $userId = (int)$pdo->lastInsertId();
+        $userId = (int)$stmt->fetchColumn();
 
         json_response([
             'message' => 'Registration successful',

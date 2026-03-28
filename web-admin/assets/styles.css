@@ -76,10 +76,16 @@ body {
   text-align: left;
   cursor: pointer;
   font-weight: 600;
+  transition: all 0.2s ease;
 }
 
 .nav button.active {
   background: var(--panel);
+  border-color: var(--border);
+}
+
+.nav button:hover {
+  background: var(--panel-2);
   border-color: var(--border);
 }
 
@@ -128,6 +134,13 @@ body {
   border: 1px solid var(--border);
   border-radius: 14px;
   padding: 16px;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
+  transform: translateY(-2px);
 }
 
 .card.gradient {
@@ -148,6 +161,51 @@ body {
 .card .meta {
   font-size: 11px;
   margin-top: 6px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  align-items: end;
+}
+
+.input,
+.select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #111;
+  color: var(--text);
+}
+
+.select[multiple] {
+  min-height: 90px;
+}
+
+.btn {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.btn.secondary {
+  background: transparent;
+}
+
+.btn:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  background: #1f1f1f;
+}
+
+.btn.secondary:hover {
+  background: #161616;
 }
 
 .meta.success {
@@ -214,6 +272,16 @@ body {
   text-align: left;
   border-bottom: 1px solid var(--border);
   font-size: 12px;
+}
+
+.table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.input:focus,
+.select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .tag {

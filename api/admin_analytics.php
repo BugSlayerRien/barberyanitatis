@@ -57,8 +57,8 @@ try {
         "SELECT COALESCE(SUM(total_amount), 0)
          FROM payments
          WHERE payment_status = 'Paid'
-           AND YEAR(created_at) = YEAR(CURRENT_DATE())
-           AND MONTH(created_at) = MONTH(CURRENT_DATE())"
+            AND created_at >= date_trunc('month', CURRENT_DATE)
+            AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'"
     );
     $monthlyRevenueStmt->execute();
     $monthlyRevenue = (float)$monthlyRevenueStmt->fetchColumn();

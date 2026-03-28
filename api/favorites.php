@@ -68,10 +68,11 @@ try {
 
         $insertStmt = $pdo->prepare(
             'INSERT INTO user_favorites (user_id, variant_id, barber_id)
-             VALUES (:user_id, :variant_id, NULL)'
+             VALUES (:user_id, :variant_id, NULL)
+             RETURNING favorite_id'
         );
         $insertStmt->execute([':user_id' => $userID, ':variant_id' => $variantID]);
-        json_response(['message' => 'Saved', 'favoriteID' => (int)$pdo->lastInsertId()], 201);
+        json_response(['message' => 'Saved', 'favoriteID' => (int)$insertStmt->fetchColumn()], 201);
     }
 
     if ($action === 'remove') {

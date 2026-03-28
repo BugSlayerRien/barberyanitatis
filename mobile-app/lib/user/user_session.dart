@@ -10,6 +10,9 @@ class UserSession {
   static Map<String, dynamic>? lastScan;
   static List<Map<String, dynamic>> lastRecommendations = [];
 
+  static String? quizGender;
+  static String? quizHairTexture;
+
   static void clear() {
     userId = null;
     fullName = null;
@@ -19,5 +22,7 @@ class UserSession {
     selectedVariantId = null;
     lastScan = null;
     lastRecommendations = [];
+    quizGender = null;
+    quizHairTexture = null;
   }
 }

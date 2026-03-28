@@ -21,7 +21,7 @@ function set_setting(PDO $pdo, string $key, string $value): void
     $stmt = $pdo->prepare(
         'INSERT INTO system_settings (setting_key, setting_value)
          VALUES (:key, :value)
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)'
+         ON CONFLICT (setting_key) DO UPDATE SET setting_value = EXCLUDED.setting_value'
     );
     $stmt->execute([':key' => $key, ':value' => $value]);
 }
@@ -103,13 +103,13 @@ try {
             $stmt = $pdo->prepare(
                 'INSERT INTO services (service_code, service_name, description, base_duration, base_price, category, is_active)
                  VALUES (:service_code, :service_name, :description, :base_duration, :base_price, :category, :is_active)
-                 ON DUPLICATE KEY UPDATE
-                   service_name = VALUES(service_name),
-                   description = VALUES(description),
-                   base_duration = VALUES(base_duration),
-                   base_price = VALUES(base_price),
-                   category = VALUES(category),
-                   is_active = VALUES(is_active)'
+                                 ON CONFLICT (service_code) DO UPDATE
+                                     SET service_name = EXCLUDED.service_name,
+                                             description = EXCLUDED.description,
+                                             base_duration = EXCLUDED.base_duration,
+                                             base_price = EXCLUDED.base_price,
+                                             category = EXCLUDED.category,
+                                             is_active = EXCLUDED.is_active'
             );
 
             $rowCount = 0;

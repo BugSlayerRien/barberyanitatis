@@ -20,7 +20,7 @@ try {
         $bestStmt = $pdo->prepare(
             "SELECT barber_id, slot_date, COUNT(*) AS available_count
              FROM time_slots
-             WHERE status = 'Available' AND slot_date >= CURDATE()
+               WHERE status = 'Available' AND slot_date >= CURRENT_DATE
              GROUP BY barber_id, slot_date
              ORDER BY available_count DESC, slot_date ASC
              LIMIT 1"
@@ -28,7 +28,40 @@ try {
         $bestStmt->execute();
         $best = $bestStmt->fetch();
         if (!$best) {
-            json_response(['error' => 'No available slots found'], 404);
+            $barberStmt = $pdo->prepare('SELECT barber_id, full_name, specialty FROM barbers WHERE is_active = 1 ORDER BY barber_id ASC LIMIT 1');
+            $barberStmt->execute();
+            $barber = $barberStmt->fetch();
+            if (!$barber) {
+                json_response(['error' => 'No available slots found'], 404);
+            }
+
+            $now = new DateTimeImmutable('now');
+            $startHour = 9;
+            $endHour = 18;
+            $hour = (int)$now->format('G');
+
+            if ($hour < $startHour) {
+                $slotDate = $now->format('Y-m-d');
+                $slotTime = sprintf('%02d:00:00', $startHour);
+            } elseif ($hour >= $endHour) {
+                $slotDate = $now->modify('+1 day')->format('Y-m-d');
+                $slotTime = sprintf('%02d:00:00', $startHour);
+            } else {
+                $slotDate = $now->format('Y-m-d');
+                $slotTime = sprintf('%02d:00:00', $hour + 1);
+            }
+
+            json_response([
+                'suggestion' => [
+                    'barberID' => (int)$barber['barber_id'],
+                    'barberName' => $barber['full_name'] ?? 'Barber',
+                    'specialty' => $barber['specialty'] ?? null,
+                    'slotDate' => $slotDate,
+                    'slotTime' => $slotTime,
+                    'availableCount' => 0,
+                    'isFallback' => true,
+                ],
+            ]);
         }
 
         $timeStmt = $pdo->prepare(
@@ -57,6 +90,7 @@ try {
                 'slotDate' => $best['slot_date'],
                 'slotTime' => $timeRow['slot_time'],
                 'availableCount' => (int)$best['available_count'],
+                'isFallback' => false,
             ],
         ]);
     }

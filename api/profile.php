@@ -21,7 +21,7 @@ function column_exists(PDO $pdo, string $table, string $column): bool
 {
     $stmt = $pdo->prepare(
         'SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
-         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table AND COLUMN_NAME = :column'
+         WHERE table_schema = current_schema() AND table_name = :table AND column_name = :column'
     );
     $stmt->execute([':table' => $table, ':column' => $column]);
     return (int)$stmt->fetchColumn() > 0;
@@ -36,6 +36,9 @@ try {
         $fullName = trim((string)($input['fullName'] ?? ''));
         $phone = trim((string)($input['phone'] ?? ''));
         $imageBase64 = trim((string)($input['profileImageBase64'] ?? ''));
+        $gender = normalize_gender(isset($input['gender']) ? (string)$input['gender'] : null);
+        $hairTextureProvided = array_key_exists('hairTexture', $input);
+        $hairTexture = normalize_hair_texture(isset($input['hairTexture']) ? (string)$input['hairTexture'] : null);
 
         $userStmt = $pdo->prepare('SELECT full_name, email, phone' . ($hasProfileImage ? ', profile_image' : '') . ' FROM users WHERE user_id = :user_id');
         $userStmt->execute([':user_id' => $userID]);
@@ -86,16 +89,50 @@ try {
                 ':user_id' => $userID,
             ]);
         }
+
+        if ($gender !== null) {
+            $genderStmt = $pdo->prepare('UPDATE users SET gender = :gender WHERE user_id = :user_id');
+            $genderStmt->execute([
+                ':gender' => $gender,
+                ':user_id' => $userID,
+            ]);
+        }
+
+        if ($hairTexture !== null || $hairTextureProvided) {
+            $profileExistsStmt = $pdo->prepare('SELECT profile_id FROM user_profiles WHERE user_id = :user_id');
+            $profileExistsStmt->execute([':user_id' => $userID]);
+            $profileExists = $profileExistsStmt->fetchColumn();
+
+            if ($profileExists) {
+                $profileUpdateStmt = $pdo->prepare('UPDATE user_profiles SET hair_texture = :hair_texture WHERE user_id = :user_id');
+                $profileUpdateStmt->execute([
+                    ':hair_texture' => $hairTexture,
+                    ':user_id' => $userID,
+                ]);
+            } else {
+                $profileInsertStmt = $pdo->prepare(
+                    'INSERT INTO user_profiles (user_id, hair_texture, created_at) VALUES (:user_id, :hair_texture, NOW())'
+                );
+                $profileInsertStmt->execute([
+                    ':user_id' => $userID,
+                    ':hair_texture' => $hairTexture,
+                ]);
+            }
+        }
     }
 
     $userStmt = $pdo->prepare(
-        'SELECT full_name, email, phone, created_at' . ($hasProfileImage ? ', profile_image' : '') . ' FROM users WHERE user_id = :user_id'
+        'SELECT full_name, email, phone, created_at, gender' . ($hasProfileImage ? ', profile_image' : '') . ' FROM users WHERE user_id = :user_id'
     );
     $userStmt->execute([':user_id' => $userID]);
     $user = $userStmt->fetch();
     if (!$user) {
         json_response(['error' => 'User not found'], 404);
     }
+
+    $profileStmt = $pdo->prepare('SELECT hair_texture, hair_density, hair_length FROM user_profiles WHERE user_id = :user_id');
+    $profileStmt->execute([':user_id' => $userID]);
+    $profileRow = $profileStmt->fetch();
 
     $completedStmt = $pdo->prepare("SELECT COUNT(*) FROM appointments WHERE user_id = :user_id AND status = 'Completed'");
     $completedStmt->execute([':user_id' => $userID]);
@@ -113,6 +150,10 @@ try {
             'fullName' => $user['full_name'] ?? '',
             'email' => $user['email'] ?? '',
             'phone' => $user['phone'] ?? '',
+            'gender' => $user['gender'] ?? null,
+            'hairTexture' => $profileRow['hair_texture'] ?? null,
+            'hairDensity' => $profileRow['hair_density'] ?? null,
+            'hairLength' => $profileRow['hair_length'] ?? null,
             'accountAge' => $ageLabel,
             'haircutsDone' => $completedCount,
             'profileImage' => $hasProfileImage ? ($user['profile_image'] ?? '') : '',
@@ -120,4 +161,44 @@ try {
     ]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+}
+
+function normalize_gender(?string $value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    $value = trim($value);
+    if ($value === '') {
+        return null;
+    }
+    $lower = strtolower($value);
+    if (in_array($lower, ['male', 'boy'], true)) {
+        return 'Male';
+    }
+    if (in_array($lower, ['female', 'girl'], true)) {
+        return 'Female';
+    }
+    if (in_array($lower, ['other', 'prefer_not', 'prefer not to tell'], true)) {
+        return 'Other';
+    }
+    return null;
+}
+
+function normalize_hair_texture(?string $value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    $value = trim($value);
+    if ($value === '') {
+        return null;
+    }
+    $allowed = ['Straight', 'Wavy', 'Curly', 'Coily'];
+    foreach ($allowed as $item) {
+        if (strcasecmp($item, $value) === 0) {
+            return $item;
+        }
+    }
+    return null;
 }

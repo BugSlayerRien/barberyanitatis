@@ -10,13 +10,14 @@ try {
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
         $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_active = 1')->fetchColumn();
     $pendingAppointments = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE status = 'Scheduled'")->fetchColumn();
+    $walkinsToday = (int)$pdo->query('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE')->fetchColumn();
 
     $monthlyRevenueStmt = $pdo->prepare(
                 "SELECT COALESCE(SUM(total_amount), 0)
          FROM payments
                  WHERE payment_status = 'Paid'
-                     AND YEAR(created_at) = YEAR(CURRENT_DATE())
-                     AND MONTH(created_at) = MONTH(CURRENT_DATE())"
+                   AND created_at >= date_trunc('month', CURRENT_DATE)
+                   AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'"
     );
     $monthlyRevenueStmt->execute();
     $monthlyRevenue = (float)$monthlyRevenueStmt->fetchColumn();
@@ -31,14 +32,33 @@ try {
     $recentAppointmentsStmt->execute();
     $recentAppointments = $recentAppointmentsStmt->fetchAll();
 
-    $activities = array_map(function ($row) {
-        return [
-            'icon' => '📅',
-            'title' => 'New appointment created',
-            'description' => $row['full_name'] . ' booked an appointment',
-            'time' => $row['created_at'],
-        ];
-    }, $recentAppointments);
+    $recentWalkinsStmt = $pdo->prepare(
+        "SELECT queue_number, created_at
+         FROM walkin_queue
+         ORDER BY created_at DESC
+         LIMIT 5"
+    );
+    $recentWalkinsStmt->execute();
+    $recentWalkins = $recentWalkinsStmt->fetchAll();
+
+    $activities = array_merge(
+        array_map(function ($row) {
+            return [
+                'icon' => '📅',
+                'title' => 'New appointment created',
+                'description' => $row['full_name'] . ' booked an appointment',
+                'time' => $row['created_at'],
+            ];
+        }, $recentAppointments),
+        array_map(function ($row) {
+            return [
+                'icon' => '🧾',
+                'title' => 'New walk-in queued',
+                'description' => 'Walk-in ' . $row['queue_number'] . ' added to queue',
+                'time' => $row['created_at'],
+            ];
+        }, $recentWalkins)
+    );
 
     $response = [
         'stats' => [
@@ -46,6 +66,7 @@ try {
             ['title' => 'Active Services', 'value' => (string)$activeServices, 'change' => '', 'changeType' => 'success'],
             ['title' => 'Monthly Revenue', 'value' => '₱' . number_format($monthlyRevenue, 2), 'change' => '', 'changeType' => 'success'],
             ['title' => 'Pending Appointments', 'value' => (string)$pendingAppointments, 'change' => '', 'changeType' => 'warning'],
+            ['title' => 'Walk-ins Today', 'value' => (string)$walkinsToday, 'change' => '', 'changeType' => 'info'],
         ],
         'activities' => $activities,
     ];

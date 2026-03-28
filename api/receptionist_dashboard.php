@@ -7,11 +7,11 @@ require_once __DIR__ . '/db.php';
 try {
     $pdo = get_db_connection();
 
-    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE()');
+    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE');
     $walkInsTodayStmt->execute();
     $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
 
-    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE()');
+    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE');
     $appointmentsTodayStmt->execute();
     $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
 
@@ -24,8 +24,8 @@ try {
     $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
 
     $appointmentsStmt = $pdo->prepare(
-        'SELECT a.appointment_id, u.full_name AS name,
-                GROUP_CONCAT(s.service_name SEPARATOR ", ") AS service,
+        "SELECT a.appointment_id, u.full_name AS name,
+                string_agg(s.service_name, ', ' ORDER BY s.service_name) AS service,
                 a.start_time AS time,
                 SUM(s.base_duration) AS duration,
                 SUM(ad.final_price) AS price,
@@ -36,25 +36,25 @@ try {
          JOIN barbers b ON a.barber_id = b.barber_id
          JOIN appointment_details ad ON a.appointment_id = ad.appointment_id
          JOIN services s ON ad.service_id = s.service_id
-         WHERE a.appointment_date = CURRENT_DATE()
+         WHERE a.appointment_date = CURRENT_DATE
          GROUP BY a.appointment_id, u.full_name, a.start_time, a.status, b.full_name
-         ORDER BY a.start_time ASC'
+         ORDER BY a.start_time ASC"
     );
     $appointmentsStmt->execute();
     $appointments = $appointmentsStmt->fetchAll();
 
     $walkinsStmt = $pdo->prepare(
-        'SELECT wq.queue_id,
-                CONCAT("Walk-in #", RIGHT(wq.queue_number, 3)) AS name,
-                GROUP_CONCAT(s.service_name SEPARATOR ", ") AS service,
+        "SELECT wq.queue_id,
+                CONCAT('Walk-in #', RIGHT(wq.queue_number, 3)) AS name,
+                string_agg(s.service_name, ', ' ORDER BY s.service_name) AS service,
                 wq.wait_time_minutes,
                 wq.status
          FROM walkin_queue wq
          JOIN walkin_service_details wsd ON wq.queue_id = wsd.queue_id
          JOIN services s ON wsd.service_id = s.service_id
-         WHERE DATE(wq.created_at) = CURRENT_DATE()
+         WHERE DATE(wq.created_at) = CURRENT_DATE
          GROUP BY wq.queue_id, wq.queue_number, wq.wait_time_minutes, wq.status
-         ORDER BY wq.queue_id ASC'
+         ORDER BY wq.queue_id ASC"
     );
     $walkinsStmt->execute();
     $walkins = array_map(function ($row) {

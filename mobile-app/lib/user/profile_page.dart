@@ -25,6 +25,8 @@ class _ProfilePageState extends State<ProfilePage> {
   String _phone = '';
   String _accountAge = '';
   int _haircutsDone = 0;
+  String _gender = '';
+  String _hairTexture = '';
   String _profileImageUrl = '';
   XFile? _profileImage;
   late TextEditingController _nameController;
@@ -74,6 +76,8 @@ class _ProfilePageState extends State<ProfilePage> {
         _email = profile['email']?.toString() ?? UserSession.email ?? '';
         _phone = profile['phone']?.toString() ?? '';
         _accountAge = profile['accountAge']?.toString() ?? '';
+        _gender = profile['gender']?.toString() ?? '';
+        _hairTexture = profile['hairTexture']?.toString() ?? '';
         _haircutsDone = profile['haircutsDone'] is int
             ? profile['haircutsDone'] as int
             : int.tryParse('${profile['haircutsDone']}') ?? 0;
@@ -143,11 +147,22 @@ class _ProfilePageState extends State<ProfilePage> {
                 ),
               ),
               const SizedBox(height: 24),
+              Text(
+                _fullName.isNotEmpty ? _fullName : 'Customer',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+              ),
+              const SizedBox(height: 10),
+              _buildTierBadge(),
+              const SizedBox(height: 18),
 
               _editCard('Full Name', _nameController, hint: 'Enter full name'),
               const SizedBox(height: 16),
 
               _infoCard('Email', _email.isNotEmpty ? _email : '—'),
+              const SizedBox(height: 16),
+              _infoCard('Gender', _formatGender(_gender)),
+              const SizedBox(height: 16),
+              _infoCard('Hair Texture', _formatHairTexture(_hairTexture)),
               const SizedBox(height: 16),
               _editCard('Mobile Number', _phoneController, hint: 'Enter mobile number'),
               const SizedBox(height: 16),
@@ -259,6 +274,91 @@ class _ProfilePageState extends State<ProfilePage> {
           const SizedBox(height: 10),
           Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
         ],
+      ),
+    );
+  }
+
+  String _formatGender(String value) {
+    if (value.isEmpty) {
+      return 'Prefer not to tell';
+    }
+    if (value.toLowerCase() == 'other') {
+      return 'Prefer not to tell';
+    }
+    return value;
+  }
+
+  String _formatHairTexture(String value) {
+    if (value.isEmpty) {
+      return 'Prefer not to tell';
+    }
+    return value;
+  }
+
+  String _tierLabel(int count) {
+    if (count >= 20) return 'Platinum';
+    if (count >= 10) return 'Gold';
+    if (count >= 5) return 'Silver';
+    if (count >= 2) return 'Bronze';
+    return 'Rookie';
+  }
+
+  Color _tierColor(String tier) {
+    switch (tier) {
+      case 'Platinum':
+        return const Color(0xFFE5E4E2);
+      case 'Gold':
+        return const Color(0xFFA99941);
+      case 'Silver':
+        return const Color(0xFFC0C0C0);
+      case 'Bronze':
+        return const Color(0xFFCD7F32);
+      default:
+        return Colors.white70;
+    }
+  }
+
+  Widget _buildTierBadge() {
+    final tier = _tierLabel(_haircutsDone);
+    final color = _tierColor(tier);
+    return InkWell(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            title: const Text('Loyalty Badge', style: TextStyle(color: Colors.white)),
+            content: Text(
+              'Tier: $tier\nCompleted haircuts: $_haircutsDone',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close', style: TextStyle(color: Colors.white)),
+              ),
+            ],
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified, color: color, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              tier,
+              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
+            ),
+          ],
+        ),
       ),
     );
   }

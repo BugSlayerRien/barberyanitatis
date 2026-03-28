@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 class QueueScreen extends StatelessWidget {
-  const QueueScreen({super.key});
+  final String queueNumber;
+
+  const QueueScreen({super.key, required this.queueNumber});
 
   @override
   Widget build(BuildContext context) {
@@ -29,12 +31,12 @@ class QueueScreen extends StatelessWidget {
                 border: Border.all(color: Colors.white10),
               ),
               child: Column(
-                children: const [
-                  Text('Queue Number', style: TextStyle(color: Colors.white70)),
-                  SizedBox(height: 8),
-                  Text('A-012', style: TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
-                  SizedBox(height: 8),
-                  Text('Estimated wait: 20 mins', style: TextStyle(color: Colors.white54)),
+                children: [
+                  const Text('Queue Number', style: TextStyle(color: Colors.white70)),
+                  const SizedBox(height: 8),
+                  Text(queueNumber, style: const TextStyle(color: Colors.white, fontSize: 40, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  const Text('Estimated wait: pending', style: TextStyle(color: Colors.white54)),
                 ],
               ),
             ),

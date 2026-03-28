@@ -48,6 +48,6 @@ WHAT WORKS RIGHT NOW
 
 WHAT IS NEXT
 - Import /database/schema.sql into your MySQL server.
-- Set DB_HOST, DB_NAME, DB_USER, DB_PASS on your PHP server.
+- Set DB_URL in /.env for Supabase/PostgreSQL (or DB_HOST/DB_NAME/DB_USER/DB_PASS for MySQL).
 - Update /api/auth.php and /api/booking.php if you need extra fields.
 - Connect the web and mobile app to the real API instead of fallback data.

@@ -65,7 +65,8 @@ try {
 
         $stmt = $pdo->prepare(
             'INSERT INTO appointments (booking_code, user_id, barber_id, appointment_date, start_time, end_time)
-             VALUES (:booking_code, :user_id, :barber_id, :appointment_date, :start_time, :end_time)'
+             VALUES (:booking_code, :user_id, :barber_id, :appointment_date, :start_time, :end_time)
+             RETURNING appointment_id'
         );
         $stmt->execute([
             ':booking_code' => $bookingCode,
@@ -75,8 +76,7 @@ try {
             ':start_time' => $startTime,
             ':end_time' => $endTime,
         ]);
-
-        $appointmentID = (int)$pdo->lastInsertId();
+        $appointmentID = (int)$stmt->fetchColumn();
 
         $priceStmt = $pdo->prepare('SELECT base_price FROM services WHERE service_id = :service_id');
         $linkStmt = $pdo->prepare(

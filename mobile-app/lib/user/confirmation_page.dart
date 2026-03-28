@@ -36,6 +36,7 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
   String? _generateError;
   final Map<String, Future<Uint8List>> _webImageCache = {};
   bool _booking = false;
+  bool _autoBookingPrompted = false;
 
   @override
   void initState() {
@@ -57,6 +58,10 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _generateAiPreview();
+      if (!_autoBookingPrompted) {
+        _autoBookingPrompted = true;
+        _showAutoBookingModal();
+      }
     });
   }
 
@@ -527,7 +532,9 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
 
       if (!mounted) return;
       if (suggestion == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No available slots found.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No available slots found. Please choose manually.')),
+        );
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
         );
@@ -545,6 +552,7 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
           final slotDate = suggestion['slotDate']?.toString() ?? '';
           final slotTime = suggestion['slotTime']?.toString() ?? '';
           final availableCount = suggestion['availableCount']?.toString() ?? '';
+          final isFallback = suggestion['isFallback'] == true;
           return SafeArea(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -556,6 +564,14 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
                     'Suggested Appointment',
                     style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                   ),
+                  if (isFallback)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'We suggested a standard time because no slots were found yet.',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   _suggestionRow('Barber', barberName),
                   _suggestionRow('Date', slotDate),

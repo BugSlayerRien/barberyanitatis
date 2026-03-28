@@ -228,7 +228,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
         request.files.add(http.MultipartFile.fromBytes(
           'image',
           payload,
-          filename: (file?.name?.isNotEmpty ?? false) ? file!.name : 'scan.jpg',
+          filename: (file?.name.isNotEmpty ?? false) ? file!.name : 'scan.jpg',
         ));
       } else {
         request.files.add(await http.MultipartFile.fromPath('image', file!.path));
@@ -376,7 +376,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
       if (!mounted) return;
       setState(() {
         _aiStatusOk = scanEnabled || tryonConfigured;
-        _aiStatusLabel = 'AI status: ' + (_aiStatusOk == true ? 'ready' : 'limited');
+        _aiStatusLabel = 'AI status: ${_aiStatusOk == true ? 'ready' : 'limited'}';
       });
     } catch (_) {
       if (!mounted) return;
@@ -473,7 +473,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
-                    _isSubmitting ? 'Running scan... ${_statusMessage}' : _statusMessage,
+                    _isSubmitting ? 'Running scan... $_statusMessage' : _statusMessage,
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                 ),

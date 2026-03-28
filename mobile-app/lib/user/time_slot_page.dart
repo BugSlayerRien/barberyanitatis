@@ -203,49 +203,52 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
             else if (_slots.isEmpty)
               const Center(child: Text('No available slots for this date.', style: TextStyle(color: Colors.white70)))
             else
-              SizedBox(
-                height: 260,
-                child: ListView.separated(
-                  itemCount: _slots.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) {
-                    final slot = _slots[index];
-                    final time = slot['slot_time']?.toString() ?? '';
-                    final isSelected = _selectedTime == time;
-                    final status = slot['status']?.toString() ?? 'Available';
-                    final normalized = status.toLowerCase();
-                    final isAvailable = !(normalized == 'holiday' || normalized == 'unavailable' || normalized == 'booked');
-                    return GestureDetector(
-                      onTap: isAvailable ? () => setState(() => _selectedTime = time) : null,
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        height: 50,
-                        decoration: BoxDecoration(
-                          color: isSelected
-                              ? Colors.white
-                              : (isAvailable ? const Color(0xFF1A1A1A) : const Color(0xFF121212)),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isSelected ? Colors.white : Colors.white10,
-                            width: isSelected ? 2 : 1,
-                          ),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 10,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 2.6,
+                ),
+                itemCount: _slots.length,
+                itemBuilder: (context, index) {
+                  final slot = _slots[index];
+                  final time = slot['slot_time']?.toString() ?? '';
+                  final isSelected = _selectedTime == time;
+                  final status = slot['status']?.toString() ?? 'Available';
+                  final normalized = status.toLowerCase();
+                  final isAvailable = !(normalized == 'holiday' || normalized == 'unavailable' || normalized == 'booked');
+                  return GestureDetector(
+                    onTap: isAvailable ? () => setState(() => _selectedTime = time) : null,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 150),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? Colors.white
+                            : (isAvailable ? const Color(0xFF1A1A1A) : const Color(0xFF121212)),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? Colors.white : Colors.white10,
+                          width: isSelected ? 2 : 1,
                         ),
-                        child: Center(
-                          child: Text(
-                            time,
-                            style: TextStyle(
-                              color: isSelected
-                                  ? Colors.black
-                                  : (isAvailable ? Colors.white : Colors.white38),
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                            ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          time,
+                          style: TextStyle(
+                            color: isSelected
+                                ? Colors.black
+                                : (isAvailable ? Colors.white : Colors.white38),
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
                           ),
                         ),
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             const SizedBox(height: 32),
 
@@ -364,8 +367,12 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
 
   List<Map<String, dynamic>> _buildDefaultSlots() {
     final times = <String>[];
-    for (var hour = 9; hour <= 18; hour++) {
-      times.add('${hour.toString().padLeft(2, '0')}:00');
+    const startMinutes = 9 * 60;
+    const endMinutes = 16 * 60 + 30;
+    for (var minutes = startMinutes; minutes <= endMinutes; minutes += 50) {
+      final hour = minutes ~/ 60;
+      final minute = minutes % 60;
+      times.add('${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}');
     }
     return times
         .map((time) => {

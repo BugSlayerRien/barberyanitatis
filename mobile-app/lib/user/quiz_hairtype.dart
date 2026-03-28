@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import 'quiz_upload.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'api_config.dart';
+import 'user_session.dart';
 
 class QuizHairTypePage extends StatefulWidget {
   const QuizHairTypePage({super.key});
@@ -58,7 +62,14 @@ class _QuizHairTypePageState extends State<QuizHairTypePage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _hairType == null ? null : () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizUploadPage())),
+                          onPressed: _hairType == null
+                              ? null
+                              : () async {
+                                  UserSession.quizHairTexture = _hairType;
+                                  await _saveOnboardingProfile();
+                                  if (!mounted) return;
+                                  Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizUploadPage()));
+                                },
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
                           child: const Text('Continue'),
                         ),
@@ -77,7 +88,10 @@ class _QuizHairTypePageState extends State<QuizHairTypePage> {
   Widget _option(String label, String value) {
     final selected = _hairType == value;
     return GestureDetector(
-      onTap: () => setState(() => _hairType = value),
+      onTap: () => setState(() {
+        _hairType = value;
+        UserSession.quizHairTexture = value;
+      }),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
@@ -98,5 +112,26 @@ class _QuizHairTypePageState extends State<QuizHairTypePage> {
         ),
       ),
     );
+  }
+
+  Future<void> _saveOnboardingProfile() async {
+    final userId = UserSession.userId;
+    if (userId == null) {
+      return;
+    }
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/profile.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'update',
+          'userID': userId,
+          'gender': UserSession.quizGender,
+          'hairTexture': UserSession.quizHairTexture,
+        }),
+      );
+    } catch (_) {
+      // Ignore onboarding save errors
+    }
   }
 }

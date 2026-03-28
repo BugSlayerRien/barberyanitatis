@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -349,7 +348,7 @@ class _QuizUploadPageState extends State<QuizUploadPage> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          _isSubmitting ? 'Running scan... ${_statusMessage}' : _statusMessage,
+                          _isSubmitting ? 'Running scan... $_statusMessage' : _statusMessage,
                           style: const TextStyle(color: Colors.white70, fontSize: 12),
                         ),
                       ),

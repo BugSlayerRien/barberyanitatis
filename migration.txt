@@ -1,0 +1,49 @@
+POSTGRESQL MIGRATION - FIRST RUN (FRESH START, NO DATA MIGRATION)
+
+Goal: Move from MySQL to PostgreSQL, keep same tables, start with empty data.
+
+PHASE 0 - Decide and lock scope
+1) Confirm the target PostgreSQL version and hosting (local/dev/staging/prod).
+2) Freeze DB schema changes during the migration window.
+3) Decide if local dev uses Docker or native Postgres.
+
+PHASE 1 - Capture current schema
+4) Export the MySQL schema only (no data).
+	- Example: mysqldump --no-data <db_name> > schema.mysql.sql
+5) Inventory MySQL-specific features in schema.sql (AUTO_INCREMENT, TINYINT, ENUM,
+	ENGINE, CHARACTER SET, COLLATION, ON UPDATE CURRENT_TIMESTAMP, backticks).
+
+PHASE 2 - Convert schema to PostgreSQL
+6) Translate schema to PostgreSQL SQL (manual or tool-based).
+	- Convert AUTO_INCREMENT to SERIAL / GENERATED ALWAYS AS IDENTITY.
+	- Replace TINYINT(1) with BOOLEAN where applicable.
+	- Replace DATETIME with TIMESTAMP (or TIMESTAMPTZ if time zone matters).
+	- Replace ENUM with CHECK constraint or a lookup table.
+	- Remove ENGINE / CHARSET / COLLATION clauses.
+	- Replace backticks with double quotes only if needed.
+7) Create a new PostgreSQL schema file: database/schema.pg.sql
+8) Validate the schema by applying it to a blank PostgreSQL DB.
+
+PHASE 3 - Update backend connection + SQL
+9) Update API DB connection config (driver, host, port, user, password, dbname).
+10) Replace MySQL-specific SQL in PHP files with PostgreSQL-compatible SQL.
+	 - LIMIT / OFFSET differences, date functions, IFNULL -> COALESCE.
+11) Update any queries that rely on MySQL-only behavior (implicit GROUP BY,
+	 backtick identifiers, CONCAT differences).
+
+PHASE 4 - Seed and smoke test (fresh start)
+12) Optionally convert seed.sql into PostgreSQL-compatible format.
+13) Apply schema + seed to PostgreSQL in dev.
+14) Run API smoke tests (auth, booking, services, users).
+
+PHASE 5 - Staging and cutover
+15) Set up staging Postgres and repeat schema + seed.
+16) Update environment variables and deploy API to staging.
+17) Validate end-to-end flows (admin, receptionist, kiosk, mobile).
+18) Cut over production by switching env vars and redeploying API.
+
+DELIVERABLES
+- database/schema.pg.sql (PostgreSQL schema)
+- Updated API DB connection settings
+- Updated SQL in API endpoints
+- Fresh database created on PostgreSQL

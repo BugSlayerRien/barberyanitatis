@@ -89,7 +89,8 @@ try {
 
         $stmt = $pdo->prepare(
             'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, is_active)
-             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :is_active)'
+             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :is_active)
+             RETURNING hairstyle_id'
         );
         $stmt->execute([
             ':style_code' => $styleCode,
@@ -100,8 +101,7 @@ try {
             ':maintenance' => $maintenance !== '' ? $maintenance : 'Medium',
             ':is_active' => $isActive,
         ]);
-
-        json_response(['message' => 'Hairstyle created', 'hairstyleID' => (int)$pdo->lastInsertId()], 201);
+        json_response(['message' => 'Hairstyle created', 'hairstyleID' => (int)$stmt->fetchColumn()], 201);
     }
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);

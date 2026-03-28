@@ -28,26 +28,59 @@
       <main class="main">
         <div class="header">
           <h2>Receptionist Dashboard</h2>
-          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+          <div style="display: flex; gap: 12px; align-items: center;">
+            <span class="badge">Last updated: <span id="last-updated">--</span></span>
+            <button class="btn" id="refresh-dashboard">Refresh</button>
+          </div>
         </div>
 
         <section id="analytics-view">
           <div class="grid stats" id="analytics-stats"></div>
           <div class="section-title">Today Summary</div>
           <div class="card">
-            <p>Monitor walk-ins, appointments, and service progress. Connect this view to the MySQL API for live data.</p>
+            <p id="summary-text">Loading summary...</p>
           </div>
         </section>
 
         <section id="appointments-view" hidden>
           <div class="section-title">Today’s Appointments</div>
           <div class="card">
+            <div class="meta" style="margin-bottom: 8px;">Tap an action to update appointment status.</div>
             <table class="table" id="appointments-table"></table>
           </div>
         </section>
 
         <section id="walkins-view" hidden>
           <div class="section-title">Walk-in Queue</div>
+          <div class="card" style="margin-bottom: 16px;">
+            <form id="walkin-form" class="form-grid">
+              <label>
+                <div class="meta">Kiosk Session ID</div>
+                <input id="walkin-session" class="input" placeholder="UUID" required />
+              </label>
+              <label>
+                <div class="meta">Services</div>
+                <select id="walkin-services" class="select" multiple required></select>
+              </label>
+              <label>
+                <div class="meta">Preferred Barber</div>
+                <select id="walkin-barber" class="select">
+                  <option value="">Unassigned</option>
+                </select>
+              </label>
+              <label>
+                <div class="meta">View</div>
+                <select id="walkin-view" class="select">
+                  <option value="">Auto</option>
+                  <option value="Front">Front</option>
+                  <option value="Side">Side</option>
+                  <option value="Back">Back</option>
+                </select>
+              </label>
+              <button type="submit" class="btn">Add Walk-in</button>
+              <div id="walkin-error" class="meta" style="color: var(--danger);"></div>
+            </form>
+          </div>
           <div class="card">
             <table class="table" id="walkins-table"></table>
           </div>

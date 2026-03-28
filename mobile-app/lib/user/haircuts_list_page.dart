@@ -337,7 +337,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     if (faceShape != null && faceShape.isNotEmpty) {
       details.add('Face shape: $faceShape');
     }
-    if (hairTexture != null && hairTexture.isNotEmpty) {
+    if (hairTexture.isNotEmpty) {
       details.add('Hair texture: $hairTexture');
     }
     return details.join('\n');

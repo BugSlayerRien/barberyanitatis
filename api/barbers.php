@@ -34,7 +34,7 @@ try {
         }
 
         $todayStmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM appointments WHERE barber_id = :barber_id AND appointment_date = CURDATE()"
+            "SELECT COUNT(*) FROM appointments WHERE barber_id = :barber_id AND appointment_date = CURRENT_DATE"
         );
         $todayStmt->execute([':barber_id' => $barberID]);
         $todayCount = (int)$todayStmt->fetchColumn();

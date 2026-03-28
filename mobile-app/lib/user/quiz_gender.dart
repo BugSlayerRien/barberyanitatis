@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'quiz_hairtype.dart';
+import 'user_session.dart';
 
 class QuizGenderPage extends StatefulWidget {
   const QuizGenderPage({super.key});
@@ -9,7 +10,7 @@ class QuizGenderPage extends StatefulWidget {
 }
 
 class _QuizGenderPageState extends State<QuizGenderPage> {
-  String? _gender; // 'boy' or 'girl'
+  String? _gender; // 'boy', 'girl', or 'prefer_not'
 
   @override
   Widget build(BuildContext context) {
@@ -58,6 +59,8 @@ class _QuizGenderPageState extends State<QuizGenderPage> {
                   _optionTile('Boy', 'boy', Icons.male),
                   const SizedBox(height: 10),
                   _optionTile('Girl', 'girl', Icons.female),
+                  const SizedBox(height: 10),
+                  _optionTile('Prefer not to tell', 'prefer_not', Icons.remove_circle_outline),
 
                   const SizedBox(height: 18),
                   Row(
@@ -75,6 +78,7 @@ class _QuizGenderPageState extends State<QuizGenderPage> {
                           onPressed: _gender == null
                               ? null
                               : () {
+                                  UserSession.quizGender = _gender;
                                   Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizHairTypePage()));
                                 },
                           style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
@@ -95,7 +99,10 @@ class _QuizGenderPageState extends State<QuizGenderPage> {
   Widget _optionTile(String label, String value, IconData icon) {
     final selected = _gender == value;
     return GestureDetector(
-      onTap: () => setState(() => _gender = value),
+      onTap: () => setState(() {
+        _gender = value;
+        UserSession.quizGender = value;
+      }),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
