@@ -181,36 +181,26 @@ try {
     }
 
     if ($action === 'createWalkin') {
-        $sessionID = trim((string)($input['sessionID'] ?? ''));
         $serviceIDs = $input['serviceIDs'] ?? [];
-        $selectedView = trim((string)($input['selectedView'] ?? ''));
         $barberID = (int)($input['barberID'] ?? 0);
 
-        if ($sessionID === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
-            json_response(['error' => 'Missing sessionID or serviceIDs'], 422);
+        if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
+            json_response(['error' => 'Missing serviceIDs'], 422);
         }
 
-        $sessionStmt = $pdo->prepare('SELECT session_id FROM kiosk_sessions WHERE session_id = :session_id');
-        $sessionStmt->execute([':session_id' => $sessionID]);
-        if (!$sessionStmt->fetch()) {
-            json_response(['error' => 'Session not found'], 404);
-        }
-
-        $recStmt = $pdo->prepare(
-            'SELECT variant_id, selected_view
-             FROM kiosk_recommendations
-             WHERE session_id = :session_id
-             ORDER BY is_selected DESC, rank_position ASC
+        $variantStmt = $pdo->prepare(
+            'SELECT hv.variant_id
+             FROM hairstyle_variants hv
+             JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+             WHERE hs.is_active = 1
+             ORDER BY hv.confidence_score DESC, hv.variant_id ASC
              LIMIT 1'
         );
-        $recStmt->execute([':session_id' => $sessionID]);
-        $recommendation = $recStmt->fetch();
-        if (!$recommendation) {
-            json_response(['error' => 'No recommendations found for session'], 404);
+        $variantStmt->execute();
+        $variantID = (int)$variantStmt->fetchColumn();
+        if ($variantID <= 0) {
+            json_response(['error' => 'No active hairstyle variants available'], 422);
         }
-
-        $variantID = (int)$recommendation['variant_id'];
-        $view = $selectedView !== '' ? $selectedView : ($recommendation['selected_view'] ?? 'Front');
 
         $pdo->beginTransaction();
 
@@ -222,13 +212,12 @@ try {
         $status = $barberID > 0 ? 'Assigned' : 'Waiting';
 
         $insertQueue = $pdo->prepare(
-            'INSERT INTO walkin_queue (queue_number, session_id, barber_id, status)
-             VALUES (:queue_number, :session_id, :barber_id, :status)
+            'INSERT INTO walkin_queue (queue_number, barber_id, status)
+             VALUES (:queue_number, :barber_id, :status)
              RETURNING queue_id'
         );
         $insertQueue->execute([
             ':queue_number' => $queueNumber,
-            ':session_id' => $sessionID,
             ':barber_id' => $barberID > 0 ? $barberID : null,
             ':status' => $status,
         ]);
@@ -259,7 +248,7 @@ try {
                 ':queue_id' => $queueID,
                 ':service_id' => $serviceID,
                 ':variant_id' => $variantID,
-                ':selected_view' => $view,
+                ':selected_view' => 'Front',
                 ':final_price' => $service['base_price'],
             ]);
         }

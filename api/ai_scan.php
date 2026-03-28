@@ -288,7 +288,7 @@ function llm_rank_variants(string $provider, string $apiKey, string $model, arra
 try {
     $pdo = get_db_connection();
 
-    $uploadDir = __DIR__ . '/../uploads/kiosk';
+    $uploadDir = __DIR__ . '/../uploads/mobile';
     if (!is_dir($uploadDir)) {
         mkdir($uploadDir, 0775, true);
     }
@@ -298,7 +298,7 @@ try {
         $fileInfo = pathinfo((string)$_FILES['image']['name']);
         $extension = strtolower($fileInfo['extension'] ?? 'jpg');
         $safeExtension = in_array($extension, ['jpg', 'jpeg', 'png'], true) ? $extension : 'jpg';
-        $filename = 'kiosk_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExtension;
+        $filename = 'scan_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExtension;
         $targetPath = $uploadDir . '/' . $filename;
 
         if (!move_uploaded_file($_FILES['image']['tmp_name'], $targetPath)) {
@@ -316,7 +316,7 @@ try {
         } elseif ($base64Mime === 'image/jpeg' || $base64Mime === 'image/jpg') {
             $safeExtension = 'jpg';
         }
-        $filename = 'kiosk_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExtension;
+        $filename = 'scan_' . date('Ymd_His') . '_' . bin2hex(random_bytes(4)) . '.' . $safeExtension;
         $targetPath = $uploadDir . '/' . $filename;
         if (file_put_contents($targetPath, $decoded) === false) {
             json_response(['error' => 'Failed to store image'], 500);
@@ -326,8 +326,8 @@ try {
 
     $baseUrl = getenv('PUBLIC_BASE_URL') ?: '';
     $publicUrl = $baseUrl !== ''
-        ? rtrim($baseUrl, '/') . '/uploads/kiosk/' . $filename
-        : '/uploads/kiosk/' . $filename;
+        ? rtrim($baseUrl, '/') . '/uploads/mobile/' . $filename
+        : '/uploads/mobile/' . $filename;
 
     $cv = run_cv_pipeline($targetPath);
 
@@ -444,44 +444,6 @@ try {
         $variants = $sorted;
     }
 
-    $sessionId = bin2hex(random_bytes(16));
-    $expiresAt = (new DateTimeImmutable('+2 hours'))->format('Y-m-d H:i:s');
-
-    // Optional persistence to kiosk tables (avoid errors if tables are missing)
-    try {
-        $sessionStmt = $pdo->prepare(
-            'INSERT INTO kiosk_sessions (session_id, original_image_url, face_shape, hair_texture, hair_density, expires_at, is_processed)
-             VALUES (:session_id, :original_image_url, :face_shape, :hair_texture, :hair_density, :expires_at, :is_processed)'
-        );
-        $sessionStmt->execute([
-            ':session_id' => $sessionId,
-            ':original_image_url' => $publicUrl,
-            ':face_shape' => $faceShape !== '' ? $faceShape : null,
-            ':hair_texture' => $hairTexture !== '' ? $hairTexture : null,
-            ':hair_density' => $hairDensity !== '' ? $hairDensity : null,
-            ':expires_at' => $expiresAt,
-            ':is_processed' => 1,
-        ]);
-
-        $recStmt = $pdo->prepare(
-            'INSERT INTO kiosk_recommendations (session_id, variant_id, rank_position, match_score)
-             VALUES (:session_id, :variant_id, :rank_position, :match_score)'
-        );
-
-        $rank = 1;
-        foreach ($variants as $row) {
-            $recStmt->execute([
-                ':session_id' => $sessionId,
-                ':variant_id' => (int)$row['variant_id'],
-                ':rank_position' => $rank,
-                ':match_score' => (float)$row['confidence_score'],
-            ]);
-            $rank++;
-        }
-    } catch (PDOException $e) {
-        // Ignore persistence errors to allow mobile flow to continue
-    }
-
     $summary = build_scan_summary($cvPayload, $llmEnabled, count($variants));
     $variants = array_map(static function ($row) use ($cvPayload) {
         if (!is_array($row)) {
@@ -493,7 +455,6 @@ try {
 
     json_response([
         'message' => 'Scan received',
-        'sessionID' => $sessionId,
         'imageUrl' => $publicUrl,
         'faceShape' => $faceShape,
         'hairTexture' => $hairTexture,

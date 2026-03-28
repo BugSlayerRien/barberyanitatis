@@ -13,7 +13,6 @@ const walkinForm = document.getElementById("walkin-form");
 const walkinError = document.getElementById("walkin-error");
 const walkinServices = document.getElementById("walkin-services");
 const walkinBarber = document.getElementById("walkin-barber");
-const walkinView = document.getElementById("walkin-view");
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -418,18 +417,14 @@ walkinForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   walkinError.textContent = "";
 
-  const sessionID = document.getElementById("walkin-session").value.trim();
   const serviceIDs = Array.from(walkinServices.selectedOptions).map((option) => option.value);
   const barberID = walkinBarber.value ? Number(walkinBarber.value) : 0;
-  const selectedView = walkinView.value;
 
   try {
     await postJson(`${apiBase}/receptionist.php`, {
       action: "createWalkin",
-      sessionID,
       serviceIDs,
       barberID,
-      selectedView,
     });
     walkinForm.reset();
     loadDashboard();
