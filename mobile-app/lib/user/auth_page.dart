@@ -5,7 +5,7 @@ import 'package:http/http.dart' as http;
 import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
 import 'forgot_password_page.dart';
-import 'quiz_gender.dart';
+import 'dashboard_page.dart';
 import 'api_config.dart';
 import 'user_session.dart';
 
@@ -92,7 +92,7 @@ class _AuthPageState extends State<AuthPage> {
       } else if (roles.contains('receptionist')) {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()));
       } else {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const DashboardPage()));
       }
     } catch (e) {
       if (!mounted) return;

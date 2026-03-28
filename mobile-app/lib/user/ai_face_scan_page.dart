@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dashboard_page.dart';
-import 'quiz_upload.dart';
 import 'scan_results_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'api_config.dart';
@@ -164,6 +163,20 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
       _scanBytes = null;
       _statusMessage = 'Photo captured from camera.';
       _debugMessage = 'Captured image from device camera.';
+    });
+  }
+
+  Future<void> _pickImage() async {
+    final file = await _picker.pickImage(source: ImageSource.gallery, maxWidth: 1200, maxHeight: 1200);
+    if (file == null) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _scanImage = file;
+      _scanBytes = null;
+      _statusMessage = 'Photo selected from gallery.';
+      _debugMessage = 'Gallery image selected.';
     });
   }
 
@@ -511,16 +524,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
             ),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: _isSubmitting
-                  ? null
-                  : () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const QuizUploadPage()),
-                );
-              },
+              onPressed: _isSubmitting ? null : _pickImage,
               style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
               icon: const Icon(Icons.cloud_upload, size: 18),
-              label: const Text('Upload Photo Instead'),
+              label: const Text('Upload From Gallery'),
             ),
             const SizedBox(height: 18),
             if (_isGeneratingPreview) ...[
