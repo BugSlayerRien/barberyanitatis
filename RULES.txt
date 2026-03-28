@@ -1,6 +1,5 @@
 1) Mobile app (client)
 2) Web app (admin/receptionist)
-3) Kiosk app (walk-in terminal)
 
 All platforms must connect to a single PHP REST API backend and a MySQL database.
 
@@ -18,7 +17,7 @@ Provide:
 2) Database tables involved per endpoint
 3) Validation and error handling rules
 4) Example request and response payloads (JSON)
-5) Notes on how changes reflect across mobile, web, and kiosk
+5) Notes on how changes reflect across mobile and web
 
 Assume:
 - Flutter (frontend)

@@ -1,7 +1,7 @@
 CURRENT DATABASE REMINDERS (LATEST SCHEMA)
 
 SYSTEM RULES (DON'T BREAK THESE)
-1) All apps (mobile, web, kiosk) use PHP API only.
+1) All apps (mobile, web) use PHP API only.
 2) Flutter/web NEVER access MySQL directly.
 3) Keep data normalized; avoid duplicates.
 4) Use snake_case column names as defined in /database/schema.sql.
@@ -22,9 +22,8 @@ CORE TABLE PURPOSES (LATEST)
 4) SERVICES & PRICING
 - services: menu with base_duration/base_price + category.
 
-5) AI SCAN (KIOSK)
-- kiosk_sessions: temporary scan sessions and analysis attributes.
-- kiosk_recommendations: top-5 variant matches per session.
+5) AI SCAN
+- Uses /api/ai_scan.php and returns ranked recommendations directly.
 
 6) APPOINTMENTS (MOBILE)
 - appointments: future bookings with booking_code and time range.
@@ -33,7 +32,7 @@ CORE TABLE PURPOSES (LATEST)
 7) TIME SLOT MANAGEMENT
 - time_slots: 35-minute slots linked to appointments.
 
-8) WALK-IN QUEUE (KIOSK)
+8) WALK-IN QUEUE
 - walkin_queue: live queue + status.
 - walkin_service_details: services + variant chosen for walk-ins.
 
@@ -59,17 +58,12 @@ CORE TABLE PURPOSES (LATEST)
 15) DISPLAY VIEW
 - queue_display: merged appointment + walk-in queue view.
 
-AI HAIRSTYLE SCANNER FLOW (KIOSK)
-1) Kiosk captures image and posts to /api/ai_scan.php (multipart/form-data).
-2) Backend analyzes face/hair (provider integration pending).
-3) Create kiosk_sessions (expires in 2 hours).
-4) Select top 5 hairstyle_variants by face_shape + hair_texture.
-5) Insert kiosk_recommendations with rank_position + match_score.
-6) Return session_id + recommendations to kiosk UI.
+AI HAIRSTYLE SCANNER FLOW
+1) Mobile/web captures image and posts to /api/ai_scan.php (multipart/form-data).
+2) Backend analyzes face/hair and ranks hairstyle_variants.
+3) Returns recommendations + summary to client.
 
 TABLES USED BY AI SCAN
-- kiosk_sessions
-- kiosk_recommendations
 - hairstyle_variants
 - hairstyles
 
@@ -79,6 +73,6 @@ DATA CONSISTENCY NOTES
 - walkin_service_details.variant_id is required.
 
 NEXT IMPLEMENTATION FOCUS
-- Implement real AI provider in /api/ai_scan.php.
+- Improve provider reliability in /api/ai_scan.php.
 - Seed hairstyle_variants with real image URLs.
-- Wire kiosk UI to select a recommended variant.
+- Tune recommendation quality and explainability.

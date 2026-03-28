@@ -34,15 +34,8 @@ WEB APP (ADMIN)
 WEB APP (RECEPTIONIST)
 1) Dashboard
 - Today’s walk-ins/appointments via /api/receptionist_dashboard.php
-
-KIOSK (WALK-IN TERMINAL)
-1) AI Scan + Recommendations
-- Upload image to /api/ai_scan.php
-- Stores kiosk session and recommendations (kiosk_sessions + kiosk_recommendations)
-
-2) Selection Flow
-- Select recommendation via /api/kiosk.php (selectRecommendation)
-- Fetch session via /api/kiosk.php (getSession)
+2) Walk-in Intake
+- Manual walk-in creation via /api/receptionist.php (createWalkin)
 
 MISSING COMPONENTS / TO-DO
 1) Image rendering on Flutter web
@@ -54,9 +47,8 @@ MISSING COMPONENTS / TO-DO
 - Confirmation page still shows "Image generation failed"
 - Fix api/ai_tryon.php request/response handling
 
-3) Scan flow navigation
-- ScanResultsPage not always used after upload
-- Update quiz upload flow to navigate to ScanResultsPage
+3) Scan flow enhancements
+- Keep improving AI scan UX and recommendation confidence
 
 4) Dataset coverage
 - New hairstyles need full variant coverage (front/side/back assets per style)

@@ -39,7 +39,7 @@ PHASE 4 - Seed and smoke test (fresh start)
 PHASE 5 - Staging and cutover
 15) Set up staging Postgres and repeat schema + seed.
 16) Update environment variables and deploy API to staging.
-17) Validate end-to-end flows (admin, receptionist, kiosk, mobile).
+17) Validate end-to-end flows (admin, receptionist, mobile).
 18) Cut over production by switching env vars and redeploying API.
 
 DELIVERABLES

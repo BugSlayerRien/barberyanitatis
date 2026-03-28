@@ -4,13 +4,12 @@
 - Base URL: /api
 - Format: JSON (except image uploads use multipart/form-data)
 - Auth: Role-based access control (RBAC) from users/roles/userRoles
-- Flutter/web/kiosk must call API; no direct DB access
+- Flutter/web clients must call API; no direct DB access
 
 ## Roles
 - client (mobile)
 - admin (web)
 - receptionist (web)
-- kiosk (kiosk device)
 
 ## Common error responses
 - 400: invalid action
@@ -245,11 +244,11 @@
 
 ---
 
-# WALK-INS (KIOSK)
+# WALK-INS
 
 ## POST /api/walkins.php (future)
 ### Actions
-- create (kiosk)
+- create (receptionist)
 - list (receptionist)
 
 ### Tables
@@ -284,10 +283,10 @@
 
 ---
 
-# DATA FLOW NOTES (MOBILE, WEB, KIOSK)
+# DATA FLOW NOTES (MOBILE, WEB)
 
 - Mobile creates appointments -> stored in appointments table -> immediately visible to receptionist (web) and admin analytics.
 - Web updates queue status -> affects real-time tracking and analytics across all platforms.
-- Kiosk creates walk-ins -> inserted into walkIns + appointmentQueue -> visible to receptionist immediately.
+- Receptionist creates walk-ins -> inserted into walkIns + appointmentQueue -> visible immediately.
 - AI face scan results stored as hairstyleVariants -> mobile can reuse without new AI costs.
 - Single database ensures no duplication; all platforms read/write through API only.

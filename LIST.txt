@@ -1,7 +1,7 @@
 MASTER LIST: Major Revision Plan
 
 1) Define scope and success criteria
-	- Inventory current features (web admin, mobile app, kiosk app, APIs, database, uploads)
+	- Inventory current features (web admin, mobile app, APIs, database, uploads)
 	- Decide what stays, what is replaced, and what can be deferred
 	- Capture performance, uptime, and security targets
 
@@ -56,7 +56,7 @@ MASTER LIST: Major Revision Plan
 	 - Ensure logs do not expose sensitive data
 
 12) Run comprehensive QA
-	 - Test admin, receptionist, kiosk, and mobile flows
+	 - Test admin, receptionist, and mobile flows
 	 - Validate authentication, bookings, services, and notifications
 	 - Confirm data consistency between UI and database
 
