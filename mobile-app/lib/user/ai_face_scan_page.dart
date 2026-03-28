@@ -492,6 +492,16 @@ class _AiFaceScanPageState extends State<AiFaceScanPage> {
                 ),
               ],
             ),
+            if (_debugMessage != null && _debugMessage!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  _debugMessage!,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             Center(
               child: InkResponse(

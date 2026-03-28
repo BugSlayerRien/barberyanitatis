@@ -192,6 +192,33 @@ class _ConfirmationPageState extends State<ConfirmationPage> with SingleTickerPr
                     style: TextStyle(color: Colors.white54, fontSize: 14, height: 1.4),
                   ),
                   const SizedBox(height: 20),
+                  if (_generating) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Generating AI preview...',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                  if (_generateError != null && _generateError!.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _generateError!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                    ),
+                  ],
+                  if (_generatedImage != null) ...[
+                    const SizedBox(height: 12),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.memory(
+                        _generatedImage!,
+                        height: 180,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
 
                   const SizedBox(height: 28),
 
