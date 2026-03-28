@@ -88,7 +88,18 @@ function get_db_connection(): PDO
                 parse_str((string)($parts['query'] ?? ''), $query);
                 $sslmode = (string)($query['sslmode'] ?? 'require');
 
+                $hostAddr = trim((string)($query['hostaddr'] ?? getenv('DB_HOSTADDR') ?: ''));
+                if ($hostAddr === '' && function_exists('dns_get_record')) {
+                    $records = dns_get_record($host, DNS_AAAA);
+                    if (is_array($records) && isset($records[0]['ipv6'])) {
+                        $hostAddr = (string)$records[0]['ipv6'];
+                    }
+                }
+
                 $dsn = "pgsql:host={$host};port={$port};dbname={$db};sslmode={$sslmode}";
+                if ($hostAddr !== '') {
+                    $dsn .= ";hostaddr={$hostAddr}";
+                }
                 $user = $user !== '' ? $user : $urlUser;
                 $pass = $pass !== '' ? $pass : $urlPass;
             } else {
@@ -107,7 +118,11 @@ function get_db_connection(): PDO
             if ($driver === 'pgsql' || $driver === 'postgres' || $driver === 'postgresql') {
                 $port = $port !== '' ? $port : '5432';
                 $sslmode = (string)(getenv('DB_SSLMODE') ?: 'prefer');
+                $hostAddr = trim((string)(getenv('DB_HOSTADDR') ?: ''));
                 $dsn = "pgsql:host={$host};port={$port};dbname={$db};sslmode={$sslmode}";
+                if ($hostAddr !== '') {
+                    $dsn .= ";hostaddr={$hostAddr}";
+                }
             } else {
                 $port = $port !== '' ? $port : '3306';
                 $charset = 'utf8mb4';
