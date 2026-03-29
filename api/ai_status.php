@@ -14,6 +14,8 @@ $tryonProvider = strtolower(trim((string)(getenv('FREE_TRYON_PROVIDER') ?: ($_EN
 $instantIdEndpoint = trim((string)(getenv('INSTANTID_ENDPOINT') ?: ($_ENV['INSTANTID_ENDPOINT'] ?? $_SERVER['INSTANTID_ENDPOINT'] ?? '')));
 $fooocusEndpoint = trim((string)(getenv('FREE_TRYON_FOOOCUS_ENDPOINT') ?: ($_ENV['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? 'https://fc.aitianhu.space/api/v1/generation/generate-image')));
 $facechainEndpoint = trim((string)(getenv('FREE_TRYON_FACECHAIN_ENDPOINT') ?: ($_ENV['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? 'https://facechain-plus.hf.space/api/predict')));
+$hfImageModel = trim((string)(getenv('HF_IMAGE_MODEL') ?: ($_ENV['HF_IMAGE_MODEL'] ?? $_SERVER['HF_IMAGE_MODEL'] ?? 'stabilityai/stable-diffusion-xl-base-1.0')));
+$hfInferenceEndpoint = $hfImageModel !== '' ? 'https://api-inference.huggingface.co/models/' . rawurlencode($hfImageModel) : '';
 $hfToken = trim((string)(getenv('HF_TOKEN') ?: ($_ENV['HF_TOKEN'] ?? $_SERVER['HF_TOKEN'] ?? '')));
 
 function probe_endpoint(string $url): array
@@ -37,13 +39,17 @@ $tryonConfigured = $tryonProvider === 'instantid'
     ? $instantIdEndpoint !== ''
     : ($tryonProvider === 'fooocus'
         ? $fooocusEndpoint !== ''
-        : $facechainEndpoint !== '');
+        : ($tryonProvider === 'huggingface'
+            ? $hfImageModel !== ''
+            : $facechainEndpoint !== ''));
 
 $tryonProbe = $tryonProvider === 'instantid'
     ? probe_endpoint($instantIdEndpoint)
     : ($tryonProvider === 'fooocus'
         ? probe_endpoint($fooocusEndpoint)
-        : probe_endpoint($facechainEndpoint));
+        : ($tryonProvider === 'huggingface'
+            ? probe_endpoint($hfInferenceEndpoint)
+            : probe_endpoint($facechainEndpoint)));
 
 json_response([
     'ok' => $scanEnabled || $tryonConfigured,
@@ -60,6 +66,8 @@ json_response([
         'instantIdEndpoint' => $instantIdEndpoint,
         'fooocusEndpoint' => $fooocusEndpoint,
         'facechainEndpoint' => $facechainEndpoint,
+        'hfImageModel' => $hfImageModel,
+        'hfInferenceEndpoint' => $hfInferenceEndpoint,
         'hfTokenSet' => $hfToken !== '',
         'probe' => $tryonProbe,
     ],
