@@ -4,12 +4,15 @@ import 'package:flutter/material.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'confirmation_page.dart';
+import 'ai_funnel_service.dart';
 import 'appointments_page.dart';
+import 'barber_selection_page.dart';
+import 'booking_guard.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
+import 'suggested_appointment_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -32,6 +35,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   final Map<String, Future<Uint8List>> _webImageCache = {};
   bool _isFavorite = false;
   bool _savingFavorite = false;
+  bool _bookingInFlight = false;
 
   @override
   void initState() {
@@ -157,6 +161,82 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
   }
 
+  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'suggestBestSlot'}),
+      ).timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) {
+        return {
+          '_error': true,
+          '_message': 'Unable to check available times right now.',
+        };
+      }
+      if (response.body.isEmpty) {
+        return null;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['suggestion'] as Map<String, dynamic>?;
+    } catch (_) {
+      return {
+        '_error': true,
+        '_message': 'Unable to check available times right now. Please try again.',
+      };
+    }
+  }
+
+  Future<void> _proceedToBookingFlow() async {
+    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
+    if (!mounted) {
+      return;
+    }
+    if (hasActive) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+      return;
+    }
+
+    setState(() => _bookingInFlight = true);
+    final suggestion = await _fetchSuggestedSlot();
+    if (mounted) {
+      setState(() => _bookingInFlight = false);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (suggestion != null && suggestion['_error'] == true) {
+      final message = suggestion['_message']?.toString() ?? 'Unable to check available times right now.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+      return;
+    }
+
+    if (suggestion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No open times available right now. You can still try this haircut.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -264,92 +344,56 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     ),
                     const SizedBox(height: 28),
 
-                    // Preview Details
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white, width: 1),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.info_outline, color: Colors.white, size: 20),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Why This Works For You',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          ...((widget.style['details']?.toString() ?? '').split('\n').where((line) => line.trim().isNotEmpty).map(
-                            (detail) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    margin: const EdgeInsets.only(top: 4),
-                                    width: 6,
-                                    height: 6,
-                                    decoration: const BoxDecoration(
-                                      color: Colors.white,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      detail,
-                                      style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 16),
 
                     // Buttons
                     ElevatedButton(
-                      onPressed: () {
-                        final variantId = widget.style['variantId'];
+                      onPressed: _bookingInFlight
+                          ? null
+                          : () async {
+                        final variantId = widget.style['variantId'] ?? widget.style['variantID'];
+                        int? normalizedVariantId;
                         if (variantId is int) {
-                          UserSession.selectedVariantId = variantId;
-                          UserSession.selectedStyleName = widget.style['name']?.toString();
+                          normalizedVariantId = variantId;
+                        } else {
+                          normalizedVariantId = int.tryParse(variantId?.toString() ?? '');
                         }
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ConfirmationPage(
-                              frontViewUrl: widget.style['frontViewUrl']?.toString(),
-                              sideViewUrl: widget.style['sideViewUrl']?.toString(),
-                              backViewUrl: widget.style['backViewUrl']?.toString(),
-                              styleName: widget.style['name']?.toString() ?? 'Style',
-                            ),
-                          ),
-                        );
+
+                        if (normalizedVariantId == null || normalizedVariantId <= 0) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('This haircut cannot be booked yet. Please choose another style.')),
+                          );
+                          return;
+                        }
+
+                        UserSession.selectedVariantId = normalizedVariantId;
+                        UserSession.selectedStyleName = widget.style['name']?.toString();
+                        UserSession.selectedEstimatedMinutes = int.tryParse(widget.style['estimatedMinutes']?.toString() ?? '');
+
+                        final userId = UserSession.userId;
+                        if (userId != null) {
+                          try {
+                            await AiFunnelService.saveSelection(
+                              scanSessionId: UserSession.ensureScanSessionId(),
+                              userId: userId,
+                              variantId: normalizedVariantId,
+                              styleName: UserSession.selectedStyleName ?? 'Style',
+                              faceShape: UserSession.lastScan?['faceShape']?.toString(),
+                              hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+                              hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+                              hairLength: UserSession.lastScan?['hairLength']?.toString(),
+                              estimatedMinutes: UserSession.selectedEstimatedMinutes,
+                            );
+                          } catch (_) {
+                            // Do not block booking flow if tracking fails.
+                          }
+                        }
+
+                        if (!context.mounted) {
+                          return;
+                        }
+                        await _proceedToBookingFlow();
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
@@ -358,14 +402,33 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         elevation: 8,
                         shadowColor: Colors.white.withOpacity(0.3),
                       ),
-                      child: const Text(
-                        'Confirm and Proceed',
+                      child: Text(
+                        _bookingInFlight ? 'Checking slots...' : 'Confirm and Proceed',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           color: Colors.black,
                           letterSpacing: 0.5,
                         ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+                        );
+                      },
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: Colors.transparent,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size.fromHeight(56),
+                        side: const BorderSide(color: Colors.white54, width: 1.5),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Text(
+                        'Try Haircut',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.4),
                       ),
                     ),
                     const SizedBox(height: 12),

@@ -1,0 +1,115 @@
+Barberya ni Tatis System: Process Summary (Web + Mobile)
+
+0) System Stack (high level)
+- Frontend app: Flutter (Dart SDK constraint: ^3.5.2), runs on mobile and web.
+- Web portal (staff): HTML/CSS/JavaScript pages under web-admin/.
+- Backend API: PHP endpoints under api/.
+- Database: PostgreSQL (via PDO in api/db.php).
+- Transport: JSON over HTTP POST for most API actions.
+
+1) Authentication and role routing
+- auth.php handles register and login.
+- Login checks active accounts in this order: staff_users, users, then barbers.
+- Returned roles drive UI routing:
+	- admin -> web-admin/admin
+	- receptionist -> web-admin/receptionist
+	- customer/barber -> mobile/web Flutter role pages
+- Passwords are validated with password_verify and stored hashed.
+
+2) Core booking and slot lifecycle (shared across all roles)
+- booking.php is the central source for appointment create/list/cancel.
+- Create flow validates:
+	- required IDs and fields
+	- date format (YYYY-MM-DD)
+	- valid start/end times
+	- endTime > startTime
+	- non-past schedule
+	- valid active user/barber
+	- barber overlap conflict
+	- slot availability in time_slots
+- On successful create:
+	- appointment + details are stored
+	- matching slot is set to Booked
+- On cancel:
+	- appointment status -> Cancelled
+	- matching slot -> Available
+
+3) Time slot management and suggestions
+- time_slots.php supports:
+	- listByBarberDate
+	- suggestBestSlot
+- If requested future date has no rows, default slots are auto-generated.
+- suggestBestSlot picks date/barber with highest available_count; returns fallback if none exists.
+
+4) Receptionist operations
+- receptionist.php dashboard returns today stats, appointments, and walk-ins.
+- updateAppointmentStatus updates status and synchronizes slot state:
+	- Cancelled or NoShow -> slot Available
+	- all other active/served states -> slot Booked
+- updateWalkinStatus manages queue lifecycle (Waiting, Assigned, InProgress, Completed, Cancelled).
+- createWalkin creates queue entry and linked walk-in services.
+
+5) Admin monitoring process
+- admin_dashboard.php aggregates live metrics:
+	- total users
+	- active services
+	- pending appointments
+	- walk-ins today
+	- monthly paid revenue
+- Also returns recent activity feed from appointments and walk-in queue.
+
+6) AI hairstyle recommendation process (backend)
+- ai_scan.php supports:
+	- image-based scan (file or base64)
+	- feature-only ranking action (rankByFeatures)
+- Uses CV + AI-assisted ranking with rule safeguards.
+- Gemini provider is supported in current code path.
+- Model in ai_scan.php defaults to gemini-2.5-flash-lite (configurable via env).
+
+7) AI Scanner process (mobile + web, summarized with tools)
+Language and framework
+- Dart + Flutter (mobile and web UI orchestration).
+
+Mobile scanner path
+- Camera input: camera ^0.10.6.
+- Face detection: google_mlkit_face_detection ^0.11.0.
+- Pipeline:
+	- stream camera frames
+	- detect face box + pose angles
+	- smooth/stabilize tracking
+	- trigger recommendations when face is stable
+
+Web scanner path
+- Camera stream: browser getUserMedia through HtmlElementView bridge.
+- Face landmarks: @mediapipe/tasks-vision@0.10.14 (from web/index.html).
+- 3D web component support: model-viewer loaded from unpkg (version not pinned in current file).
+- Pipeline:
+	- estimate landmarks per video frame
+	- compute bbox, yaw, roll, eye anchors, transform matrix
+	- feed attachment engine for overlay placement
+
+Shared scanner modules and tools
+- HTTP calls: http ^1.2.2.
+- Optional Gemini client package in app: google_generative_ai ^0.4.6.
+- Hair preview model widget: model_viewer_plus ^1.8.0.
+- Attachment engine: auto/matrix/heuristic modes in scanner/attachment_engine.dart.
+- Overlay fit + calibration: scanner/overlay_fit.dart + user calibration state.
+- Session and funnel tracking: UserSession + ai_funnel_service.dart -> ai_funnel.php.
+
+8) Suggestion-to-booking customer flow
+- Scanner generates top hairstyle options.
+- Customer picks style and proceeds to suggested/manual scheduling.
+- suggested_appointment_page.dart calls booking.php create.
+- On success, payment page flow starts and booking is tracked.
+
+9) Web and mobile coverage summary
+- Mobile app: customer/barber/receptionist/admin pages built in Flutter.
+- Flutter web build: same business APIs, web-specific scanner tracking stack.
+- Web-admin portal: lightweight JS pages for admin/receptionist operational control.
+- All role views reflect shared backend truth from appointments + time_slots.
+
+10) Practical reliability rules in current design
+- Validation and slot synchronization are backend-enforced, not UI-only.
+- Role screens are consumers of the same API state, preventing drift.
+- Fallbacks exist for empty future slots and AI recommendation gaps.
+

@@ -28,7 +28,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       backgroundColor: Colors.transparent,
       elevation: 0,
       titleSpacing: 0,
-      leadingWidth: showBack ? 150 : 120,
+      leadingWidth: showBack ? 180 : 140,
       leading: Row(
         children: [
           if (showBack)
@@ -39,7 +39,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
           const SizedBox(width: 16),
           Image.asset(
             'assets/images/TATIS.png',
-            height: 32,
+            height: 42,
           ),
         ],
       ),
@@ -59,38 +59,110 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   Future<void> _showNotifications(BuildContext context) async {
     final notifications = await _loadNotifications();
     if (!context.mounted) return;
-    showModalBottomSheet<void>(
+    showDialog<void>(
       context: context,
-      backgroundColor: const Color(0xFF111111),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Notifications',
-                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              if (notifications.isEmpty)
-                const Text('No notifications yet.', style: TextStyle(color: Colors.white70, fontSize: 12))
-              else
-                ...notifications.map(
-                  (item) => _notificationTile(item['title'] ?? 'Update', item['subtitle'] ?? ''),
+      barrierColor: Colors.black54,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => Align(
+          alignment: Alignment.topCenter,
+          child: SafeArea(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF111111),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white12),
                 ),
-            ],
+                child: SizedBox(
+                  height: MediaQuery.of(dialogContext).size.height * 0.7,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Notifications',
+                              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white70),
+                            onPressed: () => Navigator.of(dialogContext).pop(),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      if (notifications.isEmpty)
+                        const Text('No notifications yet.', style: TextStyle(color: Colors.white70, fontSize: 12))
+                      else
+                        Expanded(
+                          child: ListView.builder(
+                            itemCount: notifications.length,
+                            itemBuilder: (_, index) {
+                              final item = notifications[index];
+                              return _notificationTile(
+                                item: item,
+                                onAction: (action) async {
+                                  final notificationID = (item['notificationID'] as int?) ?? 0;
+                                  if (notificationID <= 0) {
+                                    return;
+                                  }
+
+                                  if (action == 'markRead') {
+                                    if ((item['isRead'] as bool?) == true) {
+                                      return;
+                                    }
+                                    final ok = await _markNotificationRead(notificationID);
+                                    if (!context.mounted) return;
+                                    if (ok) {
+                                      setDialogState(() {
+                                        item['isRead'] = true;
+                                      });
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Could not mark notification as read.')),
+                                      );
+                                    }
+                                    return;
+                                  }
+
+                                  if (action == 'delete') {
+                                    final ok = await _deleteNotification(notificationID);
+                                    if (!context.mounted) return;
+                                    if (ok) {
+                                      setDialogState(() {
+                                        notifications.removeWhere(
+                                          (n) => (n['notificationID'] as int?) == notificationID,
+                                        );
+                                      });
+                                    } else {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Could not delete notification.')),
+                                      );
+                                    }
+                                  }
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       ),
     );
   }
 
-  Future<List<Map<String, String>>> _loadNotifications() async {
+  Future<List<Map<String, dynamic>>> _loadNotifications() async {
     if (UserSession.userId == null) {
       return [];
     }
@@ -98,7 +170,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'userID': UserSession.userId}),
+        body: jsonEncode({'action': 'list', 'userID': UserSession.userId}),
       );
       if (response.statusCode != 200 || response.body.isEmpty) {
         return [];
@@ -109,8 +181,10 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
           .toList();
       return rows
           .map((row) => {
+                'notificationID': (row['notificationID'] as num?)?.toInt() ?? 0,
                 'title': row['title']?.toString() ?? 'Update',
                 'subtitle': row['subtitle']?.toString() ?? '',
+                'isRead': row['isRead'] == true,
               })
           .toList();
     } catch (_) {
@@ -118,12 +192,93 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     }
   }
 
-  Widget _notificationTile(String title, String subtitle) {
+  Future<bool> _markNotificationRead(int notificationID) async {
+    if (UserSession.userId == null || notificationID <= 0) {
+      return false;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'markRead',
+          'userID': UserSession.userId,
+          'notificationID': notificationID,
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _deleteNotification(int notificationID) async {
+    if (UserSession.userId == null || notificationID <= 0) {
+      return false;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'delete',
+          'userID': UserSession.userId,
+          'notificationID': notificationID,
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Widget _notificationTile({
+    required Map<String, dynamic> item,
+    required Future<void> Function(String action) onAction,
+  }) {
+    final title = item['title']?.toString() ?? 'Update';
+    final subtitle = item['subtitle']?.toString() ?? '';
+    final isRead = item['isRead'] == true;
+
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.notifications, color: Colors.white70),
-      title: Text(title, style: const TextStyle(color: Colors.white)),
+      leading: Icon(
+        isRead ? Icons.notifications_none : Icons.notifications,
+        color: isRead ? Colors.white54 : Colors.white70,
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          color: isRead ? Colors.white70 : Colors.white,
+          fontWeight: isRead ? FontWeight.w400 : FontWeight.w600,
+        ),
+      ),
       subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      trailing: PopupMenuButton<String>(
+        icon: const Icon(Icons.more_vert, color: Colors.white70),
+        color: const Color(0xFF1C1C1C),
+        onSelected: (value) async {
+          await onAction(value);
+        },
+        itemBuilder: (_) {
+          final items = <PopupMenuEntry<String>>[];
+          if (!isRead) {
+            items.add(
+              const PopupMenuItem<String>(
+                value: 'markRead',
+                child: Text('Mark as read', style: TextStyle(color: Colors.white)),
+              ),
+            );
+          }
+          items.add(
+            const PopupMenuItem<String>(
+              value: 'delete',
+              child: Text('Delete', style: TextStyle(color: Colors.white)),
+            ),
+          );
+          return items;
+        },
+      ),
     );
   }
 }

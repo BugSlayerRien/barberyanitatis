@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/pagination_controls.dart';
 
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBackground = Color(0xFF0A0A0A);
@@ -15,12 +16,32 @@ class ReceptionistWalkInsPage extends StatefulWidget {
   });
 
   @override
-  State<ReceptionistWalkInsPage> createState() => _ReceptionistWalkInsPageState();
+  State<ReceptionistWalkInsPage> createState() =>
+      _ReceptionistWalkInsPageState();
 }
 
 class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
+  int _currentPage = 1;
+
+  static const int _itemsPerPage = 6;
+
+  @override
+  void didUpdateWidget(covariant ReceptionistWalkInsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.walkIns.length != widget.walkIns.length) {
+      final totalPages = _totalPages(widget.walkIns.length);
+      if (_currentPage > totalPages) {
+        _currentPage = totalPages;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final totalPages = _totalPages(widget.walkIns.length);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final pagedWalkIns = _paginateWalkIns(widget.walkIns, safePage);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       child: Column(
@@ -31,7 +52,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
             children: [
               const Text(
                 'Walk-In Queue',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18),
               ),
               ElevatedButton.icon(
                 onPressed: _showAddWalkInDialog,
@@ -62,16 +86,43 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                   children: [
                     Icon(Icons.people_outline, color: Colors.white54, size: 48),
                     const SizedBox(height: 12),
-                    const Text('No walk-ins yet', style: TextStyle(color: Colors.white70, fontSize: 14)),
+                    const Text('No walk-ins yet',
+                        style: TextStyle(color: Colors.white70, fontSize: 14)),
                   ],
                 ),
               ),
             )
           else
-            ...widget.walkIns.map((walkIn) => _buildWalkInCard(walkIn)).toList(),
+            ...pagedWalkIns.map((walkIn) => _buildWalkInCard(walkIn)).toList(),
+          PaginationControls(
+            currentPage: safePage,
+            totalPages: totalPages,
+            onPageChanged: (page) {
+              setState(() {
+                _currentPage = page;
+              });
+            },
+          ),
         ],
       ),
     );
+  }
+
+  int _totalPages(int totalItems) {
+    if (totalItems <= 0) {
+      return 1;
+    }
+    return ((totalItems - 1) ~/ _itemsPerPage) + 1;
+  }
+
+  List<Map<String, dynamic>> _paginateWalkIns(
+      List<Map<String, dynamic>> walkIns, int page) {
+    final start = (page - 1) * _itemsPerPage;
+    if (start >= walkIns.length) {
+      return const <Map<String, dynamic>>[];
+    }
+    final end = (start + _itemsPerPage).clamp(0, walkIns.length);
+    return walkIns.sublist(start, end);
   }
 
   Widget _buildWalkInCard(Map<String, dynamic> walkIn) {
@@ -102,7 +153,11 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                 ),
                 child: Center(
                   child: Text(
-                    (walkIn['name'] as String).split(' ').map((e) => e[0]).join().toUpperCase(),
+                    (walkIn['name'] as String)
+                        .split(' ')
+                        .map((e) => e[0])
+                        .join()
+                        .toUpperCase(),
                     style: const TextStyle(
                       color: Colors.black,
                       fontWeight: FontWeight.bold,
@@ -118,23 +173,29 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                   children: [
                     Text(
                       walkIn['name'] as String,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       walkIn['service'] as String,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       walkIn['phone'] as String,
-                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: kGoldColor.withOpacity(0.2),
                   borderRadius: BorderRadius.circular(12),
@@ -142,7 +203,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                 ),
                 child: const Text(
                   'WAITING',
-                  style: TextStyle(color: kGoldColor, fontWeight: FontWeight.bold, fontSize: 10),
+                  style: TextStyle(
+                      color: kGoldColor,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 10),
                 ),
               ),
             ],
@@ -156,99 +220,133 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
     final nameController = TextEditingController();
     final phoneController = TextEditingController();
     String selectedService = 'Quick Trim';
+    var isSubmitting = false;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('ADD NEW WALK-IN', style: TextStyle(color: Colors.white)),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'Name',
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  filled: true,
-                  fillColor: const Color(0xFF111111),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: kGoldColor),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            title: const Text('ADD NEW WALK-IN',
+                style: TextStyle(color: Colors.white)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Name',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: const Color(0xFF111111),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: kGoldColor),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: phoneController,
+                    style: const TextStyle(color: Colors.white),
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      hintText: 'Contact Number',
+                      hintStyle: const TextStyle(color: Colors.white54),
+                      filled: true,
+                      fillColor: const Color(0xFF111111),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: kGoldColor),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    value: selectedService,
+                    items: [
+                      'Quick Trim',
+                      'Precision Cut',
+                      'Color Treatment',
+                      'Styling',
+                      'Full Package'
+                    ]
+                        .map((service) => DropdownMenuItem(
+                              value: service,
+                              child: Text(service,
+                                  style: const TextStyle(color: Colors.white)),
+                            ))
+                        .toList(),
+                    onChanged: isSubmitting
+                        ? null
+                        : (value) {
+                            selectedService = value ?? 'Quick Trim';
+                          },
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: const Color(0xFF111111),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: const BorderSide(color: kGoldColor),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                    dropdownColor: const Color(0xFF111111),
+                  ),
+                ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: phoneController,
-                style: const TextStyle(color: Colors.white),
-                keyboardType: TextInputType.phone,
-                decoration: InputDecoration(
-                  hintText: 'Contact Number',
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  filled: true,
-                  fillColor: const Color(0xFF111111),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: kGoldColor),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+                child: const Text('CANCEL',
+                    style: TextStyle(color: Colors.white70)),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: selectedService,
-                items: ['Quick Trim', 'Precision Cut', 'Color Treatment', 'Styling', 'Full Package']
-                    .map((service) => DropdownMenuItem(
-                          value: service,
-                          child: Text(service, style: const TextStyle(color: Colors.white)),
-                        ))
-                    .toList(),
-                onChanged: (value) {
-                  selectedService = value ?? 'Quick Trim';
-                },
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: const Color(0xFF111111),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: kGoldColor),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-                dropdownColor: const Color(0xFF111111),
+              ElevatedButton(
+                onPressed: isSubmitting
+                    ? null
+                    : () {
+                        if (nameController.text.isNotEmpty &&
+                            phoneController.text.isNotEmpty) {
+                          setDialogState(() => isSubmitting = true);
+                          final newWalkIn = {
+                            'name': nameController.text,
+                            'phone': phoneController.text,
+                            'service': selectedService,
+                          };
+                          widget.onWalkInAdded(newWalkIn);
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Walk-in added successfully')),
+                          );
+                          _showAIAvailabilityCheckDialog();
+                        }
+                      },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.black),
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.black),
+                      )
+                    : const Text('ADD WALK-IN',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.white70)),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (nameController.text.isNotEmpty && phoneController.text.isNotEmpty) {
-                final newWalkIn = {
-                  'name': nameController.text,
-                  'phone': phoneController.text,
-                  'service': selectedService,
-                };
-                widget.onWalkInAdded(newWalkIn);
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Walk-in added successfully')),
-                );
-                _showAIAvailabilityCheckDialog();
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-            child: const Text('ADD WALK-IN', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -268,7 +366,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
               children: [
                 const Text(
                   'AI Availability Check',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18),
                 ),
                 const SizedBox(height: 8),
                 const Text(
@@ -279,7 +380,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                 // Current System Status
                 const Text(
                   'Current System Status',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14),
                 ),
                 const SizedBox(height: 12),
                 Row(
@@ -287,23 +391,41 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                   children: [
                     Column(
                       children: [
-                        const Text('85%', style: TextStyle(color: Color(0xFFE74C3C), fontWeight: FontWeight.bold, fontSize: 28)),
+                        const Text('85%',
+                            style: TextStyle(
+                                color: Color(0xFFE74C3C),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 28)),
                         const SizedBox(height: 4),
-                        const Text('CURRENT LOAD', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                        const Text('CURRENT LOAD',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 10)),
                       ],
                     ),
                     Column(
                       children: [
-                        const Text('3', style: TextStyle(color: Color(0xFF4CAF50), fontWeight: FontWeight.bold, fontSize: 28)),
+                        const Text('3',
+                            style: TextStyle(
+                                color: Color(0xFF4CAF50),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 28)),
                         const SizedBox(height: 4),
-                        const Text('AVAILABLE', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                        const Text('AVAILABLE',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 10)),
                       ],
                     ),
                     Column(
                       children: [
-                        const Text('2', style: TextStyle(color: Color(0xFFFFA726), fontWeight: FontWeight.bold, fontSize: 28)),
+                        const Text('2',
+                            style: TextStyle(
+                                color: Color(0xFFFFA726),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 28)),
                         const SizedBox(height: 4),
-                        const Text('RESCHEDULES', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                        const Text('RESCHEDULES',
+                            style:
+                                TextStyle(color: Colors.white70, fontSize: 10)),
                       ],
                     ),
                   ],
@@ -312,21 +434,43 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                 // Best Slot Suggestions
                 const Text(
                   'Best Slot Suggestions',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14),
                 ),
                 const SizedBox(height: 12),
-                _buildSlotSuggestionDialog('2:30 PM', 'Stylist: Emma R.', 'Service: Cut & Style', '95% Match', 'LOW IMPACT', const Color(0xFF4CAF50)),
+                _buildSlotSuggestionDialog(
+                    '2:30 PM',
+                    'Stylist: Emma R.',
+                    'Service: Cut & Style',
+                    '95% Match',
+                    'LOW IMPACT',
+                    const Color(0xFF4CAF50)),
                 const SizedBox(height: 10),
-                _buildSlotSuggestionDialog('3:15 PM', 'Stylist: Mike C.', 'Service: Color Touch-up', '88% Match', 'MEDIUM IMPACT', const Color(0xFFFFA726)),
+                _buildSlotSuggestionDialog(
+                    '3:15 PM',
+                    'Stylist: Mike C.',
+                    'Service: Color Touch-up',
+                    '88% Match',
+                    'MEDIUM IMPACT',
+                    const Color(0xFFFFA726)),
                 const SizedBox(height: 10),
-                _buildSlotSuggestionDialog('4:00 PM', 'Stylist: Sarah J.', 'Service: Full Color', '92% Match', 'LOW IMPACT', const Color(0xFF4CAF50)),
+                _buildSlotSuggestionDialog(
+                    '4:00 PM',
+                    'Stylist: Sarah J.',
+                    'Service: Full Color',
+                    '92% Match',
+                    'LOW IMPACT',
+                    const Color(0xFF4CAF50)),
                 const SizedBox(height: 20),
                 // Close Button
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('CLOSE', style: TextStyle(color: Colors.white70)),
+                    child: const Text('CLOSE',
+                        style: TextStyle(color: Colors.white70)),
                   ),
                 ),
               ],
@@ -337,7 +481,8 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
     );
   }
 
-  Widget _buildSlotSuggestionDialog(String time, String stylist, String service, String match, String impact, Color impactColor) {
+  Widget _buildSlotSuggestionDialog(String time, String stylist, String service,
+      String match, String impact, Color impactColor) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -353,7 +498,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
             children: [
               Text(
                 time,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -376,7 +524,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                     const SizedBox(width: 4),
                     Text(
                       impact,
-                      style: TextStyle(color: impactColor, fontSize: 9, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                          color: impactColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -399,7 +550,10 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
             children: [
               Text(
                 match,
-                style: const TextStyle(color: kGoldColor, fontSize: 11, fontWeight: FontWeight.bold),
+                style: const TextStyle(
+                    color: kGoldColor,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold),
               ),
               ElevatedButton(
                 onPressed: () {
@@ -411,7 +565,8 @@ class _ReceptionistWalkInsPageState extends State<ReceptionistWalkInsPage> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   minimumSize: const Size(0, 0),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(6),

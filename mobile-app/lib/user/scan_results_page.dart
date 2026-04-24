@@ -1,13 +1,10 @@
-
-import 'dart:convert';
-
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
 import 'api_config.dart';
-import 'haircuts_list_page.dart';
+import 'ai_funnel_service.dart';
 import 'dashboard_page.dart';
 import 'hairstyle_detail_page.dart';
+import 'haircuts_list_page.dart';
 import 'user_session.dart';
 
 class ScanResultsPage extends StatefulWidget {
@@ -15,7 +12,12 @@ class ScanResultsPage extends StatefulWidget {
   final List<Map<String, dynamic>> recommendations;
   final String? summary;
 
-  const ScanResultsPage({super.key, required this.imageUrl, required this.recommendations, this.summary});
+  const ScanResultsPage({
+    super.key,
+    required this.imageUrl,
+    required this.recommendations,
+    this.summary,
+  });
 
   @override
   State<ScanResultsPage> createState() => _ScanResultsPageState();
@@ -24,134 +26,113 @@ class ScanResultsPage extends StatefulWidget {
 class _ScanResultsPageState extends State<ScanResultsPage> {
   int _selectedIndex = 0;
   String _selectedView = 'front';
-  final Map<String, Future<Uint8List>> _webImageCache = {};
-  bool _isGenerating = false;
-  String? _generatedImageUrl;
-  String? _generatedImageBase64;
-  bool? _aiStatusOk;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadAiStatus();
-  }
-
-  Future<void> _loadAiStatus() async {
-    try {
-      final response = await http.get(Uri.parse('${ApiConfig.baseUrl}/ai_status.php'));
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        if (!mounted) return;
-        setState(() => _aiStatusOk = false);
-        return;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final tryon = data['tryon'] as Map<String, dynamic>? ?? {};
-      final configured = tryon['configured'] == true;
-      if (!mounted) return;
-      setState(() => _aiStatusOk = configured);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _aiStatusOk = false);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
-    final hasRecommendations = widget.recommendations.isNotEmpty;
-    final selected = hasRecommendations ? widget.recommendations[_selectedIndex] : null;
-    final previewUrl = _generatedImageUrl ?? _resolvePreviewUrl(selected);
+    final hasItems = widget.recommendations.isNotEmpty;
+    final current = hasItems ? widget.recommendations[_selectedIndex] : null;
+    final previewUrl = _selectedPreviewUrl(current);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: const Color(0xFF090909),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        title: const Text(
+          'AI Hair Recommendations',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
         leading: IconButton(
-          icon: const Icon(Icons.close, color: Colors.white, size: 28),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pushReplacement(
             MaterialPageRoute(builder: (_) => const DashboardPage()),
           ),
         ),
-        title: const Text('AI Recommendations', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Your AI hairstyle preview',
-              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Preview the recommended hairstyle from different angles. You can also choose another style below.',
-              style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
-            ),
-            if ((widget.summary ?? '').trim().isNotEmpty) ...[
-              const SizedBox(height: 14),
+            if ((widget.summary ?? '').trim().isNotEmpty)
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.all(14),
+                padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF161616),
+                  color: const Color(0xFF131313),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.white10),
+                  border: Border.all(color: Colors.white12),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('AI Overview', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 6),
-                    Text(widget.summary!, style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.4)),
-                  ],
+                child: Text(
+                  widget.summary!,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
                 ),
               ),
-            ],
-            const SizedBox(height: 20),
-            _buildPreview(previewUrl, selected),
-            const SizedBox(height: 16),
-            _buildViewSelector(),
+            if ((widget.summary ?? '').trim().isNotEmpty) const SizedBox(height: 14),
+            _previewCard(previewUrl, current),
             const SizedBox(height: 12),
-            if (hasRecommendations)
-              const Text('Using pre-generated hairstyle images.', style: TextStyle(color: Colors.white54, fontSize: 12)),
-            if (_generatedImageUrl != null || _generatedImageBase64 != null)
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
-                child: Text('Showing AI-generated preview', style: TextStyle(color: Colors.white54, fontSize: 12)),
-              ),
-            const SizedBox(height: 20),
-            if (!hasRecommendations)
-              _buildEmptyState(context)
-            else
-              _buildRecommendationsList(context),
-            const SizedBox(height: 24),
-            if (hasRecommendations)
-              ElevatedButton(
-                onPressed: () {
-                  final style = _toStyleMap(selected!);
-                  UserSession.selectedVariantId = style['variantId'] as int?;
-                  UserSession.selectedStyleName = style['name'] as String?;
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)),
-                  );
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(52),
-                ),
-                child: const Text('Use this hairstyle'),
-              ),
+            _viewSelector(),
+            const SizedBox(height: 14),
+            const Text(
+              'Recommended styles',
+              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 10),
+            Expanded(
+              child: hasItems ? _listRecommendations() : _emptyState(),
+            ),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: hasItems
+                  ? () async {
+                      final style = _toStyleMap(widget.recommendations[_selectedIndex]);
+                      UserSession.selectedVariantId = style['variantId'] as int?;
+                      UserSession.selectedStyleName = style['name']?.toString();
+                      UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+
+                      final userId = UserSession.userId;
+                      final variantId = UserSession.selectedVariantId;
+                      if (userId != null && variantId != null) {
+                        await AiFunnelService.saveSelection(
+                          scanSessionId: UserSession.ensureScanSessionId(),
+                          userId: userId,
+                          variantId: variantId,
+                          styleName: UserSession.selectedStyleName ?? 'Style',
+                          faceShape: UserSession.lastScan?['faceShape']?.toString(),
+                          hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+                          hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+                          hairLength: UserSession.lastScan?['hairLength']?.toString(),
+                          estimatedMinutes: UserSession.selectedEstimatedMinutes,
+                        );
+                      }
+
+                      if (!context.mounted) {
+                        return;
+                      }
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)),
+                      );
+                    }
+                  : null,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(52),
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Use selected style'),
+            ),
+            const SizedBox(height: 8),
             OutlinedButton(
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const HaircutsListPage()),
                 );
               },
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
-              child: const Text('Choose from full library'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Browse full library'),
             ),
           ],
         ),
@@ -159,15 +140,15 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     );
   }
 
-  Widget _buildPreview(String? previewUrl, Map<String, dynamic>? selected) {
-    final styleName = (selected?['style_name'] ?? 'Preview') as String;
-    final score = selected?['confidence_score'];
-    final reason = selected?['rank_reason']?.toString();
+  Widget _previewCard(String? previewUrl, Map<String, dynamic>? current) {
+    final styleName = current?['style_name']?.toString() ?? current?['styleName']?.toString() ?? 'No style selected';
+    final confidence = _asDouble(current?['confidence_score']);
+
     return Container(
-      height: 320,
+      height: 250,
       width: double.infinity,
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
+        color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white12),
       ),
@@ -176,38 +157,37 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (_generatedImageBase64 != null)
-              Image.memory(base64Decode(_generatedImageBase64!), fit: BoxFit.cover)
-            else if (previewUrl != null)
-              kIsWeb
-                  ? _buildWebImage(previewUrl)
-                  : Image(image: _buildImageProvider(previewUrl), fit: BoxFit.cover)
-            else
-              Container(color: const Color(0xFF1A1A1A)),
+            if (previewUrl != null && previewUrl.isNotEmpty)
+              Image.network(
+                previewUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
             Container(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  colors: [Colors.black.withOpacity(0.55), Colors.transparent],
+                  colors: [Colors.black.withOpacity(0.65), Colors.transparent],
                 ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: Align(
-                alignment: Alignment.bottomLeft,
+            Align(
+              alignment: Alignment.bottomLeft,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(styleName, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                    if (score != null)
-                      Text('Match: ${(double.tryParse(score.toString()) ?? 0) * 100.0 ~/ 1}%', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-                    if (reason != null && reason.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 6),
-                        child: Text(reason, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                    Text(
+                      styleName,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+                    ),
+                    if (confidence != null)
+                      Text(
+                        'Match confidence: ${(confidence * 100).toStringAsFixed(0)}%',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12),
                       ),
                   ],
                 ),
@@ -219,7 +199,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     );
   }
 
-  Widget _buildViewSelector() {
+  Widget _viewSelector() {
     return Row(
       children: [
         _viewButton('Front', 'front'),
@@ -246,229 +226,119 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     );
   }
 
-  Widget _buildRecommendationsList(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text('Top ${widget.recommendations.length} recommendations', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 12),
-        ...List.generate(widget.recommendations.length, (index) {
-          final item = widget.recommendations[index];
-          final styleName = item['style_name'] ?? 'Style';
-          final score = item['confidence_score'] ?? '';
-          final reason = item['rank_reason']?.toString() ?? '';
-          final thumbUrl = _resolveImage(item['front_view_url']);
+  Widget _listRecommendations() {
+    return ListView.separated(
+      itemCount: widget.recommendations.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, index) {
+        final item = widget.recommendations[index];
+        final selected = index == _selectedIndex;
+        final title = item['style_name']?.toString() ?? item['styleName']?.toString() ?? 'Style';
+        final subtitle = item['hair_texture']?.toString() ?? item['face_shape']?.toString() ?? 'Recommended style';
 
-          return GestureDetector(
-            onTap: () => setState(() => _selectedIndex = index),
-            child: Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: index == _selectedIndex ? Colors.white10 : const Color(0xFF161616),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: index == _selectedIndex ? Colors.white24 : Colors.white10),
-              ),
-              child: Row(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: SizedBox(
-                      width: 56,
-                      height: 56,
-                      child: thumbUrl != null
-                          ? (kIsWeb
-                              ? _buildWebImage(thumbUrl)
-                              : Image(image: _buildImageProvider(thumbUrl), fit: BoxFit.cover))
-                          : Container(color: Colors.black),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(styleName.toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        Text('Score: $score', style: const TextStyle(color: Colors.white60, fontSize: 12)),
-                        if (reason.isNotEmpty)
-                          Text(reason, style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
+        return InkWell(
+          onTap: () => setState(() => _selectedIndex = index),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: selected ? const Color(0xFF1C1C1C) : const Color(0xFF121212),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: selected ? Colors.white54 : Colors.white12),
             ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Future<void> _generateAiPreview(Map<String, dynamic> selected) async {
-    if (_isGenerating) return;
-    if (_aiStatusOk == false) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('AI preview is unavailable. Check AI status settings.')),
-      );
-      return;
-    }
-    final styleName = selected['style_name']?.toString() ?? 'hairstyle';
-    final imageUrl = widget.imageUrl;
-    if (imageUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Missing scan image for AI preview.')),
-      );
-      return;
-    }
-    setState(() => _isGenerating = true);
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/ai_tryon.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'instantId',
-          'prompt': 'Apply hairstyle: $styleName',
-          'imageUrl': imageUrl,
-          'negativePrompt': 'blurry, low quality, distorted face',
-        }),
-      );
-      if (!mounted) return;
-      if (response.statusCode != 200) {
-        final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
-        final error = data['error']?.toString() ?? 'AI preview failed.';
-        final details = data['details']?.toString();
-        final hint = data['hint']?.toString();
-        final messageParts = [error];
-        if (details != null && details.isNotEmpty) {
-          messageParts.add(details);
-        }
-        if (hint != null && hint.isNotEmpty) {
-          messageParts.add(hint);
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('${messageParts.join(' ')} (${response.statusCode})')),
-        );
-        return;
-      }
-      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
-      final generatedUrl = data['imageUrl']?.toString();
-      final generatedBase64 = data['imageBase64']?.toString();
-      if ((generatedUrl == null || generatedUrl.isEmpty) && (generatedBase64 == null || generatedBase64.isEmpty)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('AI preview did not return an image.')),
-        );
-        return;
-      }
-      setState(() {
-        _generatedImageUrl = generatedUrl;
-        _generatedImageBase64 = generatedBase64;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('AI preview failed: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isGenerating = false);
-      }
-    }
-  }
-
-  Widget _buildEmptyState(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('No recommendations returned', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          const Text(
-            'Choose from the haircut library to preview a style.',
-            style: TextStyle(color: Colors.white70, fontSize: 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                  child: Center(
+                    child: Text('${index + 1}', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 2),
+                      Text(subtitle, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        ],
-      ),
-    );
-  }
-
-  String? _resolvePreviewUrl(Map<String, dynamic>? selected) {
-    if (selected == null) {
-      return _resolveImage(widget.imageUrl);
-    }
-    final key = _selectedView == 'front'
-        ? 'front_view_url'
-      : _selectedView == 'right'
-        ? 'side_view_url'
-        : 'back_view_url';
-    return _resolveImage(selected[key]) ?? _resolveImage(widget.imageUrl);
-  }
-
-  String? _resolveImage(dynamic value) {
-    final url = value?.toString() ?? '';
-    if (url.isEmpty) {
-      return null;
-    }
-    if (url.startsWith('assets/')) {
-      return url;
-    }
-    return ApiConfig.resolveImageUrl(url);
-  }
-
-  ImageProvider _buildImageProvider(String url) {
-    if (url.startsWith('assets/')) {
-      return AssetImage(url);
-    }
-    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
-  }
-
-  Future<Uint8List> _fetchWebImageBytes(String url) {
-    return _webImageCache.putIfAbsent(url, () async {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) {
-        throw Exception('Image load failed (${response.statusCode})');
-      }
-      return response.bodyBytes;
-    });
-  }
-
-  Widget _buildWebImage(String url) {
-    return FutureBuilder<Uint8List>(
-      future: _fetchWebImageBytes(url),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(color: const Color(0xFF111111));
-        }
-        if (!snapshot.hasData) {
-          return Container(color: const Color(0xFF111111));
-        }
-        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+        );
       },
     );
   }
 
+  Widget _emptyState() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: const Text(
+        'No recommendations available yet. Try scanning again with better lighting or choose from library.',
+        style: TextStyle(color: Colors.white70),
+      ),
+    );
+  }
+
+  String? _selectedPreviewUrl(Map<String, dynamic>? item) {
+    if (item == null) {
+      return null;
+    }
+
+    if (_selectedView == 'front') {
+      return _resolveImage(item['front_view_url'] ?? item['frontViewUrl']);
+    }
+    if (_selectedView == 'left') {
+      return _resolveImage(item['side_view_url'] ?? item['sideViewUrl']);
+    }
+    return _resolveImage(item['back_view_url'] ?? item['backViewUrl'] ?? item['side_view_url'] ?? item['sideViewUrl']);
+  }
+
+  String? _resolveImage(dynamic value) {
+    final raw = value?.toString() ?? '';
+    if (raw.isEmpty) {
+      return null;
+    }
+    return ApiConfig.resolveImageUrl(raw);
+  }
+
+  double? _asDouble(dynamic value) {
+    if (value == null) return null;
+    return double.tryParse(value.toString());
+  }
+
   Map<String, dynamic> _toStyleMap(Map<String, dynamic> recommendation) {
     return {
-      'name': recommendation['style_name']?.toString() ?? 'Style',
-      'description': 'AI recommended based on your scan',
-      'image': _resolveImage(recommendation['front_view_url']) ?? '',
-      'details': 'Great for your hair texture and face shape.\nFace shape: ${recommendation['face_shape'] ?? 'N/A'}\nHair texture: ${recommendation['hair_texture'] ?? 'N/A'}',
-      'rating': _scoreToRating(recommendation['confidence_score']),
-      'frontViewUrl': _resolveImage(recommendation['front_view_url']) ?? '',
-      'sideViewUrl': _resolveImage(recommendation['side_view_url']) ?? '',
-      'backViewUrl': _resolveImage(recommendation['back_view_url']) ?? '',
-      'variantId': recommendation['variant_id'],
+      'name': recommendation['style_name']?.toString() ?? recommendation['styleName']?.toString() ?? 'Style',
+      'description': recommendation['description']?.toString() ?? 'AI recommended style',
+      'image': _resolveImage(recommendation['front_view_url'] ?? recommendation['frontViewUrl']) ?? '',
+      'details': 'Face shape: ${recommendation['face_shape'] ?? 'N/A'}\nHair texture: ${recommendation['hair_texture'] ?? 'N/A'}',
+      'rating': _asDouble(recommendation['confidence_score']) ?? 4.0,
+      'frontViewUrl': _resolveImage(recommendation['front_view_url'] ?? recommendation['frontViewUrl']) ?? '',
+      'sideViewUrl': _resolveImage(recommendation['side_view_url'] ?? recommendation['sideViewUrl']) ?? '',
+      'backViewUrl': _resolveImage(recommendation['back_view_url'] ?? recommendation['backViewUrl']) ?? '',
+      'variantId': recommendation['variant_id'] ?? recommendation['variantId'],
+      'estimatedMinutes': _asInt(recommendation['estimated_minutes'] ?? recommendation['estimatedMinutes']),
     };
   }
 
-  String _scoreToRating(dynamic score) {
-    final value = double.tryParse(score?.toString() ?? '') ?? 0.0;
-    final stars = (value * 5).clamp(1, 5).round();
-    return '★' * stars + '☆' * (5 - stars);
+  int? _asInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    return int.tryParse(value.toString());
   }
 }

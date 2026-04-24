@@ -18,6 +18,18 @@ class AdminDashboardPage extends StatefulWidget {
 
 class _AdminDashboardPageState extends State<AdminDashboardPage> {
   int _selectedTab = 0;
+  bool _initialLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    Future<void>.delayed(const Duration(milliseconds: 650), () {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _initialLoading = false);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,7 +44,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24),
         ),
       ),
-      body: _selectedTab == 0 ? _buildDashboardContent() : _selectedTab == 1 ? const AdminManageUsersPage() : _selectedTab == 2 ? const AdminAuditPage() : _selectedTab == 3 ? const AdminAnalyticsPage() : _selectedTab == 4 ? const AdminManageServicesPage() : _selectedTab == 5 ? const AdminSettingsPage() : _selectedTab == 6 ? const AuthPage() : Container(),
+      body: _initialLoading ? _buildInitialSkeleton() : _buildCurrentBody(),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           border: Border(top: BorderSide(color: Colors.white10, width: 1)),
@@ -86,6 +98,114 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           selectedLabelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
           unselectedLabelStyle: const TextStyle(fontSize: 11),
         ),
+      ),
+    );
+  }
+
+  Widget _buildCurrentBody() {
+    return _selectedTab == 0
+        ? _buildDashboardContent()
+        : _selectedTab == 1
+            ? const AdminManageUsersPage()
+            : _selectedTab == 2
+                ? const AdminAuditPage()
+                : _selectedTab == 3
+                    ? const AdminAnalyticsPage()
+                    : _selectedTab == 4
+                        ? const AdminManageServicesPage()
+                        : _selectedTab == 5
+                            ? const AdminSettingsPage()
+                            : _selectedTab == 6
+                                ? const AuthPage()
+                                : Container();
+  }
+
+  Widget _buildInitialSkeleton() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 2.0,
+            children: List.generate(4, (_) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _skeletonBox(height: 10, width: 84),
+                    _skeletonBox(height: 18, width: 56),
+                    _skeletonBox(height: 9, width: 96),
+                  ],
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 32),
+          _skeletonBox(height: 18, width: 132),
+          const SizedBox(height: 16),
+          ...List.generate(3, (_) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF2A2A2A),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _skeletonBox(height: 14, width: 150),
+                          const SizedBox(height: 8),
+                          _skeletonBox(height: 11, width: 210),
+                          const SizedBox(height: 8),
+                          _skeletonBox(height: 10, width: 72),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _skeletonBox({required double height, double? width}) {
+    return Container(
+      height: height,
+      width: width,
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A2A2A),
+        borderRadius: BorderRadius.circular(6),
       ),
     );
   }

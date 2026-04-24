@@ -25,6 +25,8 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _barbers = [];
+  int? _detailsLoadingBarberId;
+  int? _openingCalendarBarberId;
 
   @override
   void initState() {
@@ -71,6 +73,11 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
   }
 
   Future<void> _showBarberDetails(int barberId) async {
+    if (_detailsLoadingBarberId == barberId) {
+      return;
+    }
+
+    setState(() => _detailsLoadingBarberId = barberId);
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
@@ -108,6 +115,29 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Failed to load barber info.')),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _detailsLoadingBarberId = null);
+      }
+    }
+  }
+
+  Future<void> _openCalendar(int barberId, String barberName) async {
+    if (_openingCalendarBarberId != null) {
+      return;
+    }
+
+    setState(() => _openingCalendarBarberId = barberId);
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => CalendarPage(
+          barberId: barberId,
+          barberName: barberName,
+        ),
+      ),
+    );
+    if (mounted) {
+      setState(() => _openingCalendarBarberId = null);
     }
   }
 
@@ -123,7 +153,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
         },
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          ? _buildBarberSkeletonList()
           : _error != null
               ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
               : ListView.builder(
@@ -203,41 +233,57 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      TextButton(
-                        onPressed: () {
-                          final barberId = barber['barber_id'] is int
-                              ? barber['barber_id'] as int
-                              : int.tryParse('${barber['barber_id']}') ?? 0;
-                          if (barberId > 0) {
-                            _showBarberDetails(barberId);
-                          }
-                        },
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('View'),
-                      ),
-                      const SizedBox(height: 6),
-                      GestureDetector(
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => CalendarPage(
-                                barberId: barber['barber_id'] is int ? barber['barber_id'] as int : int.tryParse('${barber['barber_id']}') ?? 0,
-                                barberName: barberName,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
+                      Builder(builder: (_) {
+                        final barberId = barber['barber_id'] is int
+                            ? barber['barber_id'] as int
+                            : int.tryParse('${barber['barber_id']}') ?? 0;
+                        final loadingDetails = _detailsLoadingBarberId == barberId;
+                        final openingCalendar = _openingCalendarBarberId == barberId;
+
+                        return TextButton(
+                          onPressed: (loadingDetails || openingCalendar || barberId <= 0)
+                              ? null
+                              : () => _showBarberDetails(barberId),
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.white,
                           ),
-                          child: const Icon(Icons.chevron_right, color: Colors.black, size: 24),
-                        ),
-                      ),
+                          child: loadingDetails
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Text('View'),
+                        );
+                      }),
+                      const SizedBox(height: 6),
+                      Builder(builder: (_) {
+                        final barberId = barber['barber_id'] is int
+                            ? barber['barber_id'] as int
+                            : int.tryParse('${barber['barber_id']}') ?? 0;
+                        final openingCalendar = _openingCalendarBarberId == barberId;
+                        final loadingDetails = _detailsLoadingBarberId == barberId;
+
+                        return GestureDetector(
+                          onTap: (openingCalendar || loadingDetails || barberId <= 0)
+                              ? null
+                              : () => _openCalendar(barberId, barberName),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: openingCalendar
+                                ? const SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                                  )
+                                : const Icon(Icons.chevron_right, color: Colors.black, size: 24),
+                          ),
+                        );
+                      }),
                     ],
                   ),
                 ],
@@ -261,6 +307,71 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
             showAppMenuSheet(context);
           }
         },
+      ),
+    );
+  }
+
+  Widget _buildBarberSkeletonList() {
+    return ListView.builder(
+      padding: const EdgeInsets.all(20),
+      itemCount: 6,
+      itemBuilder: (_, __) => Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white10, width: 1),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: const BoxDecoration(
+                color: Colors.white12,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 140,
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: Colors.white12,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Container(
+                    width: 90,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: Colors.white12,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: Colors.white12,
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

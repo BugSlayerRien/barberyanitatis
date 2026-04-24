@@ -1,5 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:http/http.dart' as http;
+
+import 'api_config.dart';
+import 'reset_password_page.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -21,25 +26,71 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   Future<void> _sendReset() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your email.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter your email.')));
+      return;
+    }
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please enter a valid email address.')));
       return;
     }
     setState(() => _isSubmitting = true);
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset email sent.')),
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'forgotPassword',
+          'email': email,
+        }),
       );
-      Navigator.of(context).pop();
+
+      final data = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      if (response.statusCode != 200) {
+        throw Exception(data['error']?.toString() ?? 'Reset request failed.');
+      }
+      if (!mounted) return;
+      final debugToken = data['resetToken']?.toString() ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            data['message']?.toString() ?? 'Password reset request sent.',
+          ),
+        ),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => ResetPasswordPage(initialToken: debugToken),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reset failed: $e')),
+        SnackBar(content: Text(_readableResetError(e))),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
+  }
+
+  String _readableResetError(Object error) {
+    final raw = error.toString().replaceFirst('Exception:', '').trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('not found') || lower.contains('no account')) {
+      return 'No account found for that email.';
+    }
+    if (lower.contains('network') || lower.contains('socket')) {
+      return 'Network issue. Please try again.';
+    }
+    return raw.isEmpty ? 'Reset failed. Please try again.' : raw;
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
   }
 
   @override
@@ -49,7 +100,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Forgot Password', style: TextStyle(color: Colors.white)),
+        title: const Text('Forgot Password',
+            style: TextStyle(color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
@@ -73,7 +125,10 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 children: [
                   const Text(
                     'Reset your password',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
                   const Text(
@@ -90,8 +145,11 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       hintStyle: const TextStyle(color: Colors.white54),
                       filled: true,
                       fillColor: const Color(0xFF1A1A1A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: BorderSide.none),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 14),
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -102,7 +160,28 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       foregroundColor: Colors.black,
                       minimumSize: const Size.fromHeight(48),
                     ),
-                    child: Text(_isSubmitting ? 'Sending...' : 'Send reset link'),
+                    child:
+                        Text(_isSubmitting ? 'Sending...' : 'Send reset link'),
+                  ),
+                  const SizedBox(height: 10),
+                  OutlinedButton(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const ResetPasswordPage(),
+                              ),
+                            );
+                          },
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                      side: const BorderSide(color: Colors.white30),
+                    ),
+                    child: const Text(
+                      'I already have a reset token',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ),
                 ],
               ),

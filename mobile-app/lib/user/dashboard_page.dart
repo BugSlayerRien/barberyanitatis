@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
@@ -10,6 +9,7 @@ import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
 import 'haircuts_list_page.dart';
+import 'ai_chatbot_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
@@ -32,14 +32,24 @@ class _DashboardPageState extends State<DashboardPage> {
 
   List<Map<String, dynamic>> _recommendedStyles = [];
   List<Map<String, dynamic>> _trendyStyles = [];
+  bool _insightsLoading = true;
+  Map<String, int> _paymentCounters = {
+    'Unpaid': 0,
+    'Verifying': 0,
+    'Paid': 0,
+    'Failed': 0,
+  };
+  String _queueSummary = 'Queue data unavailable';
   bool _loading = true;
   String? _error;
-  final Map<String, Future<Uint8List>> _webImageCache = {};
+  static const String _dashboardSampleHairFront =
+      'assets/images/overlays/sample_hair_front.png';
 
   @override
   void initState() {
     super.initState();
     _loadStyles();
+    _loadCustomerInsights();
     _welcomeTimer = Timer(const Duration(seconds: 5), () {
       if (!mounted) {
         return;
@@ -110,17 +120,73 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  Future<void> _loadCustomerInsights() async {
+    final userId = UserSession.userId;
+    if (userId == null) {
+      setState(() => _insightsLoading = false);
+      return;
+    }
+
+    setState(() => _insightsLoading = true);
+
+    try {
+      final bookingResponse = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'listByCustomer', 'userID': userId}),
+      );
+      final bookingData = bookingResponse.body.isNotEmpty
+          ? jsonDecode(bookingResponse.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      final appointments = (bookingData['appointments'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      final counters = <String, int>{'Unpaid': 0, 'Verifying': 0, 'Paid': 0, 'Failed': 0};
+
+      for (final appt in appointments) {
+        final state = appt['paymentState']?.toString() ?? 'Unpaid';
+        counters[state] = (counters[state] ?? 0) + 1;
+      }
+
+      final queueResponse = await http.get(Uri.parse('${ApiConfig.baseUrl}/receptionist_dashboard.php'));
+      final queueData = queueResponse.body.isNotEmpty
+          ? jsonDecode(queueResponse.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      int walkins = 0;
+      int inProgress = 0;
+      int availableBarbers = 0;
+      for (final stat in (queueData['stats'] as List<dynamic>? ?? [])) {
+        final item = Map<String, dynamic>.from(stat as Map);
+        final title = item['title']?.toString() ?? '';
+        final value = int.tryParse(item['value']?.toString() ?? '0') ?? 0;
+        if (title == 'Walk-ins') {
+          walkins = value;
+        }
+        if (title == 'In Progress') {
+          inProgress = value;
+        }
+        if (title == 'Available Barbers') {
+          availableBarbers = value;
+        }
+      }
+
+      setState(() {
+        _paymentCounters = counters;
+        _queueSummary = 'Walk-ins today: $walkins • In progress: $inProgress • Active barbers: $availableBarbers';
+        _insightsLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) {
+        return;
+      }
+      setState(() => _insightsLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final styles = _selectedTab == 0 ? _recommendedStyles : _trendyStyles;
-    final faceShape = UserSession.lastScan?['faceShape']?.toString();
-    final hairTexture = UserSession.lastScan?['hairTexture']?.toString();
-    final bulletFace = (faceShape != null && faceShape.isNotEmpty)
-      ? 'Compliments your ${faceShape.toLowerCase()} face shape'
-      : 'Compliments your face shape';
-    final bulletTexture = (hairTexture != null && hairTexture.isNotEmpty)
-      ? 'Matches your ${hairTexture.toLowerCase()} hair texture'
-      : 'Matches your hair texture';
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -158,7 +224,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               const SizedBox(height: 32),
             ],
-            
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
               child: Row(
@@ -249,6 +315,8 @@ class _DashboardPageState extends State<DashboardPage> {
                 ],
               ),
             ),
+            const SizedBox(height: 10),
+            _buildInlineOverview(),
             const SizedBox(height: 24),
 
             if (_loading)
@@ -270,58 +338,23 @@ class _DashboardPageState extends State<DashboardPage> {
                 itemCount: styles.length,
                 itemBuilder: (context, index) => _hairStyleCard(context, styles[index]),
               ),
-            const SizedBox(height: 32),
-
-            // Why These Work section
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.check_circle, color: Colors.white, size: 20),
-                      ),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Why These Work For You',
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _BulletPoint(bulletFace),
-                      SizedBox(height: 12),
-                      _BulletPoint(bulletTexture),
-                      SizedBox(height: 12),
-                      _BulletPoint('Low maintenance styling'),
-                    ],
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 24),
           ],
         ),
       ),
+      floatingActionButton: FloatingActionButton(
+        heroTag: 'dashboard_ai_chat_fab',
+        backgroundColor: const Color(0xFFA99941),
+        foregroundColor: Colors.black,
+        tooltip: 'Open AI Barber Chat',
+        onPressed: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AiChatbotPage()),
+          );
+        },
+        child: const Icon(Icons.support_agent_rounded),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
 
       bottomNavigationBar: AppBottomNavBar(
         currentIndex: _selectedIndex,
@@ -350,7 +383,8 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _hairStyleCard(BuildContext context, Map<String, dynamic> style) {
-    final imageUrl = style['image']?.toString() ?? '';
+    final styleName = style['name']?.toString() ?? 'Style';
+    final previewImage = _resolvePreviewImage(style);
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)));
@@ -375,12 +409,35 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (imageUrl.isNotEmpty)
-                      kIsWeb
-                          ? _buildWebImage(imageUrl)
-                          : Image(image: _buildImageProvider(imageUrl), fit: BoxFit.cover)
+                    Container(color: const Color(0xFF111111)),
+                    if (previewImage.startsWith('assets/'))
+                      Image.asset(
+                        previewImage,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) {
+                          return const Center(
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.white30,
+                              size: 34,
+                            ),
+                          );
+                        },
+                      )
                     else
-                      Container(color: const Color(0xFF111111)),
+                      Image.network(
+                        previewImage,
+                        fit: BoxFit.cover,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Image.asset(
+                            _dashboardSampleHairFront,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                          );
+                        },
+                      ),
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -400,7 +457,7 @@ class _DashboardPageState extends State<DashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(style['name']?.toString() ?? 'Style', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text(styleName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
                   Text(style['description']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3)),
                   const SizedBox(height: 8),
@@ -414,61 +471,85 @@ class _DashboardPageState extends State<DashboardPage> {
     );
   }
 
+  Widget _buildInlineOverview() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Quick Overview', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          if (_insightsLoading)
+            const Text('Loading overview...', style: TextStyle(color: Colors.white54, fontSize: 12))
+          else ...[
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _paymentCounters.entries
+                  .map((e) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white10,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text('${e.key}: ${e.value}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 8),
+            Text(_queueSummary, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          ],
+        ],
+      ),
+    );
+  }
+
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
-    final rawFront = variant['front_view_url']?.toString() ?? '';
-    final rawSide = variant['side_view_url']?.toString() ?? '';
-    final rawBack = variant['back_view_url']?.toString() ?? '';
+    final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
+    final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
+    final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
+    final front = _resolveImage(frontRaw) ?? _dashboardSampleHairFront;
+    final side = _resolveImage(sideRaw) ?? front;
+    final back = _resolveImage(backRaw) ?? front;
+
     return {
       'name': variant['style_name']?.toString() ?? 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
-      'image': _normalizeImageUrl(rawFront),
+      'image': front,
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
-      'frontViewUrl': _normalizeImageUrl(rawFront),
-      'sideViewUrl': _normalizeImageUrl(rawSide),
-      'backViewUrl': _normalizeImageUrl(rawBack),
+      'frontViewUrl': front,
+      'sideViewUrl': side,
+      'backViewUrl': back,
       'variantId': variant['variant_id'],
     };
   }
 
-  String _normalizeImageUrl(String url) {
-    if (url.startsWith('assets/')) {
-      return url;
+  String _resolvePreviewImage(Map<String, dynamic> style) {
+    final raw = style['image']?.toString() ??
+        style['frontViewUrl']?.toString() ??
+        '';
+    if (raw.isEmpty) {
+      return _dashboardSampleHairFront;
     }
-    return ApiConfig.resolveImageUrl(url);
+    return raw;
   }
 
-  ImageProvider _buildImageProvider(String url) {
-    if (url.startsWith('assets/')) {
-      return AssetImage(url);
+  String? _resolveImage(String raw) {
+    if (raw.isEmpty) {
+      return null;
     }
-    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
-  }
-
-  Future<Uint8List> _fetchWebImageBytes(String url) {
-    return _webImageCache.putIfAbsent(url, () async {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode != 200) {
-        throw Exception('Image load failed (${response.statusCode})');
-      }
-      return response.bodyBytes;
-    });
-  }
-
-  Widget _buildWebImage(String url) {
-    return FutureBuilder<Uint8List>(
-      future: _fetchWebImageBytes(url),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(color: const Color(0xFF111111));
-        }
-        if (!snapshot.hasData) {
-          return Container(color: const Color(0xFF111111));
-        }
-        return Image.memory(snapshot.data!, fit: BoxFit.cover);
-      },
-    );
+    if (raw.startsWith('assets/')) {
+      return raw;
+    }
+    return ApiConfig.resolveImageUrl(raw);
   }
 
   String _buildDetails(Map<String, dynamic> variant) {

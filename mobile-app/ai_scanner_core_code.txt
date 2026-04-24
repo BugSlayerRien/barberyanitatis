@@ -1,0 +1,3283 @@
+﻿AI Scanner Core Code Bundle
+Generated: 2026-04-08 00:19:00
+
+==================== FILE: lib/user/ai_face_scan_page.dart ====================
+import 'dart:convert';
+import 'dart:math' as math;
+import 'dart:ui' as ui;
+
+import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:model_viewer_plus/model_viewer_plus.dart';
+
+import 'api_config.dart';
+import 'ai_funnel_service.dart';
+import 'confirmation_page.dart';
+import 'dashboard_page.dart';
+import '../main.dart';
+import 'scanner/overlay_models.dart';
+import 'scanner/attachment_engine.dart';
+import 'scanner/face_detector_service_stub.dart'
+    if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
+import 'user_session.dart';
+import 'web_camera_view_stub.dart'
+    if (dart.library.html) 'web_camera_view.dart';
+import 'widgets/app_top_bar.dart';
+
+class AiFaceScanPage extends StatefulWidget {
+  const AiFaceScanPage({super.key});
+
+  @override
+  State<AiFaceScanPage> createState() => _AiFaceScanPageState();
+}
+
+class _AiFaceScanPageState extends State<AiFaceScanPage>
+    with WidgetsBindingObserver, RouteAware {
+  static final AttachmentEngineMode _defaultEngineMode = parseAttachmentEngineMode(
+    const String.fromEnvironment('ATTACHMENT_ENGINE', defaultValue: 'auto'),
+  );
+
+  final FaceDetectorService _detector = FaceDetectorService();
+  final WebCameraController _webCamera = WebCameraController();
+  late AttachmentEngineMode _selectedEngineMode;
+  late AttachmentEngine _attachmentEngine;
+
+  CameraController? _camera;
+  bool _busy = false;
+  bool _loadingRecommendations = false;
+  bool _initialized = false;
+  bool _webCameraReady = false;
+  Rect? _normalizedFaceRect;
+  double? _headYaw;
+  double? _headRoll;
+  double? _foreheadAnchorY;
+  double? _eyeMidX;
+  double? _eyeDistanceNorm;
+  double? _webVideoAspect;
+  List<double>? _faceTransformMatrix;
+  Rect? _smoothedFaceRect;
+  double? _smoothedHeadYaw;
+  double? _smoothedHeadRoll;
+  double? _smoothedForeheadAnchorY;
+  double? _smoothedEyeMidX;
+  double? _smoothedEyeDistanceNorm;
+  Rect? _lastStableFaceRect;
+  DateTime? _overlayHoldUntil;
+
+  String _faceShape = 'Oval';
+  String _hairTexture = 'Straight';
+  String _status = 'Center your face in the guide.';
+
+  final List<Map<String, dynamic>> _recommendations = [];
+  int _selectedIndex = 0;
+  bool _webTrackingAttached = false;
+  bool _autoProcessingStarted = false;
+  bool _isSettingUp = false;
+  bool _isRouteSubscribed = false;
+  DateTime? _lastRecommendationFetchAt;
+  DateTime? _faceSeenAt;
+  DateTime? _faceMissingAt;
+  int _stableFaceFrames = 0;
+  bool _faceSessionReady = false;
+
+  static const double _rectSmoothingAlpha = 0.58;
+  static const double _angleSmoothingAlpha = 0.28;
+  static const double _anchorSmoothingAlpha = 0.52;
+  static const Duration _faceStableDuration = Duration(milliseconds: 700);
+  static const Duration _faceMissingGrace = Duration(milliseconds: 1200);
+  static const Duration _overlayHoldDuration = Duration(milliseconds: 800);
+  static const Duration _overlayHoldAfterProcessDuration =
+      Duration(milliseconds: 2200);
+  static const Duration _recommendationCooldown = Duration(seconds: 10);
+  static const int _minimumStableFrames = 4;
+  static const bool _deterministicTestingMode = false;
+  static const double _trackingJumpThreshold = 0.13;
+  static const double _minFaceAreaForOverlay = 0.042;
+  static const double _maxFaceAreaForOverlayMobile = 0.28;
+  static const double _maxFaceAreaForOverlayWeb = 0.20;
+  static const double _overlayBaseOpacity = 1.0;
+  static const double _hairBlurSigma = 5.0;
+  static const double _hairCoverTopOpacity = 0.34;
+  static const double _hairCoverMidOpacity = 0.20;
+  static const double _hairCoverBottomOpacity = 0.08;
+  static const double _hairCoverRadialOpacity = 0.14;
+  static const double _hairEdgeOpacity = 0.12;
+  static const bool _showOverlayDebug = false;
+  static const OverlayImageSet _sampleImageOverlay = OverlayImageSet(
+    front: 'assets/images/overlays/sample_hair_front.png',
+    left: 'assets/images/overlays/sample_hair_left.png',
+    right: 'assets/images/overlays/sample_hair_right.png',
+  );
+  static const String _sampleHairModel3d = 'assets/models/blowouttaper.glb';
+  static const bool _enable3DHairOverlay = false;
+
+  static const Map<String, OverlayCalibration> _styleCalibration = {
+    'blowout taper': OverlayCalibration(
+      widthScale: 1.18,
+      heightScale: 1.28,
+      xOffset: 0.00,
+      yOffset: -0.22,
+      hairClipFactor: 0.76,
+      visualScale: 1.18,
+      yawShiftFactor: 0.06),
+  };
+
+  static const List<Map<String, dynamic>> _hardcodedCatalog = [
+    {
+      'variant_id': 9001,
+      'style_name': 'Blowout Taper',
+      'style_code': 'STYLE-BLOWOUT-TAPER-HC',
+      'face_shape': 'Oval',
+      'hair_texture': 'Straight',
+      'front_view_url': '/database/assets/hairstyles/blowout_taper_front.png',
+      'side_view_url': '/database/assets/hairstyles/blowout_taper_left.png',
+      'back_view_url': '/database/assets/hairstyles/blowout_taper_right.png',
+      'confidence_score': 0.92,
+      'estimated_minutes': 35,
+    },
+    {
+      'variant_id': 9002,
+      'style_name': 'Curly Top Fade',
+      'style_code': 'STYLE-CURLY-TOP-FADE-HC',
+      'face_shape': 'Oblong',
+      'hair_texture': 'Wavy',
+      'front_view_url': '/database/assets/hairstyles/curly_top_fade_front.png',
+      'side_view_url': '/database/assets/hairstyles/curly_top_fade_left.png',
+      'back_view_url': '/database/assets/hairstyles/curly_top_fade_right.png',
+      'confidence_score': 0.90,
+      'estimated_minutes': 40,
+    },
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _selectedEngineMode = _defaultEngineMode;
+    _attachmentEngine = createAttachmentEngine(_selectedEngineMode);
+    _setup();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isRouteSubscribed) return;
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+      _isRouteSubscribed = true;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (!mounted) return;
+
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      _releaseScannerResources();
+      return;
+    }
+
+    if (state == AppLifecycleState.resumed) {
+      _resumeScannerResources();
+    }
+  }
+
+  @override
+  void didPushNext() {
+    _releaseScannerResources();
+  }
+
+  @override
+  void didPopNext() {
+    _resumeScannerResources();
+  }
+
+  Future<void> _releaseScannerResources() async {
+    if (kIsWeb) {
+      await _webCamera.stop();
+      if (mounted) {
+        setState(() {
+          _webCameraReady = false;
+        });
+      }
+      return;
+    }
+
+    final camera = _camera;
+    if (camera == null) {
+      return;
+    }
+
+    try {
+      if (camera.value.isStreamingImages) {
+        await camera.stopImageStream();
+      }
+    } catch (_) {}
+
+    await camera.dispose();
+    if (mounted) {
+      setState(() {
+        _camera = null;
+      });
+    } else {
+      _camera = null;
+    }
+  }
+
+  void _resumeScannerResources() {
+    if (_isSettingUp) {
+      return;
+    }
+    _setup();
+  }
+
+  Future<void> _setup() async {
+    if (_isSettingUp) {
+      return;
+    }
+    _isSettingUp = true;
+
+    try {
+      await _detector.initialize();
+      if (kIsWeb) {
+        if (_webCameraReady) {
+          return;
+        }
+        final started = await _webCamera.start();
+        if (!_webTrackingAttached) {
+          _webCamera.tracking.addListener(_onWebTrackingChanged);
+          _webTrackingAttached = true;
+        }
+        if (!mounted) return;
+        setState(() {
+          _initialized = true;
+          _webCameraReady = started;
+          _status = started
+              ? 'Camera is ready. We are tracking your face live.'
+              : 'Camera is blocked. Please allow browser camera access.';
+        });
+        return;
+      }
+
+      if (_camera != null && _camera!.value.isInitialized) {
+        return;
+      }
+
+      final cameras = await availableCameras();
+      final front = cameras.firstWhere(
+        (c) => c.lensDirection == CameraLensDirection.front,
+        orElse: () => cameras.first,
+      );
+
+      final controller = CameraController(
+        front,
+        ResolutionPreset.medium,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.yuv420,
+      );
+
+      await controller.initialize();
+      await controller.startImageStream((image) async {
+        if (_busy || !mounted) return;
+        _busy = true;
+        try {
+          final frame = await _detector.processFrame(
+            image,
+            sensorOrientation: controller.description.sensorOrientation,
+          );
+          if (!mounted) return;
+          if (frame == null) {
+            final now = DateTime.now();
+            _faceMissingAt ??= now;
+            final shouldReset =
+                now.difference(_faceMissingAt!) >= _faceMissingGrace;
+
+            setState(() {
+              if (shouldReset) {
+                _normalizedFaceRect = null;
+                _smoothedFaceRect = null;
+                _smoothedHeadYaw = null;
+                _smoothedHeadRoll = null;
+                _headYaw = null;
+                _headRoll = null;
+                _foreheadAnchorY = null;
+                _eyeMidX = null;
+                _eyeDistanceNorm = null;
+                _webVideoAspect = null;
+                _faceTransformMatrix = null;
+                _autoProcessingStarted = false;
+                _faceSeenAt = null;
+                _stableFaceFrames = 0;
+                _faceSessionReady = false;
+                _smoothedForeheadAnchorY = null;
+                _smoothedEyeMidX = null;
+                _smoothedEyeDistanceNorm = null;
+                _lastStableFaceRect = null;
+                _overlayHoldUntil = null;
+                _status =
+                    'We cannot see your face yet. Face the camera in good light.';
+              } else {
+                _status = 'Hold still. We are finding your face again.';
+              }
+            });
+          } else {
+            final now = DateTime.now();
+            _faceSeenAt ??= now;
+            _faceMissingAt = null;
+            _stableFaceFrames += 1;
+            final stableWindowReached =
+                now.difference(_faceSeenAt!) >= _faceStableDuration;
+            _faceSessionReady = stableWindowReached &&
+                _stableFaceFrames >= _minimumStableFrames;
+
+            final normalized = Rect.fromLTWH(
+              (frame.boundingBox.left / frame.imageSize.width).clamp(0.0, 1.0),
+              (frame.boundingBox.top / frame.imageSize.height).clamp(0.0, 1.0),
+              (frame.boundingBox.width / frame.imageSize.width).clamp(0.0, 1.0),
+              (frame.boundingBox.height / frame.imageSize.height)
+                  .clamp(0.0, 1.0),
+            );
+            final stabilizedInput =
+              _stabilizeIncomingRect(_smoothedFaceRect, normalized);
+            final smoothedRect =
+              _smoothRect(_smoothedFaceRect, stabilizedInput, _rectSmoothingAlpha);
+            final smoothedYaw = _smoothValue(
+                _smoothedHeadYaw, frame.headEulerAngleY, _angleSmoothingAlpha);
+            final smoothedRoll = _smoothValue(
+                _smoothedHeadRoll, frame.headEulerAngleZ, _angleSmoothingAlpha);
+            final inferredForeheadAnchor =
+                (smoothedRect.top + (smoothedRect.height * 0.18))
+                    .clamp(0.0, 1.0);
+            final smoothedForehead = _smoothValue(_smoothedForeheadAnchorY,
+                inferredForeheadAnchor, _anchorSmoothingAlpha);
+            final inferredEyeMidX =
+              (smoothedRect.left + (smoothedRect.width * 0.5)).clamp(0.0, 1.0);
+            final inferredEyeDistance =
+              (smoothedRect.width * 0.42).clamp(0.04, 0.65);
+            final smoothedEyeMidX = _smoothValue(
+              _smoothedEyeMidX, inferredEyeMidX, _anchorSmoothingAlpha);
+            final smoothedEyeDistance = _smoothValue(_smoothedEyeDistanceNorm,
+              inferredEyeDistance, _anchorSmoothingAlpha);
+            final inferred =
+                _inferFaceShape(smoothedRect.width, smoothedRect.height);
+            setState(() {
+              _normalizedFaceRect = smoothedRect;
+              _headYaw = smoothedYaw;
+              _headRoll = smoothedRoll;
+              _foreheadAnchorY = smoothedForehead;
+              _eyeMidX = smoothedEyeMidX;
+              _eyeDistanceNorm = smoothedEyeDistance;
+              _smoothedFaceRect = smoothedRect;
+              _smoothedHeadYaw = smoothedYaw;
+              _smoothedHeadRoll = smoothedRoll;
+              _smoothedForeheadAnchorY = smoothedForehead;
+              _smoothedEyeMidX = smoothedEyeMidX;
+              _smoothedEyeDistanceNorm = smoothedEyeDistance;
+              _faceShape = inferred;
+              if (_isLikelyStableFace(smoothedRect)) {
+                _lastStableFaceRect = smoothedRect;
+                _overlayHoldUntil = now.add(_overlayHoldDuration);
+              }
+                _status = _faceSessionReady
+                  ? 'Face is steady. Getting haircut suggestions...'
+                  : 'Keep still for a second...';
+            });
+
+            if (_shouldAutoFetchRecommendations()) {
+              _triggerAutoFetch(isWeb: false);
+            }
+          }
+        } catch (_) {
+          if (!mounted) return;
+          setState(() {
+            _status = 'Scanner paused. Keep the camera open.';
+          });
+        } finally {
+          _busy = false;
+        }
+      });
+
+      if (!mounted) return;
+      setState(() {
+        _camera = controller;
+        _initialized = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _initialized = true;
+        _status = 'Failed to initialize camera scanner: $e';
+      });
+    } finally {
+      _isSettingUp = false;
+    }
+  }
+
+  void _onWebTrackingChanged() {
+    if (!mounted) return;
+
+    final t = _webCamera.tracking.value;
+    final rect = t.faceRect;
+    if (rect == null) {
+      final now = DateTime.now();
+      _faceMissingAt ??= now;
+      final shouldReset = now.difference(_faceMissingAt!) >= _faceMissingGrace;
+
+      setState(() {
+        if (shouldReset) {
+          _normalizedFaceRect = null;
+          _smoothedFaceRect = null;
+          _smoothedHeadYaw = null;
+          _smoothedHeadRoll = null;
+          _autoProcessingStarted = false;
+          _headYaw = null;
+          _headRoll = null;
+          _foreheadAnchorY = null;
+          _eyeMidX = null;
+          _eyeDistanceNorm = null;
+          _webVideoAspect = null;
+          _faceTransformMatrix = null;
+          _faceSeenAt = null;
+          _stableFaceFrames = 0;
+          _faceSessionReady = false;
+          _smoothedForeheadAnchorY = null;
+          _smoothedEyeMidX = null;
+          _smoothedEyeDistanceNorm = null;
+          _lastStableFaceRect = null;
+          _overlayHoldUntil = null;
+          _status = 'We cannot see your face yet. Center your face in the guide.';
+        } else {
+          _status = 'Hold still. We are finding your face again.';
+        }
+      });
+      return;
+    }
+
+    final now = DateTime.now();
+    _faceSeenAt ??= now;
+    _faceMissingAt = null;
+    _stableFaceFrames += 1;
+    final stableWindowReached =
+        now.difference(_faceSeenAt!) >= _faceStableDuration;
+    _faceSessionReady =
+        stableWindowReached && _stableFaceFrames >= _minimumStableFrames;
+
+    final smoothedRect = _smoothRect(_smoothedFaceRect,
+      _stabilizeIncomingRect(_smoothedFaceRect, rect), _rectSmoothingAlpha);
+    final smoothedYaw =
+        _smoothValue(_smoothedHeadYaw, t.headYaw, _angleSmoothingAlpha);
+    final smoothedRoll =
+        _smoothValue(_smoothedHeadRoll, t.headRoll, _angleSmoothingAlpha);
+    final eyeAnchor = ((t.eyeMidY ?? (rect.top + (rect.height * 0.36))) -
+        (rect.height * 0.16))
+      .clamp(0.0, 1.0);
+    final smoothedForehead = _smoothValue(
+        _smoothedForeheadAnchorY, eyeAnchor, _anchorSmoothingAlpha);
+    final eyeMidX =
+      (t.eyeMidX ?? (rect.left + (rect.width * 0.5))).clamp(0.0, 1.0);
+    final eyeDistance =
+      (t.eyeDistanceNorm ?? (rect.width * 0.42)).clamp(0.04, 0.65);
+    final smoothedEyeMidX =
+      _smoothValue(_smoothedEyeMidX, eyeMidX, _anchorSmoothingAlpha);
+    final smoothedEyeDistance = _smoothValue(
+      _smoothedEyeDistanceNorm, eyeDistance, _anchorSmoothingAlpha);
+    final videoAspect = t.videoAspect;
+    final transformMatrix = t.faceTransformMatrix;
+    final inferred = _inferFaceShape(smoothedRect.width, smoothedRect.height);
+
+    setState(() {
+      _normalizedFaceRect = smoothedRect;
+      _headYaw = smoothedYaw;
+      _headRoll = smoothedRoll;
+      _foreheadAnchorY = smoothedForehead;
+      _eyeMidX = smoothedEyeMidX;
+      _eyeDistanceNorm = smoothedEyeDistance;
+      _webVideoAspect = videoAspect;
+      _faceTransformMatrix = transformMatrix;
+      _smoothedFaceRect = smoothedRect;
+      _smoothedHeadYaw = smoothedYaw;
+      _smoothedHeadRoll = smoothedRoll;
+      _smoothedForeheadAnchorY = smoothedForehead;
+      _smoothedEyeMidX = smoothedEyeMidX;
+      _smoothedEyeDistanceNorm = smoothedEyeDistance;
+      _faceShape = inferred;
+      if (_isLikelyStableFace(smoothedRect)) {
+        _lastStableFaceRect = smoothedRect;
+        _overlayHoldUntil = now.add(_overlayHoldDuration);
+      }
+        _status = _faceSessionReady
+          ? 'Face tracking is on. Hair preview follows your movement.'
+          : 'Face found. Hold still while we prepare suggestions...';
+    });
+
+    if (_shouldAutoFetchRecommendations()) {
+      _triggerAutoFetch(isWeb: true);
+    }
+  }
+
+  bool _shouldAutoFetchRecommendations() {
+    if (_normalizedFaceRect == null || !_faceSessionReady) {
+      return false;
+    }
+    if (_loadingRecommendations || _autoProcessingStarted) {
+      return false;
+    }
+    final lastFetch = _lastRecommendationFetchAt;
+    if (lastFetch == null) {
+      return true;
+    }
+    return DateTime.now().difference(lastFetch) >= _recommendationCooldown;
+  }
+
+  void _triggerAutoFetch({required bool isWeb}) {
+    _autoProcessingStarted = true;
+    if (isWeb) {
+      _fetchRecommendationsWeb(showToastOnError: false, autoTriggered: true);
+    } else {
+      _fetchRecommendations(autoTriggered: true);
+    }
+  }
+
+  String _inferFaceShape(double w, double h) {
+    if (h <= 0) return 'Oval';
+    final ratio = w / h;
+    if (ratio > 0.95) return 'Round';
+    if (ratio < 0.70) return 'Oblong';
+    if (ratio > 0.84) return 'Square';
+    return 'Oval';
+  }
+
+  Future<void> _fetchRecommendations({bool autoTriggered = false}) async {
+    if (autoTriggered) {
+      _autoProcessingStarted = true;
+    }
+
+    if (kIsWeb) {
+      await _fetchRecommendationsWeb(autoTriggered: autoTriggered);
+      return;
+    }
+
+    if (_normalizedFaceRect == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please center your face first.')),
+      );
+      return;
+    }
+
+    if (_deterministicTestingMode) {
+      _applyDeterministicRecommendation();
+      return;
+    }
+
+    setState(() => _loadingRecommendations = true);
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'rankByFeatures',
+          'faceShape': _faceShape,
+          'hairTexture': _hairTexture,
+          'hairDensity': UserSession.lastScan?['hairDensity']?.toString(),
+        }),
+      );
+
+      final data = response.body.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+          : <String, dynamic>{};
+
+      if (response.statusCode != 200) {
+        throw Exception(
+            data['error']?.toString() ?? 'Failed to fetch recommendations');
+      }
+
+      final variants = (data['recommendations'] as List<dynamic>? ??
+              data['variants'] as List<dynamic>? ??
+              [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      if (variants.isEmpty) {
+        final fallback = await _loadLibraryFallback();
+        final rankedFallback = _rankRecommendations(
+            fallback.isEmpty ? _hardcodedFallback() : fallback);
+        if (!mounted) return;
+        setState(() {
+          _recommendations
+            ..clear()
+            ..addAll(rankedFallback.take(3));
+          _selectedIndex = 0;
+          _markOverlayReadyAfterProcessing();
+          _status = 'Suggestions are ready. Pick one to preview.';
+        });
+      } else {
+        final ranked = _rankRecommendations(variants);
+        if (!mounted) return;
+        setState(() {
+          _recommendations
+            ..clear()
+            ..addAll(ranked.take(3));
+          _selectedIndex = 0;
+          _markOverlayReadyAfterProcessing();
+          _status = 'Suggestions are ready. Pick one to preview.';
+        });
+      }
+
+      UserSession.lastScan = {
+        'faceShape': _faceShape,
+        'hairTexture': _hairTexture,
+        'headYaw': _headYaw,
+      };
+      UserSession.lastRecommendations = _recommendations;
+
+      UserSession.activeScanSessionId = null;
+
+      await AiFunnelService.trackScan(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: UserSession.userId,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
+        hairDensity: null,
+        hairLength: null,
+        recommendationCount: _recommendations.length,
+      );
+
+      _lastRecommendationFetchAt = DateTime.now();
+    } catch (e) {
+      if (autoTriggered) {
+        _autoProcessingStarted = false;
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load recommendations: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _loadingRecommendations = false);
+      }
+    }
+  }
+
+  Future<void> _fetchRecommendationsWeb(
+      {bool showToastOnError = true, bool autoTriggered = false}) async {
+    if (autoTriggered) {
+      _autoProcessingStarted = true;
+    }
+
+    if (_normalizedFaceRect == null) {
+      if (showToastOnError && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Center your face first so we can continue.')),
+        );
+      }
+      return;
+    }
+
+    if (!_webCameraReady) {
+      if (showToastOnError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content:
+                  Text('Camera is not ready yet. Please allow camera access.')),
+        );
+      }
+      return;
+    }
+
+    if (_deterministicTestingMode) {
+      _applyDeterministicRecommendation();
+      return;
+    }
+
+    setState(() => _loadingRecommendations = true);
+    try {
+      if (mounted) {
+        setState(() {
+          _status = 'Updating haircut suggestions...';
+        });
+      }
+
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'rankByFeatures',
+          'faceShape': _faceShape,
+          'hairTexture': _hairTexture,
+          'hairDensity': UserSession.lastScan?['hairDensity']?.toString(),
+        }),
+      );
+
+      final data = response.body.isNotEmpty
+          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+          : <String, dynamic>{};
+
+      if (response.statusCode != 200) {
+        throw Exception(data['error']?.toString() ??
+            'Failed to fetch live recommendations');
+      }
+
+      var recommendations = (data['recommendations'] as List<dynamic>? ??
+              data['variants'] as List<dynamic>? ??
+              [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+
+      if (recommendations.isEmpty) {
+        recommendations = await _loadLibraryFallback();
+      }
+
+      if (recommendations.isEmpty) {
+        recommendations = _hardcodedFallback();
+      }
+
+      if (recommendations.isEmpty) {
+        throw Exception('No available hairstyle variants yet');
+      }
+
+      final ranked = _rankRecommendations(recommendations);
+
+      if (!mounted) return;
+      setState(() {
+        _recommendations
+          ..clear()
+          ..addAll(ranked.take(3));
+        _selectedIndex = 0;
+        _markOverlayReadyAfterProcessing();
+        _status =
+          'Suggestions are ready. Hair preview now uses your selected style.';
+      });
+
+      UserSession.lastScan = {
+        'faceShape': _faceShape,
+        'hairTexture': _hairTexture,
+      };
+      UserSession.lastRecommendations = recommendations;
+
+      UserSession.activeScanSessionId = null;
+
+      await AiFunnelService.trackScan(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: UserSession.userId,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
+        hairDensity: null,
+        hairLength: null,
+        recommendationCount: _recommendations.length,
+      );
+
+      _lastRecommendationFetchAt = DateTime.now();
+    } catch (e) {
+      if (autoTriggered) {
+        _autoProcessingStarted = false;
+      }
+      if (!mounted) return;
+      setState(() {
+        _status = 'Could not update suggestions. Please try again.';
+      });
+      if (showToastOnError) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Live sync failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _loadingRecommendations = false);
+      }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadLibraryFallback() async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/haircuts.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'listLibrary'}),
+    );
+
+    if (response.statusCode != 200 || response.body.isEmpty) {
+      return _hardcodedFallback();
+    }
+
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final styles = (data['hairstyles'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    if (styles.isEmpty) {
+      return _hardcodedFallback();
+    }
+    return styles.take(8).toList();
+  }
+
+  List<Map<String, dynamic>> _hardcodedFallback() {
+    return _hardcodedCatalog.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  Widget _buildHairOnlyOverlayModel(
+      {required OverlayCalibration calibration,
+      required Map<String, dynamic>? recommendation}) {
+    if (_shouldUse3DModel(recommendation)) {
+      return _buildHair3DOverlayModel(calibration: calibration);
+    }
+
+    final yaw = (_headYaw ?? 0).clamp(-60.0, 60.0);
+    final yawAbsNorm = (yaw.abs() / 34.0).clamp(0.0, 1.0);
+    final frontOpacity = (1.0 - (yawAbsNorm * 0.58)).clamp(0.42, 1.0);
+    final sideOpacity = (0.16 + (yawAbsNorm * 0.84)).clamp(0.0, 1.0);
+
+    final frontImage = _sampleImageOverlay.front;
+    final sideImage = yaw >= 0 ? _sampleImageOverlay.left : _sampleImageOverlay.right;
+    final sideAlignment = yaw >= 0 ? Alignment.centerLeft : Alignment.centerRight;
+
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: calibration.hairClipFactor,
+        child: SizedBox.expand(
+          child: Transform.scale(
+            scale: calibration.visualScale,
+            alignment: Alignment.topCenter,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Opacity(
+                  opacity: frontOpacity,
+                  child: Image.asset(
+                    frontImage,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.topCenter,
+                    filterQuality: FilterQuality.medium,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const ColoredBox(color: Colors.transparent);
+                    },
+                  ),
+                ),
+                Opacity(
+                  opacity: sideOpacity,
+                  child: Image.asset(
+                    sideImage,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.topCenter,
+                    filterQuality: FilterQuality.medium,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const ColoredBox(color: Colors.transparent);
+                    },
+                  ),
+                ),
+                if (yawAbsNorm > 0.08)
+                  Align(
+                    alignment: sideAlignment,
+                    child: ClipRect(
+                      child: Align(
+                        alignment: sideAlignment,
+                        widthFactor: 0.46,
+                        child: Opacity(
+                          opacity: (yawAbsNorm * 0.48).clamp(0.0, 0.48),
+                          child: Transform.scale(
+                            scaleX: 1.14,
+                            scaleY: 1.03,
+                            alignment: sideAlignment,
+                            child: Image.asset(
+                              sideImage,
+                              fit: BoxFit.cover,
+                              alignment: sideAlignment,
+                              filterQuality: FilterQuality.medium,
+                              errorBuilder: (context, error, stackTrace) {
+                                return const ColoredBox(
+                                    color: Colors.transparent);
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  bool _shouldUse3DModel(Map<String, dynamic>? recommendation) {
+    if (!_enable3DHairOverlay) {
+      return false;
+    }
+    if (recommendation == null) {
+      return false;
+    }
+    final styleName = (recommendation['style_name']?.toString() ??
+            recommendation['styleName']?.toString() ??
+            '')
+        .toLowerCase();
+
+    // Initial 3D integration targets the provided blowout taper sample model.
+    return styleName.contains('blowout taper');
+  }
+
+  Widget _buildHair3DOverlayModel({required OverlayCalibration calibration}) {
+    final yaw = (_headYaw ?? 0).clamp(-60.0, 60.0);
+    final pitch = ((_headRoll ?? 0) * 0.2).clamp(-15.0, 15.0);
+    final orbit = '${yaw.toStringAsFixed(1)}deg ${pitch.toStringAsFixed(1)}deg 86%';
+
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: calibration.hairClipFactor,
+        child: SizedBox.expand(
+          child: Transform.scale(
+            scale: calibration.visualScale,
+            alignment: Alignment.topCenter,
+            child: IgnorePointer(
+              child: ModelViewer(
+                src: _sampleHairModel3d,
+                alt: '3D hair overlay',
+                cameraControls: false,
+                disableZoom: true,
+                autoRotate: false,
+                cameraOrbit: orbit,
+                interactionPrompt: InteractionPrompt.none,
+                backgroundColor: const Color.fromARGB(0, 0, 0, 0),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _applyDeterministicRecommendation() {
+    final fallback = _hardcodedFallback();
+    if (fallback.isEmpty || !mounted) {
+      return;
+    }
+
+    final defaultStyle = fallback.first;
+    setState(() {
+      _loadingRecommendations = false;
+      _recommendations
+        ..clear()
+        ..add(defaultStyle);
+      _selectedIndex = 0;
+      _status = 'Deterministic mode: default haircut applied for testing.';
+    });
+
+    UserSession.lastScan = {
+      'faceShape': _faceShape,
+      'hairTexture': _hairTexture,
+      'headYaw': _headYaw,
+    };
+    UserSession.lastRecommendations = [defaultStyle];
+  }
+
+  void _markOverlayReadyAfterProcessing() {
+    final now = DateTime.now();
+    final bestFace = _normalizedFaceRect ?? _smoothedFaceRect;
+    if (bestFace == null) {
+      return;
+    }
+    _lastStableFaceRect = bestFace;
+    _overlayHoldUntil = now.add(_overlayHoldAfterProcessDuration);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_isRouteSubscribed) {
+      routeObserver.unsubscribe(this);
+      _isRouteSubscribed = false;
+    }
+    if (_webTrackingAttached) {
+      _webCamera.tracking.removeListener(_onWebTrackingChanged);
+      _webTrackingAttached = false;
+    }
+    _releaseScannerResources();
+    _detector.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF090909),
+      appBar: AppTopBar(
+        showBack: true,
+        onBack: () {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(builder: (_) => const DashboardPage()),
+          );
+        },
+      ),
+      body: !_initialized
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: ConstrainedBox(
+                    constraints:
+                        BoxConstraints(minHeight: constraints.maxHeight),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Live Hair Preview',
+                          style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          '$_status  (${_engineLabel()})',
+                          style: const TextStyle(
+                              color: Colors.white70, fontSize: 12),
+                        ),
+                        if (kDebugMode) const SizedBox(height: 8),
+                        if (kDebugMode) _buildEngineModePicker(),
+                        if (kDebugMode) const SizedBox(height: 8),
+                        if (kDebugMode) _buildEngineDiagnostics(),
+                        const SizedBox(height: 12),
+                        _buildStatusIndicators(),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: _chip(
+                                label: 'Detected face: $_faceShape',
+                                icon: Icons.face_retouching_natural,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: _chip(
+                                label:
+                                    'Head turn: ${(_headYaw ?? 0).toStringAsFixed(1)} deg',
+                                icon: Icons.threed_rotation,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        _buildScannerCard(),
+                        const SizedBox(height: 14),
+                        _buildControls(),
+                        const SizedBox(height: 8),
+                        if (_loadingRecommendations)
+                          const Padding(
+                            padding: EdgeInsets.only(bottom: 8),
+                            child: LinearProgressIndicator(
+                              minHeight: 3,
+                              backgroundColor: Color(0xFF1A1A1A),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white70),
+                            ),
+                          ),
+                        if (kIsWeb)
+                          Text(
+                            'Web preview uses live camera only. No photo upload is needed.',
+                            style: const TextStyle(
+                                color: Colors.white54, fontSize: 11),
+                          ),
+                        if (kIsWeb) const SizedBox(height: 8),
+                        Text(
+                            'We rank 3 haircut matches from your face and hair details.',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 11),
+                        ),
+                        const SizedBox(height: 12),
+                        _buildTopThreePanel(),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          value: _hairTexture,
+                          items: const ['Straight', 'Wavy', 'Curly', 'Coily']
+                              .map((e) =>
+                                  DropdownMenuItem(value: e, child: Text(e)))
+                              .toList(),
+                          onChanged: (v) {
+                            if (v == null) return;
+                            setState(() => _hairTexture = v);
+                          },
+                          dropdownColor: const Color(0xFF121212),
+                          decoration: InputDecoration(
+                            labelText: 'Hair type (if auto-detect is wrong)',
+                            labelStyle: const TextStyle(color: Colors.white70),
+                            filled: true,
+                            fillColor: const Color(0xFF121212),
+                            border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          onPressed: _loadingRecommendations
+                              ? null
+                              : _fetchRecommendations,
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(54),
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                          ),
+                          child: Text(_loadingRecommendations
+                              ? 'Loading suggestions...'
+                              : 'Get Top 3 Haircuts'),
+                        ),
+                        const SizedBox(height: 8),
+                        ElevatedButton(
+                          onPressed: _recommendations.isEmpty
+                              ? null
+                              : () => _useSelectedStyle(),
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(50),
+                            backgroundColor: const Color(0xFFA99941),
+                            foregroundColor: Colors.black,
+                          ),
+                          child: const Text('Use This Haircut'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildScannerCard() {
+    final recommendation =
+        _recommendations.isNotEmpty ? _recommendations[_selectedIndex] : null;
+    final overlayFace = _effectiveOverlayFaceRect();
+    final overlayOpacity = _currentOverlayOpacity();
+    final scannerHeight =
+      (MediaQuery.of(context).size.height * 0.58).clamp(340.0, 620.0);
+
+    Widget? overlayLayer(BoxConstraints constraints) {
+      if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
+        return null;
+      }
+
+      final calibration = _overlayCalibration(recommendation);
+      final box = _computeAttachmentBox(
+        face: overlayFace,
+        constraints: constraints,
+        calibration: calibration,
+      );
+      return Positioned(
+        left: box.left,
+        top: box.top,
+        width: box.width,
+        height: box.height,
+        child: IgnorePointer(
+          child: Opacity(
+            opacity: overlayOpacity,
+            child: Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.identity()
+                ..rotateZ((_headRoll ?? 0) * math.pi / 180)
+                ..scale(box.yawScale, 1.0),
+              child: _buildHairOnlyOverlayModel(
+                calibration: calibration,
+                recommendation: recommendation,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget? hairBlurLayer(BoxConstraints constraints) {
+      if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
+        return null;
+      }
+
+      // BackdropFilter does not reliably blur HtmlElementView camera layers on web.
+      // Use the cover layer below for consistent real-hair suppression on web.
+      if (kIsWeb) {
+        return null;
+      }
+
+      final calibration = _overlayCalibration(recommendation);
+      final box = _computeAttachmentBox(
+        face: overlayFace,
+        constraints: constraints,
+        calibration: calibration,
+      );
+
+      final blurLeft = (box.left + (box.width * 0.10))
+          .clamp(0.0, constraints.maxWidth)
+          .toDouble();
+      final blurTop = (box.top + (box.height * 0.12))
+          .clamp(0.0, constraints.maxHeight)
+          .toDouble();
+      final blurWidth = (box.width * 0.80)
+          .clamp(0.0, constraints.maxWidth - blurLeft)
+          .toDouble();
+        final blurHeight = (box.height * 0.44)
+          .clamp(0.0, constraints.maxHeight - blurTop)
+          .toDouble();
+
+      if (blurWidth <= 1 || blurHeight <= 1) {
+        return null;
+      }
+
+      return Positioned(
+        left: blurLeft,
+        top: blurTop,
+        width: blurWidth,
+        height: blurHeight,
+        child: IgnorePointer(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(
+                  sigmaX: _hairBlurSigma, sigmaY: _hairBlurSigma),
+              child: Container(color: Colors.transparent),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget? hairCoverLayer(BoxConstraints constraints) {
+      if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
+        return null;
+      }
+
+      // Browser camera layers can render differently across window/fullscreen.
+      // Keep web path clean to avoid misplaced dark masks.
+      if (kIsWeb) {
+        return null;
+      }
+
+      final calibration = _overlayCalibration(recommendation);
+      final box = _computeAttachmentBox(
+        face: overlayFace,
+        constraints: constraints,
+        calibration: calibration,
+      );
+
+      final coverLeft = (box.left + (box.width * 0.08))
+          .clamp(0.0, constraints.maxWidth)
+          .toDouble();
+      final coverTop = (box.top + (box.height * 0.10))
+          .clamp(0.0, constraints.maxHeight)
+          .toDouble();
+      final coverWidth = (box.width * 0.84)
+          .clamp(0.0, constraints.maxWidth - coverLeft)
+          .toDouble();
+        final coverHeight = (box.height * 0.46)
+          .clamp(0.0, constraints.maxHeight - coverTop)
+          .toDouble();
+
+      if (coverWidth <= 1 || coverHeight <= 1) {
+        return null;
+      }
+
+      return Positioned(
+        left: coverLeft,
+        top: coverTop,
+        width: coverWidth,
+        height: coverHeight,
+        child: IgnorePointer(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(_hairCoverTopOpacity),
+                        Colors.black.withOpacity(_hairCoverMidOpacity),
+                        Colors.black.withOpacity(_hairCoverBottomOpacity),
+                      ],
+                    ),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    gradient: RadialGradient(
+                      center: const Alignment(0, -0.55),
+                      radius: 1.05,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withOpacity(_hairCoverRadialOpacity),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget? hairEdgeFeatherLayer(BoxConstraints constraints) {
+      if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
+        return null;
+      }
+
+      if (kIsWeb) {
+        return null;
+      }
+
+      final calibration = _overlayCalibration(recommendation);
+      final box = _computeAttachmentBox(
+        face: overlayFace,
+        constraints: constraints,
+        calibration: calibration,
+      );
+
+      final featherLeft = (box.left + (box.width * 0.06))
+          .clamp(0.0, constraints.maxWidth)
+          .toDouble();
+      final featherTop = (box.top + (box.height * 0.08))
+          .clamp(0.0, constraints.maxHeight)
+          .toDouble();
+      final featherWidth = (box.width * 0.88)
+          .clamp(0.0, constraints.maxWidth - featherLeft)
+          .toDouble();
+        final featherHeight = (box.height * 0.50)
+          .clamp(0.0, constraints.maxHeight - featherTop)
+          .toDouble();
+
+      if (featherWidth <= 1 || featherHeight <= 1) {
+        return null;
+      }
+
+      return Positioned(
+        left: featherLeft,
+        top: featherTop,
+        width: featherWidth,
+        height: featherHeight,
+        child: IgnorePointer(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: Colors.black.withOpacity(_hairEdgeOpacity),
+                width: 1.2,
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Widget? debugAttachmentLayer(BoxConstraints constraints) {
+      if (!_showOverlayDebug || overlayFace == null) {
+        return null;
+      }
+
+      final calibration = _overlayCalibration(recommendation);
+      final box = _computeAttachmentBox(
+        face: overlayFace,
+        constraints: constraints,
+        calibration: calibration,
+      );
+
+      final anchorXNorm =
+          (_eyeMidX ?? (overlayFace.left + (overlayFace.width * 0.5)))
+              .clamp(0.0, 1.0);
+      final anchorYNorm = (_foreheadAnchorY ??
+              (overlayFace.top + (overlayFace.height * 0.12)))
+          .clamp(0.0, 1.0);
+      final anchorX = anchorXNorm * constraints.maxWidth;
+      final anchorY = anchorYNorm * constraints.maxHeight;
+
+      return IgnorePointer(
+        child: Stack(
+          children: [
+            Positioned(
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              height: box.height,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF16E3FF).withOpacity(0.85),
+                    width: 1.2,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: anchorX - 5,
+              top: anchorY - 5,
+              child: Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFF4D6D),
+                  border: Border.all(color: Colors.white70, width: 1),
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            Positioned(
+              left: 8,
+              bottom: 8,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.65),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Text(
+                  'DBG box(${box.width.toStringAsFixed(0)}x${box.height.toStringAsFixed(0)}) yaw:${(_headYaw ?? 0).toStringAsFixed(1)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (kIsWeb) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          height: scannerHeight,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.white12),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_webCameraReady)
+                WebCameraView(controller: _webCamera)
+              else
+                const Center(
+                  child: Text('Web camera unavailable on this platform',
+                      style: TextStyle(color: Colors.white70)),
+                ),
+              if (_webCameraReady)
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final guideHeight =
+                        (constraints.maxHeight * 0.72).clamp(250.0, 430.0);
+                    final guideWidth =
+                        (guideHeight * 0.78).clamp(200.0, 340.0);
+
+                    return Align(
+                      alignment: Alignment.center,
+                      child: IgnorePointer(
+                        child: Container(
+                          width: guideWidth,
+                          height: guideHeight,
+                          decoration: BoxDecoration(
+                            border:
+                                Border.all(color: Colors.white38, width: 1.2),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              if (_webCameraReady)
+                const Positioned(
+                  top: 10,
+                  left: 10,
+                  child: _LiveBadge(label: 'LIVE CAMERA', isLive: true),
+                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final blurLayer = hairBlurLayer(constraints);
+                  final coverLayer = hairCoverLayer(constraints);
+                  final featherLayer = hairEdgeFeatherLayer(constraints);
+                  final layer = overlayLayer(constraints);
+                  final debugLayer = debugAttachmentLayer(constraints);
+                  if (blurLayer == null && coverLayer == null && featherLayer == null && layer == null && debugLayer == null) {
+                    return const SizedBox.shrink();
+                  }
+                  return Stack(
+                    children: [
+                      if (blurLayer != null) blurLayer,
+                      if (coverLayer != null) coverLayer,
+                      if (featherLayer != null) featherLayer,
+                      if (layer != null) layer,
+                      if (debugLayer != null) debugLayer,
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_camera == null || !_camera!.value.isInitialized) {
+      return Container(
+        height: scannerHeight,
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Center(
+          child: Text('Camera unavailable on this platform',
+              style: TextStyle(color: Colors.white70)),
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        height: scannerHeight,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            CameraPreview(_camera!),
+            if (_normalizedFaceRect != null)
+              CustomPaint(
+                painter: _FaceGuidePainter(face: _normalizedFaceRect!),
+              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final blurLayer = hairBlurLayer(constraints);
+                final coverLayer = hairCoverLayer(constraints);
+                final featherLayer = hairEdgeFeatherLayer(constraints);
+                final layer = overlayLayer(constraints);
+                final debugLayer = debugAttachmentLayer(constraints);
+                if (blurLayer == null && coverLayer == null && featherLayer == null && layer == null && debugLayer == null) {
+                  return const SizedBox.shrink();
+                }
+                return Stack(
+                  children: [
+                    if (blurLayer != null) blurLayer,
+                    if (coverLayer != null) coverLayer,
+                    if (featherLayer != null) featherLayer,
+                    if (layer != null) layer,
+                    if (debugLayer != null) debugLayer,
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildControls() {
+    const guidance = kIsWeb
+      ? 'Keep your face centered. The haircut preview updates live as you move.'
+      : 'Keep your face centered. We track your face live and fit the haircut automatically.';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101010),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.info_outline, color: Colors.white70, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              guidance,
+              style: const TextStyle(
+                  color: Colors.white70, fontSize: 12, height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusIndicators() {
+    final hasFace = _normalizedFaceRect != null;
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _StatusPill(
+          icon: Icons.videocam,
+          label: _webCameraReady || (_camera?.value.isInitialized ?? false)
+              ? 'Camera on'
+              : 'Camera off',
+          active: _webCameraReady || (_camera?.value.isInitialized ?? false),
+        ),
+        _StatusPill(
+          icon: Icons.tune,
+          label: 'Live preview',
+          active: true,
+        ),
+        _StatusPill(
+          icon: Icons.face,
+          label: kIsWeb
+              ? (_recommendations.isNotEmpty
+                  ? 'Hair preview on'
+                  : 'Waiting for suggestions')
+              : (hasFace ? 'Face found' : 'Find your face'),
+          active: kIsWeb ? (_recommendations.isNotEmpty && hasFace) : hasFace,
+        ),
+        _StatusPill(
+          icon: Icons.auto_awesome,
+          label: _loadingRecommendations ? 'Loading suggestions...' : 'Ready',
+          active: !_loadingRecommendations,
+        ),
+      ],
+    );
+  }
+
+  Widget _chip({required String label, required IconData icon}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.white70, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopThreePanel() {
+    if (_recommendations.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Text(
+          'No haircut suggestions yet. Center your face, then tap Get Top 3 Haircuts.',
+          style: TextStyle(color: Colors.white70, fontSize: 12),
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Best 3 Matches',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          ...List.generate(_recommendations.length, (index) {
+            final item = _recommendations[index];
+            final selected = index == _selectedIndex;
+            final name = item['style_name']?.toString() ??
+                item['styleName']?.toString() ??
+                'Style';
+            final texture = item['hair_texture']?.toString() ??
+                item['hairTexture']?.toString() ??
+                '';
+
+            return Padding(
+              padding: EdgeInsets.only(
+                  bottom: index == _recommendations.length - 1 ? 0 : 8),
+              child: InkWell(
+                onTap: () => setState(() => _selectedIndex = index),
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? const Color(0xFF1D1D1D)
+                        : const Color(0xFF151515),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                        color: selected ? Colors.white60 : Colors.white10),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: const BoxDecoration(
+                            color: Colors.white, shape: BoxShape.circle),
+                        child: Center(
+                          child: Text('${index + 1}',
+                              style: const TextStyle(
+                                  color: Colors.black,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11)),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12)),
+                            if (texture.isNotEmpty)
+                              Text(texture,
+                                  style: const TextStyle(
+                                      color: Colors.white60, fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  List<Map<String, dynamic>> _rankRecommendations(
+      List<Map<String, dynamic>> input) {
+    final ranked = List<Map<String, dynamic>>.from(input);
+
+    double score(Map<String, dynamic> item) {
+      final confidence = double.tryParse(
+              '${item['confidence_score'] ?? item['confidenceScore'] ?? 0}') ??
+          0;
+      final styleName = (item['style_name']?.toString() ??
+              item['styleName']?.toString() ??
+              '')
+          .toLowerCase();
+      final face = (item['face_shape']?.toString() ??
+              item['faceShape']?.toString() ??
+              '')
+          .toLowerCase();
+      final texture = (item['hair_texture']?.toString() ??
+              item['hairTexture']?.toString() ??
+              '')
+          .toLowerCase();
+
+      var s = confidence;
+      if (face.isNotEmpty && face == _faceShape.toLowerCase()) {
+        s += 0.20;
+      }
+      if (texture.isNotEmpty && texture == _hairTexture.toLowerCase()) {
+        s += 0.25;
+      }
+
+      final likelyCoilyStyle = styleName.contains('afro') ||
+          styleName.contains('dread') ||
+          styleName.contains('twist');
+      if (_hairTexture.toLowerCase() != 'coily' && likelyCoilyStyle) {
+        s -= 0.55;
+      }
+
+      return s;
+    }
+
+    ranked.sort((a, b) => score(b).compareTo(score(a)));
+    return ranked;
+  }
+
+  String? _resolveImage(dynamic value) {
+    final raw = value?.toString() ?? '';
+    if (raw.isEmpty) {
+      return null;
+    }
+    return ApiConfig.resolveImageUrl(raw);
+  }
+
+  double _perspectiveScale(double? yawDeg) {
+    final yaw = yawDeg ?? 0;
+    final scaled = math.cos(yaw * math.pi / 180);
+    return scaled.clamp(0.4, 1.0);
+  }
+
+  Future<void> _useSelectedStyle() async {
+    if (_recommendations.isEmpty) {
+      return;
+    }
+
+    final selected =
+        _recommendations[_selectedIndex.clamp(0, _recommendations.length - 1)];
+    final styleName = selected['style_name']?.toString() ??
+        selected['styleName']?.toString() ??
+        'Haircut';
+    final variantId = int.tryParse(
+        '${selected['variant_id'] ?? selected['variantId'] ?? ''}');
+    final estimated = int.tryParse(
+        '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? ''}');
+
+    UserSession.selectedStyleName = styleName;
+    UserSession.selectedEstimatedMinutes = estimated;
+    if (variantId != null) {
+      UserSession.selectedVariantId = variantId;
+    }
+
+    if (variantId != null && UserSession.userId != null) {
+      await AiFunnelService.saveSelection(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: UserSession.userId!,
+        variantId: variantId,
+        styleName: styleName,
+        faceShape: UserSession.lastScan?['faceShape']?.toString(),
+        hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+        hairLength: UserSession.lastScan?['hairLength']?.toString(),
+        estimatedMinutes: estimated,
+      );
+    }
+
+    if (!mounted) return;
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ConfirmationPage(
+          frontViewUrl: _resolveImage(
+              selected['front_view_url'] ?? selected['frontViewUrl']),
+          sideViewUrl: _resolveImage(
+              selected['side_view_url'] ?? selected['sideViewUrl']),
+          backViewUrl: _resolveImage(
+              selected['back_view_url'] ?? selected['backViewUrl']),
+          styleName: styleName,
+        ),
+      ),
+    );
+  }
+
+  Rect _smoothRect(Rect? previous, Rect next, double alpha) {
+    if (previous == null) {
+      return next;
+    }
+    return Rect.fromLTWH(
+      _smoothValue(previous.left, next.left, alpha),
+      _smoothValue(previous.top, next.top, alpha),
+      _smoothValue(previous.width, next.width, alpha),
+      _smoothValue(previous.height, next.height, alpha),
+    );
+  }
+
+  double _smoothValue(double? previous, double? next, double alpha) {
+    final target = next ?? 0;
+    if (previous == null) {
+      return target;
+    }
+    final value = previous + ((target - previous) * alpha);
+    return value;
+  }
+
+  Rect _stabilizeIncomingRect(Rect? previous, Rect next) {
+    if (previous == null) {
+      return next;
+    }
+
+    final prevCenter = previous.center;
+    final nextCenter = next.center;
+    final centerJump = (nextCenter - prevCenter).distance;
+    final areaJump = ((_rectArea(next) - _rectArea(previous)).abs() /
+            (_rectArea(previous).clamp(0.001, 1.0)))
+        .clamp(0.0, 2.0);
+
+    if (centerJump > _trackingJumpThreshold || areaJump > 0.40) {
+      return Rect.lerp(previous, next, 0.22) ?? next;
+    }
+    return next;
+  }
+
+  bool _isLikelyStableFace(Rect rect) {
+    final area = _rectArea(rect);
+    if (area < _minFaceAreaForOverlay) {
+      return false;
+    }
+    const maxArea =
+        kIsWeb ? _maxFaceAreaForOverlayWeb : _maxFaceAreaForOverlayMobile;
+    if (area > maxArea) {
+      return false;
+    }
+    if (rect.left <= 0.01 ||
+        rect.top <= 0.01 ||
+        rect.right >= 0.99 ||
+        rect.bottom >= 0.99) {
+      return false;
+    }
+    return true;
+  }
+
+  double _rectArea(Rect rect) => (rect.width * rect.height).clamp(0.0, 1.0);
+
+  Rect? _effectiveOverlayFaceRect() {
+    final current = _normalizedFaceRect;
+    if (current != null && _recommendations.isNotEmpty) {
+      if (_isLikelyStableFace(current)) {
+        _lastStableFaceRect = current;
+        _overlayHoldUntil = DateTime.now().add(_overlayHoldDuration);
+        return current;
+      }
+
+      final holdUntil = _overlayHoldUntil;
+      final fallback = _lastStableFaceRect;
+      if (holdUntil != null && fallback != null && DateTime.now().isBefore(holdUntil)) {
+        return fallback;
+      }
+      return current;
+    }
+    if (current != null && _isLikelyStableFace(current)) {
+      return current;
+    }
+    final holdUntil = _overlayHoldUntil;
+    final fallback = _lastStableFaceRect;
+    if (holdUntil == null || fallback == null) {
+      return null;
+    }
+    if (DateTime.now().isAfter(holdUntil)) {
+      return null;
+    }
+    return fallback;
+  }
+
+  double _currentOverlayOpacity() {
+    if (_normalizedFaceRect != null) {
+      return _overlayBaseOpacity;
+    }
+    final holdUntil = _overlayHoldUntil;
+    if (holdUntil == null) {
+      return 0;
+    }
+    final remainingMs = holdUntil.difference(DateTime.now()).inMilliseconds;
+    if (remainingMs <= 0) {
+      return 0;
+    }
+    final t =
+        (remainingMs / _overlayHoldDuration.inMilliseconds).clamp(0.0, 1.0);
+    return _overlayBaseOpacity * t;
+  }
+
+  OverlayCalibration _overlayCalibration(
+      Map<String, dynamic>? recommendation) {
+    OverlayCalibration base = OverlayCalibration.defaults;
+
+    if (recommendation == null) {
+      return _adaptCalibrationToFace(base);
+    }
+
+    final styleName = (recommendation['style_name']?.toString() ??
+            recommendation['styleName']?.toString() ??
+            '')
+        .trim()
+        .toLowerCase();
+    if (styleName.isEmpty) {
+      return _adaptCalibrationToFace(base);
+    }
+
+    for (final entry in _styleCalibration.entries) {
+      if (styleName.contains(entry.key)) {
+        base = entry.value;
+        break;
+      }
+    }
+
+    return _adaptCalibrationToFace(base);
+  }
+
+  String _engineLabel() {
+    switch (_selectedEngineMode) {
+      case AttachmentEngineMode.auto:
+        return _faceTransformMatrix != null
+            ? 'Engine: auto(matrix)'
+            : 'Engine: auto(heuristic)';
+      case AttachmentEngineMode.matrix:
+        return 'Engine: ${attachmentEngineModeLabel(_selectedEngineMode)}';
+      case AttachmentEngineMode.heuristic:
+        return 'Engine: ${attachmentEngineModeLabel(_selectedEngineMode)}';
+    }
+  }
+
+  void _setEngineMode(AttachmentEngineMode mode) {
+    if (_selectedEngineMode == mode) {
+      return;
+    }
+    setState(() {
+      _selectedEngineMode = mode;
+      _attachmentEngine = createAttachmentEngine(mode);
+    });
+  }
+
+  Widget _buildEngineModePicker() {
+    const modes = AttachmentEngineMode.values;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: modes
+          .map(
+            (mode) => ChoiceChip(
+              label: Text(
+                attachmentEngineModeLabel(mode),
+                style: const TextStyle(fontSize: 11),
+              ),
+              selected: _selectedEngineMode == mode,
+              onSelected: (_) => _setEngineMode(mode),
+              selectedColor: const Color(0xFF17301D),
+              backgroundColor: const Color(0xFF1A1A1A),
+              side: BorderSide(
+                color: _selectedEngineMode == mode
+                    ? const Color(0xFF3E7A4A)
+                    : Colors.white24,
+              ),
+              labelStyle: TextStyle(
+                color: _selectedEngineMode == mode
+                    ? Colors.greenAccent.shade100
+                    : Colors.white70,
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Widget _buildEngineDiagnostics() {
+    final hasMatrix = (_faceTransformMatrix?.length ?? 0) >= 16;
+    final stable = _faceSessionReady;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        _chip(
+          label: hasMatrix ? 'Matrix feed: available' : 'Matrix feed: missing',
+          icon: hasMatrix ? Icons.grid_view_rounded : Icons.grid_off_rounded,
+        ),
+        _chip(
+          label: stable ? 'Tracking: stable' : 'Tracking: warming up',
+          icon: stable ? Icons.check_circle_outline : Icons.schedule,
+        ),
+      ],
+    );
+  }
+
+  OverlayBox _computeAttachmentBox({
+    required Rect face,
+    required BoxConstraints constraints,
+    required OverlayCalibration calibration,
+  }) {
+    return _attachmentEngine.compute(
+      AttachmentInput(
+        face: face,
+        constraints: constraints,
+        calibration: calibration,
+        isWeb: kIsWeb,
+        headYaw: _headYaw,
+        headRoll: _headRoll,
+        foreheadAnchorY: _foreheadAnchorY,
+        eyeMidX: _eyeMidX,
+        eyeDistanceNorm: _eyeDistanceNorm,
+        videoAspect: _webVideoAspect,
+        faceTransformMatrix: _faceTransformMatrix,
+      ),
+    );
+  }
+
+  OverlayCalibration _adaptCalibrationToFace(OverlayCalibration base) {
+    final face = _effectiveOverlayFaceRect() ?? _smoothedFaceRect ?? _normalizedFaceRect;
+    if (face == null) {
+      return base;
+    }
+
+    final area = (face.width * face.height).clamp(0.03, 0.40);
+    final aspect = (face.width / face.height).clamp(0.58, 1.15);
+
+    final slimFaceNorm = ((0.88 - aspect) / 0.30).clamp(0.0, 1.0);
+    final wideFaceNorm = ((aspect - 0.84) / 0.24).clamp(0.0, 1.0);
+    final nearNorm = ((area - 0.15) / 0.18).clamp(0.0, 1.0);
+    final farNorm = ((0.15 - area) / 0.12).clamp(0.0, 1.0);
+    final eyeDistance =
+      (_eyeDistanceNorm ?? (face.width * 0.42)).clamp(0.05, 0.70);
+    final expectedEye = (face.width * 0.42).clamp(0.05, 0.70);
+    final eyeScaleNorm =
+      ((expectedEye - eyeDistance).abs() / expectedEye).clamp(0.0, 1.0);
+    final eyeIsWider = (eyeDistance > expectedEye) ? 1.0 : 0.0;
+
+    final widthScale = (base.widthScale *
+            (1.0 + (slimFaceNorm * 0.18) - (wideFaceNorm * 0.08)) *
+        (1.0 + (farNorm * 0.10) - (nearNorm * 0.06)) *
+        (1.0 - (eyeScaleNorm * 0.06 * eyeIsWider)))
+        .clamp(0.96, 1.58)
+        .toDouble();
+
+    final heightScale = (base.heightScale *
+            (1.0 + (wideFaceNorm * 0.16) + (slimFaceNorm * 0.05)) *
+        (1.0 + (nearNorm * 0.08) + (farNorm * 0.04)) *
+        (1.0 + (eyeScaleNorm * 0.05 * (1.0 - eyeIsWider))))
+        .clamp(1.04, 1.78)
+        .toDouble();
+
+    final yOffset = (base.yOffset +
+            (nearNorm * 0.04) -
+            (farNorm * 0.03) -
+            (slimFaceNorm * 0.02))
+      .clamp(-0.30, -0.08)
+        .toDouble();
+
+    final clipFactor =
+        (base.hairClipFactor + (wideFaceNorm * 0.03) - (slimFaceNorm * 0.02))
+            .clamp(0.80, 0.92)
+            .toDouble();
+
+    final visualScale =
+        (base.visualScale + (farNorm * 0.06) - (nearNorm * 0.04))
+        .clamp(1.00, 1.22)
+            .toDouble();
+
+    return OverlayCalibration(
+      widthScale: widthScale,
+      heightScale: heightScale,
+      xOffset: base.xOffset,
+      yOffset: yOffset,
+      hairClipFactor: clipFactor,
+      visualScale: visualScale,
+      yawShiftFactor: base.yawShiftFactor,
+    );
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool active;
+
+  const _StatusPill(
+      {required this.icon, required this.label, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: active ? const Color(0xFF17301D) : const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+            color: active ? const Color(0xFF3E7A4A) : Colors.white12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon,
+              size: 14,
+              color: active ? Colors.greenAccent.shade100 : Colors.white60),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: active ? Colors.greenAccent.shade100 : Colors.white70,
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LiveBadge extends StatelessWidget {
+  final String label;
+  final bool isLive;
+
+  const _LiveBadge({required this.label, required this.isLive});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.55),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.fiber_manual_record,
+            size: 11,
+            color: isLive ? Colors.redAccent : Colors.white54,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+                color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FaceGuidePainter extends CustomPainter {
+  final Rect face;
+
+  const _FaceGuidePainter({required this.face});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTWH(
+      face.left * size.width,
+      face.top * size.height,
+      face.width * size.width,
+      face.height * size.height,
+    );
+
+    final paint = Paint()
+      ..color = Colors.lightBlueAccent
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2;
+
+    canvas.drawRRect(
+      RRect.fromRectAndRadius(rect, const Radius.circular(14)),
+      paint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _FaceGuidePainter oldDelegate) =>
+      oldDelegate.face != face;
+}
+
+
+==================== FILE: lib/user/scanner/attachment_engine.dart ====================
+import 'package:flutter/material.dart';
+import 'dart:math' as math;
+
+import 'overlay_fit.dart';
+import 'overlay_models.dart';
+
+enum AttachmentEngineMode {
+  auto,
+  matrix,
+  heuristic,
+}
+
+AttachmentEngineMode parseAttachmentEngineMode(String raw) {
+  switch (raw.trim().toLowerCase()) {
+    case 'matrix':
+      return AttachmentEngineMode.matrix;
+    case 'heuristic':
+      return AttachmentEngineMode.heuristic;
+    case 'auto':
+    default:
+      return AttachmentEngineMode.auto;
+  }
+}
+
+String attachmentEngineModeLabel(AttachmentEngineMode mode) {
+  switch (mode) {
+    case AttachmentEngineMode.auto:
+      return 'auto';
+    case AttachmentEngineMode.matrix:
+      return 'matrix';
+    case AttachmentEngineMode.heuristic:
+      return 'heuristic';
+  }
+}
+
+AttachmentEngine createAttachmentEngine(AttachmentEngineMode mode) {
+  switch (mode) {
+    case AttachmentEngineMode.matrix:
+      return const MatrixAttachmentEngine();
+    case AttachmentEngineMode.heuristic:
+      return const HeuristicAttachmentEngine();
+    case AttachmentEngineMode.auto:
+      return const MatrixAttachmentEngine();
+  }
+}
+
+class AttachmentInput {
+  final Rect face;
+  final BoxConstraints constraints;
+  final OverlayCalibration calibration;
+  final bool isWeb;
+  final double? headYaw;
+  final double? headRoll;
+  final double? foreheadAnchorY;
+  final double? eyeMidX;
+  final double? eyeDistanceNorm;
+  final double? videoAspect;
+  final List<double>? faceTransformMatrix;
+
+  const AttachmentInput({
+    required this.face,
+    required this.constraints,
+    required this.calibration,
+    required this.isWeb,
+    required this.headYaw,
+    required this.headRoll,
+    required this.foreheadAnchorY,
+    required this.eyeMidX,
+    required this.eyeDistanceNorm,
+    required this.videoAspect,
+    required this.faceTransformMatrix,
+  });
+}
+
+abstract class AttachmentEngine {
+  const AttachmentEngine();
+
+  OverlayBox compute(AttachmentInput input);
+}
+
+class HeuristicAttachmentEngine extends AttachmentEngine {
+  const HeuristicAttachmentEngine();
+
+  @override
+  OverlayBox compute(AttachmentInput input) {
+    return computeOverlayBox(
+      face: input.face,
+      constraints: input.constraints,
+      calibration: input.calibration,
+      isWeb: input.isWeb,
+      headYaw: input.headYaw,
+      headRoll: input.headRoll,
+      foreheadAnchorY: input.foreheadAnchorY,
+      eyeMidX: input.eyeMidX,
+      eyeDistanceNorm: input.eyeDistanceNorm,
+      videoAspect: input.videoAspect,
+    );
+  }
+}
+
+class MatrixAttachmentEngine extends AttachmentEngine {
+  final AttachmentEngine fallback;
+
+  const MatrixAttachmentEngine({this.fallback = const HeuristicAttachmentEngine()});
+
+  @override
+  OverlayBox compute(AttachmentInput input) {
+    final matrix = input.faceTransformMatrix;
+    if (matrix == null || matrix.length < 16) {
+      return fallback.compute(input);
+    }
+
+    final scaleX = math.sqrt((matrix[0] * matrix[0]) + (matrix[1] * matrix[1]));
+    final scaleY = math.sqrt((matrix[4] * matrix[4]) + (matrix[5] * matrix[5]));
+    final matrixScale = ((scaleX + scaleY) * 0.5).clamp(0.55, 1.55);
+    final inferredRoll = math.atan2(matrix[1], matrix[0]) * (180 / math.pi);
+    final tx = matrix[12].clamp(-1.5, 1.5);
+    final ty = matrix[13].clamp(-1.5, 1.5);
+
+    final adjustedCalibration = OverlayCalibration(
+      widthScale: (input.calibration.widthScale * (1.0 + ((matrixScale - 1.0) * 0.14)))
+          .clamp(0.90, 1.75)
+          .toDouble(),
+      heightScale:
+          (input.calibration.heightScale * (1.0 + ((matrixScale - 1.0) * 0.11)))
+              .clamp(0.98, 1.95)
+              .toDouble(),
+      xOffset: (input.calibration.xOffset + (tx * 0.035)).clamp(-0.16, 0.16).toDouble(),
+      yOffset: (input.calibration.yOffset + (ty * 0.030)).clamp(-0.36, 0.10).toDouble(),
+      hairClipFactor: input.calibration.hairClipFactor,
+      visualScale: input.calibration.visualScale,
+      yawShiftFactor: input.calibration.yawShiftFactor,
+    );
+
+    return computeOverlayBox(
+      face: input.face,
+      constraints: input.constraints,
+      calibration: adjustedCalibration,
+      isWeb: input.isWeb,
+      headYaw: input.headYaw,
+      headRoll: input.headRoll ?? inferredRoll,
+      foreheadAnchorY: input.foreheadAnchorY,
+      eyeMidX: input.eyeMidX,
+      eyeDistanceNorm: input.eyeDistanceNorm,
+      videoAspect: input.videoAspect,
+    );
+  }
+}
+
+
+==================== FILE: lib/user/scanner/overlay_fit.dart ====================
+import 'package:flutter/material.dart';
+
+import 'overlay_models.dart';
+
+const double kOverlayTargetFaceAreaWeb = 0.145;
+const double kOverlayTargetFaceAreaMobile = 0.165;
+
+String pickOverlayImageForYaw(OverlayImageSet set, double? yawDeg) {
+  final yaw = yawDeg ?? 0;
+  if (yaw >= 12) {
+    return set.left;
+  }
+  if (yaw <= -12) {
+    return set.right;
+  }
+  return set.front;
+}
+
+OverlayBox computeOverlayBox({
+  required Rect face,
+  required BoxConstraints constraints,
+  required OverlayCalibration calibration,
+  required bool isWeb,
+  required double? headYaw,
+  required double? headRoll,
+  required double? foreheadAnchorY,
+  required double? eyeMidX,
+  required double? eyeDistanceNorm,
+  double? videoAspect,
+}) {
+  var mappedFace = face;
+  var mappedEyeMidX = eyeMidX;
+  var mappedEyeDistanceNorm = eyeDistanceNorm;
+  var mappedForeheadAnchorY = foreheadAnchorY;
+
+  // Web tracker coordinates are normalized to the raw video frame.
+  // Convert them into container-normalized space when the video is letterboxed.
+  if (isWeb && videoAspect != null && videoAspect > 0) {
+    final cw = constraints.maxWidth;
+    final ch = constraints.maxHeight;
+    final containerAspect = cw / ch;
+
+    var displayW = cw;
+    var displayH = ch;
+    var offsetX = 0.0;
+    var offsetY = 0.0;
+
+    if (containerAspect > videoAspect) {
+      displayH = ch;
+      displayW = displayH * videoAspect;
+      offsetX = (cw - displayW) * 0.5;
+    } else {
+      displayW = cw;
+      displayH = displayW / videoAspect;
+      offsetY = (ch - displayH) * 0.5;
+    }
+
+    final mappedLeft = (offsetX + (face.left * displayW)) / cw;
+    final mappedTop = (offsetY + (face.top * displayH)) / ch;
+    final mappedWidth = (face.width * displayW) / cw;
+    final mappedHeight = (face.height * displayH) / ch;
+    mappedFace = Rect.fromLTWH(mappedLeft, mappedTop, mappedWidth, mappedHeight);
+
+    if (eyeMidX != null) {
+      mappedEyeMidX = ((offsetX + (eyeMidX * displayW)) / cw).clamp(0.0, 1.0);
+    }
+    if (eyeDistanceNorm != null) {
+      mappedEyeDistanceNorm = ((eyeDistanceNorm * displayW) / cw).clamp(0.02, 0.90);
+    }
+    if (foreheadAnchorY != null) {
+      mappedForeheadAnchorY =
+          ((offsetY + (foreheadAnchorY * displayH)) / ch).clamp(0.0, 1.0);
+    }
+  }
+
+  final faceWidth = mappedFace.width * constraints.maxWidth;
+  final faceHeight = mappedFace.height * constraints.maxHeight;
+  final faceAspect = (mappedFace.width / mappedFace.height).clamp(0.55, 1.35);
+
+  final faceAreaNorm = (mappedFace.width * mappedFace.height).clamp(0.03, 0.45);
+  final targetArea =
+      isWeb ? kOverlayTargetFaceAreaWeb : kOverlayTargetFaceAreaMobile;
+
+  final distanceFactor = (targetArea / faceAreaNorm).clamp(0.72, 1.28);
+  final distanceVerticalFactor =
+      1.0 + ((faceAreaNorm - targetArea) * 1.2).clamp(-0.12, 0.18);
+
+  final slimFaceNorm = ((0.90 - faceAspect) / 0.40).clamp(0.0, 1.0);
+  final wideFaceNorm = ((faceAspect - 0.82) / 0.35).clamp(0.0, 1.0);
+  final nearCameraNorm =
+    ((faceAreaNorm - targetArea) / targetArea).clamp(0.0, 1.0);
+  final farCameraNorm =
+    ((targetArea - faceAreaNorm) / targetArea).clamp(0.0, 1.0);
+
+  final adaptiveWidthBoost =
+    (1.0 + (slimFaceNorm * 0.22) - (wideFaceNorm * 0.08));
+  final adaptiveHeightBoost =
+    (1.0 + (wideFaceNorm * 0.16) + (slimFaceNorm * 0.04));
+  final distanceWidthComp =
+    (1.0 + (farCameraNorm * 0.12) - (nearCameraNorm * 0.06));
+  final distanceHeightComp =
+    (1.0 + (nearCameraNorm * 0.10) + (farCameraNorm * 0.06));
+
+  final yawDeg = headYaw ?? 0;
+  final yawAbsNorm = (yawDeg.abs() / 45.0).clamp(0.0, 1.0);
+  final yawWidthFactor = (1.0 - (yawAbsNorm * 0.35)).clamp(0.55, 1.0);
+  final yawHeightFactor = (1.0 - (yawAbsNorm * 0.12)).clamp(0.85, 1.0);
+  final yawHorizontalShift = (yawDeg / 55.0).clamp(-0.12, 0.12);
+
+    final eyeDistNorm =
+      (mappedEyeDistanceNorm ?? (mappedFace.width * 0.42)).clamp(0.05, 0.70);
+  final eyeDistPx = eyeDistNorm * constraints.maxWidth;
+  final widthFromEyes = eyeDistPx * 2.65;
+  final eyeWidthBlend = isWeb ? 0.66 : 0.58;
+
+  final rollDeg = headRoll ?? 0;
+  final rollNorm = (rollDeg.abs() / 25.0).clamp(0.0, 1.0);
+  final rollTiltFactor = rollDeg.sign;
+
+  final width = faceWidth *
+      calibration.widthScale *
+      distanceFactor *
+      adaptiveWidthBoost *
+      distanceWidthComp *
+      yawWidthFactor *
+      (1.0 - (rollNorm * 0.04));
+    final eyeAnchoredWidth =
+      (width * (1.0 - eyeWidthBlend)) + (widthFromEyes * eyeWidthBlend);
+
+  final height = faceHeight *
+      calibration.heightScale *
+      distanceFactor *
+      adaptiveHeightBoost *
+      distanceHeightComp *
+      yawHeightFactor *
+      (1.0 + (rollNorm * 0.03));
+
+    final clampedWidth = eyeAnchoredWidth
+      .clamp(faceWidth * 0.82, faceWidth * 1.98);
+    final clampedHeight = height.clamp(faceHeight * 0.95, faceHeight * 2.05);
+
+    final anchorXNorm =
+      (mappedEyeMidX ?? (mappedFace.left + (mappedFace.width * 0.5)))
+        .clamp(0.0, 1.0);
+  final faceCenterX = anchorXNorm * constraints.maxWidth;
+  final xOffsetPx = faceWidth * (calibration.xOffset + yawHorizontalShift);
+  final left = (faceCenterX - (clampedWidth * 0.5) + xOffsetPx)
+      .clamp(-clampedWidth * 0.15, constraints.maxWidth - (clampedWidth * 0.85));
+
+  double anchorYNorm;
+  if (mappedForeheadAnchorY != null) {
+    anchorYNorm = mappedForeheadAnchorY.clamp(0.0, 1.0);
+  } else {
+    anchorYNorm = (mappedFace.top + (mappedFace.height * 0.12)).clamp(0.0, 1.0);
+  }
+
+  final yawAnchorShift = -yawAbsNorm * 0.02 * yawDeg.sign;
+  final adjustedAnchorYNorm = (anchorYNorm + yawAnchorShift).clamp(0.02, 0.35);
+  final anchorY = adjustedAnchorYNorm * constraints.maxHeight;
+
+  final topRaw = anchorY - (clampedHeight * 0.10) +
+      (faceHeight * calibration.yOffset * distanceVerticalFactor) +
+      (rollTiltFactor * rollNorm * faceHeight * 0.02);
+
+  final top = topRaw
+      .clamp(-clampedHeight * 0.35, constraints.maxHeight - (clampedHeight * 0.15));
+
+  return OverlayBox(
+    left: left.toDouble(),
+    top: top.toDouble(),
+    width: clampedWidth.toDouble(),
+    height: clampedHeight.toDouble(),
+    yawScale: yawWidthFactor,
+  );
+}
+
+
+==================== FILE: lib/user/scanner/overlay_models.dart ====================
+class OverlayImageSet {
+  final String front;
+  final String left;
+  final String right;
+
+  const OverlayImageSet({
+    required this.front,
+    required this.left,
+    required this.right,
+  });
+}
+
+class OverlayBox {
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final double yawScale;
+
+  const OverlayBox({
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    this.yawScale = 1.0,
+  });
+}
+
+class OverlayCalibration {
+  final double widthScale;
+  final double heightScale;
+  final double xOffset;
+  final double yOffset;
+  final double hairClipFactor;
+  final double visualScale;
+  final double yawShiftFactor;
+
+  const OverlayCalibration({
+    required this.widthScale,
+    required this.heightScale,
+    required this.xOffset,
+    required this.yOffset,
+    this.hairClipFactor = 0.57,
+    this.visualScale = 1.0,
+    this.yawShiftFactor = 0.07,
+  });
+
+  static const defaults = OverlayCalibration(
+    widthScale: 1.12,
+    heightScale: 1.22,
+    xOffset: 0.00,
+    yOffset: -0.18,
+    hairClipFactor: 0.74,
+    visualScale: 1.16,
+    yawShiftFactor: 0.06,
+  );
+}
+
+
+==================== FILE: lib/user/scanner/face_detector_service_mobile.dart ====================
+import 'dart:typed_data';
+import 'dart:ui';
+
+import 'package:camera/camera.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+
+class DetectedFaceFrame {
+  final Rect boundingBox;
+  final Size imageSize;
+  final double? headEulerAngleY;
+  final double? headEulerAngleZ;
+
+  const DetectedFaceFrame({
+    required this.boundingBox,
+    required this.imageSize,
+    this.headEulerAngleY,
+    this.headEulerAngleZ,
+  });
+}
+
+class FaceDetectorService {
+  late final FaceDetector _faceDetector;
+
+  Future<void> initialize() async {
+    _faceDetector = FaceDetector(
+      options: FaceDetectorOptions(
+        performanceMode: FaceDetectorMode.fast,
+        enableLandmarks: true,
+        enableContours: false,
+        enableTracking: true,
+      ),
+    );
+  }
+
+  Future<DetectedFaceFrame?> processFrame(
+    CameraImage image, {
+    required int sensorOrientation,
+  }) async {
+    final inputImage = _toInputImage(image, sensorOrientation);
+    if (inputImage == null) {
+      return null;
+    }
+
+    final faces = await _faceDetector.processImage(inputImage);
+    if (faces.isEmpty) {
+      return null;
+    }
+
+    final face = faces.first;
+    return DetectedFaceFrame(
+      boundingBox: face.boundingBox,
+      imageSize: Size(image.width.toDouble(), image.height.toDouble()),
+      headEulerAngleY: face.headEulerAngleY,
+      headEulerAngleZ: face.headEulerAngleZ,
+    );
+  }
+
+  InputImage? _toInputImage(CameraImage image, int sensorOrientation) {
+    final format = InputImageFormatValue.fromRawValue(image.format.raw);
+    if (format == null) {
+      return null;
+    }
+
+    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    if (rotation == null) {
+      return null;
+    }
+
+    final bytes = _concatenatePlanes(image.planes);
+    final metadata = InputImageMetadata(
+      size: Size(image.width.toDouble(), image.height.toDouble()),
+      rotation: rotation,
+      format: format,
+      bytesPerRow: image.planes.first.bytesPerRow,
+    );
+
+    return InputImage.fromBytes(bytes: bytes, metadata: metadata);
+  }
+
+  Uint8List _concatenatePlanes(List<Plane> planes) {
+    final buffer = BytesBuilder(copy: false);
+    for (final plane in planes) {
+      buffer.add(plane.bytes);
+    }
+    return buffer.takeBytes();
+  }
+
+  Future<void> dispose() async {
+    await _faceDetector.close();
+  }
+}
+
+
+==================== FILE: lib/user/scanner/face_detector_service_stub.dart ====================
+import 'dart:ui';
+
+import 'package:camera/camera.dart';
+
+class DetectedFaceFrame {
+  final Rect boundingBox;
+  final Size imageSize;
+  final double? headEulerAngleY;
+  final double? headEulerAngleZ;
+
+  const DetectedFaceFrame({
+    required this.boundingBox,
+    required this.imageSize,
+    this.headEulerAngleY,
+    this.headEulerAngleZ,
+  });
+}
+
+class FaceDetectorService {
+  Future<void> initialize() async {}
+
+  Future<DetectedFaceFrame?> processFrame(
+    CameraImage image, {
+    required int sensorOrientation,
+  }) async {
+    return null;
+  }
+
+  Future<void> dispose() async {}
+}
+
+
+==================== FILE: lib/user/web_camera_view.dart ====================
+// Web-only camera view/controller.
+// ignore_for_file: avoid_web_libraries_in_flutter
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:html' as html;
+import 'dart:js' as js;
+import 'dart:typed_data';
+import 'dart:ui_web' as ui;
+
+import 'package:flutter/material.dart';
+
+class WebFaceTrackingState {
+  final Rect? faceRect;
+  final double? headYaw;
+  final double? headRoll;
+  final double? eyeMidY;
+  final double? eyeMidX;
+  final double? eyeDistanceNorm;
+  final double? videoAspect;
+  final List<double>? faceTransformMatrix;
+  final bool trackerReady;
+  final bool trackerSupported;
+
+  const WebFaceTrackingState({
+    this.faceRect,
+    this.headYaw,
+    this.headRoll,
+    this.eyeMidY,
+    this.eyeMidX,
+    this.eyeDistanceNorm,
+    this.videoAspect,
+    this.faceTransformMatrix,
+    this.trackerReady = false,
+    this.trackerSupported = false,
+  });
+
+  WebFaceTrackingState copyWith({
+    Rect? faceRect,
+    double? headYaw,
+    double? headRoll,
+    double? eyeMidY,
+    double? eyeMidX,
+    double? eyeDistanceNorm,
+    double? videoAspect,
+    List<double>? faceTransformMatrix,
+    bool? trackerReady,
+    bool? trackerSupported,
+    bool clearFace = false,
+  }) {
+    return WebFaceTrackingState(
+      faceRect: clearFace ? null : (faceRect ?? this.faceRect),
+      headYaw: clearFace ? null : (headYaw ?? this.headYaw),
+      headRoll: clearFace ? null : (headRoll ?? this.headRoll),
+      eyeMidY: clearFace ? null : (eyeMidY ?? this.eyeMidY),
+      eyeMidX: clearFace ? null : (eyeMidX ?? this.eyeMidX),
+      eyeDistanceNorm:
+          clearFace ? null : (eyeDistanceNorm ?? this.eyeDistanceNorm),
+      videoAspect: clearFace ? null : (videoAspect ?? this.videoAspect),
+      faceTransformMatrix:
+          clearFace ? null : (faceTransformMatrix ?? this.faceTransformMatrix),
+      trackerReady: trackerReady ?? this.trackerReady,
+      trackerSupported: trackerSupported ?? this.trackerSupported,
+    );
+  }
+}
+
+class WebCameraController {
+  html.VideoElement? _video;
+  html.MediaStream? _stream;
+  String? _viewType;
+  Timer? _trackingTimer;
+
+  final ValueNotifier<WebFaceTrackingState> tracking =
+      ValueNotifier<WebFaceTrackingState>(const WebFaceTrackingState());
+
+  bool get isStreaming => _stream != null;
+
+  Future<bool> start() async {
+    if (_stream != null) {
+      return true;
+    }
+    final media = html.window.navigator.mediaDevices;
+    if (media == null) {
+      return false;
+    }
+
+    _stream = await media.getUserMedia({
+      'video': {
+        'facingMode': 'user',
+        'width': {'ideal': 1280},
+        'height': {'ideal': 720},
+      },
+      'audio': false,
+    });
+
+    _video = html.VideoElement()
+      ..autoplay = true
+      ..muted = true
+      ..style.width = '100%'
+      ..style.height = '100%'
+      ..srcObject = _stream;
+    _video!.setAttribute('playsinline', 'true');
+
+    _viewType = 'webcam-${DateTime.now().microsecondsSinceEpoch}';
+    // ignore: undefined_prefixed_name
+    ui.platformViewRegistry.registerViewFactory(_viewType!, (int viewId) => _video!);
+
+    await _initFaceTracker();
+    _startTrackingLoop();
+
+    return true;
+  }
+
+  Future<void> stop() async {
+    _trackingTimer?.cancel();
+    _trackingTimer = null;
+    _video?.pause();
+    _video?.srcObject = null;
+    _stream?.getTracks().forEach((track) => track.stop());
+    _stream = null;
+    tracking.value = tracking.value.copyWith(clearFace: true);
+  }
+
+  Future<void> _initFaceTracker() async {
+    try {
+      js.context.callMethod('initTatisFaceTracker');
+      tracking.value = tracking.value.copyWith(
+        trackerReady: true,
+        trackerSupported: true,
+      );
+    } catch (_) {
+      tracking.value = tracking.value.copyWith(
+        trackerReady: false,
+        trackerSupported: false,
+        clearFace: true,
+      );
+    }
+  }
+
+  void _startTrackingLoop() {
+    _trackingTimer?.cancel();
+    _trackingTimer = Timer.periodic(const Duration(milliseconds: 70), (_) {
+      _estimateFace();
+    });
+  }
+
+  void _estimateFace() {
+    final video = _video;
+    if (video == null || _stream == null) {
+      return;
+    }
+
+    try {
+      final result = js.context.callMethod('tatisEstimateFace', [video]);
+      if (result == null) {
+        return;
+      }
+
+      if (result is! js.JsObject) {
+        return;
+      }
+
+      final status = (result['status'] as String?)?.toLowerCase();
+      if (status == 'stale') {
+        return;
+      }
+      if (status == 'no_face' || status == 'error') {
+        tracking.value = tracking.value.copyWith(clearFace: true);
+        return;
+      }
+
+      final bbox = result['bbox'];
+      if (bbox == null) {
+        tracking.value = tracking.value.copyWith(clearFace: true);
+        return;
+      }
+
+      if (bbox is! js.JsObject) {
+        tracking.value = tracking.value.copyWith(clearFace: true);
+        return;
+      }
+
+      final left = ((bbox['left'] as num?) ?? 0).toDouble().clamp(0.0, 1.0);
+      final top = ((bbox['top'] as num?) ?? 0).toDouble().clamp(0.0, 1.0);
+      final width = ((bbox['width'] as num?) ?? 0).toDouble().clamp(0.0, 1.0);
+      final height = ((bbox['height'] as num?) ?? 0).toDouble().clamp(0.0, 1.0);
+      final yaw = ((result['yaw'] as num?) ?? 0).toDouble();
+      final roll = ((result['roll'] as num?) ?? 0).toDouble();
+      final eyeMidY = ((result['eyeMidY'] as num?) ?? (top + (height * 0.36))).toDouble().clamp(0.0, 1.0);
+      final eyeMidX = ((result['eyeMidX'] as num?) ?? (left + (width * 0.5)))
+          .toDouble()
+          .clamp(0.0, 1.0);
+      final eyeDistanceNorm =
+          ((result['eyeDistanceNorm'] as num?) ?? (width * 0.42))
+              .toDouble()
+              .clamp(0.04, 0.65);
+      final videoAspect = (video.videoHeight <= 0)
+          ? (16 / 9)
+          : (video.videoWidth / video.videoHeight).clamp(0.3, 4.0);
+        final faceTransformMatrix =
+          _toDoubleList(result['transformMatrix'], expectedLength: 16);
+
+      tracking.value = tracking.value.copyWith(
+        faceRect: Rect.fromLTWH(left, top, width, height),
+        headYaw: yaw,
+        headRoll: roll,
+        eyeMidY: eyeMidY,
+        eyeMidX: eyeMidX,
+        eyeDistanceNorm: eyeDistanceNorm,
+        videoAspect: videoAspect,
+        faceTransformMatrix: faceTransformMatrix,
+      );
+    } catch (_) {
+      return;
+    }
+  }
+
+  Future<Uint8List?> capture() async {
+    if (_video == null || _stream == null) {
+      return null;
+    }
+    final width = _video!.videoWidth;
+    final height = _video!.videoHeight;
+    if (width == 0 || height == 0) {
+      return null;
+    }
+
+    final canvas = html.CanvasElement(width: width, height: height);
+    final ctx = canvas.context2D;
+    ctx.drawImage(_video!, 0, 0);
+    final dataUrl = canvas.toDataUrl('image/jpeg', 0.9);
+    final base64Data = dataUrl.split(',').last;
+    return Uint8List.fromList(base64Decode(base64Data));
+  }
+
+  Widget buildView() {
+    if (_viewType == null) {
+      return const SizedBox.shrink();
+    }
+    return HtmlElementView(viewType: _viewType!);
+  }
+
+  List<double>? _toDoubleList(dynamic value, {required int expectedLength}) {
+    if (value == null || value is! js.JsObject) {
+      return null;
+    }
+
+    final out = <double>[];
+    for (var i = 0; i < expectedLength; i++) {
+      final item = value[i];
+      if (item is! num) {
+        return null;
+      }
+      out.add(item.toDouble());
+    }
+    return out;
+  }
+}
+
+class WebCameraView extends StatelessWidget {
+  final WebCameraController controller;
+
+  const WebCameraView({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return controller.buildView();
+  }
+}
+
+
+==================== FILE: lib/user/web_camera_view_stub.dart ====================
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+
+class WebFaceTrackingState {
+  final Rect? faceRect;
+  final double? headYaw;
+  final double? headRoll;
+  final double? eyeMidY;
+  final double? eyeMidX;
+  final double? eyeDistanceNorm;
+  final double? videoAspect;
+  final List<double>? faceTransformMatrix;
+  final bool trackerReady;
+  final bool trackerSupported;
+
+  const WebFaceTrackingState({
+    this.faceRect,
+    this.headYaw,
+    this.headRoll,
+    this.eyeMidY,
+    this.eyeMidX,
+    this.eyeDistanceNorm,
+    this.videoAspect,
+    this.faceTransformMatrix,
+    this.trackerReady = false,
+    this.trackerSupported = false,
+  });
+}
+
+class WebCameraController {
+  final ValueNotifier<WebFaceTrackingState> tracking =
+      ValueNotifier<WebFaceTrackingState>(const WebFaceTrackingState());
+
+  bool get isStreaming => false;
+
+  Future<bool> start() async => false;
+
+  Future<void> stop() async {}
+
+  Future<Uint8List?> capture() async => null;
+}
+
+class WebCameraView extends StatelessWidget {
+  final WebCameraController controller;
+
+  const WebCameraView({super.key, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Text(
+        'Web camera not available',
+        style: TextStyle(color: Colors.white70),
+      ),
+    );
+  }
+}
+
+
+==================== FILE: web/index.html ====================
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="A new Flutter project.">
+  <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+
+  <!-- iOS meta tags & icons -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="tatis_barbershop">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>tatis_barbershop</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <script type="module">
+    let faceLandmarker = null;
+    let lastVideoTime = -1;
+
+    async function ensureLandmarker() {
+      if (faceLandmarker) {
+        return faceLandmarker;
+      }
+
+      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14');
+      const filesetResolver = await vision.FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+
+      faceLandmarker = await vision.FaceLandmarker.createFromOptions(filesetResolver, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+        },
+        runningMode: 'VIDEO',
+        numFaces: 1,
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: true,
+      });
+
+      return faceLandmarker;
+    }
+
+    window.initTatisFaceTracker = async function () {
+      await ensureLandmarker();
+      return true;
+    };
+
+    window.tatisEstimateFace = function (video) {
+      if (!video || !faceLandmarker) {
+        return null;
+      }
+
+      if (video.readyState < 2 || video.videoWidth === 0 || video.videoHeight === 0) {
+        return null;
+      }
+
+      const videoTime = video.currentTime;
+      if (videoTime === lastVideoTime) {
+        return { status: 'stale' };
+      }
+      lastVideoTime = videoTime;
+
+      let result = null;
+      try {
+        result = faceLandmarker.detectForVideo(video, performance.now());
+      } catch (_) {
+        return { status: 'error' };
+      }
+      if (!result || !result.faceLandmarks || result.faceLandmarks.length === 0) {
+        return { status: 'no_face' };
+      }
+
+      const lm = result.faceLandmarks[0];
+      let minX = 1;
+      let minY = 1;
+      let maxX = 0;
+      let maxY = 0;
+
+      for (const p of lm) {
+        if (p.x < minX) minX = p.x;
+        if (p.y < minY) minY = p.y;
+        if (p.x > maxX) maxX = p.x;
+        if (p.y > maxY) maxY = p.y;
+      }
+
+      const leftEye = lm[33];
+      const rightEye = lm[263];
+      const noseTip = lm[1];
+
+      const dx = rightEye.x - leftEye.x;
+      const dy = rightEye.y - leftEye.y;
+      const roll = Math.atan2(dy, dx) * (180 / Math.PI);
+
+      const eyeMidX = (leftEye.x + rightEye.x) / 2;
+      const eyeMidY = (leftEye.y + rightEye.y) / 2;
+      const eyeDist = Math.max(0.0001, Math.sqrt((dx * dx) + (dy * dy)));
+      let yaw = ((noseTip.x - eyeMidX) / eyeDist) * 120;
+      yaw = Math.max(-60, Math.min(60, yaw));
+      const transformMatrix =
+        (result.facialTransformationMatrixes && result.facialTransformationMatrixes.length > 0)
+          ? Array.from(result.facialTransformationMatrixes[0].data || [])
+          : null;
+
+      return {
+        bbox: {
+          left: Math.max(0, minX),
+          top: Math.max(0, minY),
+          width: Math.max(0, Math.min(1, maxX - minX)),
+          height: Math.max(0, Math.min(1, maxY - minY)),
+        },
+        eyeMidX: Math.max(0, Math.min(1, eyeMidX)),
+        eyeMidY: Math.max(0, Math.min(1, eyeMidY)),
+        eyeDistanceNorm: Math.max(0.01, Math.min(1, eyeDist)),
+        transformMatrix,
+        yaw,
+        roll,
+      };
+    };
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
+
+
