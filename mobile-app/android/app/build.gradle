@@ -7,9 +7,8 @@ plugins {
 
 android {
     namespace = "com.example.tatis_barbershop"
-    // Ensure compileSdk is set to 35 to match plugin requirements
-    // (some plugins require a higher compile SDK than Flutter's default)
-    compileSdk = 35
+    // Ensure compileSdk matches plugin requirements
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

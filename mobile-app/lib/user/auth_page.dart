@@ -1,14 +1,19 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:http/http.dart' as http;
 import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
+import '../barber/barber_dashboard_page.dart';
 import 'forgot_password_page.dart';
-import 'quiz_gender.dart';
+import 'dashboard_page.dart';
+import 'api_config.dart';
+import 'user_session.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
 const Color kGoldColor = Colors.white;
+const String kGoogleLogoAsset = 'assets/images/google_logo.png';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -18,7 +23,9 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  static const String _apiBaseUrl = 'http://localhost/barberyanitatis/api';
+  final String _apiBaseUrl = ApiConfig.baseUrl;
+  static const String _googleServerClientId =
+      String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
 
   bool _isLogin = true;
   bool _isLoading = false;
@@ -39,6 +46,19 @@ class _AuthPageState extends State<AuthPage> {
   bool _obscureReg2 = true;
   bool _rememberMe = false;
 
+  @override
+  void dispose() {
+    _loginUser.dispose();
+    _loginPass.dispose();
+    _firstName.dispose();
+    _lastName.dispose();
+    _regEmail.dispose();
+    _phone.dispose();
+    _regPass.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
   Future<void> _login() async {
     final email = _loginUser.text.trim();
     final password = _loginPass.text;
@@ -46,6 +66,13 @@ class _AuthPageState extends State<AuthPage> {
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter email and password.')),
+      );
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address.')),
       );
       return;
     }
@@ -73,18 +100,33 @@ class _AuthPageState extends State<AuthPage> {
         return;
       }
 
-      final roles = (data['user']?['roles'] as List<dynamic>? ?? [])
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final roles = (user['roles'] as List<dynamic>? ?? [])
           .map((role) => role.toString().toLowerCase())
           .toList();
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
+      UserSession.userId = user['userID'] is int
+          ? user['userID'] as int
+          : int.tryParse('${user['userID']}');
+      UserSession.fullName = user['fullName']?.toString();
+      UserSession.email = user['email']?.toString();
+      UserSession.roles = roles;
+
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Login successful')));
 
       if (roles.contains('admin')) {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
+        Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
       } else if (roles.contains('receptionist')) {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()));
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => const ReceptionistDashboardPage()));
+      } else if (roles.contains('barber')) {
+        Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
       } else {
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const DashboardPage()));
       }
     } catch (e) {
       if (!mounted) return;
@@ -106,9 +148,34 @@ class _AuthPageState extends State<AuthPage> {
     final password = _regPass.text;
     final confirm = _confirm.text;
 
-    if (firstName.isEmpty || lastName.isEmpty || email.isEmpty || password.isEmpty) {
+    if (firstName.isEmpty ||
+        lastName.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields.')),
+      );
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address.')),
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Password must be at least 6 characters.')),
+      );
+      return;
+    }
+
+    if (phone.isNotEmpty && !_isValidPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid phone number.')),
       );
       return;
     }
@@ -141,19 +208,113 @@ class _AuthPageState extends State<AuthPage> {
 
       if (response.statusCode != 201) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'Registration failed.')),
+          SnackBar(
+              content:
+                  Text(data['error']?.toString() ?? 'Registration failed.')),
         );
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registration successful. Please sign in.')),
+        const SnackBar(
+            content: Text('Registration successful. Please sign in.')),
       );
       setState(() => _isLogin = true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Registration failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final googleSignIn = GoogleSignIn(
+        scopes: ['email', 'profile'],
+        serverClientId:
+            _googleServerClientId.isNotEmpty ? _googleServerClientId : null,
+      );
+      final googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final idToken = googleAuth.idToken?.trim() ?? '';
+      final accessToken = googleAuth.accessToken?.trim() ?? '';
+      if (idToken.isEmpty && accessToken.isEmpty) {
+        throw Exception(
+            'Google token response is empty. Configure GOOGLE_SERVER_CLIENT_ID.');
+      }
+
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'googleLogin',
+          'email': googleUser.email,
+          'fullName': googleUser.displayName,
+          'idToken': idToken,
+          'accessToken': accessToken,
+          'googleUid': googleUser.id,
+        }),
+      );
+
+      final data = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      if (response.statusCode != 200) {
+        final message = data['error']?.toString() ??
+            data['message']?.toString() ??
+            'Google sign-in backend rejected the request (${response.statusCode}).';
+        throw Exception(message);
+      }
+
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final roles = (user['roles'] as List<dynamic>? ?? ['customer'])
+          .map((role) => role.toString().toLowerCase())
+          .toList();
+
+      UserSession.userId = user['userID'] is int
+          ? user['userID'] as int
+          : int.tryParse('${user['userID']}') ?? googleUser.id.hashCode.abs();
+      UserSession.fullName =
+          user['fullName']?.toString() ?? googleUser.displayName;
+      UserSession.email = user['email']?.toString() ?? googleUser.email;
+      UserSession.roles = roles;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Google sign-in successful')));
+
+      if (UserSession.roles.contains('admin')) {
+        Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
+      } else if (UserSession.roles.contains('receptionist')) {
+        Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => const ReceptionistDashboardPage()));
+      } else if (UserSession.roles.contains('barber')) {
+        Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
+      } else {
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const DashboardPage()));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_readableGoogleSignInError(e))),
       );
     } finally {
       if (mounted) {
@@ -175,15 +336,20 @@ class _AuthPageState extends State<AuthPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo outside the card
-                Image.asset('assets/images/TATIS.png', height: 96, color: Colors.white),
+                Image.asset('assets/images/TATIS.png', height: 96),
                 const SizedBox(height: 12),
                 const Text(
                   'BARBERYA NI TATIS',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2),
                 ),
                 const SizedBox(height: 18),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0F0F0F),
                     borderRadius: BorderRadius.circular(12),
@@ -200,12 +366,18 @@ class _AuthPageState extends State<AuthPage> {
                             onTap: () => setState(() => _isLogin = true),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
-                                color: _isLogin ? kGoldColor : Colors.transparent,
+                                color:
+                                    _isLogin ? kGoldColor : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text('SIGN IN', style: TextStyle(color: _isLogin ? Colors.black : Colors.white)),
+                              child: Text('SIGN IN',
+                                  style: TextStyle(
+                                      color: _isLogin
+                                          ? Colors.black
+                                          : Colors.white)),
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -213,12 +385,18 @@ class _AuthPageState extends State<AuthPage> {
                             onTap: () => setState(() => _isLogin = false),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
-                                color: !_isLogin ? kGoldColor : Colors.transparent,
+                                color:
+                                    !_isLogin ? kGoldColor : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text('SIGN UP (REGISTER)', style: TextStyle(color: !_isLogin ? Colors.black : Colors.white)),
+                              child: Text('SIGN UP',
+                                  style: TextStyle(
+                                      color: !_isLogin
+                                          ? Colors.black
+                                          : Colors.white)),
                             ),
                           ),
                         ],
@@ -230,7 +408,9 @@ class _AuthPageState extends State<AuthPage> {
                       AnimatedCrossFade(
                         firstChild: _buildLogin(context),
                         secondChild: _buildRegister(context),
-                        crossFadeState: _isLogin ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                        crossFadeState: _isLogin
+                            ? CrossFadeState.showFirst
+                            : CrossFadeState.showSecond,
                         duration: const Duration(milliseconds: 250),
                         firstCurve: Curves.easeInOut,
                         secondCurve: Curves.easeInOut,
@@ -252,11 +432,13 @@ class _AuthPageState extends State<AuthPage> {
         const SizedBox(height: 8),
         const Align(
           alignment: Alignment.centerLeft,
-          child: Text('Sign in to your account', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          child: Text('Sign in to your account',
+              style: TextStyle(color: Colors.white70, fontSize: 12)),
         ),
         const SizedBox(height: 10),
         TextField(
           controller: _loginUser,
+          keyboardType: TextInputType.emailAddress,
           style: const TextStyle(color: Colors.white),
           decoration: _fieldDecoration('Enter your email'),
         ),
@@ -265,7 +447,13 @@ class _AuthPageState extends State<AuthPage> {
           controller: _loginPass,
           obscureText: _obscureLogin,
           style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your password', suffix: IconButton(icon: Icon(_obscureLogin ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureLogin = !_obscureLogin))),
+          decoration: _fieldDecoration('Enter your password',
+              suffix: IconButton(
+                  icon: Icon(
+                      _obscureLogin ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white70),
+                  onPressed: () =>
+                      setState(() => _obscureLogin = !_obscureLogin))),
         ),
         const SizedBox(height: 12),
         // Remember me and Forgot password
@@ -276,10 +464,12 @@ class _AuthPageState extends State<AuthPage> {
               children: [
                 Checkbox(
                   value: _rememberMe,
-                  onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                  onChanged: (value) =>
+                      setState(() => _rememberMe = value ?? false),
                   side: const BorderSide(color: Colors.white54),
                 ),
-                const Text('Remember me', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                const Text('Remember me',
+                    style: TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
             TextButton(
@@ -288,24 +478,51 @@ class _AuthPageState extends State<AuthPage> {
                   MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
                 );
               },
-              child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              child: const Text('Forgot password?',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
             ),
           ],
         ),
         const SizedBox(height: 16),
         ElevatedButton(
           onPressed: _isLoading ? null : _login,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN', style: const TextStyle(fontWeight: FontWeight.bold)),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(48)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: _isLoading ? null : _signInWithGoogle,
+          icon: Image.asset(
+            kGoogleLogoAsset,
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.account_circle, color: Colors.white),
+          ),
+          label: const Text(
+            'Continue with Google',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(46),
+            side: const BorderSide(color: Colors.white24),
+            backgroundColor: const Color(0xFF1A1A1A),
+          ),
         ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('Don’t have an account? ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const Text('Don’t have an account? ',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
             TextButton(
               onPressed: () => setState(() => _isLogin = false),
-              child: const Text('Sign up', style: TextStyle(color: Colors.white, fontSize: 12)),
+              child: const Text('Sign up',
+                  style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
@@ -319,38 +536,82 @@ class _AuthPageState extends State<AuthPage> {
         const SizedBox(height: 8),
         const Align(
           alignment: Alignment.centerLeft,
-          child: Text('Create your account', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          child: Text('Create your account',
+              style: TextStyle(color: Colors.white70, fontSize: 12)),
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: TextField(controller: _firstName, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter first name'))),
+            Expanded(
+                child: TextField(
+                    controller: _firstName,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _fieldDecoration('Enter first name'))),
             const SizedBox(width: 8),
-            Expanded(child: TextField(controller: _lastName, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter last name'))),
+            Expanded(
+                child: TextField(
+                    controller: _lastName,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _fieldDecoration('Enter last name'))),
           ],
         ),
         const SizedBox(height: 12),
-        TextField(controller: _regEmail, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter your email')),
+        TextField(
+          controller: _regEmail,
+          keyboardType: TextInputType.emailAddress,
+          style: const TextStyle(color: Colors.white),
+          decoration: _fieldDecoration('Enter your email'),
+        ),
         const SizedBox(height: 12),
-        TextField(controller: _phone, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter phone number'), keyboardType: TextInputType.phone),
+        TextField(
+            controller: _phone,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Enter phone number'),
+            keyboardType: TextInputType.phone),
         const SizedBox(height: 12),
-        TextField(controller: _regPass, obscureText: _obscureReg1, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter your password', suffix: IconButton(icon: Icon(_obscureReg1 ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureReg1 = !_obscureReg1)))),
+        TextField(
+            controller: _regPass,
+            obscureText: _obscureReg1,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Enter your password',
+                suffix: IconButton(
+                    icon: Icon(
+                        _obscureReg1 ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white70),
+                    onPressed: () =>
+                        setState(() => _obscureReg1 = !_obscureReg1)))),
         const SizedBox(height: 12),
-        TextField(controller: _confirm, obscureText: _obscureReg2, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Confirm your password', suffix: IconButton(icon: Icon(_obscureReg2 ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureReg2 = !_obscureReg2)))),
+        TextField(
+            controller: _confirm,
+            obscureText: _obscureReg2,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Confirm your password',
+                suffix: IconButton(
+                    icon: Icon(
+                        _obscureReg2 ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white70),
+                    onPressed: () =>
+                        setState(() => _obscureReg2 = !_obscureReg2)))),
         const SizedBox(height: 18),
         ElevatedButton(
           onPressed: _isLoading ? null : _register,
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN UP', style: const TextStyle(fontWeight: FontWeight.bold)),
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(48)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('Already have an account? ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const Text('Already have an account? ',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
             TextButton(
               onPressed: () => setState(() => _isLogin = true),
-              child: const Text('Sign in', style: TextStyle(color: Colors.white, fontSize: 12)),
+              child: const Text('Sign in',
+                  style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
@@ -364,9 +625,34 @@ class _AuthPageState extends State<AuthPage> {
       hintStyle: const TextStyle(color: Colors.white54),
       filled: true,
       fillColor: const Color(0xFF1A1A1A),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       suffixIcon: suffix,
     );
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+  }
+
+  bool _isValidPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    return digits.length >= 7 && digits.length <= 15;
+  }
+
+  String _readableGoogleSignInError(Object error) {
+    final raw = error.toString().replaceFirst('Exception:', '').trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('popup_closed') || lower.contains('cancel')) {
+      return 'Google sign-in was cancelled.';
+    }
+    if (lower.contains('network') || lower.contains('socket')) {
+      return 'Network issue during Google sign-in. Please check your connection.';
+    }
+    if (lower.contains('backend') || lower.contains('rejected')) {
+      return raw;
+    }
+    return 'Google sign-in failed. $raw';
   }
 }

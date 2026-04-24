@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'user/auth_page.dart';
 import 'user/splash_page.dart';
+
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 // --- 1. Define Custom Colors ---
 const Color kGoldColor = Color(0xFFA99941);
@@ -11,11 +12,6 @@ const Color kOrangeColor = Color(0xFFF37022);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    await Firebase.initializeApp();
-  } catch (_) {
-    // Allow app to start even if Firebase isn't configured yet.
-  }
   runApp(const TatisBarbershopApp());
 }
 
@@ -29,6 +25,7 @@ class TatisBarbershopApp extends StatelessWidget {
     return MaterialApp(
       title: 'Tatis Barbershop',
       debugShowCheckedModeBanner: false,
+      navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
         fontFamily: 'CenturyGothic',

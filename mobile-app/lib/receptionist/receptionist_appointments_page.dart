@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import '../shared/pagination_controls.dart';
+import '../user/time_format_utils.dart';
 
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBackground = Color(0xFF0A0A0A);
@@ -17,12 +19,34 @@ class ReceptionistAppointmentsPage extends StatefulWidget {
   });
 
   @override
-  State<ReceptionistAppointmentsPage> createState() => _ReceptionistAppointmentsPageState();
+  State<ReceptionistAppointmentsPage> createState() =>
+      _ReceptionistAppointmentsPageState();
 }
 
-class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsPage> {
+class _ReceptionistAppointmentsPageState
+    extends State<ReceptionistAppointmentsPage> {
+  int _currentPage = 1;
+
+  static const int _itemsPerPage = 6;
+
+  @override
+  void didUpdateWidget(covariant ReceptionistAppointmentsPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.appointments.length != widget.appointments.length) {
+      final totalPages = _totalPages(widget.appointments.length);
+      if (_currentPage > totalPages) {
+        _currentPage = totalPages;
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final totalPages = _totalPages(widget.appointments.length);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final pagedAppointments =
+        _paginateAppointments(widget.appointments, safePage);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
       child: Column(
@@ -30,17 +54,52 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
         children: [
           const Text(
             'Today\'s Appointments',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+            style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
           ),
           const SizedBox(height: 12),
-          ...widget.appointments.map((data) => _buildAppointmentCard(data)).toList(),
+          if (widget.appointments.isEmpty)
+            const Text('No appointments found.',
+                style: TextStyle(color: Colors.white70))
+          else
+            ...pagedAppointments
+                .map((data) => _buildAppointmentCard(data))
+                .toList(),
+          PaginationControls(
+            currentPage: safePage,
+            totalPages: totalPages,
+            onPageChanged: (page) {
+              setState(() {
+                _currentPage = page;
+              });
+            },
+          ),
         ],
       ),
     );
   }
 
+  int _totalPages(int totalItems) {
+    if (totalItems <= 0) {
+      return 1;
+    }
+    return ((totalItems - 1) ~/ _itemsPerPage) + 1;
+  }
+
+  List<Map<String, dynamic>> _paginateAppointments(
+      List<Map<String, dynamic>> appointments, int page) {
+    final start = (page - 1) * _itemsPerPage;
+    if (start >= appointments.length) {
+      return const <Map<String, dynamic>>[];
+    }
+    final end = (start + _itemsPerPage).clamp(0, appointments.length);
+    return appointments.sublist(start, end);
+  }
+
   Widget _buildAppointmentCard(Map<String, dynamic> data) {
-    final statusColor = data['status'] == 'CONFIRMED' ? const Color(0xFF4CAF50) : const Color(0xFFFF9800);
+    final statusColor = data['status'] == 'CONFIRMED'
+        ? const Color(0xFF4CAF50)
+        : const Color(0xFFFF9800);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -85,17 +144,22 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
                   children: [
                     Text(
                       data['name'] as String,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       data['service'] as String,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'with ${data['barber']}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 11),
+                      style:
+                          const TextStyle(color: Colors.white70, fontSize: 11),
                     ),
                   ],
                 ),
@@ -107,7 +171,8 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
                   }
                 },
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
@@ -115,7 +180,10 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
                   ),
                   child: Text(
                     data['status'] as String,
-                    style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 10),
+                    style: TextStyle(
+                        color: statusColor,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 10),
                   ),
                 ),
               ),
@@ -131,8 +199,11 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    data['time'] as String,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                    formatTo12Hour(data['time']?.toString() ?? ''),
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14),
                   ),
                   const SizedBox(height: 4),
                   Text(
@@ -150,37 +221,62 @@ class _ReceptionistAppointmentsPageState extends State<ReceptionistAppointmentsP
   }
 
   void _showStatusChangeDialog(Map<String, dynamic> appointment) {
+    var isProcessing = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('Change Appointment Status', style: TextStyle(color: Colors.white)),
-        content: const Text('Select action for this appointment', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              setState(() {
-                appointment['status'] = 'CONFIRMED';
-              });
-              widget.onStatusChanged(appointment);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Appointment confirmed')),
-              );
-            },
-            child: const Text('CONFIRM', style: TextStyle(color: kGoldColor)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              widget.onAppointmentRemoved(appointment);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Appointment cancelled')),
-              );
-            },
-            child: const Text('CANCEL', style: TextStyle(color: Color(0xFFE74C3C))),
-          ),
-        ],
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            title: const Text('Change Appointment Status',
+                style: TextStyle(color: Colors.white)),
+            content: const Text('Select action for this appointment',
+                style: TextStyle(color: Colors.white70)),
+            actions: [
+              TextButton(
+                onPressed: isProcessing
+                    ? null
+                    : () {
+                        setDialogState(() => isProcessing = true);
+                        Navigator.pop(ctx);
+                        setState(() {
+                          appointment['status'] = 'CONFIRMED';
+                        });
+                        widget.onStatusChanged(appointment);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Appointment confirmed')),
+                        );
+                      },
+                child: isProcessing
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: kGoldColor),
+                      )
+                    : const Text('CONFIRM',
+                        style: TextStyle(color: kGoldColor)),
+              ),
+              TextButton(
+                onPressed: isProcessing
+                    ? null
+                    : () {
+                        setDialogState(() => isProcessing = true);
+                        Navigator.pop(ctx);
+                        widget.onAppointmentRemoved(appointment);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('Appointment cancelled')),
+                        );
+                      },
+                child: const Text('CANCEL',
+                    style: TextStyle(color: Color(0xFFE74C3C))),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

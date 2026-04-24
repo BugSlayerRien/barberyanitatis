@@ -1,0 +1,7 @@
+admin@tatis.local / Admin123!
+receptionist@tatis.local / Reception123!
+barber@tatis.local / Barber123!
+customer@tatis.local / Customer123!
+
+web portal:
+http://localhost/barberyanitatis/tatis_barbershop/web-admin/login.html

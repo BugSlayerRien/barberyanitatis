@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/pagination_controls.dart';
 
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBackground = Color(0xFF0A0A0A);
@@ -7,13 +8,17 @@ class AdminManageServicesPage extends StatefulWidget {
   const AdminManageServicesPage({super.key});
 
   @override
-  State<AdminManageServicesPage> createState() => _AdminManageServicesPageState();
+  State<AdminManageServicesPage> createState() =>
+      _AdminManageServicesPageState();
 }
 
 class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedCategory = 'All Categories';
   String _sortBy = 'Sort by Name';
+  int _currentPage = 1;
+
+  static const int _itemsPerPage = 4;
 
   final List<Map<String, dynamic>> _services = [
     {
@@ -51,13 +56,19 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
       final matchesText = q.isEmpty ||
           s['name'].toString().toLowerCase().contains(q) ||
           s['description'].toString().toLowerCase().contains(q);
-      final matchesCategory = _selectedCategory == 'All Categories' || s['tag'] == _selectedCategory.toUpperCase();
+      final matchesCategory = _selectedCategory == 'All Categories' ||
+          s['tag'] == _selectedCategory.toUpperCase();
       return matchesText && matchesCategory;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
+    final filteredServices = _filteredServices;
+    final totalPages = _totalPages(filteredServices.length);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final pagedServices = _paginateServices(filteredServices, safePage);
+
     return Container(
       color: kDarkBackground,
       child: SingleChildScrollView(
@@ -73,17 +84,45 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
             const SizedBox(height: 12),
             _buildFilters(),
             const SizedBox(height: 16),
-            ..._filteredServices.map(_buildServiceCard),
+            ...pagedServices.map(_buildServiceCard),
+            PaginationControls(
+              currentPage: safePage,
+              totalPages: totalPages,
+              onPageChanged: (page) {
+                setState(() {
+                  _currentPage = page;
+                });
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
+  int _totalPages(int totalItems) {
+    if (totalItems <= 0) {
+      return 1;
+    }
+    return ((totalItems - 1) ~/ _itemsPerPage) + 1;
+  }
+
+  List<Map<String, dynamic>> _paginateServices(
+      List<Map<String, dynamic>> services, int page) {
+    final start = (page - 1) * _itemsPerPage;
+    if (start >= services.length) {
+      return const <Map<String, dynamic>>[];
+    }
+    final end = (start + _itemsPerPage).clamp(0, services.length);
+    return services.sublist(start, end);
+  }
+
   Widget _buildStatsRow() {
     return Row(
       children: [
-        Expanded(child: _buildStatCard('Total Services', _services.length.toString())),
+        Expanded(
+            child:
+                _buildStatCard('Total Services', _services.length.toString())),
       ],
     );
   }
@@ -99,7 +138,8 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(title,
+              style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -107,7 +147,9 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
               color: Colors.white,
               borderRadius: BorderRadius.circular(6),
             ),
-            child: Text(value, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            child: Text(value,
+                style: const TextStyle(
+                    color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -118,7 +160,11 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        Text(title,
+            style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold)),
       ],
     );
   }
@@ -127,7 +173,9 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
     return ElevatedButton(
       onPressed: () {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Add service form coming soon'), backgroundColor: Color(0xFF1A1A1A)),
+          const SnackBar(
+              content: Text('Add service form coming soon'),
+              backgroundColor: Color(0xFF1A1A1A)),
         );
       },
       style: ElevatedButton.styleFrom(
@@ -135,7 +183,8 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
         foregroundColor: Colors.black,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
-      child: const Text('Add New Service', style: TextStyle(fontWeight: FontWeight.bold)),
+      child: const Text('Add New Service',
+          style: TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 
@@ -165,7 +214,9 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
               borderSide: const BorderSide(color: kGoldColor),
             ),
           ),
-          onChanged: (_) => setState(() {}),
+          onChanged: (_) => setState(() {
+            _currentPage = 1;
+          }),
         ),
         const SizedBox(height: 8),
         // Category
@@ -177,7 +228,10 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
             'HAIR CUT',
             'EXTENSIONS',
           ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: (v) => setState(() => _selectedCategory = v ?? 'All Categories'),
+          onChanged: (v) => setState(() {
+            _selectedCategory = v ?? 'All Categories';
+            _currentPage = 1;
+          }),
           dropdownColor: const Color(0xFF1A1A1A),
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
@@ -202,7 +256,10 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
             'Sort by Price',
             'Sort by Popular',
           ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-          onChanged: (v) => setState(() => _sortBy = v ?? 'Sort by Name'),
+          onChanged: (v) => setState(() {
+            _sortBy = v ?? 'Sort by Name';
+            _currentPage = 1;
+          }),
           dropdownColor: const Color(0xFF1A1A1A),
           style: const TextStyle(color: Colors.white),
           decoration: InputDecoration(
@@ -239,7 +296,10 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
               Expanded(
                 child: Text(
                   s['name'],
-                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
               Container(
@@ -250,13 +310,17 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
                 ),
                 child: Text(
                   s['tag'],
-                  style: const TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Colors.black,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold),
                 ),
               ),
               if (s['popular'] == true) ...[
                 const SizedBox(width: 6),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(4),
@@ -264,20 +328,27 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
                   ),
                   child: const Text(
                     'POPULAR',
-                    style: TextStyle(color: Colors.black, fontSize: 11, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                        color: Colors.black,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
                   ),
                 ),
               ]
             ],
           ),
           const SizedBox(height: 8),
-          Text(s['description'], style: TextStyle(color: Colors.grey[400], fontSize: 13)),
+          Text(s['description'],
+              style: TextStyle(color: Colors.grey[400], fontSize: 13)),
           const SizedBox(height: 12),
           Row(
             children: [
               _buildMetaChip(s['price'], Colors.white, Colors.black),
               const SizedBox(width: 8),
-              _buildMetaChip(s['available'] ? 'Available' : 'Disabled', s['available'] ? Colors.white : Colors.white, s['available'] ? Colors.black : Colors.black),
+              _buildMetaChip(
+                  s['available'] ? 'Available' : 'Disabled',
+                  s['available'] ? Colors.white : Colors.white,
+                  s['available'] ? Colors.black : Colors.black),
             ],
           ),
           const SizedBox(height: 12),
@@ -285,18 +356,30 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _buildWhiteButton(label: s['available'] ? 'Disable' : 'Enable', onPressed: () {
-                setState(() => s['available'] = !(s['available'] as bool));
-              }),
-              _buildGoldOutlineButton(label: s['popular'] ? 'Remove Popular' : 'Mark Popular', onPressed: () {
-                setState(() => s['popular'] = !(s['popular'] as bool));
-              }),
-              _buildGoldOutlineButton(label: 'Edit', onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Edit coming soon')));
-              }),
-              _buildGoldOutlineButton(label: 'Delete', onPressed: () {
-                setState(() => _services.remove(s));
-              }),
+              _buildWhiteButton(
+                  label: s['available'] ? 'Disable' : 'Enable',
+                  onPressed: () {
+                    setState(() => s['available'] = !(s['available'] as bool));
+                  }),
+              _buildGoldOutlineButton(
+                  label: s['popular'] ? 'Remove Popular' : 'Mark Popular',
+                  onPressed: () {
+                    setState(() => s['popular'] = !(s['popular'] as bool));
+                  }),
+              _buildGoldOutlineButton(
+                  label: 'Edit',
+                  onPressed: () {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Edit coming soon')));
+                  }),
+              _buildGoldOutlineButton(
+                  label: 'Delete',
+                  onPressed: () {
+                    setState(() {
+                      _services.remove(s);
+                      _currentPage = 1;
+                    });
+                  }),
             ],
           ),
         ],
@@ -307,12 +390,16 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
   Widget _buildMetaChip(String text, Color bg, Color fg) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
-      child: Text(text, style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.bold)),
+      decoration:
+          BoxDecoration(color: bg, borderRadius: BorderRadius.circular(6)),
+      child: Text(text,
+          style:
+              TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildWhiteButton({required String label, required VoidCallback onPressed}) {
+  Widget _buildWhiteButton(
+      {required String label, required VoidCallback onPressed}) {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
@@ -320,18 +407,23 @@ class _AdminManageServicesPageState extends State<AdminManageServicesPage> {
         side: const BorderSide(color: Colors.white),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       ),
-      child: Text(label, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+      child: Text(label,
+          style: const TextStyle(
+              color: Colors.black, fontWeight: FontWeight.bold)),
     );
   }
 
-  Widget _buildGoldOutlineButton({required String label, required VoidCallback onPressed}) {
+  Widget _buildGoldOutlineButton(
+      {required String label, required VoidCallback onPressed}) {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
         side: const BorderSide(color: Colors.white),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       ),
-      child: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      child: Text(label,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold)),
     );
   }
 }

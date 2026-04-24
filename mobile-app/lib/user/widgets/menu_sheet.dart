@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../about_page.dart';
 import '../auth_page.dart';
 import '../contact_page.dart';
+import '../history_page.dart';
 import '../settings_page.dart';
 
 Future<void> showAppMenuSheet(BuildContext context) async {
@@ -39,6 +40,14 @@ Future<void> showAppMenuSheet(BuildContext context) async {
               onTap: () {
                 Navigator.of(ctx).pop();
                 Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AboutPage()));
+              },
+            ),
+            _MenuItem(
+              icon: Icons.history,
+              label: 'History',
+              onTap: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const HistoryPage()));
               },
             ),
             _MenuItem(

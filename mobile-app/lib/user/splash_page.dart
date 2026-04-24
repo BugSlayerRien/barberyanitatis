@@ -33,7 +33,6 @@ class _SplashPageState extends State<SplashPage> {
             Image.asset(
               'assets/images/TATIS.png',
               height: 120,
-              color: Colors.white,
             ),
             const SizedBox(height: 16),
             const Text(

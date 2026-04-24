@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../shared/pagination_controls.dart';
 
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBackground = Color(0xFF0A0A0A);
@@ -61,9 +62,17 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
 
   String selectedRole = 'All Roles';
   final TextEditingController searchController = TextEditingController();
+  int _currentPage = 1;
+
+  static const int _itemsPerPage = 6;
 
   @override
   Widget build(BuildContext context) {
+    final filteredUsers = _getFilteredUsers();
+    final totalPages = _totalPages(filteredUsers.length);
+    final safePage = _currentPage.clamp(1, totalPages);
+    final pagedUsers = _paginateUsers(filteredUsers, safePage);
+
     return Scaffold(
       backgroundColor: kDarkBackground,
       appBar: AppBar(
@@ -72,7 +81,8 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
         automaticallyImplyLeading: false,
         title: const Text(
           'User Management',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24),
+          style: TextStyle(
+              color: Colors.white, fontWeight: FontWeight.bold, fontSize: 24),
         ),
       ),
       body: SingleChildScrollView(
@@ -89,10 +99,14 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
               crossAxisSpacing: 12,
               childAspectRatio: 2,
               children: [
-                _buildSmallStatCard('Total Users', '5', 'registered user', const Color(0xFF4CAF50)),
-                _buildSmallStatCard('Active Users', '4', 'currently active', const Color(0xFF4CAF50)),
-                _buildSmallStatCard('Stylists', '2', 'registered staff', const Color(0xFFFF9800)),
-                _buildSmallStatCard('Customers', '3', 'client accounts', const Color(0xFFE74C3C)),
+                _buildSmallStatCard('Total Users', '5', 'registered user',
+                    const Color(0xFF4CAF50)),
+                _buildSmallStatCard('Active Users', '4', 'currently active',
+                    const Color(0xFF4CAF50)),
+                _buildSmallStatCard('Stylists', '2', 'registered staff',
+                    const Color(0xFFFF9800)),
+                _buildSmallStatCard('Customers', '3', 'client accounts',
+                    const Color(0xFFE74C3C)),
               ],
             ),
             const SizedBox(height: 32),
@@ -113,25 +127,36 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
                         hintText: 'Search users...',
                         hintStyle: const TextStyle(color: Colors.white54),
                         border: InputBorder.none,
-                        prefixIcon: const Icon(Icons.search, color: Colors.white54),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                        prefixIcon:
+                            const Icon(Icons.search, color: Colors.white54),
+                        contentPadding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 12),
                       ),
-                      onChanged: (value) => setState(() {}),
+                      onChanged: (value) => setState(() {
+                        _currentPage = 1;
+                      }),
                     ),
                   ),
                 ),
                 const SizedBox(width: 12),
                 PopupMenuButton<String>(
-                  onSelected: (value) => setState(() => selectedRole = value),
+                  onSelected: (value) => setState(() {
+                    selectedRole = value;
+                    _currentPage = 1;
+                  }),
                   itemBuilder: (context) => [
-                    const PopupMenuItem(value: 'All Roles', child: Text('All Roles')),
-                    const PopupMenuItem(value: 'Customer', child: Text('Customer')),
-                    const PopupMenuItem(value: 'Receptionist', child: Text('Receptionist')),
+                    const PopupMenuItem(
+                        value: 'All Roles', child: Text('All Roles')),
+                    const PopupMenuItem(
+                        value: 'Customer', child: Text('Customer')),
+                    const PopupMenuItem(
+                        value: 'Receptionist', child: Text('Receptionist')),
                     const PopupMenuItem(value: 'Barber', child: Text('Barber')),
                     const PopupMenuItem(value: 'Admin', child: Text('Admin')),
                   ],
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(8),
@@ -139,11 +164,13 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.filter_list, color: Colors.black, size: 20),
+                        const Icon(Icons.filter_list,
+                            color: Colors.black, size: 20),
                         const SizedBox(width: 4),
                         Text(
                           selectedRole,
-                          style: const TextStyle(color: Colors.black, fontSize: 12),
+                          style: const TextStyle(
+                              color: Colors.black, fontSize: 12),
                         ),
                       ],
                     ),
@@ -162,23 +189,57 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
               ),
             ),
             const SizedBox(height: 12),
-            ..._getFilteredUsers().map((user) => _buildUserCard(user)).toList(),
+            ...pagedUsers.map((user) => _buildUserCard(user)).toList(),
+            PaginationControls(
+              currentPage: safePage,
+              totalPages: totalPages,
+              onPageChanged: (page) {
+                setState(() {
+                  _currentPage = page;
+                });
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
+  int _totalPages(int totalItems) {
+    if (totalItems <= 0) {
+      return 1;
+    }
+    return ((totalItems - 1) ~/ _itemsPerPage) + 1;
+  }
+
+  List<Map<String, dynamic>> _paginateUsers(
+      List<Map<String, dynamic>> userList, int page) {
+    final start = (page - 1) * _itemsPerPage;
+    if (start >= userList.length) {
+      return const <Map<String, dynamic>>[];
+    }
+    final end = (start + _itemsPerPage).clamp(0, userList.length);
+    return userList.sublist(start, end);
+  }
+
   List<Map<String, dynamic>> _getFilteredUsers() {
     return users.where((user) {
-      final matchesSearch = user['name'].toString().toLowerCase().contains(searchController.text.toLowerCase()) ||
-          user['email'].toString().toLowerCase().contains(searchController.text.toLowerCase());
-      final matchesRole = selectedRole == 'All Roles' || user['role'] == selectedRole;
+      final matchesSearch = user['name']
+              .toString()
+              .toLowerCase()
+              .contains(searchController.text.toLowerCase()) ||
+          user['email']
+              .toString()
+              .toLowerCase()
+              .contains(searchController.text.toLowerCase());
+      final matchesRole =
+          selectedRole == 'All Roles' || user['role'] == selectedRole;
       return matchesSearch && matchesRole;
     }).toList();
   }
 
-  Widget _buildSmallStatCard(String title, String value, String subtitle, Color color) {
+  Widget _buildSmallStatCard(
+      String title, String value, String subtitle, Color color) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -291,7 +352,8 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
               GestureDetector(
                 onTap: () => _showRoleChangeDialog(user),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: _getRoleColor(user['role']).withOpacity(0.2),
                     borderRadius: BorderRadius.circular(6),
@@ -364,7 +426,8 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('Change User Role', style: TextStyle(color: Colors.white)),
+        title: const Text('Change User Role',
+            style: TextStyle(color: Colors.white)),
         content: Text(
           'Select a new role for ${user['name']}',
           style: const TextStyle(color: Colors.white70),
@@ -372,7 +435,8 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL', style: TextStyle(color: Colors.white70)),
+            child:
+                const Text('CANCEL', style: TextStyle(color: Colors.white70)),
           ),
           ...[
             ('Customer', const Color(0xFFE74C3C)),
@@ -387,12 +451,15 @@ class _AdminManageUsersPageState extends State<AdminManageUsersPage> {
                 });
                 Navigator.pop(context);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('${user['name']} role changed to ${roleData.$1}')),
+                  SnackBar(
+                      content: Text(
+                          '${user['name']} role changed to ${roleData.$1}')),
                 );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: roleData.$2,
-                foregroundColor: roleData.$1 == 'Admin' ? Colors.black : Colors.white,
+                foregroundColor:
+                    roleData.$1 == 'Admin' ? Colors.black : Colors.white,
               ),
               child: Text(roleData.$1),
             );

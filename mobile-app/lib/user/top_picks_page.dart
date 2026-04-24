@@ -1,19 +1,58 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'hairstyle_detail_page.dart';
+import 'api_config.dart';
+import 'user_session.dart';
 
 class TopPicksPage extends StatelessWidget {
   const TopPicksPage({super.key});
 
+  static final Map<String, Future<Uint8List>> _webImageCache = {};
+
+  Future<Map<String, dynamic>?> _loadTopPick() async {
+    if (UserSession.userId == null) {
+      return null;
+    }
+
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'listByUser', 'userID': UserSession.userId}),
+    );
+
+    if (response.statusCode != 200) {
+      return null;
+    }
+
+    final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+    final favorites = (data['favorites'] as List<dynamic>? ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+
+    if (favorites.isEmpty) {
+      return null;
+    }
+
+    final fav = favorites.first;
+    final image = ApiConfig.resolveImageUrl(fav['front_view_url']?.toString() ?? '');
+    return {
+      'name': fav['style_name']?.toString() ?? 'Style',
+      'description': fav['description']?.toString() ?? 'Saved haircut',
+      'image': image,
+      'details': 'Face shape: ${fav['face_shape'] ?? 'N/A'}\nHair texture: ${fav['hair_texture'] ?? 'N/A'}',
+      'rating': '★★★★★',
+      'frontViewUrl': image,
+      'sideViewUrl': ApiConfig.resolveImageUrl(fav['side_view_url']?.toString() ?? ''),
+      'backViewUrl': ApiConfig.resolveImageUrl(fav['back_view_url']?.toString() ?? ''),
+      'variantId': fav['variant_id'],
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
-    final topPicks = {
-      'name': 'Mullet',
-      'description': 'Al-generous 20 provide scalp features',
-      'image': 'assets/images/jeo ai haircut.jpg',
-      'details': 'Matches your face shape perfectly\nCompliments your hair type\nEasy to maintain and style',
-      'rating': '★★★★★',
-    };
-
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
@@ -45,226 +84,282 @@ class TopPicksPage extends StatelessWidget {
             ),
             const SizedBox(height: 32),
 
-            // Mullet Card - Large Featured
-            GestureDetector(
-              onTap: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => HairstyleDetailPage(style: topPicks),
-                  ),
-                );
-              },
-              child: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFA99941), width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: const Color(0xFFA99941).withOpacity(0.2),
-                      blurRadius: 20,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            FutureBuilder<Map<String, dynamic>?>(
+              future: _loadTopPick(),
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator(color: Colors.white));
+                }
+
+                final topPicks = snapshot.data;
+                if (topPicks == null) {
+                  return const Center(
+                    child: Text('No saved hairstyles yet.', style: TextStyle(color: Colors.white70)),
+                  );
+                }
+
+                return Column(
                   children: [
-                    // Large Image
-                    Container(
-                      height: 320,
-                      decoration: BoxDecoration(
-                        borderRadius: const BorderRadius.only(
-                          topLeft: Radius.circular(16),
-                          topRight: Radius.circular(16),
-                        ),
-                        image: DecorationImage(
-                          image: AssetImage(topPicks['image'] as String),
-                          fit: BoxFit.cover,
-                        ),
-                      ),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HairstyleDetailPage(style: topPicks),
+                          ),
+                        );
+                      },
                       child: Container(
                         decoration: BoxDecoration(
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(16),
-                            topRight: Radius.circular(16),
-                          ),
                           gradient: LinearGradient(
-                            begin: Alignment.bottomCenter,
-                            end: Alignment.topCenter,
-                            colors: [Colors.black.withOpacity(0.4), Colors.transparent],
+                            colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                        ),
-                        child: Align(
-                          alignment: Alignment.bottomRight,
-                          child: Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFA99941),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Icon(Icons.favorite, color: Colors.white, size: 20),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: const Color(0xFFA99941), width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFA99941).withOpacity(0.2),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
                             ),
-                          ),
+                          ],
                         ),
-                      ),
-                    ),
-                    // Content
-                    Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 320,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF111111),
+                                borderRadius: BorderRadius.only(
+                                  topLeft: Radius.circular(16),
+                                  topRight: Radius.circular(16),
+                                ),
+                              ),
+                              child: Stack(
+                                fit: StackFit.expand,
                                 children: [
-                                  Text(
-                                    topPicks['name'] as String,
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 24,
+                                  ClipRRect(
+                                    borderRadius: const BorderRadius.only(
+                                      topLeft: Radius.circular(16),
+                                      topRight: Radius.circular(16),
+                                    ),
+                                    child: kIsWeb
+                                        ? _buildWebImage(topPicks['image'] as String)
+                                        : Image(image: _buildImageProvider(topPicks['image'] as String), fit: BoxFit.cover),
+                                  ),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(16),
+                                        topRight: Radius.circular(16),
+                                      ),
+                                      gradient: LinearGradient(
+                                        begin: Alignment.bottomCenter,
+                                        end: Alignment.topCenter,
+                                        colors: [Colors.black.withOpacity(0.4), Colors.transparent],
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    topPicks['description'] as String,
-                                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                  Align(
+                                    alignment: Alignment.bottomRight,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(16),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFA99941),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: const Icon(Icons.favorite, color: Colors.white, size: 20),
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
-                              const SizedBox(width: 12),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                decoration: BoxDecoration(
-                                  gradient: LinearGradient(
-                                    colors: [const Color(0xFFA99941), const Color(0xFF8B7E3A)],
-                                  ),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: Text(
-                                  topPicks['rating'] as String,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          const Divider(color: Colors.white10, height: 1),
-                          const SizedBox(height: 20),
-                          // Why It Works
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFA99941).withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.info_outline, color: Color(0xFFA99941), size: 18),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Why This Works For You',
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 12),
-                                    ...(topPicks['details']!.split('\n').map(
-                                          (detail) => Padding(
-                                            padding: const EdgeInsets.only(bottom: 10),
-                                            child: Row(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              children: [
-                                                Container(
-                                                  margin: const EdgeInsets.only(top: 4),
-                                                  width: 5,
-                                                  height: 5,
-                                                  decoration: const BoxDecoration(
-                                                    color: Color(0xFFA99941),
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 10),
-                                                Expanded(
-                                                  child: Text(
-                                                    detail,
-                                                    style: const TextStyle(
-                                                      color: Colors.white70,
-                                                      fontSize: 13,
-                                                      height: 1.4,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ],
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            topPicks['name'] as String,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 24,
                                             ),
                                           ),
-                                        )),
-                                  ],
-                                ),
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            topPicks['description'] as String,
+                                            style: const TextStyle(color: Colors.white70, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFA99941), width: 1),
+                                        ),
+                                        child: Text(
+                                          topPicks['rating'] as String,
+                                          style: const TextStyle(
+                                            color: Color(0xFFA99941),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 20),
+                                  const Divider(color: Colors.white10, height: 1),
+                                  const SizedBox(height: 20),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFA99941).withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        child: const Icon(Icons.info_outline, color: Color(0xFFA99941), size: 18),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            const Text(
+                                              'Why This Works For You',
+                                              style: TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 12),
+                                            ...((topPicks['details'] as String).split('\n').map(
+                                                  (detail) => Padding(
+                                                    padding: const EdgeInsets.only(bottom: 10),
+                                                    child: Row(
+                                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                                      children: [
+                                                        Container(
+                                                          margin: const EdgeInsets.only(top: 4),
+                                                          width: 5,
+                                                          height: 5,
+                                                          decoration: const BoxDecoration(
+                                                            color: Color(0xFFA99941),
+                                                            shape: BoxShape.circle,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 10),
+                                                        Expanded(
+                                                          child: Text(
+                                                            detail,
+                                                            style: const TextStyle(
+                                                              color: Colors.white70,
+                                                              fontSize: 13,
+                                                              height: 1.4,
+                                                            ),
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                )),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                        ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
+                    const SizedBox(height: 32),
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HairstyleDetailPage(style: topPicks),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFA99941),
+                        minimumSize: const Size.fromHeight(56),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        elevation: 8,
+                        shadowColor: const Color(0xFFA99941).withOpacity(0.4),
+                      ),
+                      child: const Text(
+                        'View & Book',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: Colors.black,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
                   ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 32),
-
-            // Call to Action
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => HairstyleDetailPage(style: topPicks),
-                  ),
                 );
               },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA99941),
-                minimumSize: const Size.fromHeight(56),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 8,
-                shadowColor: const Color(0xFFA99941).withOpacity(0.4),
-              ),
-              child: const Text(
-                'View & Book',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                  color: Colors.black,
-                  letterSpacing: 0.5,
-                ),
-              ),
             ),
-            const SizedBox(height: 20),
           ],
         ),
       ),
+    );
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode})');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: const Color(0xFF111111));
+        }
+        if (!snapshot.hasData) {
+          return Container(color: const Color(0xFF111111));
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
     );
   }
 }
