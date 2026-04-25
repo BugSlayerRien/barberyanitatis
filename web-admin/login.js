@@ -17,7 +17,7 @@ form.addEventListener("submit", async (event) => {
 
     const data = await response.json();
     if (!response.ok) {
-      errorBox.textContent = data.error || "Login failed.";
+      errorBox.textContent = data.error || "Sign-in failed. Please verify your credentials.";
       return;
     }
 
@@ -35,8 +35,8 @@ form.addEventListener("submit", async (event) => {
       return;
     }
 
-    errorBox.textContent = "Account has no admin/receptionist access.";
+    errorBox.textContent = "Your account does not have portal access. Please contact the system administrator.";
   } catch (error) {
-    errorBox.textContent = "Login error. Check API and server.";
+    errorBox.textContent = "Unable to connect to the server. Please try again.";
   }
 });

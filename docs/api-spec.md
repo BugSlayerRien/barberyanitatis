@@ -1,4 +1,4 @@
-# Barberya ni Tatis API Spec (PHP + MySQL)
+# Barberya ni Tatis API Spec (PHP + PostgreSQL/Supabase)
 
 ## Conventions
 - Base URL: /api

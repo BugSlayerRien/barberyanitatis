@@ -1,0 +1,4 @@
+admin@tatis.local / Admin123!
+receptionist@tatis.local / Reception123!
+barber@tatis.local / Barber123!
+customer@tatis.local / Customer123!

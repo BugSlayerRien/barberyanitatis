@@ -1,5 +1,5 @@
 SUMMARY (SIMPLE)
-I set up Git, connected your local folder to GitHub, created the standard repo folders, moved the Flutter app into /mobile-app, created the web admin/receptionist dashboard in /web-admin, and created the PHP API folder in /api. I also added the MySQL schema in /database/schema.sql and started the API wiring in /api/db.php, /api/auth.php, /api/booking.php.
+I set up Git, connected your local folder to GitHub, created the standard repo folders, moved the Flutter app into /mobile-app, created the web admin/receptionist dashboard in /web-admin, and created the PHP API folder in /api. The project now uses PostgreSQL/Supabase schema in /database/schema.pg.sql and API wiring in /api/db.php, /api/auth.php, /api/booking.php.
 
 COMMANDS I USED (IN ORDER)
 1) git init
@@ -19,8 +19,8 @@ We also ran these to fix a conflict and push main again:
 CURRENT REPO STRUCTURE (WHERE THINGS LIVE)
 /mobile-app/  -> Flutter customer app
 /web-admin/   -> Admin + Receptionist web dashboards
-/api/         -> PHP API (MySQL)
-/database/    -> schema.sql and future migrations
+/api/         -> PHP API (PostgreSQL/Supabase)
+/database/    -> schema.pg.sql and future migrations
 /docs/        -> ERD and diagrams
 
 BEGINNER GIT FLOW (EVERY DAY)
@@ -44,10 +44,15 @@ WHAT WORKS RIGHT NOW
 - Repo is pushed to GitHub with main and develop branches.
 - Web admin/receptionist dashboards load with placeholder data.
 - PHP API has a DB helper and starter endpoints for auth and booking (needs real DB data).
-- MySQL schema is saved in /database/schema.sql.
+- PostgreSQL schema is saved in /database/schema.pg.sql.
 
 WHAT IS NEXT
+<<<<<<< Updated upstream
 - Import /database/schema.sql into your MySQL server.
 - Set DB_HOST, DB_NAME, DB_USER, DB_PASS on your PHP server.
+=======
+- Run /database/schema.pg.sql in your Supabase SQL editor.
+- Set DB_URL in /.env for Supabase/PostgreSQL.
+>>>>>>> Stashed changes
 - Update /api/auth.php and /api/booking.php if you need extra fields.
 - Connect the web and mobile app to the real API instead of fallback data.
