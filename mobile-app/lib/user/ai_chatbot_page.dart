@@ -27,7 +27,7 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
     _messages.add(
       const _ChatMessage(
         text:
-            'Yo, I am Tati AI Barber. Ask me for haircut ideas, maintenance tips, or what style fits your face shape.',
+            'Yo, I am AI Assitant! Ask me for haircut ideas, maintenance tips, or what style fits your face shape.',
         isUser: false,
       ),
     );

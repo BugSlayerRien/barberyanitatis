@@ -71,7 +71,7 @@ Language and framework
 - Dart + Flutter (mobile and web UI orchestration).
 
 Mobile scanner path
-- Camera input: camera ^0.10.6.
+- Cam1era input: camera ^0.10.6.
 - Face detection: google_mlkit_face_detection ^0.11.0.
 - Pipeline:
 	- stream camera frames
