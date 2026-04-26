@@ -9,7 +9,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['list', 'listByFaceShape', 'create'], true)) {
+if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'create'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 

@@ -171,6 +171,7 @@ try {
         $endTimeRaw = trim((string)($input['endTime'] ?? ''));
         $items = $input['items'] ?? null;
         $serviceIDs = $input['serviceIDs'] ?? [];
+        $variantID = (int)($input['variantID'] ?? 0);
 
         $startTime = normalize_time_string($startTimeRaw);
         $endTime = normalize_time_string($endTimeRaw);
@@ -231,8 +232,10 @@ try {
             $items = array_map(fn($id) => ['serviceID' => (int)$id, 'variantID' => $variantID], $serviceIDs);
         }
 
-        $serviceExistsStmt = $pdo->prepare(
-            'SELECT COUNT(*) FROM services WHERE service_id = :service_id AND is_active = TRUE'
+        $serviceInfoStmt = $pdo->prepare(
+            'SELECT service_id, base_price
+             FROM services
+             WHERE service_id = :service_id AND is_active = TRUE'
         );
         $variantExistsStmt = $pdo->prepare(
             'SELECT COUNT(*)
@@ -251,8 +254,9 @@ try {
                 continue;
             }
 
-            $serviceExistsStmt->execute([':service_id' => $serviceID]);
-            if ((int)$serviceExistsStmt->fetchColumn() === 0) {
+            $serviceInfoStmt->execute([':service_id' => $serviceID]);
+            $serviceInfo = $serviceInfoStmt->fetch();
+            if (!$serviceInfo) {
                 json_response(['error' => 'Selected service is unavailable. Please refresh and try again.'], 422);
             }
 
@@ -261,12 +265,17 @@ try {
                 json_response(['error' => 'Selected haircut is unavailable. Please select another style and try again.'], 422);
             }
 
+            $finalPrice = $item['finalPrice'] ?? null;
+            if ($finalPrice === null || $finalPrice === '') {
+                $finalPrice = $serviceInfo['base_price'];
+            }
+
             $validatedItems[] = [
                 'serviceID' => $serviceID,
                 'variantID' => $variantIDItem,
                 'selectedView' => $item['selectedView'] ?? 'Front',
                 'specialInstructions' => $item['specialInstructions'] ?? '',
-                'finalPrice' => $item['finalPrice'] ?? null,
+                'finalPrice' => $finalPrice,
             ];
         }
 
@@ -343,7 +352,12 @@ try {
             ':status' => 'PendingPayment',
         ]);
 
-        $appointmentID = (int)$pdo->lastInsertId();
+        $appointmentID = (int)$stmt->fetchColumn();
+
+        $detailStmt = $pdo->prepare(
+            'INSERT INTO appointment_details (appointment_id, service_id, variant_id, selected_view, final_price)
+             VALUES (:appointment_id, :service_id, :variant_id, :selected_view, :final_price)'
+        );
 
         foreach ($validatedItems as $item) {
             $serviceID = (int)($item['serviceID'] ?? 0);
@@ -355,9 +369,13 @@ try {
             if ($serviceID <= 0 || $variantIDItem <= 0) {
                 continue;
             }
-            $linkStmt->execute([
-                ':appointmentID' => $appointmentID,
-                ':serviceID' => $serviceID,
+
+            $detailStmt->execute([
+                ':appointment_id' => $appointmentID,
+                ':service_id' => $serviceID,
+                ':variant_id' => $variantIDItem,
+                ':selected_view' => $selectedView !== '' ? $selectedView : 'Front',
+                ':final_price' => $finalPrice,
             ]);
         }
 
@@ -425,36 +443,42 @@ try {
              WHERE a.user_id = :user_id
              ORDER BY a.appointment_date DESC, a.start_time DESC"
         );
-        $stmt->execute([':userID' => $userID]);
+           $stmt->execute([':user_id' => $userID]);
         $appointments = $stmt->fetchAll();
 
         if (count($appointments) === 0) {
             json_response(['appointments' => []]);
         }
 
-        $appointmentIds = array_map(fn($row) => (int)$row['appointmentID'], $appointments);
+        $appointmentIds = array_map(fn($row) => (int)$row['appointment_id'], $appointments);
         $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
 
         $serviceStmt = $pdo->prepare(
-            "SELECT aps.appointmentID, s.serviceID, s.serviceName, s.durationMinutes, s.price
-             FROM appointmentServices aps
-             JOIN services s ON aps.serviceID = s.serviceID
-             WHERE aps.appointmentID IN ($inClause)"
+            "SELECT ad.appointment_id, ad.service_id, ad.variant_id, ad.final_price,
+                    s.service_name, s.base_duration,
+                    hs.style_name AS hairstyle_name
+             FROM appointment_details ad
+             JOIN services s ON ad.service_id = s.service_id
+             LEFT JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
+             LEFT JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+             WHERE ad.appointment_id IN ($inClause)"
         );
         $serviceStmt->execute($appointmentIds);
         $serviceRows = $serviceStmt->fetchAll();
 
         $serviceMap = [];
         foreach ($serviceRows as $row) {
-            $aid = (int)$row['appointmentID'];
+            $aid = (int)$row['appointment_id'];
             if (!isset($serviceMap[$aid])) {
                 $serviceMap[$aid] = [];
             }
             $serviceMap[$aid][] = [
-                'serviceID' => (int)$row['serviceID'],
-                'serviceName' => $row['serviceName'],
-                'durationMinutes' => (int)$row['durationMinutes'],
-                'price' => (string)$row['price'],
+                'serviceID' => (int)$row['service_id'],
+                'serviceName' => $row['service_name'],
+                'hairstyleName' => $row['hairstyle_name'],
+                'variantID' => (int)($row['variant_id'] ?? 0),
+                'durationMinutes' => (int)$row['base_duration'],
+                'price' => (string)($row['final_price'] ?? '0'),
             ];
         }
 

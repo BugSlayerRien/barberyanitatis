@@ -85,8 +85,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _faceSessionReady = false;
   bool _calibrationSyncInFlight = false;
   DateTime? _lastCalibrationSyncAt;
-  double? _lastCalibrationConfidence;
-  String _calibrationSyncStatus = 'idle';
   bool _bookingInFlight = false;
 
   static const double _rectSmoothingAlpha = 0.58;
@@ -156,6 +154,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       'back_view_url': '/database/assets/hairstyles/curly_top_fade_right.png',
       'confidence_score': 0.90,
       'estimated_minutes': 40,
+    },
+    {
+      'variant_id': 9003,
+      'style_name': 'Textured Crop Fade',
+      'style_code': 'STYLE-TEXTURED-CROP-FADE-HC',
+      'face_shape': 'Square',
+      'hair_texture': 'Straight',
+      'front_view_url': '/database/assets/hairstyles/textured_crop_fade_front.png',
+      'side_view_url': '/database/assets/hairstyles/textured_crop_fade_left.png',
+      'back_view_url': '/database/assets/hairstyles/textured_crop_fade_right.png',
+      'confidence_score': 0.88,
+      'estimated_minutes': 35,
     },
   ];
 
@@ -585,7 +595,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     _calibrationSyncInFlight = true;
-    _calibrationSyncStatus = 'syncing';
     try {
       final selected = _recommendations.isNotEmpty
           ? _recommendations[
@@ -631,15 +640,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       );
 
       if (calibration == null || !mounted) {
-        _calibrationSyncStatus = 'no_response';
         return;
       }
 
       final confidence =
           (calibration['confidence'] as num?)?.toDouble() ?? 1.0;
       if (confidence < 0.55) {
-        _lastCalibrationConfidence = confidence;
-        _calibrationSyncStatus = 'low_conf';
         return;
       }
 
@@ -667,13 +673,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         if (!_showCalibrationMode) {
           _tempCalibration = merged;
         }
-        _lastCalibrationConfidence = confidence;
-        _calibrationSyncStatus = 'ok';
       });
 
-      _lastCalibrationSyncAt = DateTime.now();
     } catch (_) {
-      _calibrationSyncStatus = 'error';
     } finally {
       _calibrationSyncInFlight = false;
       if (mounted) {
@@ -683,6 +685,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   String _inferStyleFamily(Map<String, dynamic>? recommendation) {
+
+        _lastCalibrationSyncAt = DateTime.now();
     final styleName = (recommendation?['style_name']?.toString() ??
             recommendation?['styleName']?.toString() ??
             '')
@@ -766,7 +770,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         setState(() {
           _recommendations
             ..clear()
-            ..addAll(rankedFallback.take(3));
+            ..addAll(_topThreeRecommendations(rankedFallback));
           _selectedIndex = 0;
           _markOverlayReadyAfterProcessing();
           _status = 'Suggestions are ready. Pick one to preview.';
@@ -777,7 +781,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         setState(() {
           _recommendations
             ..clear()
-            ..addAll(ranked.take(3));
+            ..addAll(_topThreeRecommendations(ranked));
           _selectedIndex = 0;
           _markOverlayReadyAfterProcessing();
           _status = 'Suggestions are ready. Pick one to preview.';
@@ -904,7 +908,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       setState(() {
         _recommendations
           ..clear()
-          ..addAll(ranked.take(3));
+          ..addAll(_topThreeRecommendations(ranked));
         _selectedIndex = 0;
         _markOverlayReadyAfterProcessing();
         _status =
@@ -1328,11 +1332,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                   ),
                 ),
                     _buildSlidingControlsSheet(constraints),
-                    Positioned(
-                      top: 10,
-                      right: 10,
-                      child: _buildCalibrationDebugChip(),
-                    ),
                 if (_showCalibrationMode) _buildCalibrationOverlay(),
               ],
             );
@@ -1473,48 +1472,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildCalibrationDebugChip() {
-    final lastSync = _lastCalibrationSyncAt;
-    final secondsAgo = lastSync == null
-        ? '--'
-        : DateTime.now().difference(lastSync).inSeconds.toString();
-    final conf = _lastCalibrationConfidence;
-    final confLabel = conf == null ? '--' : conf.toStringAsFixed(2);
-
-    Color chipColor;
-    switch (_calibrationSyncStatus) {
-      case 'ok':
-        chipColor = const Color(0xFF17301D);
-        break;
-      case 'syncing':
-        chipColor = const Color(0xFF303017);
-        break;
-      case 'error':
-      case 'no_response':
-        chipColor = const Color(0xFF3A1A1A);
-        break;
-      default:
-        chipColor = const Color(0xFF1E1E1E);
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: chipColor,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white24),
-      ),
-      child: Text(
-        'Calib $_calibrationSyncStatus  c:$confLabel  t:$secondsAgo s',
-        style: const TextStyle(
-          color: Colors.white,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
     );
   }
 
@@ -2461,6 +2418,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       }
       if (texture.isNotEmpty && texture == _hairTexture.toLowerCase()) {
         s += 0.25;
+      } else if (texture.isNotEmpty && texture != _hairTexture.toLowerCase()) {
+        s -= 0.25;
       }
 
       final likelyCoilyStyle = styleName.contains('afro') ||
@@ -2475,6 +2434,34 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
     ranked.sort((a, b) => score(b).compareTo(score(a)));
     return ranked;
+  }
+
+  List<Map<String, dynamic>> _topThreeRecommendations(
+      List<Map<String, dynamic>> ranked) {
+    final top = ranked.take(3).map((e) => Map<String, dynamic>.from(e)).toList();
+    if (top.length >= 3) {
+      return top;
+    }
+
+    final existingIds = top
+        .map((e) =>
+            '${e['variant_id'] ?? e['variantId'] ?? e['style_code'] ?? e['styleName'] ?? ''}')
+        .toSet();
+
+    final fillers = _rankRecommendations(_hardcodedFallback()).where((item) {
+      final id =
+          '${item['variant_id'] ?? item['variantId'] ?? item['style_code'] ?? item['styleName'] ?? ''}';
+      return !existingIds.contains(id);
+    });
+
+    for (final item in fillers) {
+      if (top.length >= 3) {
+        break;
+      }
+      top.add(Map<String, dynamic>.from(item));
+    }
+
+    return top;
   }
 
   double _perspectiveScale(double? yawDeg) {
