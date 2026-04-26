@@ -19,11 +19,7 @@ try {
     $inProgressStmt->execute();
     $inProgress = (int)$inProgressStmt->fetchColumn();
 
-<<<<<<< Updated upstream
-    $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE isAvailable = 1');
-=======
     $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE is_active = TRUE');
->>>>>>> Stashed changes
     $activeBarbersStmt->execute();
     $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
 
@@ -67,18 +63,10 @@ try {
     }, $walkinsStmt->fetchAll());
 
     $barbersStmt = $pdo->prepare(
-<<<<<<< Updated upstream
-        'SELECT b.barberID, u.fullName
-         FROM barbers b
-         JOIN users u ON b.userID = u.userID
-         WHERE b.isAvailable = 1
-         ORDER BY u.fullName'
-=======
         'SELECT barber_id, full_name, specialty, rating, years_experience
          FROM barbers
          WHERE is_active = TRUE
          ORDER BY full_name'
->>>>>>> Stashed changes
     );
     $barbersStmt->execute();
     $barbers = array_map(function ($row) {

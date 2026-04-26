@@ -8,11 +8,7 @@ try {
     $pdo = get_db_connection();
 
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
-<<<<<<< Updated upstream
-    $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE isActive = 1')->fetchColumn();
-=======
     $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_active = TRUE')->fetchColumn();
->>>>>>> Stashed changes
     $pendingAppointments = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE status = 'Scheduled'")->fetchColumn();
 
     $monthlyRevenueStmt = $pdo->prepare(

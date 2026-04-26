@@ -47,12 +47,7 @@ WHAT WORKS RIGHT NOW
 - PostgreSQL schema is saved in /database/schema.pg.sql.
 
 WHAT IS NEXT
-<<<<<<< Updated upstream
-- Import /database/schema.sql into your MySQL server.
-- Set DB_HOST, DB_NAME, DB_USER, DB_PASS on your PHP server.
-=======
 - Run /database/schema.pg.sql in your Supabase SQL editor.
 - Set DB_URL in /.env for Supabase/PostgreSQL.
->>>>>>> Stashed changes
 - Update /api/auth.php and /api/booking.php if you need extra fields.
 - Connect the web and mobile app to the real API instead of fallback data.

@@ -17,36 +17,18 @@ try {
     $pdo = get_db_connection();
 
     if ($action === 'list') {
-<<<<<<< Updated upstream
-        $stmt = $pdo->prepare('SELECT haircutID, haircutName, faceShape, imagePath, isActive FROM haircuts WHERE isActive = 1 ORDER BY haircutName');
-=======
         $stmt = $pdo->prepare(
             'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active
              FROM hairstyles
                WHERE is_active = TRUE
              ORDER BY style_name'
         );
->>>>>>> Stashed changes
         $stmt->execute();
         json_response(['haircuts' => $stmt->fetchAll()]);
     }
 
     if ($action === 'listByFaceShape') {
         $faceShape = trim((string)($input['faceShape'] ?? ''));
-<<<<<<< Updated upstream
-
-        $stmt = $pdo->prepare(
-            'SELECT haircutID, haircutName, faceShape, imagePath, isActive
-             FROM haircuts
-             WHERE isActive = 1 AND (:faceShape = "" OR faceShape = :faceShape OR faceShape IS NULL)
-             ORDER BY haircutName'
-        );
-        $stmt->execute([
-            ':faceShape' => $faceShape,
-        ]);
-
-        json_response(['haircuts' => $stmt->fetchAll()]);
-=======
         $hairTexture = trim((string)($input['hairTexture'] ?? ''));
 
                 $stmt = $pdo->prepare(<<<'SQL'
@@ -120,7 +102,6 @@ SQL
         );
         $stmt->execute();
         json_response(['hairstyles' => $stmt->fetchAll()]);
->>>>>>> Stashed changes
     }
 
     if ($action === 'create') {

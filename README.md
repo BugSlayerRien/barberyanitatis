@@ -120,6 +120,21 @@ Assets and fonts are already configured in `pubspec.yaml`:
 4. Verify the API endpoints still respond against your local server.
 5. Open a pull request back into `develop`.
 
+## Branch Policy
+
+- `main`: stable baseline branch.
+- `develop`: integration branch for reviewed and merged work.
+- `share/current-progress`: active delivery branch for current sprint/progress.
+- `feature/*`: short-lived branches for scoped changes, merged into `develop` via PR.
+
+Rules:
+
+1. Do not push directly to `develop` or `main`.
+2. Keep each PR focused and small enough to review.
+3. Resolve all merge conflicts locally before commit.
+4. Run lint/tests before pushing.
+5. Delete merged short-lived branches to keep branch list clean.
+
 ## Notes For New Developers
 
 - If the app cannot reach the backend, first check the `API_BASE_URL` value and your local Apache/PHP path.

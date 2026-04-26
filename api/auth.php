@@ -340,60 +340,26 @@ try {
         }
 
         $passwordHash = password_hash($password, PASSWORD_BCRYPT);
-<<<<<<< Updated upstream
-
-        $pdo->beginTransaction();
-
-        $stmt = $pdo->prepare('INSERT INTO users (fullName, email, passwordHash, role) VALUES (:fullName, :email, :passwordHash, :role)');
-=======
         $stmt = $pdo->prepare(
             'INSERT INTO users (email, password_hash, full_name, phone, gender)
              VALUES (:email, :password_hash, :full_name, :phone, :gender)
              RETURNING user_id, full_name, email'
         );
->>>>>>> Stashed changes
         $stmt->execute([
             ':fullName' => $fullName,
             ':email' => $email,
             ':passwordHash' => $passwordHash,
             ':role' => $roleName,
         ]);
-<<<<<<< Updated upstream
-
-        $userId = (int)$pdo->lastInsertId();
-
-        $roleStmt = $pdo->prepare('SELECT roleID FROM roles WHERE roleName = :roleName');
-        $roleStmt->execute([':roleName' => $roleName]);
-        $roleId = (int)($roleStmt->fetchColumn() ?: 0);
-
-        if ($roleId === 0) {
-            $insertRole = $pdo->prepare('INSERT INTO roles (roleName) VALUES (:roleName)');
-            $insertRole->execute([':roleName' => $roleName]);
-            $roleId = (int)$pdo->lastInsertId();
-        }
-
-        $linkStmt = $pdo->prepare('INSERT INTO userRoles (userID, roleID) VALUES (:userID, :roleID)');
-        $linkStmt->execute([':userID' => $userId, ':roleID' => $roleId]);
-
-        $pdo->commit();
-=======
         $user = $stmt->fetch();
->>>>>>> Stashed changes
 
         json_response([
             'message' => 'Registration successful',
             'user' => [
-<<<<<<< Updated upstream
-                'userID' => $userId,
-                'fullName' => $fullName,
-                'email' => $email,
-                'role' => $roleName,
-=======
                 'userID' => (int)$user['user_id'],
                 'fullName' => (string)$user['full_name'],
                 'email' => (string)$user['email'],
                 'roles' => ['customer'],
->>>>>>> Stashed changes
             ],
         ], 201);
     }
@@ -409,27 +375,6 @@ try {
             json_response(['error' => 'Please provide a valid email address.'], 422);
         }
 
-<<<<<<< Updated upstream
-        $stmt = $pdo->prepare('SELECT userID, fullName, email, passwordHash, role FROM users WHERE email = :email AND isActive = 1');
-        $stmt->execute([':email' => $email]);
-        $user = $stmt->fetch();
-
-        if (!$user || !password_verify($password, (string)$user['passwordHash'])) {
-            json_response(['error' => 'Invalid credentials'], 401);
-        }
-
-        $roles = [$user['role']];
-
-        json_response([
-            'message' => 'Login successful',
-            'user' => [
-                'userID' => (int)$user['userID'],
-                'fullName' => $user['fullName'],
-                'email' => $user['email'],
-                'roles' => $roles,
-            ],
-        ]);
-=======
         $staffStmt = $pdo->prepare(
             'SELECT staff_id, full_name, email, password_hash, role
              FROM staff_users
@@ -467,7 +412,6 @@ try {
         }
 
         json_response(['error' => 'Invalid credentials'], 401);
->>>>>>> Stashed changes
     }
 
     if ($action === 'googleLogin') {

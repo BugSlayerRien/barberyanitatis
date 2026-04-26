@@ -1,34 +1,56 @@
 <?php
 // Database connection helper (PDO)
-<<<<<<< Updated upstream
-// Set environment variables in your server:
-// DB_HOST, DB_NAME, DB_USER, DB_PASS
-=======
 // Supported environment variables:
 // DB_URL or DATABASE_URL (postgresql://user:pass@host:port/db)
 // DB_DSN (direct PDO DSN)
 // DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS, DB_SSLMODE, DB_HOSTADDR
->>>>>>> Stashed changes
 
 declare(strict_types=1);
 
+function apply_cors_headers(): void
+{
+    $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
+    $allowedOriginsEnv = trim((string)(getenv('CORS_ALLOWED_ORIGINS') ?: ''));
+
+    if ($allowedOriginsEnv === '') {
+        if ($origin !== '' && preg_match('/^https?:\\/\\/(localhost|127\\.0\\.0\\.1)(:\\d+)?$/i', $origin) === 1) {
+            header('Access-Control-Allow-Origin: ' . $origin);
+            header('Vary: Origin');
+        } else {
+            header('Access-Control-Allow-Origin: *');
+        }
+    } else {
+        $allowedOrigins = array_values(array_filter(array_map('trim', explode(',', $allowedOriginsEnv))));
+        if ($origin !== '' && in_array($origin, $allowedOrigins, true)) {
+            header('Access-Control-Allow-Origin: ' . $origin);
+            header('Vary: Origin');
+        }
+    }
+
+    header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+}
+
+apply_cors_headers();
+
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+    http_response_code(204);
+    exit;
+}
+
 function get_db_connection(): PDO
 {
-    $host = getenv('DB_HOST') ?: 'localhost';
-    $db = getenv('DB_NAME') ?: 'barberyanitatis';
-    $user = getenv('DB_USER') ?: 'root';
-    $pass = getenv('DB_PASS') ?: '';
-    $charset = 'utf8mb4';
-
-<<<<<<< Updated upstream
-    $dsn = "mysql:host={$host};dbname={$db};charset={$charset}";
-=======
     $dsn = trim((string)(getenv('DB_DSN') ?: ''));
-    $user = trim((string)(getenv('DB_USER') ?: ''));
+    $user = (string)(getenv('DB_USER') ?: 'postgres');
     $pass = (string)(getenv('DB_PASS') ?: '');
 
     if ($dsn === '') {
-        $url = trim((string)(getenv('DB_URL') ?: getenv('DATABASE_URL') ?: ''));
+        $url = trim((string)(
+            getenv('DB_URL')
+            ?: getenv('DATABASE_URL')
+            ?: getenv('SUPABASE_DB_URL')
+            ?: ''
+        ));
 
         if ($url !== '') {
             $parts = parse_url($url);
@@ -36,7 +58,8 @@ function get_db_connection(): PDO
                 throw new RuntimeException('Invalid DB URL');
             }
 
-            $scheme = strtolower((string)($parts['scheme'] ?? 'postgresql'));
+            $scheme = strtolower((string)($parts['scheme'] ?? ''));
+
             if ($scheme === 'postgresql' || $scheme === 'postgres') {
                 $host = (string)($parts['host'] ?? '127.0.0.1');
                 $port = (int)($parts['port'] ?? 5432);
@@ -44,43 +67,40 @@ function get_db_connection(): PDO
                 $urlUser = isset($parts['user']) ? urldecode((string)$parts['user']) : '';
                 $urlPass = isset($parts['pass']) ? urldecode((string)$parts['pass']) : '';
                 parse_str((string)($parts['query'] ?? ''), $query);
-                $sslmode = (string)($query['sslmode'] ?? 'require');
+                $sslmode = (string)($query['sslmode'] ?? (getenv('DB_SSLMODE') ?: 'prefer'));
 
                 $hostAddr = trim((string)($query['hostaddr'] ?? getenv('DB_HOSTADDR') ?: ''));
-                if ($hostAddr === '' && function_exists('dns_get_record')) {
-                    $records = dns_get_record($host, DNS_AAAA);
-                    if (is_array($records) && isset($records[0]['ipv6'])) {
-                        $hostAddr = (string)$records[0]['ipv6'];
-                    }
-                }
 
                 $dsn = "pgsql:host={$host};port={$port};dbname={$db};sslmode={$sslmode}";
                 if ($hostAddr !== '') {
                     $dsn .= ";hostaddr={$hostAddr}";
                 }
-                $user = $user !== '' ? $user : $urlUser;
-                $pass = $pass !== '' ? $pass : $urlPass;
+
+                if ($urlUser !== '') {
+                    $user = $urlUser;
+                }
+                if ($urlPass !== '') {
+                    $pass = $urlPass;
+                }
             } else {
                 throw new RuntimeException('Unsupported DB URL scheme. Use postgresql://');
             }
         }
+    }
 
-        if ($dsn === '') {
-            $host = (string)(getenv('DB_HOST') ?: '127.0.0.1');
-            $port = (string)(getenv('DB_PORT') ?: '5432');
-            $db = (string)(getenv('DB_NAME') ?: 'postgres');
-            $user = $user !== '' ? $user : (string)(getenv('DB_USER') ?: '');
-            $pass = $pass !== '' ? $pass : (string)(getenv('DB_PASS') ?: '');
-
-            $sslmode = (string)(getenv('DB_SSLMODE') ?: 'require');
-            $hostAddr = trim((string)(getenv('DB_HOSTADDR') ?: ''));
-            $dsn = "pgsql:host={$host};port={$port};dbname={$db};sslmode={$sslmode}";
-            if ($hostAddr !== '') {
-                $dsn .= ";hostaddr={$hostAddr}";
-            }
+    if ($dsn === '') {
+        // Default local/fallback mode: PostgreSQL-compatible connection.
+        // Supabase requires sslmode=require.
+        $host = (string)(getenv('DB_HOST') ?: '127.0.0.1');
+        $port = (int)(getenv('DB_PORT') ?: 5432);
+        $db = (string)(getenv('DB_NAME') ?: 'postgres');
+        $sslmode = (string)(getenv('DB_SSLMODE') ?: 'require');
+        $hostAddr = trim((string)(getenv('DB_HOSTADDR') ?: ''));
+        $dsn = "pgsql:host={$host};port={$port};dbname={$db};sslmode={$sslmode}";
+        if ($hostAddr !== '') {
+            $dsn .= ";hostaddr={$hostAddr}";
         }
     }
->>>>>>> Stashed changes
 
     $options = [
         PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,

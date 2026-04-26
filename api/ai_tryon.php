@@ -58,12 +58,6 @@ function hf_inference_generate(string $token, string $model, string $prompt): ar
 try {
     $pdo = get_db_connection();
 
-<<<<<<< Updated upstream
-    $stmt = $pdo->prepare(
-        'SELECT haircutID, haircutName, faceShape, imagePath, isActive
-         FROM haircuts
-         WHERE haircutID = :haircutID AND isActive = 1'
-=======
     if ($isInstantId) {
         if ($prompt === '') {
             json_response(['error' => 'Prompt is required'], 422);
@@ -346,7 +340,6 @@ try {
          FROM hairstyle_variants hv
          JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
          WHERE hv.variant_id = :variant_id AND hs.is_active = TRUE'
->>>>>>> Stashed changes
     );
     $stmt->execute([':haircutID' => $haircutID]);
     $haircut = $stmt->fetch();

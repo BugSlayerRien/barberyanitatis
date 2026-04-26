@@ -76,14 +76,6 @@ function showView(view) {
 navButtons.forEach((button) => {
   button.addEventListener("click", () => {
     const view = button.dataset.view;
-<<<<<<< Updated upstream
-    navButtons.forEach((b) => b.classList.remove("active"));
-    button.classList.add("active");
-    Object.values(views).forEach((section) => section.setAttribute("hidden", ""));
-    if (views[view]) {
-      views[view].removeAttribute("hidden");
-    }
-=======
     if (view === "logout") {
       sessionStorage.clear();
       window.location.href = "../login.html";
@@ -97,7 +89,6 @@ document.querySelectorAll("[data-jump]").forEach((button) => {
   button.addEventListener("click", () => {
     const view = button.getAttribute("data-jump");
     if (view) showView(view);
->>>>>>> Stashed changes
   });
 });
 
@@ -516,9 +507,6 @@ async function loadDashboard() {
   }
 }
 
-<<<<<<< Updated upstream
-loadDashboard();
-=======
 function renderTable(containerId, columns, rows) {
   const container = document.getElementById(containerId);
   if (!container) return;
@@ -1497,4 +1485,3 @@ async function init() {
 }
 
 init();
->>>>>>> Stashed changes

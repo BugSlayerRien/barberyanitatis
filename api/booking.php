@@ -154,11 +154,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-<<<<<<< Updated upstream
-if ($action !== 'create' && $action !== 'listByCustomer') {
-=======
 if (!in_array($action, ['create', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule'], true)) {
->>>>>>> Stashed changes
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -171,29 +167,11 @@ try {
         $userID = (int)($input['userID'] ?? 0);
         $barberID = (int)($input['barberID'] ?? 0);
         $appointmentDate = trim((string)($input['appointmentDate'] ?? ''));
-<<<<<<< Updated upstream
-        $appointmentTime = trim((string)($input['appointmentTime'] ?? ''));
-=======
         $startTimeRaw = trim((string)($input['startTime'] ?? ''));
         $endTimeRaw = trim((string)($input['endTime'] ?? ''));
         $items = $input['items'] ?? null;
->>>>>>> Stashed changes
         $serviceIDs = $input['serviceIDs'] ?? [];
 
-<<<<<<< Updated upstream
-        if ($userID <= 0 || $barberID <= 0 || $appointmentDate === '' || $appointmentTime === '' || !is_array($serviceIDs) || count($serviceIDs) === 0) {
-            json_response(['error' => 'Missing or invalid booking details'], 422);
-        }
-
-        $pdo->beginTransaction();
-
-        $stmt = $pdo->prepare('INSERT INTO appointments (userID, barberID, appointmentDate, appointmentTime) VALUES (:userID, :barberID, :appointmentDate, :appointmentTime)');
-        $stmt->execute([
-            ':userID' => $userID,
-            ':barberID' => $barberID,
-            ':appointmentDate' => $appointmentDate,
-            ':appointmentTime' => $appointmentTime,
-=======
         $startTime = normalize_time_string($startTimeRaw);
         $endTime = normalize_time_string($endTimeRaw);
 
@@ -363,17 +341,10 @@ try {
             ':start_time' => $startTime,
             ':end_time' => $endTime,
             ':status' => 'PendingPayment',
->>>>>>> Stashed changes
         ]);
 
         $appointmentID = (int)$pdo->lastInsertId();
 
-<<<<<<< Updated upstream
-        $linkStmt = $pdo->prepare('INSERT INTO appointmentServices (appointmentID, serviceID) VALUES (:appointmentID, :serviceID)');
-        foreach ($serviceIDs as $serviceID) {
-            $serviceID = (int)$serviceID;
-            if ($serviceID <= 0) {
-=======
         foreach ($validatedItems as $item) {
             $serviceID = (int)($item['serviceID'] ?? 0);
             $variantIDItem = (int)($item['variantID'] ?? 0);
@@ -382,7 +353,6 @@ try {
             $finalPrice = $item['finalPrice'] ?? null;
 
             if ($serviceID <= 0 || $variantIDItem <= 0) {
->>>>>>> Stashed changes
                 continue;
             }
             $linkStmt->execute([
@@ -419,11 +389,8 @@ try {
         json_response([
             'message' => 'Appointment created',
             'appointmentID' => $appointmentID,
-<<<<<<< Updated upstream
-=======
             'bookingCode' => $bookingCode,
             'status' => 'PendingPayment',
->>>>>>> Stashed changes
         ], 201);
     }
 
@@ -434,15 +401,6 @@ try {
         }
 
         $stmt = $pdo->prepare(
-<<<<<<< Updated upstream
-            'SELECT a.appointmentID, a.appointmentDate, a.appointmentTime, a.status,
-                b.barberID, bu.fullName AS barberName
-             FROM appointments a
-             JOIN barbers b ON a.barberID = b.barberID
-             JOIN users bu ON b.userID = bu.userID
-             WHERE a.userID = :userID
-             ORDER BY a.appointmentDate DESC, a.appointmentTime DESC'
-=======
             "SELECT a.appointment_id, a.booking_code, a.appointment_date, a.start_time, a.end_time, a.status,
                     b.barber_id, b.full_name AS barber_name,
                     ap.status AS payment_status, ap.transaction_ref, ap.created_at AS paid_at,
@@ -466,7 +424,6 @@ try {
              ) pi ON TRUE
              WHERE a.user_id = :user_id
              ORDER BY a.appointment_date DESC, a.start_time DESC"
->>>>>>> Stashed changes
         );
         $stmt->execute([':userID' => $userID]);
         $appointments = $stmt->fetchAll();
@@ -502,11 +459,6 @@ try {
         }
 
         $appointments = array_map(function ($row) use ($serviceMap) {
-<<<<<<< Updated upstream
-            $aid = (int)$row['appointmentID'];
-            $row['services'] = $serviceMap[$aid] ?? [];
-            return $row;
-=======
             $aid = (int)$row['appointment_id'];
             $intentStatus = $row['intent_status'] !== null ? (string)$row['intent_status'] : null;
             $paymentStatus = $row['payment_status'] !== null ? (string)$row['payment_status'] : null;
@@ -538,13 +490,10 @@ try {
                 'canReschedule' => $paymentState === 'Paid' && in_array((string)$row['status'], ['Scheduled', 'PendingPayment'], true),
                 'services' => $serviceMap[$aid] ?? [],
             ];
->>>>>>> Stashed changes
         }, $appointments);
 
         json_response(['appointments' => $appointments]);
     }
-<<<<<<< Updated upstream
-=======
 
     if ($action === 'cancel') {
         $appointmentID = (int)($input['appointmentID'] ?? 0);
@@ -794,7 +743,6 @@ try {
 
         json_response(['appointments' => $appointments]);
     }
->>>>>>> Stashed changes
 } catch (PDOException $e) {
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();

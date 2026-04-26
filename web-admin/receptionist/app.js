@@ -24,8 +24,6 @@ const PAGE_SIZE_BY_KEY = {
 };
 
 const navButtons = document.querySelectorAll(".nav button");
-<<<<<<< Updated upstream
-=======
 const apiBase = "../../api";
 const refreshButton = document.getElementById("refresh-dashboard");
 const walkinForm = document.getElementById("walkin-form");
@@ -36,7 +34,6 @@ const appointmentsSearch = document.getElementById("appointments-search");
 const appointmentsStatusFilter = document.getElementById("appointments-status-filter");
 const walkinsSearch = document.getElementById("walkins-search");
 const autoRefreshToggle = document.getElementById("auto-refresh-toggle");
->>>>>>> Stashed changes
 
 navButtons.forEach((button) => {
   button.addEventListener("click", () => {
@@ -50,8 +47,6 @@ navButtons.forEach((button) => {
   });
 });
 
-<<<<<<< Updated upstream
-=======
 function formatCurrency(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
   return `PHP ${Number(value).toFixed(2)}`;
@@ -70,7 +65,6 @@ async function postJson(url, payload) {
   return data;
 }
 
->>>>>>> Stashed changes
 function requireReceptionist() {
   const rolesRaw = sessionStorage.getItem("roles");
   if (!rolesRaw) {
@@ -219,8 +213,6 @@ function renderStats(stats) {
   });
 }
 
-<<<<<<< Updated upstream
-=======
 function renderSummary(stats, appointments, walkins) {
   const summaryEl = document.getElementById("summary-text");
   if (!summaryEl) return;
@@ -356,7 +348,6 @@ function rerenderByPaginationKey(key) {
   }
 }
 
->>>>>>> Stashed changes
 function renderAppointments(appointments) {
   const table = document.getElementById("appointments-table");
   if (!table) return;
@@ -521,16 +512,6 @@ function renderBarbers(items) {
 async function loadDashboard() {
   if (!requireReceptionist()) return;
   try {
-<<<<<<< Updated upstream
-    const response = await fetch("../../api/receptionist_dashboard.php");
-    if (!response.ok) throw new Error("API error");
-    const data = await response.json();
-    renderStats(data.stats ?? []);
-    renderAppointments(data.appointments ?? []);
-    renderWalkins(data.walkins ?? []);
-    renderTracking(data.tracking ?? []);
-    renderBarbers(data.barbers ?? []);
-=======
     const data = await postJson(`${apiBase}/receptionist.php`, { action: "dashboard" });
     state.appointments = data.appointments ?? [];
     state.walkins = data.walkins ?? [];
@@ -539,7 +520,6 @@ async function loadDashboard() {
     renderWalkins(state.walkins);
     renderTracking(buildTracking(state.appointments, state.walkins));
     renderSummary(data.stats ?? [], state.appointments, state.walkins);
->>>>>>> Stashed changes
   } catch (error) {
     state.appointments = [];
     state.walkins = [];
@@ -553,9 +533,6 @@ async function loadDashboard() {
   document.getElementById("last-updated").textContent = new Date().toLocaleString();
 }
 
-<<<<<<< Updated upstream
-loadDashboard();
-=======
 async function loadAiStatus() {
   const panel = document.getElementById("ai-status-panel");
   const badge = document.getElementById("ai-health-badge");
@@ -761,4 +738,3 @@ async function init() {
 }
 
 init();
->>>>>>> Stashed changes
