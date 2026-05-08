@@ -24,7 +24,7 @@ class DashboardPage extends StatefulWidget {
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  int _selectedTab = 0; // 0 = Recommended, 1 = Trendy
+  int _selectedTab = 0; // 0 = Recommended, 1 = Trendy (default: Recommended)
   int _selectedIndex = 0; // Home tab
 
   bool _showWelcome = true;
@@ -43,7 +43,48 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _loading = true;
   String? _error;
   static const String _dashboardSampleHairFront =
-      'assets/images/overlays/sample_hair_front.png';
+      'assets/images/overlays/blowout_taper/blowout_taper_front.png';
+
+  static const Map<String, Map<String, String>> _localStyleAssets = {
+    'blowout taper': {
+      'front': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+      'side': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+      'back': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
+    },
+    'buzz cut': {
+      'front': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
+      'side': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
+      'back': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
+    },
+    'low fade': {
+      'front': 'assets/images/overlays/low_fade/low_fade_front.png',
+      'side': 'assets/images/overlays/low_fade/low_fade_left.png',
+      'back': 'assets/images/overlays/low_fade/low_fade_right.png',
+    },
+    'french crop': {
+      'front': 'assets/images/overlays/french_crop/french_crop_front.png',
+      'side': 'assets/images/overlays/french_crop/french_crop_left.png',
+      'back': 'assets/images/overlays/french_crop/french_crop_right.png',
+    },
+  };
+
+  String _styleIdentity(Map<String, dynamic> style) {
+    final variantId = style['variantId']?.toString() ?? '';
+    final styleName = style['name']?.toString().trim().toLowerCase() ?? '';
+    return variantId.isNotEmpty ? 'variant:$variantId' : 'style:$styleName';
+  }
+
+  List<Map<String, dynamic>> _dedupeStyles(List<Map<String, dynamic>> styles) {
+    final seen = <String>{};
+    final deduped = <Map<String, dynamic>>[];
+    for (final style in styles) {
+      final key = _styleIdentity(style);
+      if (seen.add(key)) {
+        deduped.add(style);
+      }
+    }
+    return deduped;
+  }
 
   @override
   void initState() {
@@ -72,7 +113,8 @@ class _DashboardPageState extends State<DashboardPage> {
       _error = null;
     });
 
-    final hasScan = UserSession.lastRecommendations.isNotEmpty;
+    final hasScan = UserSession.hasRecentRecommendations &&
+      UserSession.lastRecommendations.isNotEmpty;
     final scanMapped = hasScan
         ? UserSession.lastRecommendations.map(_mapVariant).toList()
         : <Map<String, dynamic>>[];
@@ -101,14 +143,22 @@ class _DashboardPageState extends State<DashboardPage> {
           .toList();
 
       final mapped = variants.map(_mapVariant).toList();
+      final dedupedMapped = _dedupeStyles(mapped);
 
       setState(() {
         if (hasScan) {
-          _recommendedStyles = scanMapped;
-          _trendyStyles = mapped;
+          final recommended = _dedupeStyles(scanMapped).take(3).toList();
+          final recommendedKeys = recommended.map(_styleIdentity).toSet();
+          final trendy = dedupedMapped
+              .where((style) => !recommendedKeys.contains(_styleIdentity(style)))
+              .toList();
+
+          _recommendedStyles = recommended;
+          _trendyStyles = trendy;
         } else {
-          _recommendedStyles = mapped.take(6).toList();
-          _trendyStyles = mapped.length > 6 ? mapped.skip(6).toList() : [];
+          // No scan: Recommended is empty (will show placeholder), Trendy shows API results deduped
+          _recommendedStyles = <Map<String, dynamic>>[];
+          _trendyStyles = dedupedMapped;
         }
         _loading = false;
       });
@@ -253,7 +303,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             const SizedBox(height: 16),
 
-            // Tabs with gradient
+            // Tabs with gradient (Trendy first, Recommended second)
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
@@ -324,7 +374,18 @@ class _DashboardPageState extends State<DashboardPage> {
             else if (_error != null)
               Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
             else if (styles.isEmpty)
-              const Center(child: Text('No hairstyles available.', style: TextStyle(color: Colors.white70)))
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(
+                    _selectedTab == 1
+                        ? 'Scan to show recommended haircuts.'
+                        : 'No hairstyles available.',
+                    style: const TextStyle(color: Colors.white70),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              )
             else
               GridView.builder(
                 shrinkWrap: true,
@@ -409,17 +470,18 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Container(color: const Color(0xFF111111)),
+                    Container(color: Colors.white),
                     if (previewImage.startsWith('assets/'))
                       Image.asset(
-                        previewImage,
+                          previewImage,
                         fit: BoxFit.contain,
                         filterQuality: FilterQuality.high,
                         errorBuilder: (context, error, stackTrace) {
+                          debugPrint('[Dashboard] Image.asset error for $previewImage: $error');
                           return const Center(
                             child: Icon(
                               Icons.image_not_supported_outlined,
-                              color: Colors.white30,
+                              color: Colors.black38,
                               size: 34,
                             ),
                           );
@@ -428,11 +490,11 @@ class _DashboardPageState extends State<DashboardPage> {
                     else
                       Image.network(
                         previewImage,
-                        fit: BoxFit.cover,
+                        fit: BoxFit.contain,
                         filterQuality: FilterQuality.high,
                         errorBuilder: (context, error, stackTrace) {
                           return Image.asset(
-                            _dashboardSampleHairFront,
+                              _dashboardSampleHairFront,
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.high,
                           );
@@ -459,9 +521,12 @@ class _DashboardPageState extends State<DashboardPage> {
                 children: [
                   Text(styleName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  Text(style['description']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3)),
-                  const SizedBox(height: 8),
-                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFA99941), fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(
+                    style['description']?.toString() ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
+                  ),
                 ],
               ),
             ),
@@ -512,12 +577,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
+    final styleName = variant['style_name']?.toString().trim().toLowerCase() ?? '';
     final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
     final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
     final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
-    final front = _resolveImage(frontRaw) ?? _dashboardSampleHairFront;
-    final side = _resolveImage(sideRaw) ?? front;
-    final back = _resolveImage(backRaw) ?? front;
+    final localAssets = _localStyleAssets[styleName];
+    final front = localAssets?['front'] ?? _resolveImage(frontRaw) ?? _dashboardSampleHairFront;
+    final side = localAssets?['side'] ?? _resolveImage(sideRaw) ?? front;
+    final back = localAssets?['back'] ?? _resolveImage(backRaw) ?? front;
+
+    debugPrint('[Dashboard] Mapped variant: style=${variant['style_name']} frontRaw=$frontRaw resolved=$front');
 
     return {
       'name': variant['style_name']?.toString() ?? 'Style',
@@ -529,13 +598,19 @@ class _DashboardPageState extends State<DashboardPage> {
       'sideViewUrl': side,
       'backViewUrl': back,
       'variantId': variant['variant_id'],
+      'serviceId': variant['service_id'] ?? variant['serviceID'],
     };
   }
 
   String _resolvePreviewImage(Map<String, dynamic> style) {
+    final styleName = style['name']?.toString().trim().toLowerCase() ?? '';
+    final localAssets = _localStyleAssets[styleName];
     final raw = style['image']?.toString() ??
         style['frontViewUrl']?.toString() ??
         '';
+    if (localAssets != null) {
+      return localAssets['front'] ?? _dashboardSampleHairFront;
+    }
     if (raw.isEmpty) {
       return _dashboardSampleHairFront;
     }
@@ -549,7 +624,9 @@ class _DashboardPageState extends State<DashboardPage> {
     if (raw.startsWith('assets/')) {
       return raw;
     }
-    return ApiConfig.resolveImageUrl(raw);
+    final resolved = ApiConfig.resolveImageUrl(raw);
+    debugPrint('[Dashboard] _resolveImage: raw=$raw -> resolved=$resolved');
+    return resolved;
   }
 
   String _buildDetails(Map<String, dynamic> variant) {

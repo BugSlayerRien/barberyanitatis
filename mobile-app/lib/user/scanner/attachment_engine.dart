@@ -127,6 +127,8 @@ class MatrixAttachmentEngine extends AttachmentEngine {
       return fallback.compute(input);
     }
 
+    final stabilized = _applyMatrixAnchor(input);
+
     final scaleX = math.sqrt((matrix[0] * matrix[0]) + (matrix[1] * matrix[1]));
     final scaleY = math.sqrt((matrix[4] * matrix[4]) + (matrix[5] * matrix[5]));
     final matrixScale = ((scaleX + scaleY) * 0.5).clamp(0.55, 1.55);
@@ -150,19 +152,64 @@ class MatrixAttachmentEngine extends AttachmentEngine {
     );
 
     final box = computeOverlayBox(
-      face: input.face,
+      face: stabilized.face,
       constraints: input.constraints,
       calibration: adjustedCalibration,
       isWeb: input.isWeb,
       headYaw: input.headYaw,
       headRoll: input.headRoll ?? inferredRoll,
       foreheadAnchorY: input.foreheadAnchorY,
-      eyeMidX: input.eyeMidX,
-      eyeDistanceNorm: input.eyeDistanceNorm,
+      eyeMidX: stabilized.eyeMidX,
+      eyeDistanceNorm: stabilized.eyeDistanceNorm,
       videoAspect: input.videoAspect,
     );
     return _applyCalibrationOffsets(box, input);
   }
+
+  _MatrixAnchorResult _applyMatrixAnchor(AttachmentInput input) {
+    final matrix = input.faceTransformMatrix;
+    if (matrix == null || matrix.length < 16) {
+      return _MatrixAnchorResult(
+        face: input.face,
+        eyeMidX: input.eyeMidX,
+        eyeDistanceNorm: input.eyeDistanceNorm,
+      );
+    }
+
+    // Use the translation components as a gentle stabilizer so the overlay
+    // does not drift laterally when the head turns.
+    final tx = matrix[12].clamp(-1.5, 1.5);
+    final ty = matrix[13].clamp(-1.5, 1.5);
+    final shiftX = (tx * 0.06).clamp(-0.12, 0.12);
+    final shiftY = (ty * 0.05).clamp(-0.10, 0.10);
+
+    final face = input.face;
+    final newLeft = (face.left + shiftX).clamp(0.0, 1.0 - face.width);
+    final newTop = (face.top + shiftY).clamp(0.0, 1.0 - face.height);
+    final anchoredFace = Rect.fromLTWH(newLeft, newTop, face.width, face.height);
+
+    final eyeMidX = input.eyeMidX != null
+        ? (input.eyeMidX! + shiftX).clamp(0.0, 1.0)
+        : null;
+
+    return _MatrixAnchorResult(
+      face: anchoredFace,
+      eyeMidX: eyeMidX,
+      eyeDistanceNorm: input.eyeDistanceNorm,
+    );
+  }
+}
+
+class _MatrixAnchorResult {
+  final Rect face;
+  final double? eyeMidX;
+  final double? eyeDistanceNorm;
+
+  const _MatrixAnchorResult({
+    required this.face,
+    required this.eyeMidX,
+    required this.eyeDistanceNorm,
+  });
 }
 
 OverlayBox _applyCalibrationOffsets(OverlayBox base, AttachmentInput input) {

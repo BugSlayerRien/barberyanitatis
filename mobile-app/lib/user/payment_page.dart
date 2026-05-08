@@ -28,7 +28,6 @@ class PaymentPage extends StatefulWidget {
 }
 
 class _PaymentPageState extends State<PaymentPage> {
-  int _selectedMethod = 0; // 0=Card,1=Gcash/Qrph
   bool _processing = false;
   String? _intentStatusLabel;
   String? _receiptRef;
@@ -40,7 +39,6 @@ class _PaymentPageState extends State<PaymentPage> {
 
     setState(() => _processing = true);
     try {
-      final method = _selectedMethod == 0 ? 'Card' : 'GCash/QRPh';
       final createIntentResponse = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/payments.php'),
         headers: {'Content-Type': 'application/json'},
@@ -48,7 +46,7 @@ class _PaymentPageState extends State<PaymentPage> {
           'action': 'createIntent',
           'appointmentID': widget.appointmentID,
           'amount': double.parse(total.toStringAsFixed(2)),
-          'method': method,
+          'method': 'GCash/QRPh',
           'provider': 'mock',
           'expiresMinutes': 10,
         }),
@@ -311,64 +309,19 @@ class _PaymentPageState extends State<PaymentPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Choose Payment Method', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                  const Text('Payment Method', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 12),
-
-                  // Card (uses single credit card icon)
                   _paymentMethodTile(
-                    0,
-                    title: 'Credit/Debit Card',
-                    trailing: Row(children: [
-                      _paymentIcon('assets/images/creditcard.png'),
-                    ]),
+                    title: 'GCash, PayMaya, QRPh',
+                    trailing: _paymentIcon('assets/images/gcash.png'),
                   ),
-
-                  const SizedBox(height: 8),
-
-                  // GCash / QRPh
-                  _paymentMethodTile(1, title: 'Gcash, Paymaya, QRPh', trailing: _paymentIcon('assets/images/gcash.png')),
                 ],
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // Mock card inputs (only visible for card method)
-            if (_selectedMethod == 0) ...[
-              const TextField(
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.black,
-                  hintText: 'John Doe',
-                ),
-              ),
-              const SizedBox(height: 8),
-              const TextField(
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.black,
-                  hintText: '1234 5678 9012 3456',
-                ),
-              ),
-              const SizedBox(height: 8),
-              Row(
-                children: const [
-                  Expanded(
-                    child: TextField(
-                      decoration: InputDecoration(filled: true, fillColor: Colors.black, hintText: 'MM/YY'),
-                    ),
-                  ),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      decoration: InputDecoration(filled: true, fillColor: Colors.black, hintText: 'CVV'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-
-            const SizedBox(height: 20),
+            const SizedBox(height: 4),
 
             // Summary Box
             Container(
@@ -435,30 +388,28 @@ class _PaymentPageState extends State<PaymentPage> {
     );
   }
 
-  Widget _paymentMethodTile(int id, {required String title, Widget? trailing}) {
-    final selected = _selectedMethod == id;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedMethod = id),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF111111) : const Color(0xFF0A0A0A),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? Colors.white : Colors.white10),
-        ),
-        child: Row(
-          children: [
-            Radio<int>(
-              value: id,
-              groupValue: _selectedMethod,
-              onChanged: (v) => setState(() => _selectedMethod = v ?? 0),
-              fillColor: MaterialStateProperty.all(Colors.white),
+  Widget _paymentMethodTile({required String title, Widget? trailing}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(8),
             ),
-            const SizedBox(width: 8),
-            Expanded(child: Text(title, style: const TextStyle(color: Colors.white))),
-            if (trailing != null) trailing,
-          ],
-        ),
+            child: const Icon(Icons.qr_code_2, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: Text(title, style: const TextStyle(color: Colors.white))),
+          if (trailing != null) trailing,
+        ],
       ),
     );
   }

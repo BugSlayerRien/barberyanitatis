@@ -36,6 +36,9 @@ class AiFunnelService {
     required String? hairDensity,
     required String? hairLength,
     required int? estimatedMinutes,
+    String? frontViewUrl,
+    String? sideViewUrl,
+    String? backViewUrl,
   }) async {
     await _post({
       'action': 'saveSelection',
@@ -48,6 +51,9 @@ class AiFunnelService {
       'hairDensity': hairDensity,
       'hairLength': hairLength,
       'estimatedMinutes': estimatedMinutes,
+      'frontViewUrl': frontViewUrl,
+      'sideViewUrl': sideViewUrl,
+      'backViewUrl': backViewUrl,
     });
   }
 
@@ -58,6 +64,9 @@ class AiFunnelService {
     required int appointmentId,
     required int? serviceId,
     required int? estimatedMinutes,
+    String? frontViewUrl,
+    String? sideViewUrl,
+    String? backViewUrl,
   }) async {
     await _post({
       'action': 'trackBookingCreated',
@@ -67,6 +76,9 @@ class AiFunnelService {
       'appointmentID': appointmentId,
       'serviceID': serviceId,
       'estimatedMinutes': estimatedMinutes,
+      'frontViewUrl': frontViewUrl,
+      'sideViewUrl': sideViewUrl,
+      'backViewUrl': backViewUrl,
     });
   }
 

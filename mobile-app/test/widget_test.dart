@@ -1,27 +1,20 @@
-// This test verifies that your Tatis Barbershop Dashboard loads correctly.
-
-
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 
-// The import must point to your main file
-import 'package:tatis_barbershop/main.dart'; 
+import 'package:tatis_barbershop/user/auth_page.dart';
 
 void main() {
-  testWidgets('Dashboard loads and displays key titles', (WidgetTester tester) async {
-    
-    // Build our app (which is TatisBarbershopApp now)
-    await tester.pumpWidget(const TatisBarbershopApp());
+  testWidgets('Auth page loads and displays sign-in controls', (WidgetTester tester) async {
+    await tester.binding.setSurfaceSize(const Size(1080, 1920));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
 
-    // Trigger a frame to display the widgets
+    await tester.pumpWidget(const MaterialApp(home: AuthPage()));
     await tester.pumpAndSettle();
 
-    // Verify key text elements from the dashboard are present
     expect(find.text('BARBERYA NI TATIS'), findsOneWidget);
-    expect(find.text('PREMIUM'), findsOneWidget);
-    expect(find.text('POWERED BY AI'), findsOneWidget);
-    expect(find.text('BOOK NOW'), findsOneWidget);
-
-    // Verify that the old counter text is NOT present
-    expect(find.text('0'), findsNothing); 
+    expect(find.text('SIGN IN'), findsWidgets);
+    expect(find.text('SIGN UP'), findsWidgets);
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.text('Continue with Facebook'), findsOneWidget);
   });
 }

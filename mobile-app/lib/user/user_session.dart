@@ -14,7 +14,9 @@ class UserSession {
   static int? selectedVariantId;
   static int? selectedServiceId;
   static int? selectedEstimatedMinutes;
+  static Map<String, String>? selectedPreviewImages;
   static String? activeScanSessionId;
+  static bool hasRecentRecommendations = false;
 
   static Map<String, dynamic>? lastScan;
   static List<Map<String, dynamic>> lastRecommendations = [];
@@ -104,7 +106,9 @@ class UserSession {
     selectedVariantId = null;
     selectedServiceId = null;
     selectedEstimatedMinutes = null;
+    selectedPreviewImages = null;
     activeScanSessionId = null;
+    hasRecentRecommendations = false;
     lastScan = null;
     lastRecommendations = [];
     _cachedUserCalibration = null;

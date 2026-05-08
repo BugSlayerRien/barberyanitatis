@@ -103,9 +103,9 @@ OverlayBox computeOverlayBox({
 
   final yawDeg = headYaw ?? 0;
   final yawAbsNorm = (yawDeg.abs() / 45.0).clamp(0.0, 1.0);
-  final yawWidthFactor = (1.0 - (yawAbsNorm * 0.35)).clamp(0.55, 1.0);
+  final yawWidthFactor = (1.0 - (yawAbsNorm * 0.30)).clamp(0.62, 1.0);
   final yawHeightFactor = (1.0 - (yawAbsNorm * 0.12)).clamp(0.85, 1.0);
-  final yawHorizontalShift = (yawDeg / 55.0).clamp(-0.12, 0.12);
+  const yawHorizontalShift = 0.0;
 
     final eyeDistNorm =
       (mappedEyeDistanceNorm ?? (mappedFace.width * 0.42)).clamp(0.05, 0.70);
@@ -135,8 +135,8 @@ OverlayBox computeOverlayBox({
       yawHeightFactor *
       (1.0 + (rollNorm * 0.03));
 
-    final clampedWidth = eyeAnchoredWidth
-      .clamp(faceWidth * 0.82, faceWidth * 1.98);
+    final clampedWidth = (eyeAnchoredWidth * (1.0 - (yawAbsNorm * 0.08)))
+      .clamp(faceWidth * 0.80, faceWidth * 1.92);
     final clampedHeight = height.clamp(faceHeight * 0.95, faceHeight * 2.05);
 
     final anchorXNorm =
@@ -144,7 +144,8 @@ OverlayBox computeOverlayBox({
         .clamp(0.0, 1.0);
   final faceCenterX = anchorXNorm * constraints.maxWidth;
   final xOffsetPx = faceWidth * (calibration.xOffset + yawHorizontalShift);
-  final left = (faceCenterX - (clampedWidth * 0.5) + xOffsetPx)
+  const sideBias = 0.0;
+  final left = (faceCenterX - (clampedWidth * 0.5) + xOffsetPx + sideBias)
       .clamp(-clampedWidth * 0.15, constraints.maxWidth - (clampedWidth * 0.85));
 
   double anchorYNorm;
@@ -158,7 +159,7 @@ OverlayBox computeOverlayBox({
   final adjustedAnchorYNorm = (anchorYNorm + yawAnchorShift).clamp(0.02, 0.35);
   final anchorY = adjustedAnchorYNorm * constraints.maxHeight;
 
-  final topRaw = anchorY - (clampedHeight * 0.10) +
+  final topRaw = anchorY - (clampedHeight * (0.12 + (yawAbsNorm * 0.03))) +
       (faceHeight * calibration.yOffset * distanceVerticalFactor) +
       (rollTiltFactor * rollNorm * faceHeight * 0.02);
 

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
@@ -241,6 +242,7 @@ class _AuthPageState extends State<AuthPage> {
         serverClientId:
             _googleServerClientId.isNotEmpty ? _googleServerClientId : null,
       );
+      await googleSignIn.signOut();
       final googleUser = await googleSignIn.signIn();
 
       if (googleUser == null) {
@@ -252,9 +254,10 @@ class _AuthPageState extends State<AuthPage> {
       final googleAuth = await googleUser.authentication;
       final idToken = googleAuth.idToken?.trim() ?? '';
       final accessToken = googleAuth.accessToken?.trim() ?? '';
-      if (idToken.isEmpty && accessToken.isEmpty) {
+      final hasAnyToken = idToken.isNotEmpty || accessToken.isNotEmpty;
+      if (!hasAnyToken) {
         throw Exception(
-            'Google token response is empty. Configure GOOGLE_SERVER_CLIENT_ID.');
+            'Google tokens are missing. Configure Android/iOS OAuth and GOOGLE_SERVER_CLIENT_ID.');
       }
 
       final response = await http.post(
@@ -267,6 +270,7 @@ class _AuthPageState extends State<AuthPage> {
           'idToken': idToken,
           'accessToken': accessToken,
           'googleUid': googleUser.id,
+          'photoUrl': googleUser.photoUrl,
         }),
       );
 
@@ -320,6 +324,41 @@ class _AuthPageState extends State<AuthPage> {
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _signInWithSupabaseGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      // Launch supabase OAuth flow (will open browser and redirect to the custom scheme)
+      await Supabase.instance.client.auth.signInWithOAuth(
+        Provider.google,
+        redirectTo: 'io.supabase.flutter://login-callback',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Google sign-in...')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Supabase Google sign-in failed: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signInWithSupabaseFacebook() async {
+    setState(() => _isLoading = true);
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        Provider.facebook,
+        redirectTo: 'io.supabase.flutter://login-callback',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Supabase Facebook sign-in failed: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -457,10 +496,13 @@ class _AuthPageState extends State<AuthPage> {
         ),
         const SizedBox(height: 12),
         // Remember me and Forgot password
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Checkbox(
                   value: _rememberMe,
@@ -495,7 +537,7 @@ class _AuthPageState extends State<AuthPage> {
         ),
         const SizedBox(height: 10),
         OutlinedButton.icon(
-          onPressed: _isLoading ? null : _signInWithGoogle,
+          onPressed: _isLoading ? null : _signInWithSupabaseGoogle,
           icon: Image.asset(
             kGoogleLogoAsset,
             width: 20,
@@ -513,9 +555,24 @@ class _AuthPageState extends State<AuthPage> {
             backgroundColor: const Color(0xFF1A1A1A),
           ),
         ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _isLoading ? null : _signInWithSupabaseFacebook,
+          icon: const Icon(Icons.facebook, color: Colors.white, size: 20),
+          label: const Text(
+            'Continue with Facebook',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(46),
+            side: const BorderSide(color: Colors.white24),
+            backgroundColor: const Color(0xFF1A1A1A),
+          ),
+        ),
         const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Text('Don’t have an account? ',
                 style: TextStyle(color: Colors.white54, fontSize: 12)),

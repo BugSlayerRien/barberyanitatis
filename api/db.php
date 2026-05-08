@@ -7,6 +7,62 @@
 
 declare(strict_types=1);
 
+function load_repository_env(): void
+{
+    static $loaded = false;
+
+    if ($loaded) {
+        return;
+    }
+
+    $loaded = true;
+    $envFile = dirname(__DIR__) . DIRECTORY_SEPARATOR . '.env';
+
+    if (!is_file($envFile) || !is_readable($envFile)) {
+        return;
+    }
+
+    $lines = file($envFile, FILE_IGNORE_NEW_LINES);
+    if ($lines === false) {
+        return;
+    }
+
+    foreach ($lines as $line) {
+        $trimmed = trim($line);
+        if ($trimmed === '' || str_starts_with($trimmed, '#')) {
+            continue;
+        }
+
+        if (str_starts_with($trimmed, 'export ')) {
+            $trimmed = trim(substr($trimmed, 7));
+        }
+
+        $parts = explode('=', $trimmed, 2);
+        if (count($parts) !== 2) {
+            continue;
+        }
+
+        $key = trim($parts[0]);
+        if ($key === '' || getenv($key) !== false) {
+            continue;
+        }
+
+        $value = trim($parts[1]);
+        if ($value !== '') {
+            $first = $value[0];
+            $last = $value[strlen($value) - 1];
+            if (($first === '"' && $last === '"') || ($first === "'" && $last === "'")) {
+                $value = substr($value, 1, -1);
+            }
+        }
+
+        $value = str_replace(['\\n', '\\r', '\\t'], ["\n", "\r", "\t"], $value);
+        putenv($key . '=' . $value);
+        $_ENV[$key] = $value;
+        $_SERVER[$key] = $value;
+    }
+}
+
 function apply_cors_headers(): void
 {
     $origin = trim((string)($_SERVER['HTTP_ORIGIN'] ?? ''));
@@ -40,6 +96,8 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
 
 function get_db_connection(): PDO
 {
+    load_repository_env();
+
     $dsn = trim((string)(getenv('DB_DSN') ?: ''));
     $user = (string)(getenv('DB_USER') ?: 'postgres');
     $pass = (string)(getenv('DB_PASS') ?: '');

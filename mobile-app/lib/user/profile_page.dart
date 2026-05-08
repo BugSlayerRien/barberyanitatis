@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -60,17 +61,70 @@ class _ProfilePageState extends State<ProfilePage> {
         Uri.parse('${ApiConfig.baseUrl}/profile.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'userID': UserSession.userId}),
-      );
+      ).timeout(const Duration(seconds: 10), onTimeout: () {
+        throw Exception('Request timeout: Could not reach server');
+      });
+      
       if (!mounted) return;
-      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+
+      // Check status code first
       if (response.statusCode != 200) {
         setState(() {
           _loading = false;
-          _error = data['error']?.toString() ?? 'Failed to load profile.';
+          _error = 'Server error: ${response.statusCode}';
         });
         return;
       }
+
+      // Check if response is empty
+      if (response.body.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = 'Empty response from server';
+        });
+        return;
+      }
+
+      // Check if response looks like HTML (error page)
+      if (response.body.trim().startsWith('<')) {
+        setState(() {
+          _loading = false;
+          _error = 'Server returned HTML error page. Please try again.';
+        });
+        return;
+      }
+
+      // Safely decode JSON
+      late Map<String, dynamic> data;
+      try {
+        data = jsonDecode(response.body) as Map<String, dynamic>;
+      } catch (e) {
+        setState(() {
+          _loading = false;
+          _error = 'Invalid JSON response from server';
+        });
+        return;
+      }
+
+      // Check for API error field
+      if (data.containsKey('error')) {
+        setState(() {
+          _loading = false;
+          _error = data['error']?.toString() ?? 'Unknown error from server';
+        });
+        return;
+      }
+
+      // Extract profile data
       final profile = data['profile'] as Map<String, dynamic>? ?? {};
+      if (profile.isEmpty) {
+        setState(() {
+          _loading = false;
+          _error = 'No profile data returned';
+        });
+        return;
+      }
+
       setState(() {
         _fullName = profile['fullName']?.toString() ?? UserSession.fullName ?? '';
         _email = profile['email']?.toString() ?? UserSession.email ?? '';
@@ -85,12 +139,25 @@ class _ProfilePageState extends State<ProfilePage> {
         _nameController.text = _fullName;
         _phoneController.text = _phone;
         _loading = false;
+        _error = null;
+      });
+    } on SocketException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Network error: Could not connect to server';
+      });
+    } on TimeoutException catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Connection timeout: Server took too long to respond';
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Failed to load profile: $e';
+        _error = 'Error: ${e.toString()}';
       });
     }
   }

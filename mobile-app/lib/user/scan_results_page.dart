@@ -1,10 +1,16 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'ai_funnel_service.dart';
+import 'appointments_page.dart';
+import 'barber_selection_page.dart';
+import 'booking_guard.dart';
 import 'dashboard_page.dart';
-import 'hairstyle_detail_page.dart';
 import 'haircuts_list_page.dart';
+import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 
 class ScanResultsPage extends StatefulWidget {
@@ -85,33 +91,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
             ElevatedButton(
               onPressed: hasItems
                   ? () async {
-                      final style = _toStyleMap(widget.recommendations[_selectedIndex]);
-                      UserSession.selectedVariantId = style['variantId'] as int?;
-                      UserSession.selectedStyleName = style['name']?.toString();
-                      UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
-
-                      final userId = UserSession.userId;
-                      final variantId = UserSession.selectedVariantId;
-                      if (userId != null && variantId != null) {
-                        await AiFunnelService.saveSelection(
-                          scanSessionId: UserSession.ensureScanSessionId(),
-                          userId: userId,
-                          variantId: variantId,
-                          styleName: UserSession.selectedStyleName ?? 'Style',
-                          faceShape: UserSession.lastScan?['faceShape']?.toString(),
-                          hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
-                          hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
-                          hairLength: UserSession.lastScan?['hairLength']?.toString(),
-                          estimatedMinutes: UserSession.selectedEstimatedMinutes,
-                        );
-                      }
-
-                      if (!context.mounted) {
-                        return;
-                      }
-                      Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)),
-                      );
+                      await _useSelectedStyleDirectly();
                     }
                   : null,
               style: ElevatedButton.styleFrom(
@@ -290,6 +270,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     );
   }
 
+
   String? _selectedPreviewUrl(Map<String, dynamic>? item) {
     if (item == null) {
       return null;
@@ -317,6 +298,104 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     return double.tryParse(value.toString());
   }
 
+  Future<void> _useSelectedStyleDirectly() async {
+    if (widget.recommendations.isEmpty) {
+      return;
+    }
+
+    final selected = widget.recommendations[_selectedIndex.clamp(0, widget.recommendations.length - 1)];
+    final style = _toStyleMap(selected);
+    final variantId = style['variantId'] as int?;
+    if (variantId == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This style cannot be booked yet.')),
+      );
+      return;
+    }
+
+    final userId = UserSession.userId;
+    if (userId == null) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again.')),
+      );
+      return;
+    }
+
+    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+      return;
+    }
+
+    UserSession.selectedVariantId = variantId;
+    UserSession.selectedStyleName = style['name']?.toString();
+    UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+    UserSession.selectedPreviewImages = {
+      'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': style['backViewUrl']?.toString() ?? '',
+    };
+
+    await AiFunnelService.saveSelection(
+      scanSessionId: UserSession.ensureScanSessionId(),
+      userId: userId,
+      variantId: variantId,
+      styleName: UserSession.selectedStyleName ?? 'Style',
+      faceShape: UserSession.lastScan?['faceShape']?.toString(),
+      hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+      hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+      hairLength: UserSession.lastScan?['hairLength']?.toString(),
+      estimatedMinutes: UserSession.selectedEstimatedMinutes,
+      frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+      sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+      backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+    );
+
+    final suggestion = await _fetchSuggestedSlot();
+    if (!context.mounted) {
+      return;
+    }
+    if (suggestion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No available slots found. Please choose manually.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'suggestBestSlot'}),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return null;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['suggestion'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Map<String, dynamic> _toStyleMap(Map<String, dynamic> recommendation) {
     return {
       'name': recommendation['style_name']?.toString() ?? recommendation['styleName']?.toString() ?? 'Style',
@@ -328,6 +407,7 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
       'sideViewUrl': _resolveImage(recommendation['side_view_url'] ?? recommendation['sideViewUrl']) ?? '',
       'backViewUrl': _resolveImage(recommendation['back_view_url'] ?? recommendation['backViewUrl']) ?? '',
       'variantId': recommendation['variant_id'] ?? recommendation['variantId'],
+      'serviceId': recommendation['service_id'] ?? recommendation['serviceID'],
       'estimatedMinutes': _asInt(recommendation['estimated_minutes'] ?? recommendation['estimatedMinutes']),
     };
   }
@@ -342,3 +422,4 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
     return int.tryParse(value.toString());
   }
 }
+

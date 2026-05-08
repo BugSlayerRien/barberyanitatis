@@ -229,6 +229,9 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         appointmentId: appointmentId,
         serviceId: serviceId,
         estimatedMinutes: duration,
+        frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+        sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+        backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
       );
     }
 

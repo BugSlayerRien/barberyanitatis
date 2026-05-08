@@ -202,11 +202,25 @@ try {
         json_response(['error' => 'Missing barberID or slotDate'], 422);
     }
 
+    $capacity = 10;
     $stmt = $pdo->prepare(
-        'SELECT slot_id, slot_time, status
-         FROM time_slots
-         WHERE barber_id = :barber_id AND slot_date = :slot_date
-         ORDER BY slot_time'
+        "SELECT ts.slot_id,
+                ts.slot_time,
+                ts.status,
+                COALESCE(appt.booked_count, 0) AS booked_count,
+                {$capacity} AS capacity
+         FROM time_slots ts
+         LEFT JOIN (
+            SELECT barber_id, appointment_date, start_time, COUNT(*) AS booked_count
+            FROM appointments
+            WHERE status NOT IN ('Cancelled', 'NoShow')
+            GROUP BY barber_id, appointment_date, start_time
+         ) appt
+           ON appt.barber_id = ts.barber_id
+          AND appt.appointment_date = ts.slot_date
+          AND appt.start_time = ts.slot_time
+         WHERE ts.barber_id = :barber_id AND ts.slot_date = :slot_date
+         ORDER BY ts.slot_time"
     );
     $stmt->execute([
         ':barber_id' => $barberID,

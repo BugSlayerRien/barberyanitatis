@@ -1,5 +1,4 @@
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +10,7 @@ import 'booking_guard.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
+import 'haircut_preview_scanner_page.dart';
 import 'saved_haircuts_page.dart';
 import 'suggested_appointment_page.dart';
 import 'widgets/app_top_bar.dart';
@@ -32,6 +32,8 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  late PageController _imagePageController;
+  int _currentImagePage = 0;
   final Map<String, Future<Uint8List>> _webImageCache = {};
   bool _isFavorite = false;
   bool _savingFavorite = false;
@@ -40,6 +42,12 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   @override
   void initState() {
     super.initState();
+    _imagePageController = PageController();
+    UserSession.selectedPreviewImages = {
+      'frontViewUrl': widget.style['image']?.toString() ?? widget.style['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': widget.style['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': widget.style['backViewUrl']?.toString() ?? '',
+    };
     _animationController = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
@@ -50,6 +58,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
 
   @override
   void dispose() {
+    _imagePageController.dispose();
     _animationController.dispose();
     super.dispose();
   }
@@ -67,9 +76,13 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
 
   Future<Uint8List> _fetchWebImageBytes(String url) {
     return _webImageCache.putIfAbsent(url, () async {
-      final response = await http.get(Uri.parse(url));
+      // If it's an asset path, fetch from the web assets directory
+      final fetchUrl = url.startsWith('assets/')
+          ? '/assets/${url.replaceFirst('assets/', '')}'
+          : url;
+      final response = await http.get(Uri.parse(fetchUrl));
       if (response.statusCode != 200) {
-        throw Exception('Image load failed (${response.statusCode})');
+        throw Exception('Image load failed (${response.statusCode}) from $fetchUrl');
       }
       return response.bodyBytes;
     });
@@ -80,13 +93,251 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       future: _fetchWebImageBytes(url),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(color: const Color(0xFF111111));
+          return Container(color: Colors.white);
         }
         if (!snapshot.hasData) {
-          return Container(color: const Color(0xFF111111));
+          debugPrint('[HairstyleDetail] Failed to load web image: ${snapshot.error}');
+          return Container(color: Colors.white);
         }
         return Image.memory(snapshot.data!, fit: BoxFit.cover);
       },
+    );
+  }
+
+  Map<String, String>? _styleAssetSet() {
+    final styleName = widget.style['name']?.toString().trim().toLowerCase() ?? '';
+    switch (styleName) {
+      case 'blowout taper':
+        return {
+          'front': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+          'left': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+          'right': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
+        };
+      case 'buzz cut':
+        return {
+          'front': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
+          'left': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
+          'right': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
+        };
+      case 'low fade':
+        return {
+          'front': 'assets/images/overlays/low_fade/low_fade_front.png',
+          'left': 'assets/images/overlays/low_fade/low_fade_left.png',
+          'right': 'assets/images/overlays/low_fade/low_fade_right.png',
+        };
+      case 'french crop':
+        return {
+          'front': 'assets/images/overlays/french_crop/french_crop_front.png',
+          'left': 'assets/images/overlays/french_crop/french_crop_left.png',
+          'right': 'assets/images/overlays/french_crop/french_crop_right.png',
+        };
+      default:
+        return null;
+    }
+  }
+
+  String? _resolveDetailImage(String? raw) {
+    final assetSet = _styleAssetSet();
+    if (assetSet != null) {
+      final front = assetSet['front'];
+      final left = assetSet['left'];
+      final right = assetSet['right'];
+      if (raw == widget.style['image']?.toString() || raw == widget.style['frontViewUrl']?.toString()) {
+        return front;
+      }
+      if (raw == widget.style['sideViewUrl']?.toString()) {
+        return left;
+      }
+      if (raw == widget.style['backViewUrl']?.toString()) {
+        return right;
+      }
+      return front;
+    }
+
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    return raw;
+  }
+
+  List<_DetailImageEntry> _detailImageEntries() {
+    final entries = <_DetailImageEntry>[];
+    final seen = <String>{};
+
+    void addEntry(String label, String? raw) {
+      final resolved = _resolveDetailImage(raw);
+      if (resolved == null || resolved.isEmpty) {
+        return;
+      }
+      if (seen.add(resolved)) {
+        entries.add(_DetailImageEntry(label: label, url: resolved));
+      }
+    }
+
+    addEntry('Front', widget.style['image']?.toString() ?? widget.style['frontViewUrl']?.toString());
+    addEntry('Left', widget.style['sideViewUrl']?.toString());
+    addEntry('Right', widget.style['backViewUrl']?.toString());
+
+    if (entries.isEmpty) {
+      final fallback = _resolveDetailImage(widget.style['image']?.toString());
+      if (fallback != null && fallback.isNotEmpty) {
+        entries.add(_DetailImageEntry(label: 'Front', url: fallback));
+      }
+    }
+
+    return entries;
+  }
+
+  Widget _buildDetailImage(String url) {
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        fit: BoxFit.contain,
+        filterQuality: FilterQuality.high,
+        errorBuilder: (context, error, stackTrace) {
+          debugPrint('[HairstyleDetail] Asset load failed for $url: $error');
+          return Container(color: Colors.white);
+        },
+      );
+    }
+
+    return Image.network(
+      url,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (context, error, stackTrace) {
+        debugPrint('[HairstyleDetail] Network load failed for $url: $error');
+        return Container(color: Colors.white);
+      },
+    );
+  }
+
+  Widget _buildDetailCarousel() {
+    final images = _detailImageEntries();
+    if (images.isEmpty) {
+      return Container(color: Colors.white);
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _imagePageController,
+          onPageChanged: (index) {
+            if (!mounted) return;
+            setState(() => _currentImagePage = index);
+          },
+          itemCount: images.length,
+          itemBuilder: (context, index) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Center(child: _buildDetailImage(images[index].url)),
+                Positioned(
+                  left: 16,
+                  top: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.90),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      images[index].label,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        if (images.length > 1)
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: _currentImagePage > 0
+                    ? () => _imagePageController.previousPage(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                        )
+                    : null,
+                icon: const Icon(Icons.chevron_left, color: Colors.black87),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.85),
+                ),
+              ),
+            ),
+          ),
+        if (images.length > 1)
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: _currentImagePage < images.length - 1
+                    ? () => _imagePageController.nextPage(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                        )
+                    : null,
+                icon: const Icon(Icons.chevron_right, color: Colors.black87),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.85),
+                ),
+              ),
+            ),
+          ),
+        if (images.length > 1)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 14,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(images.length, (index) {
+                final active = index == _currentImagePage;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: active ? 12 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: active ? Colors.black87 : Colors.black26,
+                    shape: BoxShape.circle,
+                  ),
+                );
+              }),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDetailSurface() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(color: Colors.white),
+        _buildDetailCarousel(),
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Colors.black.withOpacity(0.16)],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -114,8 +365,9 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (!mounted) return;
       setState(() => _isFavorite = data['isFavorite'] == true);
-    } catch (_) {
-      // Ignore
+    }
+    catch (_) {
+      // Ignore favorite status errors so the page still loads.
     }
   }
 
@@ -262,18 +514,16 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (_hasImage(widget.style['image']?.toString()))
-                      kIsWeb
-                          ? _buildWebImage(widget.style['image'].toString())
-                          : Image(image: _buildImageProvider(widget.style['image'].toString()), fit: BoxFit.cover)
-                    else
-                      Container(color: const Color(0xFF111111)),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                    Container(color: Colors.white),
+                    _buildDetailCarousel(),
+                    IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black.withOpacity(0.28)],
+                          ),
                         ),
                       ),
                     ),
@@ -302,15 +552,6 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                                   fontSize: 28,
                                   fontWeight: FontWeight.bold,
                                 ),
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Text(
-                                    widget.style['rating']?.toString() ?? '★★★★★',
-                                    style: const TextStyle(color: Color(0xFFA99941), fontSize: 14, fontWeight: FontWeight.w600),
-                                  ),
-                                ],
                               ),
                               const SizedBox(height: 12),
                               Row(
@@ -368,6 +609,8 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         }
 
                         UserSession.selectedVariantId = normalizedVariantId;
+                        final serviceIdValue = widget.style['serviceId'] ?? widget.style['service_id'] ?? widget.style['serviceID'];
+                        UserSession.selectedServiceId = int.tryParse(serviceIdValue?.toString() ?? '');
                         UserSession.selectedStyleName = widget.style['name']?.toString();
                         UserSession.selectedEstimatedMinutes = int.tryParse(widget.style['estimatedMinutes']?.toString() ?? '');
 
@@ -416,7 +659,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     OutlinedButton(
                       onPressed: () {
                         Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+                          MaterialPageRoute(
+                            builder: (_) => HaircutPreviewScannerPage(
+                              style: widget.style,
+                            ),
+                          ),
                         );
                       },
                       style: OutlinedButton.styleFrom(
@@ -429,21 +676,6 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                       child: const Text(
                         'Try Haircut',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.4),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: Colors.black,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size.fromHeight(56),
-                        side: const BorderSide(color: Colors.white, width: 2),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: const Text(
-                        'Choose Another',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.5),
                       ),
                     ),
                     const SizedBox(height: 30),
@@ -476,4 +708,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       ),
     );
   }
+}
+
+class _DetailImageEntry {
+  final String label;
+  final String url;
+
+  const _DetailImageEntry({required this.label, required this.url});
 }

@@ -13,11 +13,11 @@ import 'ai_funnel_service.dart';
 import '../services/calibration_api.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
+import 'suggested_appointment_page.dart';
 import 'ai_chatbot_page.dart';
 import 'dashboard_page.dart';
 import 'booking_guard.dart';
 import 'haircuts_list_page.dart';
-import 'suggested_appointment_page.dart';
 import '../main.dart';
 import 'scanner/overlay_models.dart';
 import 'scanner/attachment_engine.dart';
@@ -29,7 +29,10 @@ import 'web_camera_view_stub.dart'
 import 'widgets/app_top_bar.dart';
 
 class AiFaceScanPage extends StatefulWidget {
-  const AiFaceScanPage({super.key});
+  final Map<String, dynamic>? presetRecommendation;
+  final bool previewOnly;
+
+  const AiFaceScanPage({super.key, this.presetRecommendation, this.previewOnly = false});
 
   @override
   State<AiFaceScanPage> createState() => _AiFaceScanPageState();
@@ -66,6 +69,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   double? _smoothedEyeMidX;
   double? _smoothedEyeDistanceNorm;
   Rect? _lastStableFaceRect;
+  Rect? _lastCenteredFaceRect;
   DateTime? _overlayHoldUntil;
 
   String _faceShape = 'Oval';
@@ -112,12 +116,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   static const double _hairEdgeOpacity = 0.12;
   static const bool _showOverlayDebug = false;
   static const OverlayImageSet _sampleImageOverlay = OverlayImageSet(
-    front: 'assets/images/overlays/sample_hair_front.png',
-    left: 'assets/images/overlays/sample_hair_left.png',
-    right: 'assets/images/overlays/sample_hair_right.png',
+    front: 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+    left: 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+    right: 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
   );
   static const String _sampleHairModel3d = 'assets/models/blowouttaper.glb';
   static const bool _enable3DHairOverlay = false;
+
+  static const Map<String, OverlayImageSet> _styleOverlayImages = {
+    'blowout taper': OverlayImageSet(
+      front: 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+      left: 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+      right: 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
+    ),
+    'buzz cut': OverlayImageSet(
+      front: 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
+      left: 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
+      right: 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
+    ),
+    'low fade': OverlayImageSet(
+      front: 'assets/images/overlays/low_fade/low_fade_front.png',
+      left: 'assets/images/overlays/low_fade/low_fade_left.png',
+      right: 'assets/images/overlays/low_fade/low_fade_right.png',
+    ),
+    'french crop': OverlayImageSet(
+      front: 'assets/images/overlays/french_crop/french_crop_front.png',
+      left: 'assets/images/overlays/french_crop/french_crop_left.png',
+      right: 'assets/images/overlays/french_crop/french_crop_right.png',
+    ),
+  };
 
   static const Map<String, OverlayCalibration> _styleCalibration = {
     'blowout taper': OverlayCalibration(
@@ -128,20 +155,80 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hairClipFactor: 0.76,
       visualScale: 1.18,
       yawShiftFactor: 0.06),
+    'buzz cut': OverlayCalibration(
+      widthScale: 0.96,
+      heightScale: 0.94,
+      xOffset: 0.00,
+      yOffset: -0.08,
+      hairClipFactor: 0.85,
+      visualScale: 0.98,
+      yawShiftFactor: 0.03),
+    'low fade': OverlayCalibration(
+      widthScale: 1.04,
+      heightScale: 1.06,
+      xOffset: 0.00,
+      yOffset: -0.16,
+      hairClipFactor: 0.80,
+      visualScale: 1.04,
+      yawShiftFactor: 0.05),
+    'french crop': OverlayCalibration(
+      widthScale: 1.06,
+      heightScale: 1.08,
+      xOffset: 0.00,
+      yOffset: -0.18,
+      hairClipFactor: 0.78,
+      visualScale: 1.06,
+      yawShiftFactor: 0.05),
   };
 
   static const List<Map<String, dynamic>> _hardcodedCatalog = [
     {
       'variant_id': 9001,
       'style_name': 'Blowout Taper',
-      'style_code': 'STYLE-BLOWOUT-TAPER-HC',
+      'style_code': 'HC-BLOWOUT-TAPER',
       'face_shape': 'Oval',
       'hair_texture': 'Straight',
-      'front_view_url': '/database/assets/hairstyles/blowout_taper_front.png',
-      'side_view_url': '/database/assets/hairstyles/blowout_taper_left.png',
-      'back_view_url': '/database/assets/hairstyles/blowout_taper_right.png',
+      'front_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+      'side_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+      'back_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
       'confidence_score': 0.92,
       'estimated_minutes': 35,
+    },
+    {
+      'variant_id': 9004,
+      'style_name': 'Buzz Cut',
+      'style_code': 'HC-BUZZ-CUT',
+      'face_shape': 'Oval',
+      'hair_texture': 'Straight',
+      'front_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
+      'side_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
+      'back_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
+      'confidence_score': 0.90,
+      'estimated_minutes': 15,
+    },
+    {
+      'variant_id': 9005,
+      'style_name': 'Low Fade',
+      'style_code': 'HC-LOW-FADE',
+      'face_shape': 'Oval',
+      'hair_texture': 'Straight',
+      'front_view_url': 'assets/images/overlays/low_fade/low_fade_front.png',
+      'side_view_url': 'assets/images/overlays/low_fade/low_fade_left.png',
+      'back_view_url': 'assets/images/overlays/low_fade/low_fade_right.png',
+      'confidence_score': 0.90,
+      'estimated_minutes': 30,
+    },
+    {
+      'variant_id': 9006,
+      'style_name': 'French Crop',
+      'style_code': 'HC-FRENCH-CROP',
+      'face_shape': 'Square',
+      'hair_texture': 'Straight',
+      'front_view_url': 'assets/images/overlays/french_crop/french_crop_front.png',
+      'side_view_url': 'assets/images/overlays/french_crop/french_crop_left.png',
+      'back_view_url': 'assets/images/overlays/french_crop/french_crop_right.png',
+      'confidence_score': 0.90,
+      'estimated_minutes': 25,
     },
     {
       'variant_id': 9002,
@@ -174,6 +261,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _attachmentEngine = createAttachmentEngine(AttachmentEngineMode.auto);
+    _applyPresetRecommendation();
     _loadCalibration();
     _setup();
   }
@@ -270,7 +358,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _isSettingUp = true;
 
     try {
+      debugPrint('[AiFaceScan] Initializing face detector...');
       await _detector.initialize();
+      debugPrint('[AiFaceScan] Face detector initialized successfully');
+      
       if (kIsWeb) {
         if (_webCameraReady) {
           return;
@@ -292,23 +383,33 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       }
 
       if (_camera != null && _camera!.value.isInitialized) {
+        debugPrint('[AiFaceScan] Camera already initialized, skipping...');
         return;
       }
 
+      debugPrint('[AiFaceScan] Getting available cameras...');
       final cameras = await availableCameras();
+      debugPrint('[AiFaceScan] Found ${cameras.length} cameras');
+      
       final front = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
         orElse: () => cameras.first,
       );
 
+      debugPrint('[AiFaceScan] Initializing camera controller...');
       final controller = CameraController(
         front,
-        ResolutionPreset.medium,
+        ResolutionPreset.low,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.yuv420,
+        imageFormatGroup: defaultTargetPlatform == TargetPlatform.android
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
       );
 
       await controller.initialize();
+      debugPrint('[AiFaceScan] Camera controller initialized successfully');
+      
+      debugPrint('[AiFaceScan] Starting image stream...');
       await controller.startImageStream((image) async {
         if (_busy || !mounted) return;
         _busy = true;
@@ -357,11 +458,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             _faceSeenAt ??= now;
             _faceMissingAt = null;
             _stableFaceFrames += 1;
-            final stableWindowReached =
-                now.difference(_faceSeenAt!) >= _faceStableDuration;
-            _faceSessionReady = stableWindowReached &&
-                _stableFaceFrames >= _minimumStableFrames;
-
             final normalized = Rect.fromLTWH(
               (frame.boundingBox.left / frame.imageSize.width).clamp(0.0, 1.0),
               (frame.boundingBox.top / frame.imageSize.height).clamp(0.0, 1.0),
@@ -369,6 +465,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               (frame.boundingBox.height / frame.imageSize.height)
                   .clamp(0.0, 1.0),
             );
+            final stableWindowReached =
+              now.difference(_faceSeenAt!) >= _faceStableDuration;
+            final centeredInGuide = _isFaceInsideScanGuide(normalized);
+            _faceSessionReady = stableWindowReached &&
+              _stableFaceFrames >= _minimumStableFrames &&
+              centeredInGuide;
             final stabilizedInput =
               _stabilizeIncomingRect(_smoothedFaceRect, normalized);
             final smoothedRect =
@@ -409,10 +511,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               if (_isLikelyStableFace(smoothedRect)) {
                 _lastStableFaceRect = smoothedRect;
                 _overlayHoldUntil = now.add(_overlayHoldDuration);
+                if (smoothedYaw.abs() < 8 && centeredInGuide) {
+                  _lastCenteredFaceRect = smoothedRect;
+                }
               }
                 _status = _faceSessionReady
-                  ? 'Face is steady. Getting haircut suggestions...'
-                  : 'Keep still for a second...';
+                  ? 'Face is centered and steady. Starting automatically...'
+                  : (centeredInGuide
+                      ? 'Keep still inside the guide...'
+                      : 'Move your face into the guide marks.');
             });
 
             if (_shouldAutoFetchRecommendations()) {
@@ -420,10 +527,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             }
             _maybeSyncServerCalibration();
           }
-        } catch (_) {
+        } catch (e, st) {
+          debugPrint('[Face Detector Error] $e\nStackTrace: $st');
           if (!mounted) return;
           setState(() {
-            _status = 'Scanner paused. Keep the camera open.';
+            _status = 'Camera stream error. Retrying...';
           });
         } finally {
           _busy = false;
@@ -491,9 +599,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _faceMissingAt = null;
     _stableFaceFrames += 1;
     final stableWindowReached =
-        now.difference(_faceSeenAt!) >= _faceStableDuration;
-    _faceSessionReady =
-        stableWindowReached && _stableFaceFrames >= _minimumStableFrames;
+      now.difference(_faceSeenAt!) >= _faceStableDuration;
+    final centeredInGuide = _isFaceInsideScanGuide(rect);
+    _faceSessionReady = stableWindowReached &&
+      _stableFaceFrames >= _minimumStableFrames &&
+      centeredInGuide;
 
     final smoothedRect = _smoothRect(_smoothedFaceRect,
       _stabilizeIncomingRect(_smoothedFaceRect, rect), _rectSmoothingAlpha);
@@ -537,10 +647,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       if (_isLikelyStableFace(smoothedRect)) {
         _lastStableFaceRect = smoothedRect;
         _overlayHoldUntil = now.add(_overlayHoldDuration);
+        if (smoothedYaw.abs() < 8 && centeredInGuide) {
+          _lastCenteredFaceRect = smoothedRect;
+        }
       }
         _status = _faceSessionReady
-          ? 'Face tracking is on. Hair preview follows your movement.'
-          : 'Face found. Hold still while we prepare suggestions...';
+          ? 'Face is centered and steady. Starting automatically...'
+          : (centeredInGuide
+              ? 'Keep still inside the guide...'
+              : 'Move your face into the guide marks.');
     });
 
     if (_shouldAutoFetchRecommendations()) {
@@ -550,8 +665,21 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   bool _shouldAutoFetchRecommendations() {
-    if (_normalizedFaceRect == null || !_faceSessionReady) {
+    if (widget.previewOnly) {
       return false;
+    }
+    if (_normalizedFaceRect == null || !_faceSessionReady) {
+      if (_normalizedFaceRect == null) {
+        return false;
+      }
+      if (!_isLikelyStableFace(_normalizedFaceRect!)) {
+        return false;
+      }
+    }
+    if (!_isFaceInsideScanGuide(_normalizedFaceRect!)) {
+      if (!_isLikelyStableFace(_normalizedFaceRect!)) {
+        return false;
+      }
     }
     if (_loadingRecommendations || _autoProcessingStarted) {
       return false;
@@ -570,6 +698,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     } else {
       _fetchRecommendations(autoTriggered: true);
     }
+  }
+
+  bool _isFaceInsideScanGuide(Rect face) {
+    final center = face.center;
+    final centerOffsetX = (center.dx - 0.5).abs();
+    final centerOffsetY = (center.dy - 0.5).abs();
+    final area = face.width * face.height;
+    return centerOffsetX <= 0.14 &&
+        centerOffsetY <= 0.16 &&
+        area >= 0.05 &&
+        area <= 0.24;
   }
 
   void _maybeSyncServerCalibration() {
@@ -717,6 +856,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _autoProcessingStarted = true;
     }
 
+    if (widget.presetRecommendation != null && autoTriggered) {
+      return;
+    }
+
     if (kIsWeb) {
       await _fetchRecommendationsWeb(autoTriggered: autoTriggered);
       return;
@@ -756,37 +899,26 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             data['error']?.toString() ?? 'Failed to fetch recommendations');
       }
 
-      final variants = (data['recommendations'] as List<dynamic>? ??
+      var recommendations = (data['recommendations'] as List<dynamic>? ??
               data['variants'] as List<dynamic>? ??
               [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
 
-      if (variants.isEmpty) {
-        final fallback = await _loadLibraryFallback();
-        final rankedFallback = _rankRecommendations(
-            fallback.isEmpty ? _hardcodedFallback() : fallback);
-        if (!mounted) return;
-        setState(() {
-          _recommendations
-            ..clear()
-            ..addAll(_topThreeRecommendations(rankedFallback));
-          _selectedIndex = 0;
-          _markOverlayReadyAfterProcessing();
-          _status = 'Suggestions are ready. Pick one to preview.';
-        });
-      } else {
-        final ranked = _rankRecommendations(variants);
-        if (!mounted) return;
-        setState(() {
-          _recommendations
-            ..clear()
-            ..addAll(_topThreeRecommendations(ranked));
-          _selectedIndex = 0;
-          _markOverlayReadyAfterProcessing();
-          _status = 'Suggestions are ready. Pick one to preview.';
-        });
-      }
+      final libraryFallback = await _loadLibraryFallback();
+      recommendations = _mergeRecommendations(recommendations, libraryFallback);
+      recommendations = _mergeRecommendations(recommendations, _hardcodedFallback());
+
+      final ranked = _rankRecommendations(recommendations);
+      if (!mounted) return;
+      setState(() {
+        _recommendations
+          ..clear()
+          ..addAll(_topThreeRecommendations(ranked));
+        _selectedIndex = 0;
+        _markOverlayReadyAfterProcessing();
+        _status = 'Suggestions are ready. Pick one to preview.';
+      });
 
       UserSession.lastScan = {
         'faceShape': _faceShape,
@@ -794,6 +926,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         'headYaw': _headYaw,
       };
       UserSession.lastRecommendations = _recommendations;
+      UserSession.hasRecentRecommendations = true;
 
       UserSession.activeScanSessionId = null;
 
@@ -827,6 +960,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       {bool showToastOnError = true, bool autoTriggered = false}) async {
     if (autoTriggered) {
       _autoProcessingStarted = true;
+    }
+
+    if (widget.presetRecommendation != null && autoTriggered) {
+      return;
     }
 
     if (_normalizedFaceRect == null) {
@@ -890,13 +1027,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
 
-      if (recommendations.isEmpty) {
-        recommendations = await _loadLibraryFallback();
-      }
-
-      if (recommendations.isEmpty) {
-        recommendations = _hardcodedFallback();
-      }
+      final libraryFallback = await _loadLibraryFallback();
+      recommendations = _mergeRecommendations(recommendations, libraryFallback);
+      recommendations = _mergeRecommendations(recommendations, _hardcodedFallback());
 
       if (recommendations.isEmpty) {
         throw Exception('No available hairstyle variants yet');
@@ -919,7 +1052,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         'faceShape': _faceShape,
         'hairTexture': _hairTexture,
       };
-      UserSession.lastRecommendations = recommendations;
+      UserSession.lastRecommendations = _recommendations;
+      UserSession.hasRecentRecommendations = true;
 
       UserSession.activeScanSessionId = null;
 
@@ -955,13 +1089,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<List<Map<String, dynamic>>> _loadLibraryFallback() async {
+    debugPrint('[AiFaceScan] Loading hairstyle library from ${ApiConfig.baseUrl}/haircuts.php');
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/haircuts.php'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'action': 'listLibrary'}),
     );
 
+    debugPrint('[AiFaceScan] Library response status=${response.statusCode} bytes=${response.bodyBytes.length}');
+
     if (response.statusCode != 200 || response.body.isEmpty) {
+      debugPrint('[AiFaceScan] Library API failed or returned empty payload, using hardcoded catalog');
       return _hardcodedFallback();
     }
 
@@ -970,9 +1108,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
     if (styles.isEmpty) {
+      debugPrint('[AiFaceScan] Library API returned 0 hairstyles, using hardcoded catalog');
       return _hardcodedFallback();
     }
-    return styles.take(8).toList();
+
+    debugPrint('[AiFaceScan] Library API returned ${styles.length} hairstyles: ${styles.map((style) => style['style_name'] ?? style['styleName'] ?? 'unknown').take(12).join(', ')}');
+    return styles;
   }
 
   List<Map<String, dynamic>> _hardcodedFallback() {
@@ -988,12 +1129,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
     final yaw = (_headYaw ?? 0).clamp(-60.0, 60.0);
     final yawAbsNorm = (yaw.abs() / 34.0).clamp(0.0, 1.0);
-    final frontOpacity = (1.0 - (yawAbsNorm * 0.58)).clamp(0.42, 1.0);
-    final sideOpacity = (0.16 + (yawAbsNorm * 0.84)).clamp(0.0, 1.0);
+    final frontOpacity = (1.0 - (yawAbsNorm * 0.45)).clamp(0.60, 1.0);
+    final sideOpacity = ((yawAbsNorm - 0.12) / 0.38).clamp(0.0, 1.0);
+    final styleName = (recommendation?['style_name']?.toString() ??
+            recommendation?['styleName']?.toString() ??
+            '')
+        .trim();
 
-    final frontImage = _sampleImageOverlay.front;
-    final sideImage = yaw >= 0 ? _sampleImageOverlay.left : _sampleImageOverlay.right;
-    final sideAlignment = yaw >= 0 ? Alignment.centerLeft : Alignment.centerRight;
+    // Resolve overlay images based on style name from recommendation
+    final overlayImageSet = _resolveOverlayImageSet(recommendation);
+    final frontImage = overlayImageSet.front;
+    final sideImage = yaw >= 0 ? overlayImageSet.right : overlayImageSet.left;
+    final frontAsset = _assetPath(frontImage);
+    final sideAsset = _assetPath(sideImage);
+    
+    debugPrint('[AiFaceScan] === Overlay Rendering Debug ===');
+    debugPrint('[AiFaceScan] Recommendation keys: ${recommendation?.keys.toList()}');
+    debugPrint('[AiFaceScan] Full recommendation: $recommendation');
+    debugPrint('[AiFaceScan] styleName="$styleName" yaw=${yaw.toStringAsFixed(1)}');
+    debugPrint('[AiFaceScan] frontImage=$frontImage');
+    debugPrint('[AiFaceScan] sideImage=$sideImage');
+    debugPrint('[AiFaceScan] frontOpacity=$frontOpacity sideOpacity=$sideOpacity');
+    debugPrint('[AiFaceScan] === End Debug ===');
+    final sideAlignment = Alignment.center;
+    final sideInset = (0.50 - (yawAbsNorm * 0.06)).clamp(0.40, 0.52).toDouble();
+    final sideStretchX = (1.0 + (yawAbsNorm * 0.20)).clamp(1.0, 1.24).toDouble();
+    final sideStretchY = (1.0 + (yawAbsNorm * 0.06)).clamp(1.0, 1.10).toDouble();
+    const sideNudgeX = 0.0;
+    const sideFadeBegin = Alignment.centerLeft;
+    const sideFadeEnd = Alignment.centerRight;
 
     return ClipRect(
       child: Align(
@@ -1009,25 +1173,59 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                 Opacity(
                   opacity: frontOpacity,
                   child: Image.asset(
-                    frontImage,
+                    frontAsset,
                     fit: BoxFit.contain,
                     alignment: Alignment.topCenter,
                     filterQuality: FilterQuality.medium,
                     errorBuilder: (context, error, stackTrace) {
+                      debugPrint('[AiFaceScan] Failed to load front overlay asset: $frontImage | $error');
                       return const ColoredBox(color: Colors.transparent);
                     },
                   ),
                 ),
                 Opacity(
                   opacity: sideOpacity,
-                  child: Image.asset(
-                    sideImage,
-                    fit: BoxFit.contain,
-                    alignment: Alignment.topCenter,
-                    filterQuality: FilterQuality.medium,
-                    errorBuilder: (context, error, stackTrace) {
-                      return const ColoredBox(color: Colors.transparent);
-                    },
+                  child: Align(
+                    alignment: sideAlignment,
+                    child: ClipRect(
+                      child: Align(
+                        alignment: sideAlignment,
+                        widthFactor: sideInset,
+                        child: ShaderMask(
+                          shaderCallback: (rect) {
+                            return LinearGradient(
+                              begin: sideFadeBegin,
+                              end: sideFadeEnd,
+                              colors: const [
+                                Colors.white,
+                                Colors.white,
+                                Colors.transparent,
+                              ],
+                              stops: const [0.0, 0.62, 1.0],
+                            ).createShader(rect);
+                          },
+                          blendMode: BlendMode.dstIn,
+                          child: Transform.translate(
+                            offset: Offset(sideNudgeX, 0),
+                            child: Transform.scale(
+                              scaleX: sideStretchX,
+                              scaleY: sideStretchY,
+                              alignment: sideAlignment,
+                              child: Image.asset(
+                                sideAsset,
+                                fit: BoxFit.cover,
+                                alignment: sideAlignment,
+                                filterQuality: FilterQuality.medium,
+                                errorBuilder: (context, error, stackTrace) {
+                                  debugPrint('[AiFaceScan] Failed to load side overlay asset: $sideImage | $error');
+                                  return const ColoredBox(color: Colors.transparent);
+                                },
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 if (yawAbsNorm > 0.08)
@@ -1038,17 +1236,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                         alignment: sideAlignment,
                         widthFactor: 0.46,
                         child: Opacity(
-                          opacity: (yawAbsNorm * 0.48).clamp(0.0, 0.48),
+                          opacity: (yawAbsNorm * 0.48 * sideOpacity).clamp(0.0, 0.48),
                           child: Transform.scale(
                             scaleX: 1.14,
                             scaleY: 1.03,
                             alignment: sideAlignment,
                             child: Image.asset(
-                              sideImage,
+                              sideAsset,
                               fit: BoxFit.cover,
                               alignment: sideAlignment,
                               filterQuality: FilterQuality.medium,
                               errorBuilder: (context, error, stackTrace) {
+                                debugPrint('[AiFaceScan] Failed to load side overlay asset: $sideImage | $error');
                                 return const ColoredBox(
                                     color: Colors.transparent);
                               },
@@ -1137,6 +1336,45 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     UserSession.lastRecommendations = [defaultStyle];
   }
 
+  void _applyPresetRecommendation() {
+    final preset = widget.presetRecommendation;
+    if (preset == null) {
+      return;
+    }
+
+    final normalized = _normalizePresetRecommendation(preset);
+    _recommendations
+      ..clear()
+      ..add(normalized);
+    _selectedIndex = 0;
+    _status = 'Previewing your selected haircut. Tap Get Top 3 to update.';
+    if (!widget.previewOnly) {
+      UserSession.lastRecommendations = [normalized];
+      UserSession.hasRecentRecommendations = true;
+    }
+  }
+
+  Map<String, dynamic> _normalizePresetRecommendation(Map<String, dynamic> preset) {
+    final name = preset['style_name'] ?? preset['styleName'] ?? preset['name'];
+    final front = preset['front_view_url'] ?? preset['frontViewUrl'] ?? preset['image'];
+    final side = preset['side_view_url'] ?? preset['sideViewUrl'] ?? preset['side'];
+    final back = preset['back_view_url'] ?? preset['backViewUrl'] ?? preset['back'];
+    return {
+      'style_name': name?.toString() ?? 'Style',
+      'style_code': preset['style_code'] ?? preset['styleCode'],
+      'face_shape': preset['face_shape'] ?? preset['faceShape'],
+      'hair_texture': preset['hair_texture'] ?? preset['hairTexture'],
+      'front_view_url': front?.toString() ?? '',
+      'side_view_url': side?.toString() ?? '',
+      'back_view_url': back?.toString() ?? '',
+      'confidence_score': preset['confidence_score'] ?? preset['confidenceScore'] ?? 0,
+      'description': preset['description'] ?? 'Selected from library',
+      'variant_id': preset['variant_id'] ?? preset['variantId'],
+      'service_id': preset['service_id'] ?? preset['serviceId'] ?? preset['serviceID'],
+      'estimated_minutes': preset['estimated_minutes'] ?? preset['estimatedMinutes'],
+    };
+  }
+
   void _markOverlayReadyAfterProcessing() {
     final now = DateTime.now();
     final bestFace = _normalizedFaceRect ?? _smoothedFaceRect;
@@ -1168,9 +1406,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final media = MediaQuery.of(context);
     final isPortrait = media.orientation == Orientation.portrait;
     if (isPortrait) {
-      return (media.size.height * 0.68).clamp(430.0, 760.0);
+      return (media.size.height * 0.62).clamp(360.0, 640.0);
     }
-    return (media.size.height * 0.82).clamp(320.0, 560.0);
+    return (media.size.height * 0.72).clamp(280.0, 480.0);
   }
 
   @override
@@ -1180,9 +1418,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       appBar: AppTopBar(
         showBack: true,
         onBack: () {
-          Navigator.of(context).pushReplacement(
-            MaterialPageRoute(builder: (_) => const DashboardPage()),
-          );
+          if (widget.previewOnly) {
+            Navigator.of(context).pop();
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const DashboardPage()),
+            );
+          }
         },
       ),
       floatingActionButton: Padding(
@@ -1253,80 +1495,131 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                         const SizedBox(height: 12),
                         _buildScannerCard(),
                         const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            onPressed:
-                                _recommendations.isEmpty || _bookingInFlight
-                                    ? null
-                                    : () => _useSelectedStyle(),
-                            style: ElevatedButton.styleFrom(
-                              minimumSize: const Size.fromHeight(50),
-                              backgroundColor: const Color(0xFFA99941),
-                              foregroundColor: Colors.black,
-                            ),
-                            child: _bookingInFlight
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: Colors.black,
-                                    ),
-                                  )
-                                : const Text('Proceed to Booking'),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-                        if (_loadingRecommendations)
-                          const Padding(
-                            padding: EdgeInsets.only(bottom: 8),
-                            child: LinearProgressIndicator(
-                              minHeight: 3,
-                              backgroundColor: Color(0xFF1A1A1A),
-                              valueColor:
-                                  AlwaysStoppedAnimation<Color>(Colors.white70),
+                        if (widget.previewOnly) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _recommendations.isEmpty || _bookingInFlight
+                                      ? null
+                                      : () => _useSelectedStyle(),
+                              style: ElevatedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(50),
+                                backgroundColor: const Color(0xFFA99941),
+                                foregroundColor: Colors.black,
+                              ),
+                              child: _bookingInFlight
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  : const Text('Confirm and Proceed'),
                             ),
                           ),
-                        const Text(
-                          'Top 3 results',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        _buildTopThreePanel(),
-                        const SizedBox(height: 10),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (_) => const HaircutsListPage(),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.folder_open, color: Colors.white),
-                            label: const Text(
-                              'Haircut Library',
-                              style: TextStyle(color: Colors.white),
-                            ),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white24),
-                              backgroundColor: const Color(0xFF121212),
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const HaircutsListPage(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.folder_open, color: Colors.white),
+                              label: const Text(
+                                'Choose Another Haircut',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white24),
+                                backgroundColor: const Color(0xFF121212),
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'Open the bottom panel for quick actions and booking.',
-                          style: TextStyle(color: Colors.white54, fontSize: 11),
-                        ),
-                        const SizedBox(height: 10),
+                          const SizedBox(height: 10),
+                        ] else ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton(
+                              onPressed:
+                                  _recommendations.isEmpty || _bookingInFlight
+                                      ? null
+                                      : () => _useSelectedStyle(),
+                              style: ElevatedButton.styleFrom(
+                                minimumSize: const Size.fromHeight(50),
+                                backgroundColor: const Color(0xFFA99941),
+                                foregroundColor: Colors.black,
+                              ),
+                              child: _bookingInFlight
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  : const Text('Proceed to Booking'),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          if (_loadingRecommendations)
+                            const Padding(
+                              padding: EdgeInsets.only(bottom: 8),
+                              child: LinearProgressIndicator(
+                                minHeight: 3,
+                                backgroundColor: Color(0xFF1A1A1A),
+                                valueColor:
+                                    AlwaysStoppedAnimation<Color>(Colors.white70),
+                              ),
+                            ),
+                          const Text(
+                            'Top 3 results',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          _buildTopThreePanel(),
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => const HaircutsListPage(),
+                                  ),
+                                );
+                              },
+                              icon: const Icon(Icons.folder_open, color: Colors.white),
+                              label: const Text(
+                                'Haircut Library',
+                                style: TextStyle(color: Colors.white),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white24),
+                                backgroundColor: const Color(0xFF121212),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Open the bottom panel for quick actions and booking.',
+                            style: TextStyle(color: Colors.white54, fontSize: 11),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
                       ],
                     ),
                   ),
@@ -1361,51 +1654,60 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             elevation: 14,
             borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 10),
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
               decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: Colors.white12)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 34,
-                        height: 4,
-                        margin: const EdgeInsets.only(right: 10),
-                        decoration: BoxDecoration(
-                          color: Colors.white38,
-                          borderRadius: BorderRadius.circular(99),
+                  SizedBox(
+                    height: 32,
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 30,
+                          height: 4,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white38,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
                         ),
-                      ),
-                      Expanded(
-                        child: Text(
-                          _controlsSheetExpanded
-                              ? 'Quick Actions'
-                              : 'Quick actions',
-                          style: const TextStyle(color: Colors.white70, fontSize: 12),
+                        Expanded(
+                          child: Text(
+                            _controlsSheetExpanded
+                                ? 'Quick Actions'
+                                : 'Quick actions',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                              height: 1.0,
+                            ),
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: _controlsSheetExpanded
-                            ? 'Slide down (hide controls)'
-                            : 'Slide up (show controls)',
-                        onPressed: () {
-                          setState(() {
-                            _controlsSheetExpanded = !_controlsSheetExpanded;
-                          });
-                        },
-                        iconSize: 34,
-                        splashRadius: 22,
-                        icon: Icon(
-                          _controlsSheetExpanded
-                              ? Icons.keyboard_arrow_down_rounded
-                              : Icons.keyboard_arrow_up_rounded,
-                          color: const Color(0xFFE8D27D),
+                        IconButton(
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints.tightFor(width: 30, height: 30),
+                          tooltip: _controlsSheetExpanded
+                              ? 'Slide down (hide controls)'
+                              : 'Slide up (show controls)',
+                          onPressed: () {
+                            setState(() {
+                              _controlsSheetExpanded = !_controlsSheetExpanded;
+                            });
+                          },
+                          iconSize: 24,
+                          splashRadius: 18,
+                          icon: Icon(
+                            _controlsSheetExpanded
+                                ? Icons.keyboard_arrow_down_rounded
+                                : Icons.keyboard_arrow_up_rounded,
+                            color: const Color(0xFFE8D27D),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   if (_controlsSheetExpanded) ...[
                     const SizedBox(height: 6),
@@ -1703,32 +2005,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               if (_webCameraReady)
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final guideHeight =
-                        (constraints.maxHeight * 0.72).clamp(250.0, 430.0);
-                    final guideWidth =
-                        (guideHeight * 0.78).clamp(200.0, 340.0);
-
-                    return Align(
-                      alignment: Alignment.center,
-                      child: IgnorePointer(
-                        child: Container(
-                          width: guideWidth,
-                          height: guideHeight,
-                          decoration: BoxDecoration(
-                            border:
-                                Border.all(color: Colors.white38, width: 1.2),
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                        ),
-                      ),
-                    );
+                    return _buildScanGuideOverlay(constraints);
                   },
-                ),
-              if (_webCameraReady)
-                const Positioned(
-                  top: 10,
-                  left: 10,
-                  child: _LiveBadge(label: 'LIVE CAMERA', isLive: true),
                 ),
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -1813,31 +2091,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           children: [
             LayoutBuilder(
               builder: (context, constraints) {
-                final previewAspect = _camera!.value.aspectRatio;
-                final boxAspect = constraints.maxWidth / constraints.maxHeight;
-                late final double width;
-                late final double height;
-                if (boxAspect > previewAspect) {
-                  width = constraints.maxWidth;
-                  height = width / previewAspect;
-                } else {
-                  height = constraints.maxHeight;
-                  width = height * previewAspect;
-                }
+                final previewSize = _camera!.value.previewSize;
+                final previewWidth = previewSize?.height ?? constraints.maxWidth;
+                final previewHeight = previewSize?.width ?? constraints.maxHeight;
 
-                return Center(
-                  child: SizedBox(
-                    width: width,
-                    height: height,
-                    child: CameraPreview(_camera!),
+                return ClipRect(
+                  child: OverflowBox(
+                    alignment: Alignment.center,
+                    minWidth: constraints.maxWidth,
+                    minHeight: constraints.maxHeight,
+                    maxWidth: double.infinity,
+                    maxHeight: double.infinity,
+                    child: FittedBox(
+                      fit: BoxFit.cover,
+                      alignment: Alignment.center,
+                      child: SizedBox(
+                        width: previewWidth,
+                        height: previewHeight,
+                        child: CameraPreview(_camera!),
+                      ),
+                    ),
                   ),
                 );
               },
             ),
-            if (_normalizedFaceRect != null)
-              CustomPaint(
-                painter: _FaceGuidePainter(face: _normalizedFaceRect!),
-              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                return _buildScanGuideOverlay(constraints);
+              },
+            ),
             LayoutBuilder(
               builder: (context, constraints) {
                 final blurLayer = _hairBlurLayer(
@@ -1901,12 +2183,25 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required double overlayOpacity,
   }) {
     if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
+      if (recommendation == null) {
+        debugPrint('[AiFaceScan] _overlayLayer: Skipping - no recommendation');
+      } else if (overlayFace == null) {
+        debugPrint('[AiFaceScan] _overlayLayer: Skipping - no overlayFace');
+      } else {
+        debugPrint('[AiFaceScan] _overlayLayer: Skipping - opacity too low ($overlayOpacity)');
+      }
       return null;
     }
 
+    debugPrint('[AiFaceScan] _overlayLayer: Building with recommendation style_name=${recommendation['style_name']}');
+
     final calibration = _overlayCalibration(recommendation);
+    final yawAbsNorm = ((_headYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
+    final anchorFace = (yawAbsNorm > 0.12 && _lastCenteredFaceRect != null)
+        ? _anchorRectToCenter(overlayFace, _lastCenteredFaceRect!)
+        : overlayFace;
     final box = _computeAttachmentBox(
-      face: overlayFace,
+      face: anchorFace,
       constraints: constraints,
       calibration: calibration,
     );
@@ -1919,7 +2214,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         child: Opacity(
           opacity: overlayOpacity,
           child: Transform(
-            alignment: Alignment.center,
+            alignment: (_headYaw ?? 0) >= 0
+                ? Alignment.centerLeft
+                : Alignment.centerRight,
             transform: Matrix4.identity()
               ..rotateZ((_headRoll ?? 0) * math.pi / 180)
               ..scale(box.yawScale, 1.0),
@@ -1954,14 +2251,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       calibration: calibration,
     );
 
+    // tighten blur area to avoid covering the face
     final blurLeft =
-        (box.left + (box.width * 0.10)).clamp(0.0, constraints.maxWidth).toDouble();
+      (box.left + (box.width * 0.14)).clamp(0.0, constraints.maxWidth).toDouble();
     final blurTop =
-        (box.top + (box.height * 0.12)).clamp(0.0, constraints.maxHeight).toDouble();
+      (box.top + (box.height * 0.06)).clamp(0.0, constraints.maxHeight).toDouble();
     final blurWidth =
-        (box.width * 0.80).clamp(0.0, constraints.maxWidth - blurLeft).toDouble();
+      (box.width * 0.60).clamp(0.0, constraints.maxWidth - blurLeft).toDouble();
     final blurHeight =
-        (box.height * 0.44).clamp(0.0, constraints.maxHeight - blurTop).toDouble();
+      (box.height * 0.34).clamp(0.0, constraints.maxHeight - blurTop).toDouble();
 
     if (blurWidth <= 1 || blurHeight <= 1) {
       return null;
@@ -2006,14 +2304,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       calibration: calibration,
     );
 
+    // slightly reduce cover region to sit more on the hairline
     final coverLeft =
-        (box.left + (box.width * 0.08)).clamp(0.0, constraints.maxWidth).toDouble();
+      (box.left + (box.width * 0.10)).clamp(0.0, constraints.maxWidth).toDouble();
     final coverTop =
-        (box.top + (box.height * 0.10)).clamp(0.0, constraints.maxHeight).toDouble();
+      (box.top + (box.height * 0.06)).clamp(0.0, constraints.maxHeight).toDouble();
     final coverWidth =
-        (box.width * 0.84).clamp(0.0, constraints.maxWidth - coverLeft).toDouble();
+      (box.width * 0.78).clamp(0.0, constraints.maxWidth - coverLeft).toDouble();
     final coverHeight =
-        (box.height * 0.46).clamp(0.0, constraints.maxHeight - coverTop).toDouble();
+      (box.height * 0.40).clamp(0.0, constraints.maxHeight - coverTop).toDouble();
 
     if (coverWidth <= 1 || coverHeight <= 1) {
       return null;
@@ -2083,14 +2382,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       calibration: calibration,
     );
 
+    // edge feather slightly smaller to match reduced cover
     final featherLeft =
-        (box.left + (box.width * 0.06)).clamp(0.0, constraints.maxWidth).toDouble();
+      (box.left + (box.width * 0.08)).clamp(0.0, constraints.maxWidth).toDouble();
     final featherTop =
-        (box.top + (box.height * 0.08)).clamp(0.0, constraints.maxHeight).toDouble();
+      (box.top + (box.height * 0.06)).clamp(0.0, constraints.maxHeight).toDouble();
     final featherWidth =
-        (box.width * 0.88).clamp(0.0, constraints.maxWidth - featherLeft).toDouble();
+      (box.width * 0.80).clamp(0.0, constraints.maxWidth - featherLeft).toDouble();
     final featherHeight =
-        (box.height * 0.50).clamp(0.0, constraints.maxHeight - featherTop).toDouble();
+      (box.height * 0.46).clamp(0.0, constraints.maxHeight - featherTop).toDouble();
 
     if (featherWidth <= 1 || featherHeight <= 1) {
       return null;
@@ -2146,6 +2446,22 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return IgnorePointer(
       child: Stack(
         children: [
+          // Raw ML face rectangle (normalized coordinates) - red border
+          Positioned(
+            left: overlayFace.left * constraints.maxWidth,
+            top: overlayFace.top * constraints.maxHeight,
+            width: overlayFace.width * constraints.maxWidth,
+            height: overlayFace.height * constraints.maxHeight,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.red.withOpacity(0.85),
+                  width: 1.6,
+                ),
+              ),
+            ),
+          ),
           Positioned(
             left: box.left,
             top: box.top,
@@ -2220,6 +2536,61 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                 color: Colors.white70,
                 fontSize: 12,
                 height: 1.35,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScanGuideOverlay(BoxConstraints constraints) {
+    final guideHeight = (constraints.maxHeight * 0.72).clamp(250.0, 430.0);
+    final guideWidth = (guideHeight * 0.78).clamp(200.0, 340.0);
+    final guideRect = Rect.fromCenter(
+      center: Offset(constraints.maxWidth / 2, constraints.maxHeight / 2),
+      width: guideWidth,
+      height: guideHeight,
+    );
+
+    final ready = _faceSessionReady;
+
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: CustomPaint(
+              painter: _ScanGuidePainter(
+                guideRect: guideRect,
+                ready: ready,
+              ),
+            ),
+          ),
+          Positioned(
+            left: 12,
+            right: 12,
+            top: 12,
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: ready ? Colors.greenAccent.shade200 : Colors.white24,
+                  ),
+                ),
+                child: Text(
+                  ready
+                      ? 'Ready - scan will start automatically'
+                      : 'Place your face inside the guide marks',
+                  style: TextStyle(
+                    color: ready ? Colors.greenAccent.shade100 : Colors.white70,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
             ),
           ),
@@ -2393,7 +2764,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   List<Map<String, dynamic>> _rankRecommendations(
       List<Map<String, dynamic>> input) {
-    final ranked = List<Map<String, dynamic>>.from(input);
+    final ranked = _dedupeRecommendations(input);
 
     double score(Map<String, dynamic> item) {
       final confidence = double.tryParse(
@@ -2436,38 +2807,58 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return ranked;
   }
 
-  List<Map<String, dynamic>> _topThreeRecommendations(
-      List<Map<String, dynamic>> ranked) {
-    final top = ranked.take(3).map((e) => Map<String, dynamic>.from(e)).toList();
-    if (top.length >= 3) {
-      return top;
+  String _recommendationIdentity(Map<String, dynamic> item) {
+    final variantId = item['variant_id']?.toString() ?? item['variantId']?.toString() ?? '';
+    if (variantId.isNotEmpty) {
+      return 'variant:$variantId';
     }
-
-    final existingIds = top
-        .map((e) =>
-            '${e['variant_id'] ?? e['variantId'] ?? e['style_code'] ?? e['styleName'] ?? ''}')
-        .toSet();
-
-    final fillers = _rankRecommendations(_hardcodedFallback()).where((item) {
-      final id =
-          '${item['variant_id'] ?? item['variantId'] ?? item['style_code'] ?? item['styleName'] ?? ''}';
-      return !existingIds.contains(id);
-    });
-
-    for (final item in fillers) {
-      if (top.length >= 3) {
-        break;
-      }
-      top.add(Map<String, dynamic>.from(item));
+    final styleCode = item['style_code']?.toString() ?? item['styleCode']?.toString() ?? '';
+    if (styleCode.isNotEmpty) {
+      return 'stylecode:$styleCode';
     }
-
-    return top;
+    final styleName = item['style_name']?.toString() ?? item['styleName']?.toString() ?? '';
+    return 'style:$styleName'.toLowerCase();
   }
 
-  double _perspectiveScale(double? yawDeg) {
-    final yaw = yawDeg ?? 0;
-    final scaled = math.cos(yaw * math.pi / 180);
-    return scaled.clamp(0.4, 1.0);
+  List<Map<String, dynamic>> _dedupeRecommendations(List<Map<String, dynamic>> input) {
+    final seen = <String>{};
+    final output = <Map<String, dynamic>>[];
+    for (final item in input) {
+      final key = _recommendationIdentity(item);
+      if (seen.add(key)) {
+        output.add(Map<String, dynamic>.from(item));
+      }
+    }
+    return output;
+  }
+
+  List<Map<String, dynamic>> _mergeRecommendations(
+      List<Map<String, dynamic>> base,
+      List<Map<String, dynamic>> extras) {
+    final seen = <String>{};
+    final output = <Map<String, dynamic>>[];
+
+    for (final item in base) {
+      final key = _recommendationIdentity(item);
+      if (seen.add(key)) {
+        output.add(item);
+      }
+    }
+
+    for (final item in extras) {
+      final key = _recommendationIdentity(item);
+      if (seen.add(key)) {
+        output.add(item);
+      }
+    }
+
+    return output;
+  }
+
+  List<Map<String, dynamic>> _topThreeRecommendations(
+      List<Map<String, dynamic>> ranked) {
+    // ranked is already deduped and sorted by _rankRecommendations, just take top 3
+    return ranked.take(3).toList();
   }
 
   Future<void> _useSelectedStyle() async {
@@ -2475,76 +2866,28 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    final selected =
-        _recommendations[_selectedIndex.clamp(0, _recommendations.length - 1)];
-    final styleName = selected['style_name']?.toString() ??
-        selected['styleName']?.toString() ??
-        'Haircut';
-    final variantId = int.tryParse(
-        '${selected['variant_id'] ?? selected['variantId'] ?? ''}');
-    final estimated = int.tryParse(
-        '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? ''}');
-
-    UserSession.selectedStyleName = styleName;
-    UserSession.selectedEstimatedMinutes = estimated;
-    if (variantId != null) {
-      UserSession.selectedVariantId = variantId;
-    }
-
-    if (variantId != null && UserSession.userId != null) {
-      await AiFunnelService.saveSelection(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: UserSession.userId!,
-        variantId: variantId,
-        styleName: styleName,
-        faceShape: UserSession.lastScan?['faceShape']?.toString(),
-        hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
-        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
-        hairLength: UserSession.lastScan?['hairLength']?.toString(),
-        estimatedMinutes: estimated,
+    final selected = _recommendations[_selectedIndex.clamp(0, _recommendations.length - 1)];
+    final style = _toStyleMap(selected);
+    final variantId = style['variantId'] as int?;
+    if (variantId == null || variantId <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This style cannot be booked yet.')),
       );
-    }
-
-    if (!mounted) return;
-
-    final wantsToProceed = await showDialog<bool>(
-          context: context,
-          builder: (ctx) {
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1A1A1A),
-              title: const Text(
-                'Proceed to Booking',
-                style: TextStyle(color: Colors.white),
-              ),
-              content: Text(
-                'Use "$styleName" and check the best available schedule automatically?',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(ctx).pop(false),
-                  child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(ctx).pop(true),
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
-                  child: const Text('Continue', style: TextStyle(color: Colors.black)),
-                ),
-              ],
-            );
-          },
-        ) ??
-        false;
-
-    if (!mounted || !wantsToProceed) {
       return;
     }
 
-    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
-    if (!mounted) {
+    final userId = UserSession.userId;
+    if (userId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again.')),
+      );
       return;
     }
-    if (hasActive) {
+
+    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You already have an active appointment.')),
       );
@@ -2554,7 +2897,53 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    await _showAutoBookingModal();
+    UserSession.selectedVariantId = variantId;
+    UserSession.selectedServiceId = int.tryParse(style['serviceId']?.toString() ?? '');
+    UserSession.selectedStyleName = style['name']?.toString();
+    UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+    UserSession.selectedPreviewImages = {
+      'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': style['backViewUrl']?.toString() ?? '',
+    };
+
+    await AiFunnelService.saveSelection(
+      scanSessionId: UserSession.ensureScanSessionId(),
+      userId: userId,
+      variantId: variantId,
+      styleName: UserSession.selectedStyleName ?? 'Style',
+      faceShape: UserSession.lastScan?['faceShape']?.toString(),
+      hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+      hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+      hairLength: UserSession.lastScan?['hairLength']?.toString(),
+      estimatedMinutes: UserSession.selectedEstimatedMinutes,
+      frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+      sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+      backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+    );
+
+    setState(() => _bookingInFlight = true);
+    final suggestion = await _fetchSuggestedSlot();
+    if (!mounted) {
+      return;
+    }
+    setState(() => _bookingInFlight = false);
+
+    if (suggestion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No available slots found. Please choose manually.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+      ),
+    );
   }
 
   Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
@@ -2574,42 +2963,52 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
   }
 
-  Future<void> _showAutoBookingModal() async {
-    if (UserSession.userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in again.')),
-      );
-      return;
-    }
-    if (UserSession.selectedVariantId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a hairstyle before booking.')),
-      );
-      return;
-    }
+  Map<String, dynamic> _toStyleMap(Map<String, dynamic> recommendation) {
+    return {
+      'name': recommendation['style_name']?.toString() ?? recommendation['styleName']?.toString() ?? 'Style',
+      'description': recommendation['description']?.toString() ?? 'AI recommended style',
+      'image': _resolveImage(recommendation['front_view_url'] ?? recommendation['frontViewUrl']) ?? '',
+      'details': 'Face shape: ${recommendation['face_shape'] ?? 'N/A'}\nHair texture: ${recommendation['hair_texture'] ?? 'N/A'}',
+      'rating': _asDouble(recommendation['confidence_score']) ?? 4.0,
+      'frontViewUrl': _resolveImage(recommendation['front_view_url'] ?? recommendation['frontViewUrl']) ?? '',
+      'sideViewUrl': _resolveImage(recommendation['side_view_url'] ?? recommendation['sideViewUrl']) ?? '',
+      'backViewUrl': _resolveImage(recommendation['back_view_url'] ?? recommendation['backViewUrl']) ?? '',
+      'variantId': recommendation['variant_id'] ?? recommendation['variantId'],
+      'serviceId': recommendation['service_id'] ?? recommendation['serviceID'],
+      'estimatedMinutes': _asInt(recommendation['estimated_minutes'] ?? recommendation['estimatedMinutes']),
+    };
+  }
 
-    setState(() => _bookingInFlight = true);
-    final suggestion = await _fetchSuggestedSlot();
-    if (mounted) {
-      setState(() => _bookingInFlight = false);
+  String? _resolveImage(dynamic value) {
+    final raw = value?.toString() ?? '';
+    if (raw.isEmpty) {
+      return null;
     }
-
-    if (!mounted) return;
-    if (suggestion == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No available slots found. Please choose manually.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
+    if (raw.startsWith('assets/')) {
+      return raw;
     }
+    return ApiConfig.resolveImageUrl(raw);
+  }
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
-      ),
-    );
+  String _assetPath(String raw) {
+    return raw;
+  }
+
+  double? _asDouble(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    return double.tryParse(value.toString());
+  }
+
+  int? _asInt(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+    if (value is int) {
+      return value;
+    }
+    return int.tryParse(value.toString());
   }
 
   Rect _smoothRect(Rect? previous, Rect next, double alpha) {
@@ -2675,6 +3074,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   Rect? _effectiveOverlayFaceRect() {
     final current = _normalizedFaceRect;
     if (current != null && _recommendations.isNotEmpty) {
+      final yawAbsNorm = ((_headYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
+      final centered = _lastCenteredFaceRect;
+      if (yawAbsNorm > 0.12 && centered != null) {
+        return _recenterRectX(current, centered.center.dx);
+      }
       if (_isLikelyStableFace(current)) {
         _lastStableFaceRect = current;
         _overlayHoldUntil = DateTime.now().add(_overlayHoldDuration);
@@ -2702,6 +3106,20 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return fallback;
   }
 
+  Rect _recenterRectX(Rect current, double centerX) {
+    final width = current.width;
+    final left = (centerX - (width * 0.5)).clamp(0.0, 1.0 - width);
+    return Rect.fromLTWH(left, current.top, width, current.height);
+  }
+
+  Rect _anchorRectToCenter(Rect current, Rect anchor) {
+    final width = current.width;
+    final height = current.height;
+    final left = (anchor.center.dx - (width * 0.5)).clamp(0.0, 1.0 - width);
+    final top = (anchor.center.dy - (height * 0.5)).clamp(0.0, 1.0 - height);
+    return Rect.fromLTWH(left, top, width, height);
+  }
+
   double _currentOverlayOpacity() {
     if (_normalizedFaceRect != null) {
       return _overlayBaseOpacity;
@@ -2717,6 +3135,40 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final t =
         (remainingMs / _overlayHoldDuration.inMilliseconds).clamp(0.0, 1.0);
     return _overlayBaseOpacity * t;
+  }
+
+  OverlayImageSet _resolveOverlayImageSet(Map<String, dynamic>? recommendation) {
+    if (recommendation == null) {
+      debugPrint('[AiFaceScan] No recommendation available, using sample overlay');
+      return _sampleImageOverlay;
+    }
+
+    final styleName = (recommendation['style_name']?.toString() ??
+            recommendation['styleName']?.toString() ??
+            '')
+        .trim()
+        .toLowerCase();
+    if (styleName.isEmpty) {
+      debugPrint('[AiFaceScan] Recommendation missing style name, using sample overlay');
+      return _sampleImageOverlay;
+    }
+
+    // Try exact match first
+    if (_styleOverlayImages.containsKey(styleName)) {
+      debugPrint('[AiFaceScan] Matched overlay style="$styleName" via exact match');
+      return _styleOverlayImages[styleName]!;
+    }
+
+    // Try substring match (in case style name has variations)
+    for (final entry in _styleOverlayImages.entries) {
+      if (styleName.contains(entry.key)) {
+        debugPrint('[AiFaceScan] Matched overlay style="$styleName" via substring match -> ${entry.key}');
+        return entry.value;
+      }
+    }
+
+    debugPrint('[AiFaceScan] No overlay match for style="$styleName", using sample overlay');
+    return _sampleImageOverlay;
   }
 
   OverlayCalibration _overlayCalibration(
@@ -2751,6 +3203,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required BoxConstraints constraints,
     required OverlayCalibration calibration,
   }) {
+    final yawAbsNorm = ((_headYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
+    final anchorX = yawAbsNorm > 0.12 && _lastCenteredFaceRect != null
+        ? _lastCenteredFaceRect!.center.dx
+        : (face.left + (face.width * 0.5));
     return _attachmentEngine.compute(
       AttachmentInput(
         face: face,
@@ -2760,7 +3216,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         headYaw: _headYaw,
         headRoll: _headRoll,
         foreheadAnchorY: _foreheadAnchorY,
-        eyeMidX: _eyeMidX,
+        eyeMidX: anchorX,
         eyeDistanceNorm: _eyeDistanceNorm,
         videoAspect: _webVideoAspect,
         faceTransformMatrix: _faceTransformMatrix,
@@ -2908,6 +3364,32 @@ class _LiveBadge extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ScanGuidePainter extends CustomPainter {
+  final Rect guideRect;
+  final bool ready;
+
+  const _ScanGuidePainter({required this.guideRect, required this.ready});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = guideRect;
+    final paint = Paint()
+      ..color = ready
+          ? Colors.greenAccent.withOpacity(0.72)
+          : Colors.white.withOpacity(0.68)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.6;
+
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(999));
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ScanGuidePainter oldDelegate) {
+    return oldDelegate.guideRect != guideRect || oldDelegate.ready != ready;
   }
 }
 

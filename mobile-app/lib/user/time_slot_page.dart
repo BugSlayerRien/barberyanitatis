@@ -25,6 +25,7 @@ class TimeSlotPage extends StatefulWidget {
 class _TimeSlotPageState extends State<TimeSlotPage> {
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
+  static const int _minimumSelectableGapMinutes = 35;
   static const String _aiApiKey =
       'REMOVED_GEMINI_KEY';
   static const String _aiModelName = 'gemini-2.5-flash';
@@ -38,13 +39,44 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   String? _weatherSummary;
   String? _timeAdvice;
   bool _bookingInFlight = false;
+  late DateTime _activeDate;
+  bool _autoShiftedDate = false;
 
   @override
   void initState() {
     super.initState();
+    _activeDate = _resolveActiveDate(widget.selectedDate);
+    _autoShiftedDate = !_isSameDay(_activeDate, widget.selectedDate);
     _loadSlots();
     _loadDefaultService();
     _loadWeatherAndSuggestion();
+    _maybeShowDateShiftNotice();
+  }
+
+  DateTime _resolveActiveDate(DateTime selected) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final selectedDay = DateTime(selected.year, selected.month, selected.day);
+    if (_isSameDay(selectedDay, today) && now.hour >= 19) {
+      return selectedDay.add(const Duration(days: 1));
+    }
+    return selected;
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) {
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  void _maybeShowDateShiftNotice() {
+    if (!_autoShiftedDate) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('It\'s past 7pm. Showing the next available date instead.')),
+      );
+    });
   }
 
   Future<void> _loadSlots() async {
@@ -59,7 +91,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
         body: jsonEncode({
           'action': 'listByBarberDate',
           'barberID': widget.barberId,
-          'slotDate': _formatDate(widget.selectedDate),
+          'slotDate': _formatDate(_activeDate),
         }),
       );
 
@@ -104,7 +136,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       _loadingWeatherAdvice = true;
     });
 
-    final date = _formatDate(widget.selectedDate);
+    final date = _formatDate(_activeDate);
     final availableSlots = _availableSlotsForAdvice();
 
     try {
@@ -137,10 +169,17 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
           : null;
 
       final weatherSummary = _buildWeatherSummary(maxTemp, minTemp, rainChance);
+      final recommendedSlot = _pickMostBufferedSlot(
+        availableSlots: availableSlots,
+        allSlots: _slots,
+        maxTemp: maxTemp,
+        rainChance: rainChance,
+      );
       final fallbackAdvice = _buildHeuristicAdvice(
         maxTemp: maxTemp,
         rainChance: rainChance,
         availableSlots: availableSlots,
+        allSlots: _slots,
       );
       final aiAdvice = await _getAiTimeAdvice(
         date: date,
@@ -149,6 +188,8 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
         minTemp: minTemp,
         rainChance: rainChance,
         availableSlots: availableSlots,
+        allSlots: _slots,
+        recommendedSlot: recommendedSlot,
       );
       final validatedAiAdvice = _validateAiAdvice(aiAdvice, availableSlots);
 
@@ -170,6 +211,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
           maxTemp: null,
           rainChance: null,
           availableSlots: availableSlots,
+          allSlots: _slots,
         );
         _loadingWeatherAdvice = false;
       });
@@ -191,34 +233,27 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     required double? maxTemp,
     required double? rainChance,
     required List<Map<String, dynamic>> availableSlots,
+    required List<Map<String, dynamic>> allSlots,
   }) {
     if (availableSlots.isEmpty) {
       return 'No open times are available now. Please pick another date or barber.';
     }
 
-    final morning = availableSlots.where((slot) {
-      final hour = int.tryParse((slot['slot_time']?.toString() ?? '00:00:00').split(':').first) ?? 0;
-      return hour >= 9 && hour <= 11;
-    }).toList();
-    final coolerWindow = availableSlots.where((slot) {
-      final hour = int.tryParse((slot['slot_time']?.toString() ?? '00:00:00').split(':').first) ?? 0;
-      return hour <= 10 || hour >= 16;
-    }).toList();
-
-    final preferred = rainChance != null && rainChance >= 60
-        ? (morning.isNotEmpty ? morning.first : availableSlots.first)
-        : (maxTemp != null && maxTemp >= 33
-            ? (coolerWindow.isNotEmpty ? coolerWindow.first : availableSlots.first)
-            : (morning.isNotEmpty ? morning.first : availableSlots.first));
+    final preferred = _pickMostBufferedSlot(
+      availableSlots: availableSlots,
+      allSlots: allSlots,
+      maxTemp: maxTemp,
+      rainChance: rainChance,
+    );
 
     final displayTime = preferred['display_time']?.toString() ?? preferred['slot_time']?.toString() ?? '';
     if (rainChance != null && rainChance >= 60) {
-      return 'Best today: $displayTime. Earlier slots are safer before possible rain.';
+      return 'Best today: $displayTime. It keeps distance from occupied times and lowers rain-travel risk.';
     }
     if (maxTemp != null && maxTemp >= 33) {
-      return 'Best today: $displayTime. Cooler hours are better for comfort and travel.';
+      return 'Best today: $displayTime. It stays buffered from occupied times and avoids hotter commute hours.';
     }
-    return 'Best today: $displayTime. It balances convenience with expected weather.';
+    return 'Best today: $displayTime. It is the most buffered slot from currently taken times.';
   }
 
   String? _validateAiAdvice(String? aiAdvice, List<Map<String, dynamic>> availableSlots) {
@@ -258,6 +293,8 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     required double? minTemp,
     required double? rainChance,
     required List<Map<String, dynamic>> availableSlots,
+    required List<Map<String, dynamic>> allSlots,
+    required Map<String, dynamic> recommendedSlot,
   }) async {
     if (availableSlots.isEmpty || !_aiApiKey.isNotEmpty) {
       return null;
@@ -267,6 +304,14 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
         .map((slot) => slot['display_time']?.toString() ?? slot['slot_time']?.toString() ?? '')
         .where((slot) => slot.isNotEmpty)
         .join(', ');
+    final occupiedText = allSlots
+      .where(_isSlotTaken)
+      .map((slot) => slot['display_time']?.toString() ?? slot['slot_time']?.toString() ?? '')
+      .where((slot) => slot.isNotEmpty)
+      .join(', ');
+    final recommendedTime = recommendedSlot['display_time']?.toString() ??
+      recommendedSlot['slot_time']?.toString() ??
+      '';
     if (slotText.isEmpty) {
       return null;
     }
@@ -280,9 +325,12 @@ High temp: ${maxTemp?.toStringAsFixed(1) ?? 'n/a'}
 Low temp: ${minTemp?.toStringAsFixed(1) ?? 'n/a'}
 Rain chance: ${rainChance?.toStringAsFixed(1) ?? 'n/a'}
 Available slots: $slotText
+Taken slots: ${occupiedText.isEmpty ? 'none' : occupiedText}
+Preferred buffered slot: $recommendedTime
 
 Return exactly one short sentence in this format:
 Best today: <time>. <reason>
+Use the preferred buffered slot as the time unless it is not in available slots.
 Keep the total response under 24 words.
 ''';
 
@@ -429,7 +477,7 @@ Keep the total response under 24 words.
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('For ${_formatDisplayDate(widget.selectedDate)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          Text('For ${_formatDisplayDate(_activeDate)}', style: const TextStyle(color: Colors.white70, fontSize: 12)),
                           Text(
                             widget.barberName,
                             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
@@ -582,6 +630,8 @@ Keep the total response under 24 words.
                       final displayTime = slot['display_time']?.toString() ?? canonicalTime;
                       final isSelected = _selectedTime == canonicalTime;
                       final isAvailable = _isSlotBookable(slot);
+                      final isFull = _isSlotFull(slot);
+                      final availabilityColor = _slotAvailabilityColor(slot);
                       return GestureDetector(
                         onTap: isAvailable ? () => setState(() => _selectedTime = canonicalTime) : null,
                         child: AnimatedContainer(
@@ -589,10 +639,20 @@ Keep the total response under 24 words.
                           decoration: BoxDecoration(
                             color: isSelected
                                 ? Colors.white
-                                : (isAvailable ? const Color(0xFF1A1A1A) : const Color(0xFF121212)),
+                                : (isAvailable
+                                    ? availabilityColor.withOpacity(0.28)
+                                    : (isFull
+                                        ? availabilityColor.withOpacity(0.22)
+                                        : const Color(0xFF121212))),
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: isSelected ? Colors.white : Colors.white10,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isAvailable
+                                      ? availabilityColor.withOpacity(0.7)
+                                      : (isFull
+                                          ? availabilityColor.withOpacity(0.6)
+                                          : Colors.white10)),
                               width: isSelected ? 2 : 1,
                             ),
                           ),
@@ -602,7 +662,9 @@ Keep the total response under 24 words.
                               style: TextStyle(
                                 color: isSelected
                                     ? Colors.black
-                                    : (isAvailable ? Colors.white : Colors.white38),
+                                    : (isAvailable
+                                        ? Colors.white
+                                        : (isFull ? Colors.white70 : Colors.white38)),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 12,
                               ),
@@ -667,7 +729,7 @@ Keep the total response under 24 words.
                       }
 
                       final selectedDateTime = tryParseSlotDateTime(
-                        date: widget.selectedDate,
+                        date: _activeDate,
                         time: _selectedTime ?? '',
                       );
                       if (selectedDateTime == null || !selectedDateTime.isAfter(DateTime.now())) {
@@ -709,7 +771,7 @@ Keep the total response under 24 words.
                           'action': 'create',
                           'userID': UserSession.userId,
                           'barberID': widget.barberId,
-                          'appointmentDate': _formatDate(widget.selectedDate),
+                          'appointmentDate': _formatDate(_activeDate),
                           'startTime': startTime,
                           'endTime': endTime,
                           'serviceIDs': [serviceId],
@@ -745,6 +807,9 @@ Keep the total response under 24 words.
                           appointmentId: appointmentId,
                           serviceId: serviceId,
                           estimatedMinutes: duration,
+                          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+                          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+                          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
                         );
                       }
 
@@ -754,7 +819,7 @@ Keep the total response under 24 words.
                         builder: (_) => PaymentPage(
                           appointmentID: appointmentId,
                           barberName: widget.barberName,
-                          date: _formatDisplayDate(widget.selectedDate),
+                          date: _formatDisplayDate(_activeDate),
                           time: formatTo12Hour(_selectedTime ?? ''),
                           amount: price.round(),
                           haircutName: UserSession.selectedStyleName ?? 'Haircut',
@@ -825,7 +890,7 @@ Keep the total response under 24 words.
     final times = <String>[];
     const startMinutes = 9 * 60;
     const endMinutes = 16 * 60 + 30;
-    for (var minutes = startMinutes; minutes <= endMinutes; minutes += 50) {
+    for (var minutes = startMinutes; minutes <= endMinutes; minutes += _minimumSelectableGapMinutes) {
       final hour = minutes ~/ 60;
       final minute = minutes % 60;
       times.add('${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}');
@@ -835,6 +900,8 @@ Keep the total response under 24 words.
               'slot_time': _canonicalTime(time),
               'display_time': _displayTime(_canonicalTime(time)),
               'status': 'Available',
+              'booked_count': 0,
+              'capacity': 10,
             })
         .toList();
   }
@@ -856,17 +923,27 @@ Keep the total response under 24 words.
       } else {
         final existing = byTime[time];
         final existingStatus = existing?['status']?.toString() ?? 'Available';
+        final existingBooked = int.tryParse(existing?['booked_count']?.toString() ?? '') ?? 0;
+        final incomingBooked = int.tryParse(slot['booked_count']?.toString() ?? '') ?? 0;
         if (existingStatus.toLowerCase() == 'available' && status.toLowerCase() != 'available') {
           byTime[time] = {
             ...slot,
             'slot_time': time,
             'display_time': _displayTime(time),
           };
+        } else if (existingStatus.toLowerCase() == 'available' && status.toLowerCase() == 'available') {
+          if (existing != null && incomingBooked > existingBooked) {
+            byTime[time] = {
+              ...existing,
+              'booked_count': incomingBooked,
+            };
+          }
         }
       }
     }
     final sortedKeys = byTime.keys.toList()..sort();
-    return sortedKeys.map((time) => byTime[time]!).toList();
+    final normalized = sortedKeys.map((time) => byTime[time]!).toList();
+    return _applySelectableSpacing(normalized);
   }
 
   String _canonicalTime(String value) {
@@ -890,7 +967,135 @@ Keep the total response under 24 words.
 
   bool _isStatusBookable(String status) {
     final normalized = status.toLowerCase();
-    return normalized != 'holiday' && normalized != 'unavailable' && normalized != 'booked';
+    return normalized != 'holiday' &&
+        normalized != 'unavailable' &&
+        normalized != 'booked' &&
+        normalized != 'break';
+  }
+
+  bool _isSlotTaken(Map<String, dynamic> slot) {
+    final status = slot['status']?.toString() ?? 'Available';
+    if (!_isStatusBookable(status)) {
+      return true;
+    }
+    return _isSlotFull(slot);
+  }
+
+  List<Map<String, dynamic>> _applySelectableSpacing(List<Map<String, dynamic>> slots) {
+    final adjusted = <Map<String, dynamic>>[];
+    int? lastSelectableMinute;
+
+    for (final slot in slots) {
+      final status = slot['status']?.toString() ?? 'Available';
+      if (!_isStatusBookable(status) || _isSlotFull(slot)) {
+        adjusted.add(slot);
+        continue;
+      }
+
+      final slotMinute = _timeToMinutes(slot['slot_time']?.toString() ?? '');
+      if (slotMinute == null) {
+        adjusted.add(slot);
+        continue;
+      }
+
+      if (lastSelectableMinute == null ||
+          slotMinute - lastSelectableMinute >= _minimumSelectableGapMinutes) {
+        adjusted.add(slot);
+        lastSelectableMinute = slotMinute;
+      } else {
+        adjusted.add({
+          ...slot,
+          'status': 'Break',
+        });
+      }
+    }
+
+    return adjusted;
+  }
+
+  Map<String, dynamic> _pickMostBufferedSlot({
+    required List<Map<String, dynamic>> availableSlots,
+    required List<Map<String, dynamic>> allSlots,
+    required double? maxTemp,
+    required double? rainChance,
+  }) {
+    if (availableSlots.isEmpty) {
+      return <String, dynamic>{};
+    }
+
+    final occupiedMinutes = allSlots
+        .where(_isSlotTaken)
+        .map((slot) => _timeToMinutes(slot['slot_time']?.toString() ?? ''))
+        .whereType<int>()
+        .toList();
+
+    Map<String, dynamic>? best;
+    var bestBuffer = -1;
+    var bestWeatherScore = -1 << 20;
+    var bestCenterScore = -1 << 20;
+
+    for (final candidate in availableSlots) {
+      final minute = _timeToMinutes(candidate['slot_time']?.toString() ?? '');
+      if (minute == null) {
+        continue;
+      }
+
+      var nearestBuffer = 24 * 60;
+      if (occupiedMinutes.isNotEmpty) {
+        nearestBuffer = occupiedMinutes
+            .map((taken) => (minute - taken).abs())
+            .reduce((a, b) => a < b ? a : b);
+      }
+
+      final weatherScore = _weatherTieBreakerScore(
+        slotMinute: minute,
+        maxTemp: maxTemp,
+        rainChance: rainChance,
+      );
+      final centerScore = -(minute - (12 * 60)).abs();
+
+      if (nearestBuffer > bestBuffer ||
+          (nearestBuffer == bestBuffer && weatherScore > bestWeatherScore) ||
+          (nearestBuffer == bestBuffer && weatherScore == bestWeatherScore && centerScore > bestCenterScore)) {
+        best = candidate;
+        bestBuffer = nearestBuffer;
+        bestWeatherScore = weatherScore;
+        bestCenterScore = centerScore;
+      }
+    }
+
+    return best ?? availableSlots.first;
+  }
+
+  int _weatherTieBreakerScore({
+    required int slotMinute,
+    required double? maxTemp,
+    required double? rainChance,
+  }) {
+    if (rainChance != null && rainChance >= 60) {
+      return -slotMinute;
+    }
+
+    if (maxTemp != null && maxTemp >= 33) {
+      final isCoolerWindow = slotMinute <= (10 * 60) || slotMinute >= (16 * 60);
+      return isCoolerWindow ? 1000 - (slotMinute - (10 * 60)).abs() : 0;
+    }
+
+    return -(slotMinute - (11 * 60)).abs();
+  }
+
+  int? _timeToMinutes(String value) {
+    final canonical = _canonicalTime(value);
+    final parts = canonical.split(':');
+    if (parts.length < 2) {
+      return null;
+    }
+    final hour = int.tryParse(parts[0]);
+    final minute = int.tryParse(parts[1]);
+    if (hour == null || minute == null) {
+      return null;
+    }
+    return hour * 60 + minute;
   }
 
   bool _isSlotBookable(Map<String, dynamic> slot) {
@@ -899,12 +1104,39 @@ Keep the total response under 24 words.
       return false;
     }
 
+    if (_isSlotFull(slot)) {
+      return false;
+    }
+
     final canonicalTime = slot['slot_time']?.toString() ?? '';
-    final slotDateTime = tryParseSlotDateTime(date: widget.selectedDate, time: canonicalTime);
+    final slotDateTime = tryParseSlotDateTime(date: _activeDate, time: canonicalTime);
     if (slotDateTime == null) {
       return false;
     }
     return slotDateTime.isAfter(DateTime.now());
+  }
+
+  int _slotBookedCount(Map<String, dynamic> slot) {
+    return int.tryParse(slot['booked_count']?.toString() ?? '') ?? 0;
+  }
+
+  int _slotCapacity(Map<String, dynamic> slot) {
+    return int.tryParse(slot['capacity']?.toString() ?? '') ?? 10;
+  }
+
+  bool _isSlotFull(Map<String, dynamic> slot) {
+    return _slotBookedCount(slot) >= _slotCapacity(slot);
+  }
+
+  Color _slotAvailabilityColor(Map<String, dynamic> slot) {
+    final booked = _slotBookedCount(slot);
+    if (booked >= 8) {
+      return Colors.redAccent;
+    }
+    if (booked >= 5) {
+      return Colors.amber;
+    }
+    return Colors.green;
   }
 
   void _openTryHaircut() {

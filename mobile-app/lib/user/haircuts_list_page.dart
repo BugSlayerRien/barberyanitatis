@@ -4,16 +4,21 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'hairstyle_detail_page.dart';
+import 'ai_funnel_service.dart';
 import 'appointments_page.dart';
-import 'profile_page.dart';
+import 'barber_selection_page.dart';
+import 'booking_guard.dart';
 import 'dashboard_page.dart';
 import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
+import 'suggested_appointment_page.dart';
+import 'user_session.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
+import 'hairstyle_detail_page.dart';
+import 'profile_page.dart';
 
 class HaircutsListPage extends StatefulWidget {
   const HaircutsListPage({super.key});
@@ -24,6 +29,31 @@ class HaircutsListPage extends StatefulWidget {
 
 class _HaircutsListPageState extends State<HaircutsListPage> {
   final Map<String, Future<Uint8List>> _webImageCache = {};
+  static const String _librarySampleHairFront =
+      'assets/images/overlays/blowout_taper/blowout_taper_front.png';
+
+  static const Map<String, Map<String, String>> _localStyleAssets = {
+    'blowout taper': {
+      'front': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
+      'side': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
+      'back': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
+    },
+    'buzz cut': {
+      'front': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
+      'side': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
+      'back': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
+    },
+    'low fade': {
+      'front': 'assets/images/overlays/low_fade/low_fade_front.png',
+      'side': 'assets/images/overlays/low_fade/low_fade_left.png',
+      'back': 'assets/images/overlays/low_fade/low_fade_right.png',
+    },
+    'french crop': {
+      'front': 'assets/images/overlays/french_crop/french_crop_front.png',
+      'side': 'assets/images/overlays/french_crop/french_crop_left.png',
+      'back': 'assets/images/overlays/french_crop/french_crop_right.png',
+    },
+  };
 
   List<Map<String, dynamic>> _allStyles = [];
   List<String> _categories = const ['All'];
@@ -59,13 +89,14 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         return;
       }
 
-        final variants = (data['hairstyles'] as List<dynamic>? ?? [])
+      final variants = (data['hairstyles'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
 
-            final mapped = variants.map(_mapVariant).toList();
-            const ordered = ['Straight', 'Wavy', 'Curly', 'Coily', 'Mixed'];
-            final categories = ['All', ...ordered];
+      _logLibraryAudit(variants);
+      final mapped = _dedupeStyles(variants.map(_mapVariant).toList());
+      const ordered = ['Straight', 'Wavy', 'Curly', 'Coily', 'Mixed'];
+      final categories = ['All', ...ordered];
 
       setState(() {
         _allStyles = mapped;
@@ -94,7 +125,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       appBar: AppTopBar(
         showBack: true,
         onProfileTap: () {
-          Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfilePage()));
         },
       ),
       body: SingleChildScrollView(
@@ -177,9 +208,16 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   }
 
   Widget _hairStyleCard(BuildContext context, Map<String, dynamic> style) {
-    final imageUrl = style['image']?.toString() ?? '';
+    final previewImage = style['image']?.toString().trim().isNotEmpty == true
+        ? style['image']?.toString() ?? ''
+        : _librarySampleHairFront;
     return GestureDetector(
       onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)),
+        );
+      },
+      onLongPress: () {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => HairstyleDetailPage(style: style)));
       },
       child: Container(
@@ -190,7 +228,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10, width: 1),
+          border: Border.all(color: Colors.white, width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -202,12 +240,36 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    if (imageUrl.isNotEmpty)
-                      kIsWeb
-                          ? _buildWebImage(imageUrl)
-                          : Image(image: _buildImageProvider(imageUrl), fit: BoxFit.cover)
+                    Container(color: Colors.white),
+                    if (previewImage.startsWith('assets/'))
+                      Image.asset(
+                        previewImage,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) {
+                          debugPrint('[HaircutLibrary] Image.asset error for $previewImage: $error');
+                          return const Center(
+                            child: Icon(
+                              Icons.image_not_supported_outlined,
+                              color: Colors.black38,
+                              size: 34,
+                            ),
+                          );
+                        },
+                      )
                     else
-                      Container(color: const Color(0xFF111111)),
+                      Image.network(
+                        previewImage,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Image.asset(
+                            _librarySampleHairFront,
+                            fit: BoxFit.contain,
+                            filterQuality: FilterQuality.high,
+                          );
+                        },
+                      ),
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -229,9 +291,12 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                 children: [
                   Text(style['name']?.toString() ?? 'Style', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
                   const SizedBox(height: 4),
-                  Text(style['description']?.toString() ?? '', style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3)),
-                  const SizedBox(height: 8),
-                  Text(style['rating']?.toString() ?? '★★★★★', style: const TextStyle(color: Color(0xFFA99941), fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text(
+                    style['description']?.toString() ?? '',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
+                  ),
                 ],
               ),
             ),
@@ -276,19 +341,85 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
     final hairTexture = _normalizeTexture((variant['hair_texture'] ?? '').toString());
+    final styleName = variant['style_name']?.toString().trim().toLowerCase() ?? '';
+    final localAssets = _localStyleAssets[styleName];
+    final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
+    final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
+    final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
+    final frontResolved = ApiConfig.resolveImageUrl(frontRaw);
+    final sideResolved = ApiConfig.resolveImageUrl(sideRaw);
+    final backResolved = ApiConfig.resolveImageUrl(backRaw);
+    final front = localAssets?['front'] ?? (frontResolved.isEmpty ? '' : frontResolved);
+    final side = localAssets?['side'] ?? (sideResolved.isEmpty ? front : sideResolved);
+    final back = localAssets?['back'] ?? (backResolved.isEmpty ? front : backResolved);
     return {
       'name': variant['style_name']?.toString() ?? 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
-      'image': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
+      'image': front,
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
       'hairTexture': hairTexture.isNotEmpty ? hairTexture : 'Mixed',
       'faceShape': variant['face_shape']?.toString() ?? '',
-      'frontViewUrl': ApiConfig.resolveImageUrl(variant['front_view_url']?.toString() ?? ''),
-      'sideViewUrl': ApiConfig.resolveImageUrl(variant['side_view_url']?.toString() ?? ''),
-      'backViewUrl': ApiConfig.resolveImageUrl(variant['back_view_url']?.toString() ?? ''),
+      'frontViewUrl': front,
+      'sideViewUrl': side,
+      'backViewUrl': back,
       'variantId': variant['variant_id'],
+      'serviceId': variant['service_id'] ?? variant['serviceID'],
     };
+  }
+
+  String _styleIdentity(Map<String, dynamic> style) {
+    final variantId = style['variantId']?.toString() ?? '';
+    final styleName = style['name']?.toString().trim().toLowerCase() ?? '';
+    return variantId.isNotEmpty ? 'variant:$variantId' : 'style:$styleName';
+  }
+
+  List<Map<String, dynamic>> _dedupeStyles(List<Map<String, dynamic>> styles) {
+    final seen = <String>{};
+    final deduped = <Map<String, dynamic>>[];
+    for (final style in styles) {
+      final key = _styleIdentity(style);
+      if (seen.add(key)) {
+        deduped.add(style);
+      }
+    }
+    return deduped;
+  }
+
+  void _logLibraryAudit(List<Map<String, dynamic>> variants) {
+    final nameCounts = <String, int>{};
+    final missingAssets = <String>[];
+    for (final variant in variants) {
+      final rawName = variant['style_name']?.toString().trim() ?? '';
+      final name = rawName.toLowerCase();
+      nameCounts[name] = (nameCounts[name] ?? 0) + 1;
+
+      final front = variant['front_view_url']?.toString() ?? '';
+      final side = variant['side_view_url']?.toString() ?? '';
+      final back = variant['back_view_url']?.toString() ?? '';
+      final hasAssets = front.isNotEmpty && side.isNotEmpty && back.isNotEmpty;
+      if (!hasAssets && rawName.isNotEmpty) {
+        missingAssets.add(rawName);
+      }
+    }
+
+    final duplicates = nameCounts.entries
+        .where((entry) => entry.value > 1)
+        .map((entry) => entry.key)
+        .toList();
+    final localOnly = _localStyleAssets.keys
+        .where((key) => !nameCounts.containsKey(key))
+        .toList();
+
+    if (duplicates.isNotEmpty) {
+      debugPrint('[HaircutLibrary] Duplicate styles from API: ${duplicates.join(', ')}');
+    }
+    if (missingAssets.isNotEmpty) {
+      debugPrint('[HaircutLibrary] Styles missing assets (front/side/back): ${missingAssets.join(', ')}');
+    }
+    if (localOnly.isNotEmpty) {
+      debugPrint('[HaircutLibrary] Local asset overrides not found in API: ${localOnly.join(', ')}');
+    }
   }
 
   Widget _buildCategoryFolder(String label, bool selected) {
@@ -356,6 +487,130 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         return 'Coily';
       default:
         return '';
+    }
+  }
+
+  Future<void> _useStyleDirectly(BuildContext context, Map<String, dynamic> style) async {
+    final variantId = style['variantId'] as int?;
+    if (variantId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This haircut cannot be booked yet.')),
+      );
+      return;
+    }
+
+    final userHairTexture = (UserSession.lastScan?['hairTexture']?.toString() ?? '').trim().toLowerCase();
+    final styleHairTexture = (style['hairTexture']?.toString() ?? '').trim().toLowerCase();
+    final isMismatch = userHairTexture.isNotEmpty && styleHairTexture.isNotEmpty && userHairTexture != styleHairTexture;
+
+    if (isMismatch) {
+      final proceed = await showDialog<bool>(
+            context: context,
+            builder: (dialogContext) {
+              return AlertDialog(
+                backgroundColor: const Color(0xFF1A1A1A),
+                title: const Text('Texture mismatch', style: TextStyle(color: Colors.white)),
+                content: Text(
+                  'Your current hair looks ${UserSession.lastScan?['hairTexture']?.toString() ?? 'different'} and this cut is best for ${style['hairTexture']?.toString() ?? 'another texture'}. It can still work, but styling may be needed.',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('Pick another', style: TextStyle(color: Colors.white70)),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
+                    child: const Text('Use anyway', style: TextStyle(color: Colors.black)),
+                  ),
+                ],
+              );
+            },
+          ) ??
+          false;
+      if (!proceed) {
+        return;
+      }
+    }
+
+    final userId = UserSession.userId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again.')),
+      );
+      return;
+    }
+
+    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+      return;
+    }
+
+    UserSession.selectedVariantId = variantId;
+    UserSession.selectedStyleName = style['name']?.toString();
+    UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+    UserSession.selectedPreviewImages = {
+      'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': style['backViewUrl']?.toString() ?? '',
+    };
+
+    await AiFunnelService.saveSelection(
+      scanSessionId: UserSession.ensureScanSessionId(),
+      userId: userId,
+      variantId: variantId,
+      styleName: UserSession.selectedStyleName ?? 'Style',
+      faceShape: UserSession.lastScan?['faceShape']?.toString(),
+      hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+      hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+      hairLength: UserSession.lastScan?['hairLength']?.toString(),
+      estimatedMinutes: UserSession.selectedEstimatedMinutes,
+      frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+      sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+      backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+    );
+
+    final suggestion = await _fetchSuggestedSlot();
+    if (!context.mounted) {
+      return;
+    }
+    if (suggestion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No available slots found. Please choose manually.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'suggestBestSlot'}),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return null;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['suggestion'] as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
     }
   }
 

@@ -2,7 +2,8 @@ import 'package:flutter/foundation.dart';
 
 class ApiConfig {
   static const String webBaseUrl = 'http://localhost/barberyanitatis/tatis_barbershop/api';
-  static const String emulatorBaseUrl = 'http://10.0.2.2/barberyanitatis/tatis_barbershop/api';
+  // Local LAN address for device testing — updated to your Wi-Fi IP (192.168.1.6)
+  static const String emulatorBaseUrl = 'http://192.168.1.6/barberyanitatis/tatis_barbershop/api';
 
   static String get baseUrl {
     const configured = String.fromEnvironment('API_BASE_URL', defaultValue: '');
