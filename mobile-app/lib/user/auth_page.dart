@@ -333,7 +333,7 @@ class _AuthPageState extends State<AuthPage> {
       // Launch supabase OAuth flow (will open browser and redirect to the custom scheme)
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.google,
-        redirectTo: 'io.supabase.flutter://login-callback',
+        redirectTo: 'io.supabase.flutter://login-callback/',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Google sign-in...')));
@@ -350,7 +350,7 @@ class _AuthPageState extends State<AuthPage> {
     try {
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.facebook,
-        redirectTo: 'io.supabase.flutter://login-callback',
+        redirectTo: 'io.supabase.flutter://login-callback/',
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
