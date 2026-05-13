@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import 'appointments_page.dart';
 import 'api_config.dart';
 import 'time_format_utils.dart';
@@ -31,6 +32,37 @@ class _PaymentPageState extends State<PaymentPage> {
   bool _processing = false;
   String? _intentStatusLabel;
   String? _receiptRef;
+  String _selectedMethod = 'gcash';
+
+  String _paymentApiRoot() {
+    final root = ApiConfig.rootUrl.replaceAll(RegExp(r'/$'), '');
+    return '$root/mobile-app';
+  }
+
+  String _paymentReturnUrl(bool success) {
+    final base = _paymentApiRoot();
+    return success ? '$base/payment-success' : '$base/payment-failed';
+  }
+
+  String? _extractCheckoutUrl(Map<String, dynamic> body) {
+    return body['checkout_url']?.toString() ??
+        body['data']?['attributes']?['redirect']?['checkout_url']?.toString() ??
+        body['data']?['attributes']?['next_action']?['redirect']?['url']?.toString() ??
+        body['raw']?['data']?['attributes']?['redirect']?['checkout_url']?.toString();
+  }
+
+  Future<void> _openCheckoutUrlIfPresent(String? checkoutUrl) async {
+    if (checkoutUrl == null || checkoutUrl.isEmpty) {
+      return;
+    }
+
+    final uri = Uri.tryParse(checkoutUrl);
+    if (uri == null) {
+      return;
+    }
+
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
 
   Future<void> _startPaymentIntent(double total) async {
     if (_processing) {
@@ -39,22 +71,24 @@ class _PaymentPageState extends State<PaymentPage> {
 
     setState(() => _processing = true);
     try {
+      // Create payment intent via backend PayMongo endpoint
+      final cents = (total * 100).round();
+      final paymentRoot = _paymentApiRoot();
       final createIntentResponse = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/payments.php'),
+        Uri.parse('$paymentRoot/backend/paymongo/create-payment.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'action': 'createIntent',
-          'appointmentID': widget.appointmentID,
-          'amount': double.parse(total.toStringAsFixed(2)),
-          'method': 'GCash/QRPh',
-          'provider': 'mock',
-          'expiresMinutes': 10,
+          'amount': cents,
+          'currency': 'PHP',
+          'method': _selectedMethod,
+          'description': 'Appointment ${widget.appointmentID}',
+          'appointment_id': widget.appointmentID.toString(),
+          'success_url': _paymentReturnUrl(true),
+          'failed_url': _paymentReturnUrl(false),
         }),
       );
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       final data = createIntentResponse.body.isNotEmpty
           ? jsonDecode(createIntentResponse.body) as Map<String, dynamic>
@@ -67,26 +101,12 @@ class _PaymentPageState extends State<PaymentPage> {
         return;
       }
 
-      if ((data['paymentState']?.toString() ?? '') == 'Paid') {
-        setState(() {
-          _intentStatusLabel = 'Payment already completed';
-          _receiptRef = data['receiptRef']?.toString();
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment already confirmed for this appointment.')),
-        );
-        Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-          (route) => false,
-        );
-        return;
-      }
+      final resourceId = data['resource_id']?.toString() ?? data['data']?['id']?.toString() ?? '';
+      final resourceType = data['resource_type']?.toString() ??
+          (resourceId.startsWith('src_') ? 'source' : 'payment_intent');
+      final checkoutUrl = _extractCheckoutUrl(data);
 
-      final intent = data['intent'] is Map ? Map<String, dynamic>.from(data['intent'] as Map) : <String, dynamic>{};
-      final intentID = int.tryParse('${intent['intentID'] ?? ''}') ?? 0;
-      final intentToken = intent['intentToken']?.toString() ?? '';
-
-      if (intentID <= 0 || intentToken.isEmpty) {
+      if (resourceId.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to initialize payment intent.')),
         );
@@ -95,16 +115,14 @@ class _PaymentPageState extends State<PaymentPage> {
 
       setState(() => _intentStatusLabel = 'Waiting for gateway confirmation...');
 
-      await _showMockCheckout(intentID: intentID, intentToken: intentToken, amount: total);
-
-      if (!mounted) {
-        return;
+      if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+        await _openCheckoutUrlIfPresent(checkoutUrl);
+        if (!mounted) return;
+        setState(() => _intentStatusLabel = 'Complete payment in the opened browser/app...');
       }
 
-      final statusData = await _pollIntentUntilFinal(intentID);
-      if (!mounted || statusData == null) {
-        return;
-      }
+      final statusData = await _pollPaymentUntilFinal(resourceId, resourceType: resourceType);
+      if (!mounted || statusData == null) return;
 
       final paymentState = statusData['paymentState']?.toString() ?? 'Unpaid';
       final receipt = statusData['receiptRef']?.toString();
@@ -119,7 +137,13 @@ class _PaymentPageState extends State<PaymentPage> {
           SnackBar(content: Text(receipt != null && receipt.isNotEmpty ? 'Payment successful ($receipt)' : 'Payment successful.')),
         );
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+          MaterialPageRoute(
+            builder: (_) => AppointmentsPage(
+              highlightAppointmentId: widget.appointmentID,
+              forcedPaymentState: 'Paid',
+              forcedReceiptRef: receipt,
+            ),
+          ),
           (route) => false,
         );
         return;
@@ -142,115 +166,58 @@ class _PaymentPageState extends State<PaymentPage> {
     }
   }
 
-  Future<void> _showMockCheckout({
-    required int intentID,
-    required String intentToken,
-    required double amount,
-  }) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: const Color(0xFF111111),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        bool submitting = false;
+  // Mock checkout removed. Real gateway flow handled via server endpoints and hosted pages.
 
-        Future<void> submitOutcome(String outcome) async {
-          if (submitting) {
-            return;
-          }
-          submitting = true;
-          try {
-            await http.post(
-              Uri.parse('${ApiConfig.baseUrl}/payments.php'),
-              headers: {'Content-Type': 'application/json'},
-              body: jsonEncode({
-                'action': 'mockProviderWebhook',
-                'intentID': intentID,
-                'intentToken': intentToken,
-                'outcome': outcome,
-              }),
-            );
-          } finally {
-            if (ctx.mounted) {
-              Navigator.of(ctx).pop();
+  Future<Map<String, dynamic>?> _pollPaymentUntilFinal(
+    String id, {
+    required String resourceType,
+  }) async {
+    final normalizedType = resourceType.toLowerCase();
+    final paymentRoot = _paymentApiRoot();
+    for (var attempt = 0; attempt < 24; attempt++) {
+      try {
+        final uri = Uri.parse(
+          '$paymentRoot/backend/paymongo/payment-status.php?intent_id=$id&resource_type=$normalizedType',
+        );
+        final response = await http.get(uri).timeout(const Duration(seconds: 5));
+
+        final data = response.body.isNotEmpty
+            ? jsonDecode(response.body) as Map<String, dynamic>
+            : <String, dynamic>{};
+
+        if (response.statusCode != 200) {
+          debugPrint('Payment status check failed (attempt $attempt): ${response.statusCode}');
+          debugPrint('Response: ${response.body}');
+          return {'paymentState': 'Unknown', 'raw': data};
+        }
+
+        final status = data['data']?['attributes']?['status']?.toString().toLowerCase() ?? '';
+        debugPrint('Payment status poll attempt $attempt: status=$status');
+        
+        if (status == 'paid' || status == 'succeeded') {
+          return {
+            'paymentState': 'Paid',
+            'receiptRef': data['data']?['attributes']?['receipt']?.toString(),
+          };
+        }
+        if (status == 'failed' || status == 'canceled' || status == 'expired') {
+          return {'paymentState': 'Failed'};
+        }
+
+        if (normalizedType == 'source') {
+          if (status == 'chargeable' || status == 'pending') {
+            if (mounted) {
+              setState(() => _intentStatusLabel = 'Payment authorized. Waiting for gateway finalization...');
             }
           }
         }
 
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Mock Checkout',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Amount: ₱${amount.toStringAsFixed(2)}',
-                style: const TextStyle(color: Colors.white70),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                'Fallback mode is active while payment gateway integration is in progress.',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => submitOutcome('failed'),
-                      style: OutlinedButton.styleFrom(foregroundColor: const Color(0xFFE74C3C)),
-                      child: const Text('Simulate Failed'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () => submitOutcome('paid'),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-                      child: const Text('Simulate Success'),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Future<Map<String, dynamic>?> _pollIntentUntilFinal(int intentID) async {
-    for (var attempt = 0; attempt < 10; attempt++) {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/payments.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'getIntentStatus',
-          'intentID': intentID,
-        }),
-      );
-
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        return data;
+        await Future.delayed(const Duration(seconds: 2));
+      } catch (e) {
+        debugPrint('Payment status poll error (attempt $attempt): $e');
+        // Continue polling on transient errors
+        await Future.delayed(const Duration(seconds: 2));
       }
-
-      final paymentState = data['paymentState']?.toString() ?? 'Unpaid';
-      if (paymentState == 'Paid' || paymentState == 'Failed') {
-        return data;
-      }
-
-      await Future.delayed(const Duration(milliseconds: 700));
     }
 
     return null;
@@ -312,8 +279,24 @@ class _PaymentPageState extends State<PaymentPage> {
                   const Text('Payment Method', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                   const SizedBox(height: 12),
                   _paymentMethodTile(
-                    title: 'GCash, PayMaya, QRPh',
+                    title: 'GCash',
                     trailing: _paymentIcon('assets/images/gcash.png'),
+                    selected: _selectedMethod == 'gcash',
+                    onTap: () => setState(() => _selectedMethod = 'gcash'),
+                  ),
+                  const SizedBox(height: 8),
+                  _paymentMethodTile(
+                    title: 'GrabPay',
+                    trailing: const Icon(Icons.account_balance_wallet, color: Colors.white70, size: 18),
+                    selected: _selectedMethod == 'grab_pay',
+                    onTap: () => setState(() => _selectedMethod = 'grab_pay'),
+                  ),
+                  const SizedBox(height: 8),
+                  _paymentMethodTile(
+                    title: 'Card',
+                    trailing: const Icon(Icons.credit_card, color: Colors.white70, size: 18),
+                    selected: _selectedMethod == 'card',
+                    onTap: () => setState(() => _selectedMethod = 'card'),
                   ),
                 ],
               ),
@@ -388,28 +371,37 @@ class _PaymentPageState extends State<PaymentPage> {
     );
   }
 
-  Widget _paymentMethodTile({required String title, Widget? trailing}) {
+  Widget _paymentMethodTile({
+    required String title,
+    Widget? trailing,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF111111),
+        color: selected ? const Color(0xFF1A1A1A) : const Color(0xFF111111),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: selected ? Colors.white54 : Colors.white12),
       ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.08),
-              borderRadius: BorderRadius.circular(8),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.qr_code_2, color: Colors.white, size: 18),
             ),
-            child: const Icon(Icons.qr_code_2, color: Colors.white, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(child: Text(title, style: const TextStyle(color: Colors.white))),
-          if (trailing != null) trailing,
-        ],
+            const SizedBox(width: 12),
+            Expanded(child: Text(title, style: const TextStyle(color: Colors.white))),
+            if (trailing != null) trailing,
+          ],
+        ),
       ),
     );
   }

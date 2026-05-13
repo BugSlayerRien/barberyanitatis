@@ -15,10 +15,10 @@ class _SplashPageState extends State<SplashPage> {
   void initState() {
     super.initState();
     Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
+    if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const AuthPage()),
-      );
+    );
     });
   }
 

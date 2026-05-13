@@ -66,12 +66,28 @@ class _DashboardPageState extends State<DashboardPage> {
       'side': 'assets/images/overlays/french_crop/french_crop_left.png',
       'back': 'assets/images/overlays/french_crop/french_crop_right.png',
     },
+    'curly taper fade': {
+      'front': 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
+      'side': 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
+      'back': 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
+    },
+    'textured crop': {
+      'front': 'assets/images/overlays/textured_crop/textured_crop_front.png',
+      'side': 'assets/images/overlays/textured_crop/textured_crop_left.png',
+      'back': 'assets/images/overlays/textured_crop/textured_crop_right.png',
+    },
+    'curly modern mullet': {
+      'front': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
+      'side': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
+      'back': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
+    },
   };
 
   String _styleIdentity(Map<String, dynamic> style) {
-    final variantId = style['variantId']?.toString() ?? '';
-    final styleName = style['name']?.toString().trim().toLowerCase() ?? '';
-    return variantId.isNotEmpty ? 'variant:$variantId' : 'style:$styleName';
+    final rawStyleName = style['name']?.toString().trim().toLowerCase() ?? '';
+    final normalizedStyleName =
+        rawStyleName == 'curly top fade' ? 'curly taper fade' : rawStyleName;
+    return 'style:$normalizedStyleName';
   }
 
   List<Map<String, dynamic>> _dedupeStyles(List<Map<String, dynamic>> styles) {
@@ -578,10 +594,11 @@ class _DashboardPageState extends State<DashboardPage> {
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
     final styleName = variant['style_name']?.toString().trim().toLowerCase() ?? '';
+    final normalizedStyleName = styleName == 'curly top fade' ? 'curly taper fade' : styleName;
     final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
     final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
     final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
-    final localAssets = _localStyleAssets[styleName];
+    final localAssets = _localStyleAssets[normalizedStyleName];
     final front = localAssets?['front'] ?? _resolveImage(frontRaw) ?? _dashboardSampleHairFront;
     final side = localAssets?['side'] ?? _resolveImage(sideRaw) ?? front;
     final back = localAssets?['back'] ?? _resolveImage(backRaw) ?? front;
@@ -589,7 +606,9 @@ class _DashboardPageState extends State<DashboardPage> {
     debugPrint('[Dashboard] Mapped variant: style=${variant['style_name']} frontRaw=$frontRaw resolved=$front');
 
     return {
-      'name': variant['style_name']?.toString() ?? 'Style',
+        'name': normalizedStyleName == 'curly taper fade'
+          ? 'Curly Taper Fade'
+          : variant['style_name']?.toString() ?? 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
       'image': front,
       'details': _buildDetails(variant),
@@ -604,7 +623,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   String _resolvePreviewImage(Map<String, dynamic> style) {
     final styleName = style['name']?.toString().trim().toLowerCase() ?? '';
-    final localAssets = _localStyleAssets[styleName];
+    final normalizedStyleName = styleName == 'curly top fade' ? 'curly taper fade' : styleName;
+    final localAssets = _localStyleAssets[normalizedStyleName];
     final raw = style['image']?.toString() ??
         style['frontViewUrl']?.toString() ??
         '';

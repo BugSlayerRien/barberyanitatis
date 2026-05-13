@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../about_page.dart';
 import '../auth_page.dart';
 import '../contact_page.dart';
 import '../history_page.dart';
 import '../settings_page.dart';
+import '../user_session.dart';
 
 Future<void> showAppMenuSheet(BuildContext context) async {
   await showModalBottomSheet<void>(
@@ -74,8 +76,18 @@ Future<void> showAppMenuSheet(BuildContext context) async {
                     ],
                   ),
                 );
-                if (confirmed == true && context.mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
+                if (confirmed == true) {
+                  if (!context.mounted) {
+                    return;
+                  }
+                  final navigator = Navigator.of(context);
+                  try {
+                    await Supabase.instance.client.auth.signOut();
+                  } catch (_) {
+                    // Continue with local sign-out even if the remote call fails.
+                  }
+                  await UserSession.clear();
+                  navigator.pushAndRemoveUntil(
                     MaterialPageRoute(builder: (_) => const AuthPage()),
                     (route) => false,
                   );

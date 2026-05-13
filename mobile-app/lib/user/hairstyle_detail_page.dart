@@ -131,6 +131,24 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
           'left': 'assets/images/overlays/french_crop/french_crop_left.png',
           'right': 'assets/images/overlays/french_crop/french_crop_right.png',
         };
+      case 'curly taper fade':
+        return {
+          'front': 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
+          'left': 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
+          'right': 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
+        };
+      case 'textured crop':
+        return {
+          'front': 'assets/images/overlays/textured_crop/textured_crop_front.png',
+          'left': 'assets/images/overlays/textured_crop/textured_crop_left.png',
+          'right': 'assets/images/overlays/textured_crop/textured_crop_right.png',
+        };
+      case 'curly modern mullet':
+        return {
+          'front': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
+          'left': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
+          'right': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
+        };
       default:
         return null;
     }

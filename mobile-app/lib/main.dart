@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'user/auth_page.dart';
 import 'user/splash_page.dart';
+import 'package:app_links/app_links.dart';
+import 'user/payment_result_page.dart';
+
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
@@ -13,12 +19,30 @@ const Color kOrangeColor = Color(0xFFF37022);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (kIsWeb) {
+    // Use path-based routing so OAuth fragments (#access_token=...) are not
+    // interpreted as Flutter route paths.
+    setUrlStrategy(PathUrlStrategy());
+  }
+
   await Supabase.initialize(
     url: 'https://sergfnujsutcschocuuz.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
-    authCallbackUrlHostname: 'io.supabase.flutter',
+    authCallbackUrlHostname: 'login-callback',
   );
+
+  // Setup deep link listener to handle app scheme callbacks (payment return)
+  final AppLinks _appLinks = AppLinks();
+  _appLinks.uriLinkStream.listen((uri) {
+    if (uri == null) return;
+    if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
+      final params = uri.queryParameters;
+      try {
+        navigatorKey.currentState?.pushNamed('/payment-result', arguments: params);
+      } catch (_) {}
+    }
+  }, onError: (_) {});
 
   runApp(const TatisBarbershopApp());
 }
@@ -33,6 +57,7 @@ class TatisBarbershopApp extends StatelessWidget {
     return MaterialApp(
       title: 'Tatis Barbershop',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
       navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
@@ -47,6 +72,11 @@ class TatisBarbershopApp extends StatelessWidget {
         ),
       ),
       home: const SplashPage(),
+      routes: {
+        '/payment-result': (context) => const PaymentResultPage(),
+      },
+      onUnknownRoute: (_) =>
+          MaterialPageRoute(builder: (_) => const SplashPage()),
     );
   }
 }

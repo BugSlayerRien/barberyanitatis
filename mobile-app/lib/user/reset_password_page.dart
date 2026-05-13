@@ -1,113 +1,50 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'api_config.dart';
+import '../admins/admin_dashboard_page.dart';
+import '../barber/barber_dashboard_page.dart';
+import '../receptionist/receptionist_dashboard_page.dart';
+import 'dashboard_page.dart';
+import 'user_session.dart';
 
 class ResetPasswordPage extends StatefulWidget {
-  const ResetPasswordPage({super.key, this.initialToken = ''});
-
-  final String initialToken;
+  const ResetPasswordPage({super.key});
 
   @override
   State<ResetPasswordPage> createState() => _ResetPasswordPageState();
 }
 
 class _ResetPasswordPageState extends State<ResetPasswordPage> {
-  final TextEditingController _tokenController = TextEditingController();
   final TextEditingController _newPasswordController = TextEditingController();
   final TextEditingController _confirmPasswordController =
       TextEditingController();
 
-  bool _isVerifying = false;
   bool _isSubmitting = false;
-  bool _tokenVerified = false;
   bool _obscureNewPassword = true;
   bool _obscureConfirmPassword = true;
-  String? _tokenHint;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.initialToken.trim().isNotEmpty) {
-      _tokenController.text = widget.initialToken.trim();
-    }
-  }
 
   @override
   void dispose() {
-    _tokenController.dispose();
     _newPasswordController.dispose();
     _confirmPasswordController.dispose();
     super.dispose();
   }
 
-  Future<void> _verifyToken() async {
-    final token = _tokenController.text.trim();
-    if (token.isEmpty) {
+  Future<void> _resetPassword() async {
+    final newPassword = _newPasswordController.text;
+    final confirmPassword = _confirmPasswordController.text;
+    final currentUser = Supabase.instance.client.auth.currentUser;
+
+    if (currentUser == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your reset token.')),
+        const SnackBar(
+          content: Text('Open the password reset link from your email first.'),
+        ),
       );
       return;
     }
 
-    setState(() {
-      _isVerifying = true;
-      _tokenVerified = false;
-      _tokenHint = null;
-    });
-
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'verifyResetToken',
-          'token': token,
-        }),
-      );
-
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        throw Exception(data['error']?.toString() ?? 'Token verification failed.');
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      setState(() {
-        _tokenVerified = true;
-        _tokenHint = data['emailHint']?.toString();
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Reset token verified.')),
-      );
-    } catch (e) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_readableError(e))),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _isVerifying = false);
-      }
-    }
-  }
-
-  Future<void> _resetPassword() async {
-    final token = _tokenController.text.trim();
-    final newPassword = _newPasswordController.text;
-    final confirmPassword = _confirmPasswordController.text;
-
-    if (token.isEmpty || newPassword.isEmpty || confirmPassword.isEmpty) {
+    if (newPassword.isEmpty || confirmPassword.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all fields.')),
       );
@@ -127,33 +64,16 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       return;
     }
 
-    if (!_tokenVerified) {
-      await _verifyToken();
-      if (!_tokenVerified) {
-        return;
-      }
-    }
-
     setState(() => _isSubmitting = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'resetPassword',
-          'token': token,
-          'newPassword': newPassword,
-          'confirmPassword': confirmPassword,
-        }),
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(password: newPassword),
       );
 
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        throw Exception(data['error']?.toString() ?? 'Password reset failed.');
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session != null) {
+        _applySupabaseSession(session);
       }
 
       if (!mounted) {
@@ -161,14 +81,9 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            data['message']?.toString() ??
-                'Password reset successful. You can now sign in.',
-          ),
-        ),
+        const SnackBar(content: Text('Password updated successfully.')),
       );
-      Navigator.of(context).pop();
+      _goToSignedInDestination();
     } catch (e) {
       if (!mounted) {
         return;
@@ -183,14 +98,65 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
     }
   }
 
+  void _applySupabaseSession(Session session) {
+    final user = session.user;
+    final metadata = user.userMetadata ?? <String, dynamic>{};
+    final appMetadata = user.appMetadata;
+    final rawRole = '${appMetadata['role'] ?? metadata['role']}'.trim();
+    final role = rawRole.isEmpty || rawRole == 'null' ? null : rawRole;
+    final fullNameValue = metadata['full_name'];
+    final nameValue = metadata['name'];
+    final resolvedFullName = fullNameValue != null &&
+        fullNameValue.toString().trim().isNotEmpty
+        ? fullNameValue.toString().trim()
+        : nameValue != null && nameValue.toString().trim().isNotEmpty
+            ? nameValue.toString().trim()
+            : user.email;
+
+    UserSession.userId = user.id.hashCode.abs();
+    UserSession.fullName = resolvedFullName;
+    UserSession.email = user.email;
+    UserSession.roles = role != null && role.isNotEmpty
+        ? [role.toLowerCase()]
+        : ['authenticated'];
+  }
+
+  void _goToSignedInDestination() {
+    if (!mounted) {
+      return;
+    }
+
+    if (UserSession.roles.contains('admin')) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const AdminDashboardPage()),
+        (route) => false,
+      );
+    } else if (UserSession.roles.contains('receptionist')) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()),
+        (route) => false,
+      );
+    } else if (UserSession.roles.contains('barber')) {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const BarberDashboardPage()),
+        (route) => false,
+      );
+    } else {
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const DashboardPage()),
+        (route) => false,
+      );
+    }
+  }
+
   String _readableError(Object error) {
     final raw = error.toString().replaceFirst('Exception:', '').trim();
     final lower = raw.toLowerCase();
     if (lower.contains('expired')) {
-      return 'This reset token is expired.';
+      return 'This recovery session is expired. Request a new reset link.';
     }
     if (lower.contains('invalid')) {
-      return 'Invalid reset token. Please request a new one.';
+      return 'Invalid recovery session. Please request a new reset link.';
     }
     if (lower.contains('network') || lower.contains('socket')) {
       return 'Network issue. Please try again.';
@@ -241,34 +207,14 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Enter your reset token and set a new password',
+                    'Set a new password for your recovery session',
                     style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   const SizedBox(height: 14),
-                  TextField(
-                    controller: _tokenController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _fieldDecoration('Reset token'),
+                  const Text(
+                    'Open the reset link from your email before changing the password.',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
                   ),
-                  const SizedBox(height: 12),
-                  OutlinedButton(
-                    onPressed: (_isVerifying || _isSubmitting) ? null : _verifyToken,
-                    style: OutlinedButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      side: const BorderSide(color: Colors.white30),
-                    ),
-                    child: Text(
-                      _isVerifying ? 'Verifying...' : 'Verify token',
-                      style: const TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  if (_tokenHint != null) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      'Token is valid for: $_tokenHint',
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
-                    ),
-                  ],
                   const SizedBox(height: 16),
                   TextField(
                     controller: _newPasswordController,
@@ -309,7 +255,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                   ),
                   const SizedBox(height: 18),
                   ElevatedButton(
-                    onPressed: (_isSubmitting || _isVerifying) ? null : _resetPassword,
+                    onPressed: _isSubmitting ? null : _resetPassword,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black,

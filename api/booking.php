@@ -75,6 +75,23 @@ function derive_payment_state(?string $paymentStatus, ?string $intentStatus): st
     return 'Unpaid';
 }
 
+function promote_paid_appointment(PDO $pdo, int $appointmentId, string $currentStatus): string
+{
+    if ($currentStatus !== 'PendingPayment') {
+        return $currentStatus;
+    }
+
+    $updateStmt = $pdo->prepare(
+        "UPDATE appointments
+         SET status = 'Scheduled'
+         WHERE appointment_id = :appointment_id
+           AND status = 'PendingPayment'"
+    );
+    $updateStmt->execute([':appointment_id' => $appointmentId]);
+
+    return 'Scheduled';
+}
+
 function ensure_appointments_status_constraint(PDO $pdo): void
 {
     // Older schemas miss PendingPayment in appointments_status_check, causing booking inserts to fail.
@@ -482,11 +499,15 @@ try {
             ];
         }
 
-        $appointments = array_map(function ($row) use ($serviceMap) {
+        $appointments = array_map(function ($row) use ($serviceMap, $pdo) {
             $aid = (int)$row['appointment_id'];
             $intentStatus = $row['intent_status'] !== null ? (string)$row['intent_status'] : null;
             $paymentStatus = $row['payment_status'] !== null ? (string)$row['payment_status'] : null;
             $paymentState = derive_payment_state($paymentStatus, $intentStatus);
+            $appointmentStatus = (string)$row['status'];
+            if ($paymentState === 'Paid') {
+                $appointmentStatus = promote_paid_appointment($pdo, $aid, $appointmentStatus);
+            }
             $canRetryPayment = in_array($paymentState, ['Unpaid', 'Failed'], true);
             if ($intentStatus === 'PendingGateway' && $row['intent_expires_at'] !== null) {
                 $canRetryPayment = strtotime((string)$row['intent_expires_at']) < time();
@@ -497,7 +518,7 @@ try {
                 'appointmentDate' => $row['appointment_date'],
                 'startTime' => $row['start_time'],
                 'endTime' => $row['end_time'],
-                'status' => $row['status'],
+                'status' => $appointmentStatus,
                 'barberID' => (int)$row['barber_id'],
                 'barberName' => $row['barber_name'],
                 'paymentState' => $paymentState,

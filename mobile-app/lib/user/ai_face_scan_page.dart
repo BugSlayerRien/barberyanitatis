@@ -134,6 +134,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       left: 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
       right: 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
     ),
+    'curly taper fade': OverlayImageSet(
+      front: 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
+      left: 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
+      right: 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
+    ),
     'low fade': OverlayImageSet(
       front: 'assets/images/overlays/low_fade/low_fade_front.png',
       left: 'assets/images/overlays/low_fade/low_fade_left.png',
@@ -143,6 +148,16 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       front: 'assets/images/overlays/french_crop/french_crop_front.png',
       left: 'assets/images/overlays/french_crop/french_crop_left.png',
       right: 'assets/images/overlays/french_crop/french_crop_right.png',
+    ),
+    'textured crop': OverlayImageSet(
+      front: 'assets/images/overlays/textured_crop/textured_crop_front.png',
+      left: 'assets/images/overlays/textured_crop/textured_crop_left.png',
+      right: 'assets/images/overlays/textured_crop/textured_crop_right.png',
+    ),
+    'curly modern mullet': OverlayImageSet(
+      front: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
+      left: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
+      right: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
     ),
   };
 
@@ -179,82 +194,31 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hairClipFactor: 0.78,
       visualScale: 1.06,
       yawShiftFactor: 0.05),
+    'curly taper fade': OverlayCalibration(
+      widthScale: 1.10,
+      heightScale: 1.12,
+      xOffset: 0.00,
+      yOffset: -0.14,
+      hairClipFactor: 0.80,
+      visualScale: 1.06,
+      yawShiftFactor: 0.04),
+    'textured crop': OverlayCalibration(
+      widthScale: 1.02,
+      heightScale: 1.04,
+      xOffset: 0.00,
+      yOffset: -0.12,
+      hairClipFactor: 0.82,
+      visualScale: 1.03,
+      yawShiftFactor: 0.04),
+    'curly modern mullet': OverlayCalibration(
+      widthScale: 1.12,
+      heightScale: 1.18,
+      xOffset: 0.00,
+      yOffset: -0.16,
+      hairClipFactor: 0.79,
+      visualScale: 1.08,
+      yawShiftFactor: 0.05),
   };
-
-  static const List<Map<String, dynamic>> _hardcodedCatalog = [
-    {
-      'variant_id': 9001,
-      'style_name': 'Blowout Taper',
-      'style_code': 'HC-BLOWOUT-TAPER',
-      'face_shape': 'Oval',
-      'hair_texture': 'Straight',
-      'front_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
-      'side_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
-      'back_view_url': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
-      'confidence_score': 0.92,
-      'estimated_minutes': 35,
-    },
-    {
-      'variant_id': 9004,
-      'style_name': 'Buzz Cut',
-      'style_code': 'HC-BUZZ-CUT',
-      'face_shape': 'Oval',
-      'hair_texture': 'Straight',
-      'front_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
-      'side_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
-      'back_view_url': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
-      'confidence_score': 0.90,
-      'estimated_minutes': 15,
-    },
-    {
-      'variant_id': 9005,
-      'style_name': 'Low Fade',
-      'style_code': 'HC-LOW-FADE',
-      'face_shape': 'Oval',
-      'hair_texture': 'Straight',
-      'front_view_url': 'assets/images/overlays/low_fade/low_fade_front.png',
-      'side_view_url': 'assets/images/overlays/low_fade/low_fade_left.png',
-      'back_view_url': 'assets/images/overlays/low_fade/low_fade_right.png',
-      'confidence_score': 0.90,
-      'estimated_minutes': 30,
-    },
-    {
-      'variant_id': 9006,
-      'style_name': 'French Crop',
-      'style_code': 'HC-FRENCH-CROP',
-      'face_shape': 'Square',
-      'hair_texture': 'Straight',
-      'front_view_url': 'assets/images/overlays/french_crop/french_crop_front.png',
-      'side_view_url': 'assets/images/overlays/french_crop/french_crop_left.png',
-      'back_view_url': 'assets/images/overlays/french_crop/french_crop_right.png',
-      'confidence_score': 0.90,
-      'estimated_minutes': 25,
-    },
-    {
-      'variant_id': 9002,
-      'style_name': 'Curly Top Fade',
-      'style_code': 'STYLE-CURLY-TOP-FADE-HC',
-      'face_shape': 'Oblong',
-      'hair_texture': 'Wavy',
-      'front_view_url': '/database/assets/hairstyles/curly_top_fade_front.png',
-      'side_view_url': '/database/assets/hairstyles/curly_top_fade_left.png',
-      'back_view_url': '/database/assets/hairstyles/curly_top_fade_right.png',
-      'confidence_score': 0.90,
-      'estimated_minutes': 40,
-    },
-    {
-      'variant_id': 9003,
-      'style_name': 'Textured Crop Fade',
-      'style_code': 'STYLE-TEXTURED-CROP-FADE-HC',
-      'face_shape': 'Square',
-      'hair_texture': 'Straight',
-      'front_view_url': '/database/assets/hairstyles/textured_crop_fade_front.png',
-      'side_view_url': '/database/assets/hairstyles/textured_crop_fade_left.png',
-      'back_view_url': '/database/assets/hairstyles/textured_crop_fade_right.png',
-      'confidence_score': 0.88,
-      'estimated_minutes': 35,
-    },
-  ];
 
   @override
   void initState() {
@@ -873,7 +837,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     if (_deterministicTestingMode) {
-      _applyDeterministicRecommendation();
+      await _applyDeterministicRecommendation();
       return;
     }
 
@@ -907,7 +871,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       final libraryFallback = await _loadLibraryFallback();
       recommendations = _mergeRecommendations(recommendations, libraryFallback);
-      recommendations = _mergeRecommendations(recommendations, _hardcodedFallback());
 
       final ranked = _rankRecommendations(recommendations);
       if (!mounted) return;
@@ -989,7 +952,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     if (_deterministicTestingMode) {
-      _applyDeterministicRecommendation();
+      await _applyDeterministicRecommendation();
       return;
     }
 
@@ -1029,7 +992,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       final libraryFallback = await _loadLibraryFallback();
       recommendations = _mergeRecommendations(recommendations, libraryFallback);
-      recommendations = _mergeRecommendations(recommendations, _hardcodedFallback());
 
       if (recommendations.isEmpty) {
         throw Exception('No available hairstyle variants yet');
@@ -1099,8 +1061,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     debugPrint('[AiFaceScan] Library response status=${response.statusCode} bytes=${response.bodyBytes.length}');
 
     if (response.statusCode != 200 || response.body.isEmpty) {
-      debugPrint('[AiFaceScan] Library API failed or returned empty payload, using hardcoded catalog');
-      return _hardcodedFallback();
+      debugPrint('[AiFaceScan] Library API failed or returned empty payload (API-only mode)');
+      return <Map<String, dynamic>>[];
     }
 
     final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -1108,16 +1070,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
     if (styles.isEmpty) {
-      debugPrint('[AiFaceScan] Library API returned 0 hairstyles, using hardcoded catalog');
-      return _hardcodedFallback();
+      debugPrint('[AiFaceScan] Library API returned 0 hairstyles (API-only mode)');
+      return <Map<String, dynamic>>[];
     }
 
     debugPrint('[AiFaceScan] Library API returned ${styles.length} hairstyles: ${styles.map((style) => style['style_name'] ?? style['styleName'] ?? 'unknown').take(12).join(', ')}');
     return styles;
-  }
-
-  List<Map<String, dynamic>> _hardcodedFallback() {
-    return _hardcodedCatalog.map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
   Widget _buildHairOnlyOverlayModel(
@@ -1312,9 +1270,23 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
-  void _applyDeterministicRecommendation() {
-    final fallback = _hardcodedFallback();
+  Future<void> _applyDeterministicRecommendation() async {
+    if (!mounted) {
+      return;
+    }
+
+    List<Map<String, dynamic>> fallback;
+    try {
+      fallback = await _loadLibraryFallback();
+    } catch (_) {
+      fallback = <Map<String, dynamic>>[];
+    }
     if (fallback.isEmpty || !mounted) {
+      setState(() {
+        _loadingRecommendations = false;
+        _recommendations.clear();
+        _status = 'Deterministic mode: no hairstyles registered in the database yet.';
+      });
       return;
     }
 
@@ -3153,15 +3125,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return _sampleImageOverlay;
     }
 
+    final normalizedStyleName = styleName == 'curly top fade' ? 'curly taper fade' : styleName;
+
     // Try exact match first
-    if (_styleOverlayImages.containsKey(styleName)) {
+    if (_styleOverlayImages.containsKey(normalizedStyleName)) {
       debugPrint('[AiFaceScan] Matched overlay style="$styleName" via exact match');
-      return _styleOverlayImages[styleName]!;
+      return _styleOverlayImages[normalizedStyleName]!;
     }
 
     // Try substring match (in case style name has variations)
     for (final entry in _styleOverlayImages.entries) {
-      if (styleName.contains(entry.key)) {
+      if (normalizedStyleName.contains(entry.key)) {
         debugPrint('[AiFaceScan] Matched overlay style="$styleName" via substring match -> ${entry.key}');
         return entry.value;
       }

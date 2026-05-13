@@ -20,7 +20,16 @@ import 'payment_page.dart';
 import '../shared/pagination_controls.dart';
 
 class AppointmentsPage extends StatefulWidget {
-  const AppointmentsPage({super.key});
+  final int? highlightAppointmentId;
+  final String? forcedPaymentState;
+  final String? forcedReceiptRef;
+
+  const AppointmentsPage({
+    super.key,
+    this.highlightAppointmentId,
+    this.forcedPaymentState,
+    this.forcedReceiptRef,
+  });
 
   @override
   State<AppointmentsPage> createState() => _AppointmentsPageState();
@@ -92,19 +101,41 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
             services.isNotEmpty ? services.first as Map : <String, dynamic>{};
         final status = appt['status']?.toString() ?? '';
 
+        final appointmentId = appt['appointmentID'];
+        final isPaymentOverride = widget.highlightAppointmentId != null &&
+            '$appointmentId' == '${widget.highlightAppointmentId}';
+        final forcedState = widget.forcedPaymentState;
+        final forcedReceipt = widget.forcedReceiptRef;
+
         final mapped = {
-          'appointmentId': appt['appointmentID'],
+          'appointmentId': appointmentId,
           'barberID': appt['barberID'],
-          'status': status,
-          'paymentState': appt['paymentState']?.toString() ??
-              (status == 'PendingPayment' ? 'Unpaid' : 'Unpaid'),
-          'paymentStatus': appt['paymentStatus']?.toString(),
-          'receiptRef': appt['receiptRef']?.toString(),
+          'status': isPaymentOverride && forcedState == 'Paid'
+              ? 'Scheduled'
+              : status,
+          'paymentState': isPaymentOverride && forcedState != null
+              ? forcedState
+              : appt['paymentState']?.toString() ??
+                  (status == 'PendingPayment' ? 'Unpaid' : 'Unpaid'),
+          'paymentStatus': isPaymentOverride && forcedState != null
+              ? forcedState
+              : appt['paymentStatus']?.toString(),
+          'receiptRef': isPaymentOverride && forcedReceipt != null
+              ? forcedReceipt
+              : appt['receiptRef']?.toString(),
           'intentID': appt['intentID'],
-          'intentStatus': appt['intentStatus']?.toString(),
-          'intentExpiresAt': appt['intentExpiresAt']?.toString(),
-          'canRetryPayment': appt['canRetryPayment'] == true,
-          'canReschedule': appt['canReschedule'] == true,
+          'intentStatus': isPaymentOverride && forcedState != null
+              ? forcedState
+              : appt['intentStatus']?.toString(),
+          'intentExpiresAt': isPaymentOverride && forcedState == 'Paid'
+              ? null
+              : appt['intentExpiresAt']?.toString(),
+          'canRetryPayment': isPaymentOverride && forcedState == 'Paid'
+              ? false
+              : appt['canRetryPayment'] == true,
+          'canReschedule': isPaymentOverride && forcedState == 'Paid'
+              ? true
+              : appt['canReschedule'] == true,
           'intentFailureReason': appt['intentFailureReason']?.toString(),
           'service': firstService['hairstyleName']?.toString() ??
               firstService['serviceName']?.toString() ??
@@ -167,313 +198,342 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
               .push(MaterialPageRoute(builder: (_) => const ProfilePage()));
         },
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Tabs
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+      body: RefreshIndicator(
+        onRefresh: _loadAppointments,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white, width: 1),
                 ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        _selectedTab = 0;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeInOut,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: _selectedTab == 0
-                              ? Colors.white
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          'Upcoming',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color:
-                                _selectedTab == 0 ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _selectedTab = 0;
+                        }),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeInOut,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == 0
+                                ? Colors.white
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            'Upcoming',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _selectedTab == 0
+                                  ? Colors.black
+                                  : Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        _selectedTab = 1;
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeInOut,
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        decoration: BoxDecoration(
-                          color: _selectedTab == 1
-                              ? Colors.white
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Text(
-                          'Completed',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color:
-                                _selectedTab == 1 ? Colors.black : Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _selectedTab = 1;
+                        }),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeInOut,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == 1
+                                ? Colors.white
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            'Completed',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _selectedTab == 1
+                                  ? Colors.black
+                                  : Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-
-            if (_loading)
-              _buildAppointmentsSkeleton()
-            else if (_error != null)
-              Center(
-                  child: Text(_error!,
-                      style: const TextStyle(color: Colors.white70)))
-            else if (appointments.isEmpty)
-              Center(
-                child: Text(
-                  _selectedTab == 0
-                      ? 'No upcoming appointments.'
-                      : 'No completed appointments.',
-                  style: const TextStyle(color: Colors.white70),
+                  ],
                 ),
-              )
-            else
-              // Appointments List with switch animation
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 250),
-                child: Column(
-                  key: ValueKey<int>(_selectedTab),
-                  children: appointments.map((appointment) {
-                    final isUpcoming = _selectedTab == 0;
-                    final statusText =
-                        (appointment['status']?.toString() ?? 'Scheduled')
-                            .trim();
-                    final isPendingPayment = statusText == 'PendingPayment';
-                    final paymentState =
-                        appointment['paymentState']?.toString() ??
-                            (isPendingPayment ? 'Unpaid' : 'Unpaid');
-                    final paymentChip = _buildPaymentChip(paymentState);
-                    final appointmentId =
-                        int.tryParse('${appointment['appointmentId'] ?? ''}') ??
-                            0;
-                    final isProcessing = appointmentId > 0 &&
-                        _processingAppointmentIds.contains(appointmentId);
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 16),
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
+              ),
+              const SizedBox(height: 24),
+              if (_loading)
+                _buildAppointmentsSkeleton()
+              else if (_error != null)
+                Center(
+                    child: Text(_error!,
+                        style: const TextStyle(color: Colors.white70)))
+              else if (appointments.isEmpty)
+                Center(
+                  child: Text(
+                    _selectedTab == 0
+                        ? 'No upcoming appointments.'
+                        : 'No completed appointments.',
+                    style: const TextStyle(color: Colors.white70),
+                  ),
+                )
+              else
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Column(
+                    key: ValueKey<int>(_selectedTab),
+                    children: appointments.map((appointment) {
+                      final isUpcoming = _selectedTab == 0;
+                      final statusText =
+                          (appointment['status']?.toString() ?? 'Scheduled')
+                              .trim();
+                      final isPendingPayment = statusText == 'PendingPayment';
+                      final paymentState =
+                          appointment['paymentState']?.toString() ??
+                              (isPendingPayment ? 'Unpaid' : 'Unpaid');
+                      final paymentChip = _buildPaymentChip(paymentState);
+                      final appointmentId =
+                          int.tryParse('${appointment['appointmentId'] ?? ''}') ??
+                              0;
+                      final isProcessing = appointmentId > 0 &&
+                          _processingAppointmentIds.contains(appointmentId);
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.white, width: 1),
                         ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white, width: 1),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Header with Service and Status
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      appointment['service'] as String,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        appointment['service'] as String,
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      appointment['barber'] as String,
-                                      style: const TextStyle(
-                                          color: Colors.white70, fontSize: 12),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    paymentChip,
-                                  ],
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        appointment['barber'] as String,
+                                        style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      paymentChip,
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 10, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: isUpcoming
-                                      ? (isPendingPayment
-                                          ? const Color(0xFFE67E22)
-                                              .withOpacity(0.2)
-                                          : const Color(0xFF4CAF50)
-                                              .withOpacity(0.2))
-                                      : const Color(0xFF666666)
-                                          .withOpacity(0.2),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  isUpcoming
-                                      ? (isPendingPayment
-                                          ? 'Pending Payment'
-                                          : 'Confirmed')
-                                      : 'Completed',
-                                  style: TextStyle(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
                                     color: isUpcoming
                                         ? (isPendingPayment
                                             ? const Color(0xFFE67E22)
-                                            : const Color(0xFF4CAF50))
-                                        : const Color(0xFF999999),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 10,
+                                                .withOpacity(0.2)
+                                            : const Color(0xFF4CAF50)
+                                                .withOpacity(0.2))
+                                        : const Color(0xFF666666)
+                                            .withOpacity(0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Text(
+                                    isUpcoming
+                                        ? (isPendingPayment
+                                            ? 'Pending Payment'
+                                            : 'Confirmed')
+                                        : 'Completed',
+                                    style: TextStyle(
+                                      color: isUpcoming
+                                          ? (isPendingPayment
+                                              ? const Color(0xFFE67E22)
+                                              : const Color(0xFF4CAF50))
+                                          : const Color(0xFF999999),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 10,
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          if (isUpcoming) _buildPaymentHint(appointment),
-                          if (isUpcoming) const SizedBox(height: 10),
-                          const Divider(color: Colors.white10, height: 1),
-                          const SizedBox(height: 12),
-
-                          // Details Row
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.calendar_today,
-                                            color: Colors.white, size: 16),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          appointment['date'] as String,
-                                          style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.access_time,
-                                            color: Colors.white, size: 16),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          appointment['time'] as String,
-                                          style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.timer,
-                                            color: Colors.white, size: 16),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          appointment['duration'] as String,
-                                          style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 12),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        const Icon(Icons.local_offer,
-                                            color: Colors.white, size: 16),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          appointment['price'] as String,
-                                          style: const TextStyle(
-                                            color: Color(0xFFA99941),
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12,
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            if (isUpcoming) _buildPaymentHint(appointment),
+                            if (isUpcoming) const SizedBox(height: 10),
+                            const Divider(color: Colors.white10, height: 1),
+                            const SizedBox(height: 12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.calendar_today,
+                                              color: Colors.white, size: 16),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            appointment['date'] as String,
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          const Divider(color: Colors.white10, height: 1),
-                          const SizedBox(height: 12),
-
-                          // Rating and Actions
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              if (appointment['rating'] != null)
-                                Text(
-                                  appointment['rating'] as String,
-                                  style: const TextStyle(
-                                    color: Color(0xFFA99941),
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 12,
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.access_time,
+                                              color: Colors.white, size: 16),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            appointment['time'] as String,
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
                                   ),
-                                )
-                              else
-                                const SizedBox.shrink(),
-                              Row(
-                                children: [
-                                  // Upcoming: Cancel removes the appointment and shows snackbar
-                                  if (isUpcoming)
-                                    Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [
-                                        if (paymentState != 'Paid')
-                                          ElevatedButton(
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.timer,
+                                              color: Colors.white, size: 16),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            appointment['duration'] as String,
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 12),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.local_offer,
+                                              color: Colors.white, size: 16),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            appointment['price'] as String,
+                                            style: const TextStyle(
+                                              color: Color(0xFFA99941),
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            const Divider(color: Colors.white10, height: 1),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                if (appointment['rating'] != null)
+                                  Text(
+                                    appointment['rating'] as String,
+                                    style: const TextStyle(
+                                      color: Color(0xFFA99941),
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 12,
+                                    ),
+                                  )
+                                else
+                                  const SizedBox.shrink(),
+                                Row(
+                                  children: [
+                                    if (isUpcoming)
+                                      Wrap(
+                                        spacing: 8,
+                                        runSpacing: 8,
+                                        children: [
+                                          if (paymentState != 'Paid')
+                                            ElevatedButton(
+                                              onPressed: isProcessing
+                                                  ? null
+                                                  : () => _retryPayment(
+                                                      appointment),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: Colors.white,
+                                                foregroundColor: Colors.black,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                        horizontal: 12,
+                                                        vertical: 8),
+                                                shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            6)),
+                                              ),
+                                              child: const Text(
+                                                'Pay Now',
+                                                style: TextStyle(
+                                                    fontWeight:
+                                                        FontWeight.bold,
+                                                    fontSize: 11),
+                                              ),
+                                            ),
+                                          OutlinedButton(
                                             onPressed: isProcessing
                                                 ? null
-                                                : () =>
-                                                    _retryPayment(appointment),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.white,
-                                              foregroundColor: Colors.black,
+                                                : () => _rescheduleAppointment(
+                                                    appointment),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor:
+                                                  const Color(0xFFA99941),
+                                              side: const BorderSide(
+                                                  color: Color(0xFFA99941),
+                                                  width: 1),
                                               padding:
                                                   const EdgeInsets.symmetric(
                                                       horizontal: 12,
@@ -483,182 +543,171 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                                                       BorderRadius.circular(6)),
                                             ),
                                             child: const Text(
-                                              'Pay Now',
+                                              'Reschedule',
                                               style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 11),
                                             ),
                                           ),
-                                        OutlinedButton(
-                                          onPressed: isProcessing
-                                              ? null
-                                              : () => _rescheduleAppointment(
-                                                  appointment),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor:
-                                                const Color(0xFFA99941),
-                                            side: const BorderSide(
-                                                color: Color(0xFFA99941),
-                                                width: 1),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 8),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(6)),
-                                          ),
-                                          child: const Text(
-                                            'Reschedule',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11),
-                                          ),
-                                        ),
-                                        OutlinedButton(
-                                          onPressed: isProcessing
-                                              ? null
-                                              : () =>
-                                                  _showCancelModal(appointment),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor:
-                                                const Color(0xFFE74C3C),
-                                            side: const BorderSide(
-                                                color: Color(0xFFE74C3C),
-                                                width: 1),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 16, vertical: 8),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(6)),
-                                          ),
-                                          child: isProcessing
-                                              ? const SizedBox(
-                                                  width: 12,
-                                                  height: 12,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                          color: Color(
-                                                              0xFFE74C3C)),
-                                                )
-                                              : const Text(
-                                                  'Cancel',
-                                                  style: TextStyle(
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 11,
+                                          OutlinedButton(
+                                            onPressed: isProcessing
+                                                ? null
+                                                : () => _showCancelModal(
+                                                    appointment),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor:
+                                                  const Color(0xFFE74C3C),
+                                              side: const BorderSide(
+                                                  color: Color(0xFFE74C3C),
+                                                  width: 1),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 8),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(6)),
+                                            ),
+                                            child: isProcessing
+                                                ? const SizedBox(
+                                                    width: 12,
+                                                    height: 12,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: Color(
+                                                                0xFFE74C3C)),
+                                                  )
+                                                : const Text(
+                                                    'Cancel',
+                                                    style: TextStyle(
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 11,
+                                                    ),
                                                   ),
-                                                ),
-                                        ),
-                                      ],
-                                    )
-                                  else
-                                    Row(
-                                      children: [
-                                        ElevatedButton(
-                                          onPressed: isProcessing
-                                              ? null
-                                              : () =>
-                                                  _handleBookAgain(appointment),
-                                          style: ElevatedButton.styleFrom(
-                                            backgroundColor: Colors.white,
-                                            foregroundColor: Colors.black,
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 16, vertical: 8),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(6)),
                                           ),
-                                          child: isProcessing
-                                              ? const SizedBox(
-                                                  width: 12,
-                                                  height: 12,
-                                                  child:
-                                                      CircularProgressIndicator(
-                                                          strokeWidth: 2,
-                                                          color: Colors.black),
-                                                )
-                                              : const Text(
-                                                  'Book Again',
-                                                  style: TextStyle(
-                                                    color: Colors.black,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 11,
+                                        ],
+                                      )
+                                    else
+                                      Row(
+                                        children: [
+                                          ElevatedButton(
+                                            onPressed: isProcessing
+                                                ? null
+                                                : () => _handleBookAgain(
+                                                    appointment),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: Colors.white,
+                                              foregroundColor: Colors.black,
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 16,
+                                                      vertical: 8),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(6)),
+                                            ),
+                                            child: isProcessing
+                                                ? const SizedBox(
+                                                    width: 12,
+                                                    height: 12,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color:
+                                                                Colors.black),
+                                                  )
+                                                : const Text(
+                                                    'Book Again',
+                                                    style: TextStyle(
+                                                      color: Colors.black,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      fontSize: 11,
+                                                    ),
                                                   ),
-                                                ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        TextButton(
-                                          onPressed: () {
-                                            Navigator.of(context)
-                                                .push(MaterialPageRoute(
-                                              builder: (_) =>
-                                                  CompletedAppointmentDetailPage(
-                                                      appointment: appointment),
-                                            ));
-                                          },
-                                          style: TextButton.styleFrom(
-                                            foregroundColor:
-                                                const Color(0xFFA99941),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 8),
                                           ),
-                                          child: const Text(
-                                            'View',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11),
+                                          const SizedBox(width: 8),
+                                          TextButton(
+                                            onPressed: () {
+                                              Navigator.of(context)
+                                                  .push(MaterialPageRoute(
+                                                builder: (_) =>
+                                                    CompletedAppointmentDetailPage(
+                                                        appointment:
+                                                            appointment),
+                                              ));
+                                            },
+                                            style: TextButton.styleFrom(
+                                              foregroundColor:
+                                                  const Color(0xFFA99941),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                            ),
+                                            child: const Text(
+                                              'View',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11),
+                                            ),
                                           ),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        OutlinedButton(
-                                          onPressed: isProcessing
-                                              ? null
-                                              : () => _showFeedbackModal(
-                                                  context, appointment),
-                                          style: OutlinedButton.styleFrom(
-                                            foregroundColor: Colors.white,
-                                            side: const BorderSide(
-                                                color: Colors.white24),
-                                            padding: const EdgeInsets.symmetric(
-                                                horizontal: 12, vertical: 8),
-                                            shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(6)),
+                                          const SizedBox(width: 6),
+                                          OutlinedButton(
+                                            onPressed: isProcessing
+                                                ? null
+                                                : () => _showFeedbackModal(
+                                                    context, appointment),
+                                            style: OutlinedButton.styleFrom(
+                                              foregroundColor: Colors.white,
+                                              side: const BorderSide(
+                                                  color: Colors.white24),
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8),
+                                              shape: RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(6)),
+                                            ),
+                                            child: const Text(
+                                              'Feedback',
+                                              style: TextStyle(
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 11),
+                                            ),
                                           ),
-                                          child: const Text(
-                                            'Feedback',
-                                            style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                fontSize: 11),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
                 ),
-              ),
-            if (!_loading && _error == null && allAppointments.isNotEmpty)
-              PaginationControls(
-                currentPage: safePage,
-                totalPages: totalPages,
-                onPageChanged: (page) {
-                  setState(() {
-                    if (_selectedTab == 0) {
-                      _upcomingPage = page;
-                    } else {
-                      _completedPage = page;
-                    }
-                  });
-                },
-              ),
-            const SizedBox(height: 20),
-          ],
+              if (!_loading && _error == null && allAppointments.isNotEmpty)
+                PaginationControls(
+                  currentPage: safePage,
+                  totalPages: totalPages,
+                  onPageChanged: (page) {
+                    setState(() {
+                      if (_selectedTab == 0) {
+                        _upcomingPage = page;
+                      } else {
+                        _completedPage = page;
+                      }
+                    });
+                  },
+                ),
+              const SizedBox(height: 20),
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: AppBottomNavBar(

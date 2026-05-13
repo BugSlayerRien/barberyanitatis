@@ -97,7 +97,7 @@ class UserSession {
     return activeScanSessionId!;
   }
 
-  static void clear() {
+  static Future<void> clear() async {
     userId = null;
     fullName = null;
     email = null;
@@ -112,6 +112,8 @@ class UserSession {
     lastScan = null;
     lastRecommendations = [];
     _cachedUserCalibration = null;
+    // Clear calibration data from persistent storage
+    await clearUserCalibration();
   }
 }
 

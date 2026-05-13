@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -8,9 +11,11 @@ import '../receptionist/receptionist_dashboard_page.dart';
 import '../admins/admin_dashboard_page.dart';
 import '../barber/barber_dashboard_page.dart';
 import 'forgot_password_page.dart';
+import 'reset_password_page.dart';
 import 'dashboard_page.dart';
 import 'api_config.dart';
 import 'user_session.dart';
+import 'web_utils.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
 const Color kGoldColor = Colors.white;
@@ -25,11 +30,19 @@ class AuthPage extends StatefulWidget {
 
 class _AuthPageState extends State<AuthPage> {
   final String _apiBaseUrl = ApiConfig.baseUrl;
+  static const String _supabaseRedirectUri =
+      'io.supabase.flutter://login-callback';
   static const String _googleServerClientId =
       String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
 
+  final AppLinks _appLinks = AppLinks();
+  StreamSubscription<Uri>? _deepLinkSubscription;
+  StreamSubscription<AuthState>? _authStateSubscription;
+
   bool _isLogin = true;
   bool _isLoading = false;
+  bool _didNavigateAfterSignIn = false;
+  String? _lastProcessedAuthCallbackUri;
   // Login controllers
   final TextEditingController _loginUser = TextEditingController();
   final TextEditingController _loginPass = TextEditingController();
@@ -48,7 +61,15 @@ class _AuthPageState extends State<AuthPage> {
   bool _rememberMe = false;
 
   @override
+  void initState() {
+    super.initState();
+    _bootstrapAuthListeners();
+  }
+
+  @override
   void dispose() {
+    _deepLinkSubscription?.cancel();
+    _authStateSubscription?.cancel();
     _loginUser.dispose();
     _loginPass.dispose();
     _firstName.dispose();
@@ -58,6 +79,202 @@ class _AuthPageState extends State<AuthPage> {
     _regPass.dispose();
     _confirm.dispose();
     super.dispose();
+  }
+
+  Future<void> _bootstrapAuthListeners() async {
+    _authStateSubscription =
+        Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
+      if (data.event == AuthChangeEvent.signedIn && data.session != null) {
+        _applySupabaseSession(data.session!);
+        _goToSignedInDestination();
+      } else if (data.event == AuthChangeEvent.passwordRecovery &&
+          data.session != null) {
+        _applySupabaseSession(data.session!);
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const ResetPasswordPage()),
+        );
+      } else if (data.event == AuthChangeEvent.signedOut) {
+        await UserSession.clear();
+        _didNavigateAfterSignIn = false;
+        _lastProcessedAuthCallbackUri = null;
+      }
+    });
+
+    _deepLinkSubscription = _appLinks.uriLinkStream.listen(
+      (uri) async => _handleAuthCallbackUri(uri),
+      onError: (Object error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Deep link error: $error')),
+        );
+      },
+    );
+
+    try {
+      if (kIsWeb) {
+        await _handleAuthCallbackUri(Uri.base);
+      } else {
+        final initialLink = await _appLinks.getInitialAppLink();
+        if (initialLink != null) {
+          await _handleAuthCallbackUri(initialLink);
+        }
+      }
+
+      final existingSession = Supabase.instance.client.auth.currentSession;
+      if (existingSession != null) {
+        _applySupabaseSession(existingSession);
+        _goToSignedInDestination();
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to inspect auth callback: $error')),
+      );
+    }
+  }
+
+  bool _isSupabaseAuthCallbackUri(Uri uri) {
+    if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
+      return true;
+    }
+
+    final fragmentParameters = _readAuthCallbackParameters(uri);
+    final hasOAuthFragment = fragmentParameters.containsKey('access_token') ||
+        fragmentParameters.containsKey('refresh_token') ||
+        fragmentParameters.containsKey('error') ||
+        fragmentParameters.containsKey('error_description');
+    final hasOAuthQuery = uri.queryParameters.containsKey('code');
+    return hasOAuthFragment || hasOAuthQuery;
+  }
+
+  Future<void> _handleAuthCallbackUri(Uri uri) async {
+    if (!_isSupabaseAuthCallbackUri(uri)) {
+      return;
+    }
+
+    final uriKey = uri.toString();
+    if (_lastProcessedAuthCallbackUri == uriKey) {
+      return;
+    }
+    _lastProcessedAuthCallbackUri = uriKey;
+
+    try {
+      final currentSession = Supabase.instance.client.auth.currentSession;
+      if (currentSession != null) {
+        _applySupabaseSession(currentSession);
+        _goToSignedInDestination();
+        return;
+      }
+
+      final normalizedUri = _normalizeAuthCallbackUri(uri);
+      final response = await Supabase.instance.client.auth.getSessionFromUrl(
+        normalizedUri,
+      );
+      _applySupabaseSession(response.session);
+      if (kIsWeb) {
+        try {
+          clearUrlFragment();
+        } catch (_) {}
+      }
+      _goToSignedInDestination();
+      return;
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Supabase callback failed: $error')),
+      );
+      _lastProcessedAuthCallbackUri = null;
+    }
+  }
+
+  Map<String, String> _readAuthCallbackParameters(Uri uri) {
+    final fragment = uri.fragment;
+    if (fragment.isEmpty) {
+      return const <String, String>{};
+    }
+
+    final normalizedFragment =
+        fragment.startsWith('?') ? fragment.substring(1) : fragment;
+    if (normalizedFragment.isEmpty) {
+      return const <String, String>{};
+    }
+
+    try {
+      return Uri.splitQueryString(normalizedFragment);
+    } catch (_) {
+      return const <String, String>{};
+    }
+  }
+
+  Uri _normalizeAuthCallbackUri(Uri uri) {
+    final fragmentParameters = _readAuthCallbackParameters(uri);
+    if (fragmentParameters.isEmpty) {
+      return uri;
+    }
+
+    return uri.replace(
+      fragment: '',
+      queryParameters: {
+        ...uri.queryParameters,
+        ...fragmentParameters,
+      },
+    );
+  }
+
+  String _webOAuthRedirectTo() {
+    return Uri.base.origin;
+  }
+
+  void _applySupabaseSession(Session session) {
+    final user = session.user;
+    final metadata = user.userMetadata ?? <String, dynamic>{};
+    final appMetadata = user.appMetadata;
+    final rawRole = '${appMetadata['role'] ?? metadata['role']}'.trim();
+    final role = rawRole.isEmpty || rawRole == 'null' ? null : rawRole;
+    final fullNameValue = metadata['full_name'];
+    final nameValue = metadata['name'];
+    final resolvedFullName = fullNameValue != null &&
+        fullNameValue.toString().trim().isNotEmpty
+      ? fullNameValue.toString().trim()
+      : nameValue != null && nameValue.toString().trim().isNotEmpty
+        ? nameValue.toString().trim()
+        : user.email;
+
+    UserSession.userId = user.id.hashCode.abs();
+    UserSession.fullName = resolvedFullName;
+    UserSession.email = user.email;
+    UserSession.roles = role != null && role.isNotEmpty
+        ? [role.toLowerCase()]
+        : ['authenticated'];
+  }
+
+  void _goToSignedInDestination() {
+    if (!mounted) {
+      return;
+    }
+
+    if (_didNavigateAfterSignIn) {
+      return;
+    }
+    _didNavigateAfterSignIn = true;
+
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('Signed in successfully')));
+
+    if (UserSession.roles.contains('admin')) {
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
+    } else if (UserSession.roles.contains('receptionist')) {
+      Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => const ReceptionistDashboardPage()));
+    } else if (UserSession.roles.contains('barber')) {
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
+    } else {
+      Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const DashboardPage()));
+    }
   }
 
   Future<void> _login() async {
@@ -191,34 +408,32 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'register',
-          'fullName': '$firstName $lastName',
-          'email': email,
-          'password': password,
+      final response = await Supabase.instance.client.auth.signUp(
+        email: email,
+        password: password,
+        data: {
+          'full_name': '$firstName $lastName',
           'phone': phone,
-          'roleName': 'Customer',
-        }),
+        },
+        emailRedirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       if (!mounted) return;
 
-      if (response.statusCode != 201) {
+      final session = response.session;
+      if (session != null) {
+        _applySupabaseSession(session);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content:
-                  Text(data['error']?.toString() ?? 'Registration failed.')),
+          const SnackBar(content: Text('Registration successful.')),
         );
+        _goToSignedInDestination();
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Registration successful. Please sign in.')),
+            content:
+                Text('Registration successful. Check your email to confirm your account.')),
       );
       setState(() => _isLogin = true);
     } catch (e) {
@@ -333,7 +548,7 @@ class _AuthPageState extends State<AuthPage> {
       // Launch supabase OAuth flow (will open browser and redirect to the custom scheme)
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.google,
-        redirectTo: 'io.supabase.flutter://login-callback/',
+        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Google sign-in...')));
@@ -348,9 +563,11 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseFacebook() async {
     setState(() => _isLoading = true);
     try {
+      // On web: redirect back to the running app URL so callback tokens are captured.
+      // On mobile: use the deep-link scheme for the OAuth callback.
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.facebook,
-        redirectTo: 'io.supabase.flutter://login-callback/',
+        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));

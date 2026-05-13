@@ -53,6 +53,14 @@
 				<string>io.supabase.flutter</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>tatisapp</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tatisapp</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

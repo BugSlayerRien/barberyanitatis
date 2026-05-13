@@ -16,6 +16,21 @@ if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'create'], tru
 try {
     $pdo = get_db_connection();
 
+    $normalizeHaircutRow = static function (array $row): array {
+        $styleName = trim((string)($row['style_name'] ?? ''));
+        if (strcasecmp($styleName, 'Curly Top Fade') === 0) {
+            $row['style_name'] = 'Curly Taper Fade';
+            if (isset($row['style_code']) && is_string($row['style_code'])) {
+                $row['style_code'] = 'STYLE-CURLY-TAPER-FADE';
+            }
+            $row['front_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_front.png';
+            $row['side_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_left.png';
+            $row['back_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_right.png';
+        }
+
+        return $row;
+    };
+
     if ($action === 'list') {
         $stmt = $pdo->prepare(
             'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active
@@ -24,7 +39,8 @@ try {
              ORDER BY style_name'
         );
         $stmt->execute();
-        json_response(['haircuts' => $stmt->fetchAll()]);
+        $haircuts = array_map($normalizeHaircutRow, $stmt->fetchAll());
+        json_response(['haircuts' => $haircuts]);
     }
 
     if ($action === 'listByFaceShape') {
@@ -81,7 +97,8 @@ SQL
                         ':hair_texture' => $hairTexture,
                 ]);
 
-        json_response(['variants' => $stmt->fetchAll()]);
+        $variants = array_map($normalizeHaircutRow, $stmt->fetchAll());
+        json_response(['variants' => $variants]);
     }
 
     if ($action === 'listLibrary') {
@@ -101,7 +118,8 @@ SQL
              ORDER BY hs.style_name'
         );
         $stmt->execute();
-        json_response(['hairstyles' => $stmt->fetchAll()]);
+        $hairstyles = array_map($normalizeHaircutRow, $stmt->fetchAll());
+        json_response(['hairstyles' => $hairstyles]);
     }
 
     if ($action === 'create') {

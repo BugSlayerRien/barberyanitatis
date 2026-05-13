@@ -1,9 +1,7 @@
-import 'dart:convert';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'api_config.dart';
 import 'reset_password_page.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
@@ -37,34 +35,15 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     }
     setState(() => _isSubmitting = true);
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'forgotPassword',
-          'email': email,
-        }),
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        email,
+        redirectTo:
+            kIsWeb ? Uri.base.origin : 'io.supabase.flutter://login-callback',
       );
-
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        throw Exception(data['error']?.toString() ?? 'Reset request failed.');
-      }
       if (!mounted) return;
-      final debugToken = data['resetToken']?.toString() ?? '';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            data['message']?.toString() ?? 'Password reset request sent.',
-          ),
-        ),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ResetPasswordPage(initialToken: debugToken),
+        const SnackBar(
+          content: Text('Password reset email sent. Check your inbox.'),
         ),
       );
     } catch (e) {
@@ -179,7 +158,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       side: const BorderSide(color: Colors.white30),
                     ),
                     child: const Text(
-                      'I already have a reset token',
+                      'I already opened the reset link',
                       style: TextStyle(color: Colors.white),
                     ),
                   ),

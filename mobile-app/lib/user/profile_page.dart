@@ -1,11 +1,12 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'widgets/app_top_bar.dart';
 import 'api_config.dart';
 import 'user_session.dart';
@@ -29,6 +30,7 @@ class _ProfilePageState extends State<ProfilePage> {
   String _gender = '';
   String _hairTexture = '';
   String _profileImageUrl = '';
+  Uint8List? _profileImageBytes;
   XFile? _profileImage;
   late TextEditingController _nameController;
   late TextEditingController _phoneController;
@@ -48,116 +50,71 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
+  bool get _hasLocalSession {
+    return UserSession.userId != null ||
+        (UserSession.fullName ?? '').trim().isNotEmpty ||
+        (UserSession.email ?? '').trim().isNotEmpty;
+  }
+
+  String _readProfileValue(
+    Map<String, dynamic> metadata,
+    String key,
+  ) {
+    return metadata[key]?.toString().trim() ?? '';
+  }
+
   Future<void> _loadProfile() async {
-    if (UserSession.userId == null) {
+    final currentSession = Supabase.instance.client.auth.currentSession;
+    final user = currentSession?.user ?? Supabase.instance.client.auth.currentUser;
+    if (user == null && !_hasLocalSession) {
       setState(() {
         _loading = false;
         _error = 'Please sign in again.';
       });
       return;
     }
+
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'userID': UserSession.userId}),
-      ).timeout(const Duration(seconds: 10), onTimeout: () {
-        throw Exception('Request timeout: Could not reach server');
-      });
+      final metadata = user?.userMetadata ?? <String, dynamic>{};
+      final resolvedFullName = _readProfileValue(metadata, 'full_name').isNotEmpty
+          ? _readProfileValue(metadata, 'full_name')
+          : _readProfileValue(metadata, 'name').isNotEmpty
+              ? _readProfileValue(metadata, 'name')
+              : (UserSession.fullName ?? '').trim();
+      final resolvedEmail = (user?.email ?? UserSession.email ?? '').trim();
+      final resolvedPhone = _readProfileValue(metadata, 'phone');
+      final resolvedAccountAge = _readProfileValue(metadata, 'account_age');
+      final resolvedGender = _readProfileValue(metadata, 'gender');
+      final resolvedHairTexture = _readProfileValue(metadata, 'hair_texture');
+      final resolvedProfileImageUrl = _readProfileValue(metadata, 'avatar_url');
+      final resolvedProfileImageBase64 = _readProfileValue(metadata, 'profile_image_base64');
+      final resolvedHaircutsDone = metadata['haircuts_done'] is int
+          ? metadata['haircuts_done'] as int
+          : int.tryParse('${metadata['haircuts_done']}') ?? 0;
       
-      if (!mounted) return;
-
-      // Check status code first
-      if (response.statusCode != 200) {
-        setState(() {
-          _loading = false;
-          _error = 'Server error: ${response.statusCode}';
-        });
-        return;
-      }
-
-      // Check if response is empty
-      if (response.body.isEmpty) {
-        setState(() {
-          _loading = false;
-          _error = 'Empty response from server';
-        });
-        return;
-      }
-
-      // Check if response looks like HTML (error page)
-      if (response.body.trim().startsWith('<')) {
-        setState(() {
-          _loading = false;
-          _error = 'Server returned HTML error page. Please try again.';
-        });
-        return;
-      }
-
-      // Safely decode JSON
-      late Map<String, dynamic> data;
-      try {
-        data = jsonDecode(response.body) as Map<String, dynamic>;
-      } catch (e) {
-        setState(() {
-          _loading = false;
-          _error = 'Invalid JSON response from server';
-        });
-        return;
-      }
-
-      // Check for API error field
-      if (data.containsKey('error')) {
-        setState(() {
-          _loading = false;
-          _error = data['error']?.toString() ?? 'Unknown error from server';
-        });
-        return;
-      }
-
-      // Extract profile data
-      final profile = data['profile'] as Map<String, dynamic>? ?? {};
-      if (profile.isEmpty) {
-        setState(() {
-          _loading = false;
-          _error = 'No profile data returned';
-        });
-        return;
-      }
-
       setState(() {
-        _fullName = profile['fullName']?.toString() ?? UserSession.fullName ?? '';
-        _email = profile['email']?.toString() ?? UserSession.email ?? '';
-        _phone = profile['phone']?.toString() ?? '';
-        _accountAge = profile['accountAge']?.toString() ?? '';
-        _gender = profile['gender']?.toString() ?? '';
-        _hairTexture = profile['hairTexture']?.toString() ?? '';
-        _haircutsDone = profile['haircutsDone'] is int
-            ? profile['haircutsDone'] as int
-            : int.tryParse('${profile['haircutsDone']}') ?? 0;
-        _profileImageUrl = profile['profileImage']?.toString() ?? '';
+        _fullName = resolvedFullName;
+        _email = resolvedEmail;
+        _profileImageUrl = resolvedProfileImageUrl;
+        _profileImageBytes = resolvedProfileImageBase64.isNotEmpty
+            ? base64Decode(resolvedProfileImageBase64)
+            : null;
+        _phone = resolvedPhone;
+        _accountAge = resolvedAccountAge.isNotEmpty ? resolvedAccountAge : '—';
+        _gender = resolvedGender;
+        _hairTexture = resolvedHairTexture;
+        _haircutsDone = resolvedHaircutsDone;
+        
         _nameController.text = _fullName;
         _phoneController.text = _phone;
         _loading = false;
         _error = null;
       });
-    } on SocketException catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'Network error: Could not connect to server';
-      });
-    } on TimeoutException catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = 'Connection timeout: Server took too long to respond';
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error = 'Error: ${e.toString()}';
+        _error = 'Error loading profile: ${e.toString()}';
       });
     }
   }
@@ -200,16 +157,18 @@ class _ProfilePageState extends State<ProfilePage> {
                         ? (kIsWeb
                             ? Image.network(_profileImage!.path, fit: BoxFit.cover)
                             : Image.file(File(_profileImage!.path), fit: BoxFit.cover))
-                        : (_profileImageUrl.isNotEmpty
-                            ? Image.network(ApiConfig.resolveImageUrl(_profileImageUrl), fit: BoxFit.cover)
-                            : Center(
-                                child: Text(
-                                  _fullName.isNotEmpty
-                                      ? _fullName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
-                                      : 'U',
-                                  style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
-                                ),
-                              )),
+                        : (_profileImageBytes != null
+                            ? Image.memory(_profileImageBytes!, fit: BoxFit.cover)
+                            : (_profileImageUrl.isNotEmpty
+                                ? Image.network(ApiConfig.resolveImageUrl(_profileImageUrl), fit: BoxFit.cover)
+                                : Center(
+                                    child: Text(
+                                      _fullName.isNotEmpty
+                                          ? _fullName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join().toUpperCase()
+                                          : 'U',
+                                      style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+                                    ),
+                                  ))),
                   ),
                 ),
               ),
@@ -268,56 +227,73 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _saveProfile() async {
-    if (UserSession.userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please sign in again.')));
-      return;
-    }
     setState(() => _saving = true);
     try {
-      String? imageBase64;
+      final newFullName = _nameController.text.trim();
+      final newPhone = _phoneController.text.trim();
+      Uint8List? newProfileImageBytes;
+      
+      // Update Supabase user metadata
+      final updates = <String, dynamic>{
+        'full_name': newFullName,
+        'phone': newPhone,
+      };
+      
+      // If a new image was selected, convert to base64
       if (_profileImage != null) {
-        final bytes = await _profileImage!.readAsBytes();
-        imageBase64 = base64Encode(bytes);
+        try {
+          final bytes = await _profileImage!.readAsBytes();
+          newProfileImageBytes = bytes;
+          final imageBase64 = base64Encode(bytes);
+          updates['profile_image_base64'] = imageBase64;
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to process image: $e')),
+          );
+          setState(() => _saving = false);
+          return;
+        }
+      }
+      
+      final currentSession = Supabase.instance.client.auth.currentSession;
+      final currentUser = currentSession?.user ?? Supabase.instance.client.auth.currentUser;
+      if (currentUser == null) {
+        throw StateError('No Supabase session found. Please sign in again.');
       }
 
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'update',
-          'userID': UserSession.userId,
-          'fullName': _nameController.text.trim(),
-          'phone': _phoneController.text.trim(),
-          if (imageBase64 != null) 'profileImageBase64': imageBase64,
-        }),
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(
+          data: updates,
+        ),
       );
-
+      
       if (!mounted) return;
-      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
-      if (response.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'Failed to save profile.')),
-        );
-        return;
-      }
-      final profile = data['profile'] as Map<String, dynamic>? ?? {};
+      
+      // Update local state and UserSession
       setState(() {
-        _fullName = profile['fullName']?.toString() ?? _fullName;
-        _email = profile['email']?.toString() ?? _email;
-        _phone = profile['phone']?.toString() ?? _phone;
-        _profileImageUrl = profile['profileImage']?.toString() ?? _profileImageUrl;
+        _fullName = newFullName;
+        _phone = newPhone;
+        _profileImageBytes = newProfileImageBytes ?? _profileImageBytes;
         _profileImage = null;
+        _saving = false;
       });
-      UserSession.fullName = _fullName;
-      UserSession.email = _email;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile updated.')));
+      
+      UserSession.fullName = newFullName;
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully.')),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to save profile: $e')));
-    } finally {
-      if (mounted) {
-        setState(() => _saving = false);
-      }
+      
+      setState(() {
+        _saving = false;
+      });
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save profile to Supabase: $e')),
+      );
     }
   }
 
