@@ -1,11 +1,14 @@
-import 'package:flutter/material.dart';
-import '../user/auth_page.dart';
+import 'dart:async';
 
+import 'package:flutter/material.dart';
+
+import '../user/auth_page.dart';
 import 'receptionist_analytics_page.dart';
 import 'receptionist_appointments_page.dart';
-import 'receptionist_walkins_page.dart';
-import 'receptionist_tracking_page.dart';
+import 'receptionist_api.dart';
 import 'receptionist_barbers_page.dart';
+import 'receptionist_tracking_page.dart';
+import 'receptionist_walkins_page.dart';
 
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBackground = Color(0xFF0A0A0A);
@@ -20,41 +23,13 @@ class ReceptionistDashboardPage extends StatefulWidget {
 
 class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
   int _selectedIndex = 0;
+  bool _initialLoading = true;
+  String? _error;
+  Timer? _refreshTimer;
 
-  List<Map<String, dynamic>> _todayAppointments = [
-    {
-      'initials': 'JD',
-      'name': 'Jessica Davis',
-      'service': 'Precision Cut & Style',
-      'time': '10:00 AM',
-      'duration': '90 min',
-      'price': '₱100',
-      'status': 'CONFIRMED',
-      'barber': 'Mike Chen',
-    },
-    {
-      'initials': 'MR',
-      'name': 'Maria Rodriguez',
-      'service': 'Color Transformation',
-      'time': '2:00 PM',
-      'duration': '180 min',
-      'price': '₱150',
-      'status': 'PENDING',
-      'barber': 'Sarah Johnson',
-    },
-    {
-      'initials': 'SJ',
-      'name': 'Sarah Johnson',
-      'service': 'Luxury Treatment',
-      'time': '5:00 PM',
-      'duration': '120 min',
-      'price': '₱200',
-      'status': 'CONFIRMED',
-      'barber': 'Emma Rodriguez',
-    },
-  ];
-
+  List<Map<String, dynamic>> _todayAppointments = [];
   List<Map<String, dynamic>> _walkIns = [];
+  List<Map<String, dynamic>> _trackingData = [];
 
   final List<Map<String, dynamic>> _barbers = [
     {'initials': 'MC', 'name': 'Mike Chen', 'specialty': 'Precision Cuts', 'rating': 4.9, 'experience': '8 years'},
@@ -62,35 +37,66 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
     {'initials': 'ER', 'name': 'Emma Rodriguez', 'specialty': 'Styling Specialist', 'rating': 4.7, 'experience': '5 years'},
   ];
 
-  final List<Map<String, dynamic>> _trackingData = [
-    {
-      'initials': 'AB',
-      'name': 'Alex Brown',
-      'service': 'Haircut & Styling',
-      'status': 'IN PROGRESS',
-      'progress': 0.65,
-      'timeRemaining': '15 min remaining',
-      'color': const Color(0xFF4CAF50),
-    },
-    {
-      'initials': 'JW',
-      'name': 'Jessica White',
-      'service': 'Color Treatment',
-      'status': 'WAITING',
-      'progress': 0.0,
-      'timeRemaining': 'Waiting',
-      'color': const Color(0xFF2196F3),
-    },
-    {
-      'initials': 'MJ',
-      'name': 'Michael Johnson',
-      'service': 'Beard Trim',
-      'status': 'COMPLETED',
-      'progress': 1.0,
-      'timeRemaining': 'Completed',
-      'color': const Color(0xFF9E9E9E),
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboard();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 45), (_) => _loadDashboard(silent: true));
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadDashboard({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _initialLoading = true;
+        _error = null;
+      });
+    }
+
+    try {
+      final data = await ReceptionistApi.loadDashboard();
+      final appointments = ReceptionistApi.mapAppointments(
+        data['appointments'] as List<dynamic>? ?? const [],
+      );
+      final walkIns = (data['walkins'] as List<dynamic>? ?? const [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .map((row) {
+            final name = row['name']?.toString() ?? 'Walk-in';
+            return {
+              ...row,
+              'initials': name.length >= 2 ? name.substring(0, 2).toUpperCase() : 'W',
+              'service': row['service']?.toString() ?? 'Walk-in',
+              'waitTime': row['waitTime']?.toString() ?? '',
+            };
+          })
+          .toList();
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _todayAppointments = appointments;
+        _walkIns = walkIns;
+        _trackingData = ReceptionistApi.buildTrackingData(appointments, walkIns);
+        _initialLoading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _initialLoading = false;
+        _error = e.toString();
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -108,40 +114,33 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
           ),
         ),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: () => _loadDashboard(),
+            icon: const Icon(Icons.refresh, color: Colors.white),
+          ),
+        ],
       ),
-      body: _selectedIndex == 0
-          ? ReceptionistAnalyticsPage(walkInsCount: _walkIns.length)
-          : _selectedIndex == 1
-              ? ReceptionistAppointmentsPage(
-                  appointments: _todayAppointments,
-                  onStatusChanged: (appointment) {
-                    setState(() {});
-                  },
-                  onAppointmentRemoved: (appointment) {
-                    setState(() {
-                      _todayAppointments.remove(appointment);
-                    });
-                  },
+      body: _initialLoading
+          ? _buildInitialSkeleton()
+          : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(_error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70)),
+                        const SizedBox(height: 12),
+                        ElevatedButton(
+                          onPressed: _loadDashboard,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  ),
                 )
-              : _selectedIndex == 2
-                  ? ReceptionistWalkInsPage(
-                      walkIns: _walkIns,
-                      onWalkInAdded: (walkIn) {
-                        setState(() {
-                          _walkIns.add(walkIn);
-                        });
-                      },
-                    )
-                  : _selectedIndex == 3
-                      ? ReceptionistTrackingPage(trackingData: _trackingData)
-                      : _selectedIndex == 4
-                          ? ReceptionistBarbersPage(barbers: _barbers)
-                          : const Center(
-                              child: Text(
-                                'Logging out...',
-                                style: TextStyle(color: Colors.white),
-                              ),
-                            ),
+              : _buildCurrentBody(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _selectedIndex > 4 ? 0 : _selectedIndex,
         onTap: (index) {
@@ -172,5 +171,65 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
       ),
     );
   }
-}
 
+  Widget _buildCurrentBody() {
+    return _selectedIndex == 0
+        ? ReceptionistAnalyticsPage(walkInsCount: _walkIns.length)
+        : _selectedIndex == 1
+            ? ReceptionistAppointmentsPage(
+                appointments: _todayAppointments,
+                onStatusChanged: (_) => _loadDashboard(silent: true),
+                onAppointmentRemoved: (_) => _loadDashboard(silent: true),
+              )
+            : _selectedIndex == 2
+                ? ReceptionistWalkInsPage(
+                    walkIns: _walkIns,
+                    onWalkInAdded: (_) => _loadDashboard(silent: true),
+                  )
+                : _selectedIndex == 3
+                    ? ReceptionistTrackingPage(
+                        appointments: _todayAppointments,
+                        walkIns: _walkIns,
+                        onChanged: () => _loadDashboard(silent: true),
+                      )
+                    : _selectedIndex == 4
+                        ? ReceptionistBarbersPage(barbers: _barbers)
+                        : const Center(
+                            child: Text(
+                              'Logging out...',
+                              style: TextStyle(color: Colors.white),
+                            ),
+                          );
+  }
+
+  Widget _buildInitialSkeleton() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _skeletonBox(height: 14, width: 220),
+          const SizedBox(height: 14),
+          Container(
+            height: 120,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _skeletonBox({required double height, required double width}) {
+    return Container(
+      height: height,
+      width: width,
+      decoration: BoxDecoration(
+        color: Colors.white12,
+        borderRadius: BorderRadius.circular(6),
+      ),
+    );
+  }
+}

@@ -1,13 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import '../receptionist/receptionist_dashboard_page.dart';
-import '../admins/admin_dashboard_page.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'forgot_password_page.dart';
-import 'quiz_gender.dart';
+import 'api_config.dart';
+import 'auth_bootstrap.dart';
+import 'user_session.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
 const Color kGoldColor = Colors.white;
+const String kGoogleLogoAsset = 'assets/images/google_logo.png';
 
 class AuthPage extends StatefulWidget {
   const AuthPage({super.key});
@@ -17,7 +23,14 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
+  final String _apiBaseUrl = ApiConfig.baseUrl;
+  static const String _supabaseRedirectUri =
+      'io.supabase.flutter://login-callback';
+  static const String _googleServerClientId =
+      String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
+
   bool _isLogin = true;
+  bool _isLoading = false;
   // Login controllers
   final TextEditingController _loginUser = TextEditingController();
   final TextEditingController _loginPass = TextEditingController();
@@ -35,26 +48,367 @@ class _AuthPageState extends State<AuthPage> {
   bool _obscureReg2 = true;
   bool _rememberMe = false;
 
-  Future<void> _signInWithGoogle() async {
-    try {
-      final googleUser = await GoogleSignIn().signIn();
-      if (googleUser == null) return;
-      final googleAuth = await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-      if (!mounted) return;
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_resumeIfAlreadySignedIn());
+  }
+
+  @override
+  void dispose() {
+    _loginUser.dispose();
+    _loginPass.dispose();
+    _firstName.dispose();
+    _lastName.dispose();
+    _regEmail.dispose();
+    _phone.dispose();
+    _regPass.dispose();
+    _confirm.dispose();
+    super.dispose();
+  }
+
+  Future<void> _resumeIfAlreadySignedIn() async {
+    if (AuthBootstrap.didNavigateAfterSignIn) {
+      return;
+    }
+
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
+      return;
+    }
+
+    await AuthBootstrap.applySupabaseSession(session);
+    if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
+      return;
+    }
+    AuthBootstrap.navigateToSignedInHome();
+  }
+
+  String _webOAuthRedirectTo() {
+    return Uri.base.origin;
+  }
+
+  Future<void> _login() async {
+    final email = _loginUser.text.trim();
+    final password = _loginPass.text;
+
+    if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Google sign-in successful')),
+        const SnackBar(content: Text('Please enter email and password.')),
       );
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
+      return;
+    }
+
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address.')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final phpLogin = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'login',
+          'email': email,
+          'password': password,
+        }),
+      );
+
+      if (phpLogin.statusCode == 200 && phpLogin.body.isNotEmpty) {
+        final phpData = jsonDecode(phpLogin.body) as Map<String, dynamic>;
+        final phpUser = phpData['user'] as Map<String, dynamic>?;
+        if (phpUser != null) {
+          AuthBootstrap.applyPhpAuthUser(phpUser);
+          if (!mounted) return;
+          AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
+          return;
+        }
+      }
+
+      final response = await Supabase.instance.client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      final session = response.session;
+      if (session == null) {
+        throw Exception('Login succeeded but no Supabase session was returned.');
+      }
+
+      await AuthBootstrap.applySupabaseSession(session);
+      if (!mounted) return;
+      AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Google sign-in failed: $e')),
+        SnackBar(content: Text(_readableLoginError(e, email: email))),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _register() async {
+    final firstName = _firstName.text.trim();
+    final lastName = _lastName.text.trim();
+    final email = _regEmail.text.trim();
+    final phone = _phone.text.trim();
+    final password = _regPass.text;
+    final confirm = _confirm.text;
+    final fullName = '$firstName $lastName'.trim();
+
+    // Validation 1: Required fields
+    if (firstName.isEmpty ||
+        lastName.isEmpty ||
+        email.isEmpty ||
+        password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please complete all required fields.')),
+      );
+      return;
+    }
+
+    // Validation 2: Email format
+    if (!_isValidEmail(email)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid email address (e.g., yourname@example.com).')),
+      );
+      return;
+    }
+
+    // Validation 3: Check for duplicate email
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'checkEmailExists',
+          'email': email,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['exists'] == true) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This email is already registered. Try signing in instead.')),
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // Email check failed; continue anyway (service might be down)
+    }
+
+    // Validation 4: Password strength
+    final passwordError = _getPasswordValidationError(password);
+    if (passwordError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(passwordError)),
+      );
+      return;
+    }
+
+    // Validation 5: Passwords match
+    if (password != confirm) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Passwords do not match.')),
+      );
+      return;
+    }
+
+    // Validation 6: Phone number (if provided)
+    if (phone.isNotEmpty && !_isValidPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid Philippine phone number (e.g., 09123456789).')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      // Sign up with email confirmation enabled (auto-confirm for dev)
+      final response = await Supabase.instance.client.auth.signUp(
+        email: email,
+        password: password,
+        data: {
+          'full_name': fullName,
+          'phone': phone,
+        },
+        emailRedirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+      );
+
+      if (!mounted) return;
+
+      final session = response.session;
+      if (session != null) {
+        // Signup succeeded and user is signed in
+        await AuthBootstrap.applySupabaseSession(session);
+        
+        // Sync the new user to public.users table
+        try {
+          await http.post(
+            Uri.parse('$_apiBaseUrl/auth_sync.php'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'full_name': fullName,
+            }),
+          );
+        } catch (_) {
+          // Sync failed but user is authenticated; continue anyway
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Registration successful. Welcome!')),
+        );
+        AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Registration successful. You can now sign in.')),
+      );
+      setState(() => _isLogin = true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registration failed: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isLoading = true);
+
+    try {
+      final googleSignIn = GoogleSignIn(
+        scopes: ['email', 'profile'],
+        serverClientId:
+            _googleServerClientId.isNotEmpty ? _googleServerClientId : null,
+      );
+      await googleSignIn.signOut();
+      final googleUser = await googleSignIn.signIn();
+
+      if (googleUser == null) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        return;
+      }
+
+      final googleAuth = await googleUser.authentication;
+      final idToken = googleAuth.idToken?.trim() ?? '';
+      final accessToken = googleAuth.accessToken?.trim() ?? '';
+      final hasAnyToken = idToken.isNotEmpty || accessToken.isNotEmpty;
+      if (!hasAnyToken) {
+        throw Exception(
+            'Google tokens are missing. Configure Android/iOS OAuth and GOOGLE_SERVER_CLIENT_ID.');
+      }
+
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'googleLogin',
+          'email': googleUser.email,
+          'fullName': googleUser.displayName,
+          'idToken': idToken,
+          'accessToken': accessToken,
+          'googleUid': googleUser.id,
+          'photoUrl': googleUser.photoUrl,
+        }),
+      );
+
+      final data = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      if (response.statusCode != 200) {
+        final message = data['error']?.toString() ??
+            data['message']?.toString() ??
+            'Google sign-in backend rejected the request (${response.statusCode}).';
+        throw Exception(message);
+      }
+
+      final user = data['user'] as Map<String, dynamic>? ?? {};
+      final roles = (user['roles'] as List<dynamic>? ?? ['customer'])
+          .map((role) => role.toString().toLowerCase())
+          .toList();
+
+      UserSession.userId = user['userID'] is int
+          ? user['userID'] as int
+          : int.tryParse('${user['userID']}') ?? googleUser.id.hashCode.abs();
+      UserSession.fullName =
+          user['fullName']?.toString() ?? googleUser.displayName;
+      UserSession.email = user['email']?.toString() ?? googleUser.email;
+      UserSession.roles = roles;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Google sign-in successful')));
+
+      AuthBootstrap.navigateToSignedInHome(showSnackBar: false);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_readableGoogleSignInError(e))),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
+  Future<void> _signInWithSupabaseGoogle() async {
+    setState(() => _isLoading = true);
+    try {
+      // Launch supabase OAuth flow (will open browser and redirect to the custom scheme)
+      await Supabase.instance.client.auth.signInWithOAuth(
+        Provider.google,
+        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Google sign-in...')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Supabase Google sign-in failed: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _signInWithSupabaseFacebook() async {
+    setState(() => _isLoading = true);
+    try {
+      // On web: redirect back to the running app URL so callback tokens are captured.
+      // On mobile: use the deep-link scheme for the OAuth callback.
+      await Supabase.instance.client.auth.signInWithOAuth(
+        Provider.facebook,
+        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Supabase Facebook sign-in failed: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -71,15 +425,20 @@ class _AuthPageState extends State<AuthPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 // Logo outside the card
-                Image.asset('assets/images/TATIS.png', height: 96, color: Colors.white),
+                Image.asset('assets/images/TATIS.png', height: 96),
                 const SizedBox(height: 12),
                 const Text(
                   'BARBERYA NI TATIS',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 1.2),
                 ),
                 const SizedBox(height: 18),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
                   decoration: BoxDecoration(
                     color: const Color(0xFF0F0F0F),
                     borderRadius: BorderRadius.circular(12),
@@ -96,12 +455,18 @@ class _AuthPageState extends State<AuthPage> {
                             onTap: () => setState(() => _isLogin = true),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
-                                color: _isLogin ? kGoldColor : Colors.transparent,
+                                color:
+                                    _isLogin ? kGoldColor : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text('SIGN IN', style: TextStyle(color: _isLogin ? Colors.black : Colors.white)),
+                              child: Text('SIGN IN',
+                                  style: TextStyle(
+                                      color: _isLogin
+                                          ? Colors.black
+                                          : Colors.white)),
                             ),
                           ),
                           const SizedBox(width: 10),
@@ -109,12 +474,18 @@ class _AuthPageState extends State<AuthPage> {
                             onTap: () => setState(() => _isLogin = false),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
-                                color: !_isLogin ? kGoldColor : Colors.transparent,
+                                color:
+                                    !_isLogin ? kGoldColor : Colors.transparent,
                                 borderRadius: BorderRadius.circular(20),
                               ),
-                              child: Text('SIGN UP (REGISTER)', style: TextStyle(color: !_isLogin ? Colors.black : Colors.white)),
+                              child: Text('SIGN UP',
+                                  style: TextStyle(
+                                      color: !_isLogin
+                                          ? Colors.black
+                                          : Colors.white)),
                             ),
                           ),
                         ],
@@ -126,7 +497,9 @@ class _AuthPageState extends State<AuthPage> {
                       AnimatedCrossFade(
                         firstChild: _buildLogin(context),
                         secondChild: _buildRegister(context),
-                        crossFadeState: _isLogin ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+                        crossFadeState: _isLogin
+                            ? CrossFadeState.showFirst
+                            : CrossFadeState.showSecond,
                         duration: const Duration(milliseconds: 250),
                         firstCurve: Curves.easeInOut,
                         secondCurve: Curves.easeInOut,
@@ -148,34 +521,47 @@ class _AuthPageState extends State<AuthPage> {
         const SizedBox(height: 8),
         const Align(
           alignment: Alignment.centerLeft,
-          child: Text('Sign in to your account', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          child: Text('Sign in to your account',
+              style: TextStyle(color: Colors.white70, fontSize: 12)),
         ),
         const SizedBox(height: 10),
         TextField(
           controller: _loginUser,
+          keyboardType: TextInputType.emailAddress,
           style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter username (Customer, Recep, or Admin)'),
+          decoration: _fieldDecoration('Enter your email'),
         ),
         const SizedBox(height: 12),
         TextField(
           controller: _loginPass,
           obscureText: _obscureLogin,
           style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your password', suffix: IconButton(icon: Icon(_obscureLogin ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureLogin = !_obscureLogin))),
+          decoration: _fieldDecoration('Enter your password',
+              suffix: IconButton(
+                  icon: Icon(
+                      _obscureLogin ? Icons.visibility_off : Icons.visibility,
+                      color: Colors.white70),
+                  onPressed: () =>
+                      setState(() => _obscureLogin = !_obscureLogin))),
         ),
         const SizedBox(height: 12),
         // Remember me and Forgot password
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          runSpacing: 4,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Checkbox(
                   value: _rememberMe,
-                  onChanged: (value) => setState(() => _rememberMe = value ?? false),
+                  onChanged: (value) =>
+                      setState(() => _rememberMe = value ?? false),
                   side: const BorderSide(color: Colors.white54),
                 ),
-                const Text('Remember me', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                const Text('Remember me',
+                    style: TextStyle(color: Colors.white70, fontSize: 12)),
               ],
             ),
             TextButton(
@@ -184,74 +570,66 @@ class _AuthPageState extends State<AuthPage> {
                   MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
                 );
               },
-              child: const Text('Forgot password?', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              child: const Text('Forgot password?',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
             ),
           ],
         ),
         const SizedBox(height: 16),
         ElevatedButton(
-          onPressed: () {
-            final u = _loginUser.text.trim();
-            final p = _loginPass.text;
-            if (u == 'Customer' && p == 'Cust123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const QuizGenderPage()));
-            } else if (u == 'recep' && p == 'recep123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()));
-            } else if (u == 'admin' && p == 'admin123') {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Login successful')));
-              Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
-            } else {
-              showDialog<void>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: const Color(0xFF1A1A1A),
-                  title: const Text('Login failed', style: TextStyle(color: Colors.white)),
-                  content: const Text('Invalid username or password.', style: TextStyle(color: Colors.white70)),
-                  actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('OK'))],
-                ),
-              );
-            }
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: const Text('SIGN IN', style: TextStyle(fontWeight: FontWeight.bold)),
+          onPressed: _isLoading ? null : _login,
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(48)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
-        const SizedBox(height: 16),
-        // OR CONTINUE WITH
-        const Row(
-          children: [
-            Expanded(child: Divider(color: Colors.white24)),
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: 12),
-              child: Text('OR CONTINUE WITH', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500)),
-            ),
-            Expanded(child: Divider(color: Colors.white24)),
-          ],
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          onPressed: _isLoading ? null : _signInWithSupabaseGoogle,
+          icon: Image.asset(
+            kGoogleLogoAsset,
+            width: 20,
+            height: 20,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.account_circle, color: Colors.white),
+          ),
+          label: const Text(
+            'Continue with Google',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(46),
+            side: const BorderSide(color: Colors.white24),
+            backgroundColor: const Color(0xFF1A1A1A),
+          ),
         ),
-        const SizedBox(height: 12),
-        // Google sign-in button inside the container
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _signInWithGoogle,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white24),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-            icon: const Icon(Icons.language, size: 18),
-            label: const Text('Continue with Google'),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: _isLoading ? null : _signInWithSupabaseFacebook,
+          icon: const Icon(Icons.facebook, color: Colors.white, size: 20),
+          label: const Text(
+            'Continue with Facebook',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          ),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(46),
+            side: const BorderSide(color: Colors.white24),
+            backgroundColor: const Color(0xFF1A1A1A),
           ),
         ),
         const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            const Text('Don’t have an account? ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const Text('Don’t have an account? ',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
             TextButton(
               onPressed: () => setState(() => _isLogin = false),
-              child: const Text('Sign up', style: TextStyle(color: Colors.white, fontSize: 12)),
+              child: const Text('Sign up',
+                  style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
@@ -265,41 +643,83 @@ class _AuthPageState extends State<AuthPage> {
         const SizedBox(height: 8),
         const Align(
           alignment: Alignment.centerLeft,
-          child: Text('Create your account', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          child: Text('Create your account',
+              style: TextStyle(color: Colors.white70, fontSize: 12)),
         ),
         const SizedBox(height: 10),
         Row(
           children: [
-            Expanded(child: TextField(controller: _firstName, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter first name'))),
+            Expanded(
+                child: TextField(
+                    controller: _firstName,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _fieldDecoration('Enter first name'))),
             const SizedBox(width: 8),
-            Expanded(child: TextField(controller: _lastName, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter last name'))),
+            Expanded(
+                child: TextField(
+                    controller: _lastName,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: _fieldDecoration('Enter last name'))),
           ],
         ),
         const SizedBox(height: 12),
-        TextField(controller: _regEmail, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter your email')),
+        TextField(
+          controller: _regEmail,
+          keyboardType: TextInputType.emailAddress,
+          style: const TextStyle(color: Colors.white),
+          decoration: _fieldDecoration('Enter your email', helperText: 'Format: yourname@example.com'),
+        ),
         const SizedBox(height: 12),
-        TextField(controller: _phone, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter phone number'), keyboardType: TextInputType.phone),
+        TextField(
+            controller: _phone,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Enter phone number', helperText: 'PH format: 09123456789 or 02-1234567'),
+            keyboardType: TextInputType.phone),
         const SizedBox(height: 12),
-        TextField(controller: _regPass, obscureText: _obscureReg1, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Enter your password', suffix: IconButton(icon: Icon(_obscureReg1 ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureReg1 = !_obscureReg1)))),
+        TextField(
+            controller: _regPass,
+            obscureText: _obscureReg1,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Enter your password',
+                helperText: 'Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special (!@#\$%^&*)',
+                suffix: IconButton(
+                    icon: Icon(
+                        _obscureReg1 ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white70),
+                    onPressed: () =>
+                        setState(() => _obscureReg1 = !_obscureReg1)))),
         const SizedBox(height: 12),
-        TextField(controller: _confirm, obscureText: _obscureReg2, style: const TextStyle(color: Colors.white), decoration: _fieldDecoration('Confirm your password', suffix: IconButton(icon: Icon(_obscureReg2 ? Icons.visibility_off : Icons.visibility, color: Colors.white70), onPressed: () => setState(() => _obscureReg2 = !_obscureReg2)))),
+        TextField(
+            controller: _confirm,
+            obscureText: _obscureReg2,
+            style: const TextStyle(color: Colors.white),
+            decoration: _fieldDecoration('Confirm your password',
+                suffix: IconButton(
+                    icon: Icon(
+                        _obscureReg2 ? Icons.visibility_off : Icons.visibility,
+                        color: Colors.white70),
+                    onPressed: () =>
+                        setState(() => _obscureReg2 = !_obscureReg2)))),
         const SizedBox(height: 18),
         ElevatedButton(
-          onPressed: () {
-            // UX-only: just close back to previous screen
-            setState(() => _isLogin = true);
-          },
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black, minimumSize: const Size.fromHeight(48)),
-          child: const Text('SIGN UP', style: TextStyle(fontWeight: FontWeight.bold)),
+          onPressed: _isLoading ? null : _register,
+          style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              minimumSize: const Size.fromHeight(48)),
+          child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 12),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Text('Already have an account? ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+            const Text('Already have an account? ',
+                style: TextStyle(color: Colors.white54, fontSize: 12)),
             TextButton(
               onPressed: () => setState(() => _isLogin = true),
-              child: const Text('Sign in', style: TextStyle(color: Colors.white, fontSize: 12)),
+              child: const Text('Sign in',
+                  style: TextStyle(color: Colors.white, fontSize: 12)),
             ),
           ],
         ),
@@ -307,15 +727,109 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  InputDecoration _fieldDecoration(String hint, {Widget? suffix}) {
+  InputDecoration _fieldDecoration(String hint, {Widget? suffix, String? helperText}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: Colors.white54),
+      helperText: helperText,
+      helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
       filled: true,
       fillColor: const Color(0xFF1A1A1A),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+      border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       suffixIcon: suffix,
     );
+  }
+
+  bool _isValidEmail(String email) {
+    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+  }
+
+  bool _isValidPhone(String phone) {
+    // Accept Philippine phone numbers
+    // Formats: 09123456789 (11 digits), 02-1234567 (8-10 digits), +63912345678
+    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
+    
+    // PH mobile: 09xxxxxxxxx (11 digits) or 639xxxxxxxxx (international, 12 digits)
+    if (cleaned.startsWith('09') && cleaned.length == 11) {
+      return true;
+    }
+    if (cleaned.startsWith('639') && cleaned.length == 12) {
+      return true;
+    }
+
+    // PH landline: 0X-xxxxxxx to 0XX-xxxxx (area codes 02-08, 8-10 total digits)
+    // Valid: 02-1234567 (9 digits), 032-123456 (9 digits), etc.
+    if ((cleaned.startsWith('02') || cleaned.startsWith('03') ||
+         cleaned.startsWith('04') || cleaned.startsWith('05') ||
+         cleaned.startsWith('06') || cleaned.startsWith('07') ||
+         cleaned.startsWith('08')) &&
+        cleaned.length >= 8 && cleaned.length <= 10) {
+      return true;
+    }
+
+    return false;
+  }
+
+  String? _getPasswordValidationError(String password) {
+    // Check minimum length
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters long.';
+    }
+    
+    // Check for uppercase letter
+    if (!password.contains(RegExp(r'[A-Z]'))) {
+      return 'Password must contain at least one uppercase letter (A-Z).';
+    }
+    
+    // Check for lowercase letter
+    if (!password.contains(RegExp(r'[a-z]'))) {
+      return 'Password must contain at least one lowercase letter (a-z).';
+    }
+    
+    // Check for number
+    if (!password.contains(RegExp(r'\d'))) {
+      return 'Password must contain at least one number (0-9).';
+    }
+    
+    // Check for special character
+    if (!password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:,.<>?]'))) {
+      return 'Password must contain at least one special character (!@#\$%^&*).';
+    }
+    
+    return null;  // Valid password
+  }
+
+  String _readableLoginError(Object error, {required String email}) {
+    final raw = error.toString().replaceFirst('Exception:', '').trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('invalid_grant') ||
+        lower.contains('grant') ||
+        lower.contains('invalid login credentials')) {
+      if (email.endsWith('@tatis.local')) {
+        return 'Sign-in failed. For staff/barber demo accounts use: barber@tatis.local / Barber123!, receptionist@tatis.local / Reception123!, or admin@tatis.local / Admin123!';
+      }
+      return 'Invalid email or password. OAuth-only accounts must use Google/Facebook sign-in.';
+    }
+    if (lower.contains('failed to fetch') || lower.contains('network')) {
+      return 'Cannot reach the auth server. Check your internet connection and API URL.';
+    }
+    return 'Login failed: $raw';
+  }
+
+  String _readableGoogleSignInError(Object error) {
+    final raw = error.toString().replaceFirst('Exception:', '').trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('popup_closed') || lower.contains('cancel')) {
+      return 'Google sign-in was cancelled.';
+    }
+    if (lower.contains('network') || lower.contains('socket')) {
+      return 'Network issue during Google sign-in. Please check your connection.';
+    }
+    if (lower.contains('backend') || lower.contains('rejected')) {
+      return raw;
+    }
+    return 'Google sign-in failed. $raw';
   }
 }

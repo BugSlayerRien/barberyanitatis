@@ -1,15 +1,28 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'confirmation_page.dart';
+
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+import 'ai_funnel_service.dart';
 import 'appointments_page.dart';
+import 'barber_selection_page.dart';
+import 'booking_guard.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
+import 'haircut_preview_scanner_page.dart';
+import 'saved_haircuts_page.dart';
+import 'suggested_appointment_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'user_session.dart';
+import 'api_config.dart';
+import 'scanner/overlay_preview_image.dart';
+import 'scanner/overlay_registry.dart';
 
 class HairstyleDetailPage extends StatefulWidget {
-  final Map<String, String> style;
+  final Map<String, dynamic> style;
 
   const HairstyleDetailPage({required this.style, super.key});
 
@@ -21,21 +34,431 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     with SingleTickerProviderStateMixin {
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
+  late PageController _imagePageController;
+  int _currentImagePage = 0;
+  final Map<String, Future<Uint8List>> _webImageCache = {};
+  bool _isFavorite = false;
+  bool _savingFavorite = false;
+  bool _bookingInFlight = false;
 
   @override
   void initState() {
     super.initState();
+    _imagePageController = PageController();
+    UserSession.selectedPreviewImages = {
+      'frontViewUrl': widget.style['image']?.toString() ?? widget.style['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': widget.style['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': widget.style['backViewUrl']?.toString() ?? '',
+    };
     _animationController = AnimationController(duration: const Duration(milliseconds: 800), vsync: this);
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _animationController, curve: Curves.easeIn),
     );
     _animationController.forward();
+    _loadFavoriteStatus();
   }
 
   @override
   void dispose() {
+    _imagePageController.dispose();
     _animationController.dispose();
     super.dispose();
+  }
+
+  bool _hasImage(String? url) {
+    return url != null && url.isNotEmpty;
+  }
+
+  ImageProvider _buildImageProvider(String url) {
+    if (url.startsWith('assets/')) {
+      return AssetImage(url);
+    }
+    return NetworkImage(url, webHtmlElementStrategy: WebHtmlElementStrategy.prefer);
+  }
+
+  Future<Uint8List> _fetchWebImageBytes(String url) {
+    return _webImageCache.putIfAbsent(url, () async {
+      // If it's an asset path, fetch from the web assets directory
+      final fetchUrl = url.startsWith('assets/')
+          ? '/assets/${url.replaceFirst('assets/', '')}'
+          : url;
+      final response = await http.get(Uri.parse(fetchUrl));
+      if (response.statusCode != 200) {
+        throw Exception('Image load failed (${response.statusCode}) from $fetchUrl');
+      }
+      return response.bodyBytes;
+    });
+  }
+
+  Widget _buildWebImage(String url) {
+    return FutureBuilder<Uint8List>(
+      future: _fetchWebImageBytes(url),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(color: Colors.white);
+        }
+        if (!snapshot.hasData) {
+          debugPrint('[HairstyleDetail] Failed to load web image: ${snapshot.error}');
+          return Container(color: Colors.white);
+        }
+        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+      },
+    );
+  }
+
+  Map<String, String>? _styleAssetSet() {
+    final styleName = widget.style['name']?.toString() ?? '';
+    final overlay = OverlayRegistry.resolve(styleName);
+    return {
+      'front': overlay.front,
+      'left': overlay.left,
+      'right': overlay.right,
+    };
+  }
+
+  String? _resolveDetailImage(String? raw) {
+    final assetSet = _styleAssetSet();
+    if (assetSet != null) {
+      final front = assetSet['front'];
+      final left = assetSet['left'];
+      final right = assetSet['right'];
+      if (raw == widget.style['image']?.toString() || raw == widget.style['frontViewUrl']?.toString()) {
+        return front;
+      }
+      if (raw == widget.style['sideViewUrl']?.toString()) {
+        return left;
+      }
+      if (raw == widget.style['backViewUrl']?.toString()) {
+        return right;
+      }
+      return front;
+    }
+
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+    return raw;
+  }
+
+  List<_DetailImageEntry> _detailImageEntries() {
+    final entries = <_DetailImageEntry>[];
+    final seen = <String>{};
+
+    void addEntry(String label, String? raw) {
+      final resolved = _resolveDetailImage(raw);
+      if (resolved == null || resolved.isEmpty) {
+        return;
+      }
+      if (seen.add(resolved)) {
+        entries.add(_DetailImageEntry(label: label, url: resolved));
+      }
+    }
+
+    addEntry('Front', widget.style['image']?.toString() ?? widget.style['frontViewUrl']?.toString());
+    addEntry('Left', widget.style['sideViewUrl']?.toString());
+    addEntry('Right', widget.style['backViewUrl']?.toString());
+
+    if (entries.isEmpty) {
+      final fallback = _resolveDetailImage(widget.style['image']?.toString());
+      if (fallback != null && fallback.isNotEmpty) {
+        entries.add(_DetailImageEntry(label: 'Front', url: fallback));
+      }
+    }
+
+    return entries;
+  }
+
+  Widget _buildDetailImage(String url) {
+    if (url.startsWith('assets/')) {
+      return OverlayPreviewImage(assetPath: url, fit: BoxFit.contain);
+    }
+
+    return Image.network(
+      url,
+      fit: BoxFit.contain,
+      filterQuality: FilterQuality.high,
+      errorBuilder: (context, error, stackTrace) {
+        debugPrint('[HairstyleDetail] Network load failed for $url: $error');
+        return Container(color: Colors.white);
+      },
+    );
+  }
+
+  Widget _buildDetailCarousel() {
+    final images = _detailImageEntries();
+    if (images.isEmpty) {
+      return Container(color: Colors.white);
+    }
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        PageView.builder(
+          controller: _imagePageController,
+          onPageChanged: (index) {
+            if (!mounted) return;
+            setState(() => _currentImagePage = index);
+          },
+          itemCount: images.length,
+          itemBuilder: (context, index) {
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                Center(child: _buildDetailImage(images[index].url)),
+                Positioned(
+                  left: 16,
+                  top: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.90),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      images[index].label,
+                      style: const TextStyle(
+                        color: Colors.black,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+        if (images.length > 1)
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: _currentImagePage > 0
+                    ? () => _imagePageController.previousPage(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                        )
+                    : null,
+                icon: const Icon(Icons.chevron_left, color: Colors.black87),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.85),
+                ),
+              ),
+            ),
+          ),
+        if (images.length > 1)
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                onPressed: _currentImagePage < images.length - 1
+                    ? () => _imagePageController.nextPage(
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeInOut,
+                        )
+                    : null,
+                icon: const Icon(Icons.chevron_right, color: Colors.black87),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withOpacity(0.85),
+                ),
+              ),
+            ),
+          ),
+        if (images.length > 1)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 14,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(images.length, (index) {
+                final active = index == _currentImagePage;
+                return AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: active ? 12 : 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    color: active ? Colors.black87 : Colors.black26,
+                    shape: BoxShape.circle,
+                  ),
+                );
+              }),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDetailSurface() {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        Container(color: Colors.white),
+        _buildDetailCarousel(),
+        Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [Colors.transparent, Colors.black.withOpacity(0.16)],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  int? _getVariantId() {
+    final value = widget.style['variantId'];
+    if (value is int) return value;
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  Future<void> _loadFavoriteStatus() async {
+    final userId = UserSession.userId;
+    final variantId = _getVariantId();
+    if (userId == null || variantId == null) {
+      return;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'status', 'userID': userId, 'variantID': variantId}),
+      );
+      if (response.statusCode != 200 || response.body.isEmpty) {
+        return;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (!mounted) return;
+      setState(() => _isFavorite = data['isFavorite'] == true);
+    }
+    catch (_) {
+      // Ignore favorite status errors so the page still loads.
+    }
+  }
+
+  Future<void> _toggleFavorite() async {
+    final userId = UserSession.userId;
+    final variantId = _getVariantId();
+    if (userId == null || variantId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Login required to save haircuts.')),
+      );
+      return;
+    }
+    if (_savingFavorite) return;
+    setState(() => _savingFavorite = true);
+    try {
+      final action = _isFavorite ? 'remove' : 'add';
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': action, 'userID': userId, 'variantID': variantId}),
+      );
+      if (!mounted) return;
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        setState(() => _isFavorite = !_isFavorite);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_isFavorite ? 'Saved to bookmarks.' : 'Removed from bookmarks.')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update saved haircuts.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update saved haircuts: $e')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _savingFavorite = false);
+      }
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'suggestBestSlot'}),
+      ).timeout(const Duration(seconds: 12));
+      if (response.statusCode != 200) {
+        return {
+          '_error': true,
+          '_message': 'Unable to check available times right now.',
+        };
+      }
+      if (response.body.isEmpty) {
+        return null;
+      }
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['suggestion'] as Map<String, dynamic>?;
+    } catch (_) {
+      return {
+        '_error': true,
+        '_message': 'Unable to check available times right now. Please try again.',
+      };
+    }
+  }
+
+  Future<void> _proceedToBookingFlow() async {
+    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
+    if (!mounted) {
+      return;
+    }
+    if (hasActive) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+      return;
+    }
+
+    setState(() => _bookingInFlight = true);
+    final suggestion = await _fetchSuggestedSlot();
+    if (mounted) {
+      setState(() => _bookingInFlight = false);
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    if (suggestion != null && suggestion['_error'] == true) {
+      final message = suggestion['_message']?.toString() ?? 'Unable to check available times right now.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+      return;
+    }
+
+    if (suggestion == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No open times available right now. You can still try this haircut.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+      ),
+    );
   }
 
   @override
@@ -59,17 +482,24 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
               // Large image with gradient overlay
               Container(
                 height: 380,
-                decoration: BoxDecoration(
-                  image: DecorationImage(image: AssetImage(widget.style['image']!), fit: BoxFit.cover),
-                ),
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [Colors.transparent, Colors.black.withOpacity(0.8)],
+                decoration: const BoxDecoration(color: Color(0xFF0A0A0A)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Container(color: Colors.white),
+                    _buildDetailCarousel(),
+                    IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [Colors.transparent, Colors.black.withOpacity(0.28)],
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
               const SizedBox(height: 20),
@@ -88,22 +518,36 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.style['name']!,
+                                widget.style['name']?.toString() ?? 'Style',
                                 style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 28,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 12),
                               Row(
                                 children: [
-                                  const Icon(Icons.star, color: Colors.white, size: 18),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    widget.style['rating']!,
-                                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                                  ElevatedButton.icon(
+                                    onPressed: _savingFavorite ? null : _toggleFavorite,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: _isFavorite ? Colors.white : Colors.transparent,
+                                      foregroundColor: _isFavorite ? Colors.black : Colors.white,
+                                      side: const BorderSide(color: Colors.white, width: 1),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                    ),
+                                    icon: Icon(_isFavorite ? Icons.bookmark : Icons.bookmark_border, size: 18),
+                                    label: Text(_isFavorite ? 'Saved' : 'Save'),
                                   ),
+                                  if (_savingFavorite)
+                                    const Padding(
+                                      padding: EdgeInsets.only(left: 10),
+                                      child: SizedBox(
+                                        height: 14,
+                                        width: 14,
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ],
@@ -113,80 +557,58 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     ),
                     const SizedBox(height: 28),
 
-                    // Preview Details
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: Colors.white, width: 1),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.all(8),
-                                decoration: BoxDecoration(
-                                  color: Colors.white.withOpacity(0.1),
-                                  borderRadius: BorderRadius.circular(8),
-                                ),
-                                child: const Icon(Icons.info_outline, color: Colors.white, size: 20),
-                              ),
-                              const SizedBox(width: 12),
-                              const Text(
-                                'Why This Works For You',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          ...(widget.style['details']!.split('\n').map(
-                            (detail) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Container(
-                                    margin: const EdgeInsets.only(top: 4),
-                                    width: 6,
-                                    height: 6,
-                                    decoration: const BoxDecoration(
-                                      color: Colors.white,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text(
-                                      detail,
-                                      style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          )),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 32),
+                    const SizedBox(height: 16),
 
                     // Buttons
                     ElevatedButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const ConfirmationPage()),
-                        );
+                      onPressed: _bookingInFlight
+                          ? null
+                          : () async {
+                        final variantId = widget.style['variantId'] ?? widget.style['variantID'];
+                        int? normalizedVariantId;
+                        if (variantId is int) {
+                          normalizedVariantId = variantId;
+                        } else {
+                          normalizedVariantId = int.tryParse(variantId?.toString() ?? '');
+                        }
+
+                        if (normalizedVariantId == null || normalizedVariantId <= 0) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('This haircut cannot be booked yet. Please choose another style.')),
+                          );
+                          return;
+                        }
+
+                        UserSession.selectedVariantId = normalizedVariantId;
+                        final serviceIdValue = widget.style['serviceId'] ?? widget.style['service_id'] ?? widget.style['serviceID'];
+                        UserSession.selectedServiceId = int.tryParse(serviceIdValue?.toString() ?? '');
+                        UserSession.selectedStyleName = widget.style['name']?.toString();
+                        UserSession.selectedEstimatedMinutes = int.tryParse(widget.style['estimatedMinutes']?.toString() ?? '');
+
+                        final userId = UserSession.userId;
+                        if (userId != null) {
+                          try {
+                            await AiFunnelService.saveSelection(
+                              scanSessionId: UserSession.ensureScanSessionId(),
+                              userId: userId,
+                              variantId: normalizedVariantId,
+                              styleName: UserSession.selectedStyleName ?? 'Style',
+                              faceShape: UserSession.lastScan?['faceShape']?.toString(),
+                              hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+                              hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+                              hairLength: UserSession.lastScan?['hairLength']?.toString(),
+                              estimatedMinutes: UserSession.selectedEstimatedMinutes,
+                            );
+                          } catch (_) {
+                            // Do not block booking flow if tracking fails.
+                          }
+                        }
+
+                        if (!context.mounted) {
+                          return;
+                        }
+                        await _proceedToBookingFlow();
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
@@ -195,8 +617,8 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         elevation: 8,
                         shadowColor: Colors.white.withOpacity(0.3),
                       ),
-                      child: const Text(
-                        'Confirm and Proceed',
+                      child: Text(
+                        _bookingInFlight ? 'Checking slots...' : 'Confirm and Proceed',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
@@ -207,17 +629,25 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton(
-                      onPressed: () => Navigator.of(context).pop(),
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => HaircutPreviewScannerPage(
+                              style: widget.style,
+                            ),
+                          ),
+                        );
+                      },
                       style: OutlinedButton.styleFrom(
-                        backgroundColor: Colors.black,
+                        backgroundColor: Colors.transparent,
                         foregroundColor: Colors.white,
                         minimumSize: const Size.fromHeight(56),
-                        side: const BorderSide(color: Colors.white, width: 2),
+                        side: const BorderSide(color: Colors.white54, width: 1.5),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: const Text(
-                        'Choose Another',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.5),
+                        'Try Haircut',
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.4),
                       ),
                     ),
                     const SizedBox(height: 30),
@@ -240,8 +670,8 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
           } else if (index == 2) {
             Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
           } else if (index == 3) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Placeholder tab - suggest: Saved styles or Notifications')),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
             );
           } else if (index == 4) {
             showAppMenuSheet(context);
@@ -250,4 +680,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       ),
     );
   }
+}
+
+class _DetailImageEntry {
+  final String label;
+  final String url;
+
+  const _DetailImageEntry({required this.label, required this.url});
 }

@@ -1,17 +1,27 @@
-Firebase setup notes (configure later):
-1) Run FlutterFire CLI to generate firebase_options.dart.
-	- flutterfire configure
-2) Add google-services.json (Android) in android/app/ and GoogleService-Info.plist (iOS) in ios/Runner/.
-3) Enable Email/Password + Google providers in Firebase Auth.
-4) For Android: add SHA-1/SHA-256 to Firebase console.
-5) For Web: add web config in firebase_options.dart.
-6) After setup, run: flutter pub get
+⚠️  LATEST SYSTEM STATUS: See SYSTEM_STATUS.md
 
+KEY ISSUES (TIER 1 - CRITICAL):
+1) Supabase Auth broken - seed script creates users in public.users, not auth.users
+2) Web Admin/Receptionist auth flow incomplete
+3) AI Hairstyle API hardcoded with fallback images
+4) Payment integration incomplete (PayMongo not fully wired)
 
+SUPABASE CONFIGURATION:
+- Hardcoded in mobile-app/lib/main.dart
+- Project: sergfnujsutcschocuuz
+- Schema applied: schema.pg.sql
+- Status: Database tables exist; auth integration broken
 
-logo proper picture
-ai impleemntation
-payment page
+FIREBASE / GOOGLE SIGN-IN:
+- Code exists but not fully tested
+- Waiting on: OAuth credentials, Firebase console setup
+
+TODO:
+- Fix Supabase auth user creation (use auth.admin.createUser)
+- Complete web admin auth flow
+- Seed hairstyle_variants with real variant data
+- Integrate PayMongo API (not just mock)
+- Test booking flow end-to-end
 
 ---
 WEB PORTAL (ADMIN + RECEPTIONIST)

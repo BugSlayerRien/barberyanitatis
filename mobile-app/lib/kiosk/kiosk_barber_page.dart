@@ -1,0 +1,259 @@
+import 'package:flutter/material.dart';
+
+import 'kiosk_api.dart';
+import 'kiosk_done_page.dart';
+import 'kiosk_session.dart';
+import 'kiosk_theme.dart';
+import 'widgets/kiosk_scaffold.dart';
+
+class KioskBarberPage extends StatefulWidget {
+  const KioskBarberPage({super.key});
+
+  @override
+  State<KioskBarberPage> createState() => _KioskBarberPageState();
+}
+
+class _KioskBarberPageState extends State<KioskBarberPage> {
+  bool _loading = true;
+  bool _submitting = false;
+  String? _error;
+  List<Map<String, dynamic>> _barbers = [];
+  Map<String, dynamic>? _firstAvailable;
+  int? _selectedBarberId;
+  int _serviceId = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final services = await KioskApi.loadServices();
+      if (services.isNotEmpty) {
+        final haircut = services.firstWhere(
+          (s) => (s['category']?.toString().toLowerCase() ?? '') == 'haircut',
+          orElse: () => services.first,
+        );
+        _serviceId = int.tryParse('${haircut['service_id']}') ?? 1;
+        KioskSession.selectedServiceId = _serviceId;
+      }
+
+      final data = await KioskApi.loadBarberQueue();
+      setState(() {
+        _barbers = (data['barbers'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        _firstAvailable = data['firstAvailable'] as Map<String, dynamic>?;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _joinQueue() async {
+    if (_selectedBarberId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Select a barber or first available')),
+      );
+      return;
+    }
+
+    final guestName = KioskSession.guestName ?? '';
+    if (guestName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Missing guest name. Start over.')),
+      );
+      return;
+    }
+
+    final variantId = KioskSession.selectedVariantId ?? 0;
+
+    setState(() => _submitting = true);
+    try {
+      final result = await KioskApi.createWalkin(
+        guestName: guestName,
+        serviceIds: [KioskSession.selectedServiceId ?? _serviceId],
+        barberId: _selectedBarberId!,
+        variantId: variantId > 0 ? variantId : 0,
+        styleName: KioskSession.selectedStyleName ??
+            (KioskSession.entryPath == KioskEntryPath.knownStyle ? 'Walk-in' : 'Style'),
+        scanMode: KioskSession.scanModeLabel,
+        entryPath: KioskSession.entryPathLabel,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(
+          builder: (_) => KioskDonePage(queueResult: result),
+        ),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('$e')),
+      );
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return KioskScaffold(
+      title: 'Choose your barber',
+      body: _loading
+          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          : _error != null
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(_error!, style: const TextStyle(color: Colors.white70)),
+                      const SizedBox(height: 12),
+                      TextButton(onPressed: _load, child: const Text('Retry')),
+                    ],
+                  ),
+                )
+              : ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  children: [
+                    if (KioskSession.selectedStyleName != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: KioskColors.panel,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: KioskColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.content_cut, color: Colors.white70, size: 20),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Style: ${KioskSession.selectedStyleName}',
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
+                    _BarberTile(
+                      name: 'First available',
+                      subtitle: _firstAvailable?['waitLabel']?.toString() ?? 'Shortest wait',
+                      specialty: 'Any barber',
+                      selected: _selectedBarberId == 0,
+                      onTap: () => setState(() => _selectedBarberId = 0),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Or pick a barber',
+                      style: TextStyle(color: KioskColors.textDim, fontSize: 12),
+                    ),
+                    const SizedBox(height: 8),
+                    ..._barbers.map((barber) {
+                      final id = int.tryParse('${barber['barber_id']}') ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _BarberTile(
+                          name: barber['full_name']?.toString() ?? 'Barber',
+                          subtitle: barber['waitLabel']?.toString() ?? '',
+                          specialty: barber['specialty']?.toString() ?? '',
+                          queueCount: int.tryParse('${barber['queueCount']}') ?? 0,
+                          selected: _selectedBarberId == id,
+                          onTap: () => setState(() => _selectedBarberId = id),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+      bottomBar: KioskPrimaryButton(
+        label: 'Join walk-in queue',
+        loading: _submitting,
+        onPressed: _loading ? null : _joinQueue,
+      ),
+    );
+  }
+}
+
+class _BarberTile extends StatelessWidget {
+  final String name;
+  final String subtitle;
+  final String specialty;
+  final int queueCount;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _BarberTile({
+    required this.name,
+    required this.subtitle,
+    required this.specialty,
+    this.queueCount = 0,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? const Color(0xFF1F1F1F) : KioskColors.panel,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: selected ? Colors.white : KioskColors.border, width: selected ? 1.5 : 1),
+          ),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: Colors.white12,
+                child: Text(
+                  name.isNotEmpty ? name[0].toUpperCase() : 'B',
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                    if (specialty.isNotEmpty)
+                      Text(specialty, style: const TextStyle(color: KioskColors.textDim, fontSize: 11)),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    if (queueCount > 0)
+                      Text(
+                        '$queueCount in queue',
+                        style: const TextStyle(color: KioskColors.textDim, fontSize: 11),
+                      ),
+                  ],
+                ),
+              ),
+              Icon(
+                selected ? Icons.check_circle : Icons.circle_outlined,
+                color: selected ? Colors.white : Colors.white38,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

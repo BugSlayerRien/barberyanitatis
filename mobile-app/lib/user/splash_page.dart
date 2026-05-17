@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import 'auth_bootstrap.dart';
 import 'auth_page.dart';
 
 class SplashPage extends StatefulWidget {
@@ -11,15 +13,33 @@ class SplashPage extends StatefulWidget {
 }
 
 class _SplashPageState extends State<SplashPage> {
+  Timer? _routeTimer;
+
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(seconds: 3), () {
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AuthPage()),
-      );
-    });
+    _routeTimer = Timer(const Duration(milliseconds: 1200), _routeNext);
+  }
+
+  @override
+  void dispose() {
+    _routeTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _routeNext() async {
+    if (!mounted) {
+      return;
+    }
+
+    final restored = await AuthBootstrap.restoreSessionOnColdStart();
+    if (!mounted || restored || AuthBootstrap.didNavigateAfterSignIn) {
+      return;
+    }
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const AuthPage()),
+    );
   }
 
   @override
@@ -33,7 +53,6 @@ class _SplashPageState extends State<SplashPage> {
             Image.asset(
               'assets/images/TATIS.png',
               height: 120,
-              color: Colors.white,
             ),
             const SizedBox(height: 16),
             const Text(
