@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/shop_schedule.php';
 
 require_method('POST');
 
@@ -18,18 +19,7 @@ if (!in_array($action, ['listByBarberDate', 'suggestBestSlot', 'availabilityByBa
  */
 function default_slot_times(): array
 {
-    return [
-        '09:00:00',
-        '09:50:00',
-        '10:40:00',
-        '11:30:00',
-        '12:20:00',
-        '13:10:00',
-        '14:00:00',
-        '14:50:00',
-        '15:40:00',
-        '16:30:00',
-    ];
+    return shop_default_slot_times();
 }
 
 function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): void
@@ -38,9 +28,10 @@ function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): voi
         return;
     }
 
+    $slotDuration = shop_slot_duration_minutes();
     $insertStmt = $pdo->prepare(
         "INSERT INTO time_slots (barber_id, slot_date, slot_time, duration, status)
-         VALUES (:barber_id, :slot_date, :slot_time, 35, 'Available')
+         VALUES (:barber_id, :slot_date, :slot_time, :duration, 'Available')
          ON CONFLICT (barber_id, slot_date, slot_time) DO NOTHING"
     );
 
@@ -50,6 +41,7 @@ function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): voi
                 ':barber_id' => $barberID,
                 ':slot_date' => $slotDate,
                 ':slot_time' => $slotTime,
+                ':duration' => $slotDuration,
             ]);
         }
     }
@@ -61,7 +53,7 @@ function seed_week_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): voi
         return;
     }
 
-    $today = new DateTimeImmutable('today');
+    $today = shop_now()->setTime(0, 0);
     $dates = [];
     for ($offset = 0; $offset < $windowDays; $offset++) {
         $dates[] = $today->modify('+' . $offset . ' day')->format('Y-m-d');
@@ -70,8 +62,76 @@ function seed_week_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): voi
     seed_slots_for_barber_dates($pdo, $barberID, $dates);
 }
 
+/**
+ * @param array<int, array<string, mixed>> $dbRows
+ * @return array<int, array<string, mixed>>
+ */
+function merge_barber_slots_for_date(array $dbRows, int $capacity = 10): array
+{
+    $byTime = [];
+    foreach ($dbRows as $row) {
+        $normalized = shop_normalize_slot_time((string)($row['slot_time'] ?? ''));
+        if ($normalized === null) {
+            continue;
+        }
+
+        $existing = $byTime[$normalized] ?? null;
+        $status = (string)($row['status'] ?? 'Available');
+        $bookedCount = (int)($row['booked_count'] ?? 0);
+
+        if ($existing === null) {
+            $byTime[$normalized] = [
+                'slot_id' => $row['slot_id'] ?? null,
+                'slot_time' => $normalized,
+                'status' => $status,
+                'booked_count' => $bookedCount,
+                'capacity' => (int)($row['capacity'] ?? $capacity),
+            ];
+            continue;
+        }
+
+        $existingStatus = (string)($existing['status'] ?? 'Available');
+        $existingBooked = (int)($existing['booked_count'] ?? 0);
+        if ($existingStatus === 'Available' && $status !== 'Available') {
+            $byTime[$normalized] = [
+                'slot_id' => $row['slot_id'] ?? $existing['slot_id'] ?? null,
+                'slot_time' => $normalized,
+                'status' => $status,
+                'booked_count' => $bookedCount,
+                'capacity' => (int)($row['capacity'] ?? $capacity),
+            ];
+        } elseif ($existingStatus === 'Available' && $status === 'Available' && $bookedCount > $existingBooked) {
+            $byTime[$normalized]['booked_count'] = $bookedCount;
+        }
+    }
+
+    $merged = [];
+    foreach (default_slot_times() as $slotTime) {
+        if (isset($byTime[$slotTime])) {
+            $merged[] = $byTime[$slotTime];
+            continue;
+        }
+
+        $merged[] = [
+            'slot_id' => null,
+            'slot_time' => $slotTime,
+            'status' => 'Available',
+            'booked_count' => 0,
+            'capacity' => $capacity,
+        ];
+    }
+
+    return $merged;
+}
+
+function future_slot_sql_clause(): string
+{
+    return '(slot_date > :shop_today OR (slot_date = :shop_today AND slot_time > :shop_now_time))';
+}
+
 try {
     $pdo = get_db_connection();
+    auto_complete_due_appointments($pdo);
 
     if ($action === 'suggestBestSlot') {
         $activeBarbersStmt = $pdo->prepare('SELECT barber_id FROM barbers WHERE is_active = TRUE');
@@ -89,20 +149,27 @@ try {
             }
         }
 
+        $shopToday = shop_today();
+        $shopNowTime = shop_current_time();
+        $shopWindowEnd = shop_window_end_date(7);
+
         $bestStmt = $pdo->prepare(
             "SELECT barber_id, slot_date, COUNT(*) AS available_count
              FROM time_slots
              WHERE status = 'Available'
-                             AND slot_date <= (CURRENT_DATE + INTERVAL '6 day')
-               AND (
-                    slot_date > CURRENT_DATE
-                    OR (slot_date = CURRENT_DATE AND slot_time > CURRENT_TIME)
-               )
+               AND slot_date <= :window_end_date
+               AND " . future_slot_sql_clause() . "
+               AND EXTRACT(MINUTE FROM slot_time) = 0
+               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
              GROUP BY barber_id, slot_date
              ORDER BY slot_date ASC, available_count DESC, barber_id ASC
              LIMIT 1"
         );
-        $bestStmt->execute();
+        $bestStmt->execute([
+            ':shop_today' => $shopToday,
+            ':shop_now_time' => $shopNowTime,
+            ':window_end_date' => $shopWindowEnd,
+        ]);
         $best = $bestStmt->fetch();
 
         if (!$best) {
@@ -114,19 +181,26 @@ try {
                WHERE barber_id = :barber_id
                 AND slot_date = :slot_date
                 AND status = 'Available'
-                AND slot_date <= (CURRENT_DATE + INTERVAL '6 day')
-                AND (
-                    slot_date > CURRENT_DATE
-                    OR (slot_date = CURRENT_DATE AND slot_time > CURRENT_TIME)
-                )
+                AND slot_date <= :window_end_date
+                AND " . future_slot_sql_clause() . "
+                AND EXTRACT(MINUTE FROM slot_time) = 0
+                AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
              ORDER BY slot_time ASC LIMIT 1"
         );
         $timeStmt->execute([
             ':barber_id' => $best['barber_id'],
             ':slot_date' => $best['slot_date'],
+            ':shop_today' => $shopToday,
+            ':shop_now_time' => $shopNowTime,
+            ':window_end_date' => $shopWindowEnd,
         ]);
         $timeRow = $timeStmt->fetch();
         if (!$timeRow) {
+            json_response(['error' => 'No available time for suggested slot'], 404);
+        }
+
+        $normalizedSlotTime = shop_normalize_slot_time((string)$timeRow['slot_time']);
+        if ($normalizedSlotTime === null || !shop_is_future_slot((string)$best['slot_date'], $normalizedSlotTime)) {
             json_response(['error' => 'No available time for suggested slot'], 404);
         }
 
@@ -140,7 +214,7 @@ try {
                 'barberName' => $barber['full_name'] ?? 'Barber',
                 'specialty' => $barber['specialty'] ?? null,
                 'slotDate' => $best['slot_date'],
-                'slotTime' => $timeRow['slot_time'],
+                'slotTime' => $normalizedSlotTime,
                 'availableCount' => (int)$best['available_count'],
                 'isFallback' => false,
             ],
@@ -160,7 +234,9 @@ try {
 
         $startDate = sprintf('%04d-%02d-01', $year, $month);
         $endDate = date('Y-m-d', strtotime($startDate . ' +1 month'));
-                $windowEndDate = (new DateTimeImmutable('today'))->modify('+6 day')->format('Y-m-d');
+        $windowEndDate = shop_window_end_date(7);
+        $shopToday = shop_today();
+        $shopNowTime = shop_current_time();
 
         $stmt = $pdo->prepare(
             "SELECT slot_date, COUNT(*) AS available_count
@@ -169,11 +245,10 @@ try {
                AND status = 'Available'
                AND slot_date >= :start_date
                AND slot_date < :end_date
-                             AND slot_date <= :window_end_date
-               AND (
-                    slot_date > CURRENT_DATE
-                    OR (slot_date = CURRENT_DATE AND slot_time > CURRENT_TIME)
-               )
+               AND slot_date <= :window_end_date
+               AND " . future_slot_sql_clause() . "
+               AND EXTRACT(MINUTE FROM slot_time) = 0
+               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
              GROUP BY slot_date"
         );
         $stmt->execute([
@@ -181,6 +256,8 @@ try {
             ':start_date' => $startDate,
             ':end_date' => $endDate,
             ':window_end_date' => $windowEndDate,
+            ':shop_today' => $shopToday,
+            ':shop_now_time' => $shopNowTime,
         ]);
         $rows = $stmt->fetchAll();
 
@@ -230,11 +307,11 @@ try {
     $rows = $stmt->fetchAll();
 
     if (!$rows) {
-        $requestedDate = DateTimeImmutable::createFromFormat('Y-m-d', $slotDate);
-        $today = new DateTimeImmutable('today');
-        $windowEndDate = $today->modify('+6 day');
+        $requestedDate = DateTimeImmutable::createFromFormat('Y-m-d', $slotDate, new DateTimeZone(shop_timezone()));
+        $today = shop_now()->setTime(0, 0);
+        $windowEndDate = shop_window_end_date(7);
 
-        if ($requestedDate !== false && $requestedDate >= $today && $requestedDate <= $windowEndDate) {
+        if ($requestedDate !== false && $requestedDate >= $today && $requestedDate->format('Y-m-d') <= $windowEndDate) {
             seed_slots_for_barber_dates($pdo, $barberID, [$slotDate]);
 
             $stmt->execute([
@@ -245,7 +322,7 @@ try {
         }
     }
 
-    json_response(['slots' => $rows]);
+    json_response(['slots' => merge_barber_slots_for_date($rows, $capacity)]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
 }

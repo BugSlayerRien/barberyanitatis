@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/auth_sync.php';
 
 require_method('POST');
 
@@ -15,6 +16,8 @@ $allowedActions = [
     'forgotPassword',
     'verifyResetToken',
     'resetPassword',
+    'checkEmailExists',
+    'resolveAccount',
 ];
 
 if (!in_array($action, $allowedActions, true)) {
@@ -203,18 +206,6 @@ function find_account_by_email(PDO $pdo, string $email): ?array
         return ['type' => 'staff', 'row' => $staff];
     }
 
-    $userStmt = $pdo->prepare(
-        'SELECT user_id, full_name, email
-         FROM users
-         WHERE email = :email AND is_active = TRUE
-         LIMIT 1'
-    );
-    $userStmt->execute([':email' => $email]);
-    $user = $userStmt->fetch();
-    if ($user) {
-        return ['type' => 'customer', 'row' => $user];
-    }
-
     $barberStmt = $pdo->prepare(
         'SELECT barber_id, full_name, email
          FROM barbers
@@ -225,6 +216,18 @@ function find_account_by_email(PDO $pdo, string $email): ?array
     $barber = $barberStmt->fetch();
     if ($barber) {
         return ['type' => 'barber', 'row' => $barber];
+    }
+
+    $userStmt = $pdo->prepare(
+        'SELECT user_id, full_name, email
+         FROM users
+         WHERE lower(email) = lower(:email) AND is_active = TRUE
+         LIMIT 1'
+    );
+    $userStmt->execute([':email' => $email]);
+    $user = $userStmt->fetch();
+    if ($user) {
+        return ['type' => 'customer', 'row' => $user];
     }
 
     return null;
@@ -378,7 +381,7 @@ try {
         $staffStmt = $pdo->prepare(
             'SELECT staff_id, full_name, email, password_hash, role
              FROM staff_users
-             WHERE email = :email AND is_active = TRUE
+             WHERE lower(email) = lower(:email) AND is_active = TRUE
              LIMIT 1'
         );
         $staffStmt->execute([':email' => $email]);
@@ -390,7 +393,7 @@ try {
         $userStmt = $pdo->prepare(
             'SELECT user_id, full_name, email, password_hash
              FROM users
-             WHERE email = :email AND is_active = TRUE
+             WHERE lower(email) = lower(:email) AND is_active = TRUE
              LIMIT 1'
         );
         $userStmt->execute([':email' => $email]);
@@ -402,7 +405,7 @@ try {
         $barberStmt = $pdo->prepare(
             'SELECT barber_id, full_name, email, password_hash
              FROM barbers
-             WHERE email = :email AND is_active = TRUE
+             WHERE lower(email) = lower(:email) AND is_active = TRUE
              LIMIT 1'
         );
         $barberStmt->execute([':email' => $email]);
@@ -581,6 +584,44 @@ try {
         }
 
         json_response(['message' => 'Password has been reset successfully. You can now sign in.']);
+    }
+
+    if ($action === 'checkEmailExists') {
+        $email = trim((string)($input['email'] ?? ''));
+        if (empty($email) || !is_valid_email($email)) {
+            json_response(['exists' => false]);
+        }
+
+        $pdo = get_db_connection();
+        $account = find_account_by_email($pdo, $email);
+        json_response(['exists' => $account !== null]);
+    }
+
+    if ($action === 'resolveAccount') {
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $fullName = sanitize_full_name((string)($input['fullName'] ?? ''), $email);
+        if ($email === '' || !is_valid_email($email)) {
+            json_response(['error' => 'Invalid email'], 422);
+        }
+
+        $account = find_account_by_email($pdo, $email);
+        if ($account === null) {
+            $sync = sync_auth_to_public_users($email, $fullName);
+            if (!$sync['success']) {
+                json_response(['error' => $sync['message']], 500);
+            }
+
+            $account = find_account_by_email($pdo, $email);
+            if ($account === null) {
+                json_response(['error' => 'Unable to provision customer account'], 500);
+            }
+        }
+
+        json_response([
+            'accountType' => $account['type'],
+            'user' => build_user_payload($account['type'], $account['row']),
+            'provisioned' => $account['type'] === 'customer',
+        ]);
     }
 } catch (PDOException $e) {
     $sqlState = (string)$e->getCode();

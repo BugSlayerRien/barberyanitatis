@@ -46,5 +46,6 @@ function paymongo_bootstrap(bool $includeSecurityHeaders = false): void
         exit;
     }
 
+    paymongo_load_env_file(dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . '.env');
     paymongo_load_env_file(__DIR__ . '/.env');
 }

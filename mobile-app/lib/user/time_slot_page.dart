@@ -25,7 +25,7 @@ class TimeSlotPage extends StatefulWidget {
 class _TimeSlotPageState extends State<TimeSlotPage> {
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
-  static const int _minimumSelectableGapMinutes = 35;
+  static const int _appointmentDurationMinutes = 60;
   static const String _aiApiKey =
       'REMOVED_GEMINI_KEY';
   static const String _aiModelName = 'gemini-2.5-flash';
@@ -57,7 +57,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final selectedDay = DateTime(selected.year, selected.month, selected.day);
-    if (_isSameDay(selectedDay, today) && now.hour >= 19) {
+    if (_isSameDay(selectedDay, today) && now.hour >= 20) {
       return selectedDay.add(const Duration(days: 1));
     }
     return selected;
@@ -74,7 +74,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('It\'s past 7pm. Showing the next available date instead.')),
+        SnackBar(content: Text('It\'s past closing time. Showing the next available date instead.')),
       );
     });
   }
@@ -757,11 +757,7 @@ Keep the total response under 24 words.
                       final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
 
                       final startTime = _selectedTime ?? '';
-                      final baseDuration = int.tryParse(_defaultService!['base_duration']?.toString() ?? '') ?? 0;
-                      final durationHint = UserSession.selectedEstimatedMinutes;
-                      final duration = durationHint != null && durationHint > 0
-                          ? durationHint
-                          : baseDuration;
+                      const duration = _appointmentDurationMinutes;
                       final endTime = _addMinutes(startTime, duration);
 
                       final response = await http.post(
@@ -887,18 +883,10 @@ Keep the total response under 24 words.
   }
 
   List<Map<String, dynamic>> _buildDefaultSlots() {
-    final times = <String>[];
-    const startMinutes = 9 * 60;
-    const endMinutes = 16 * 60 + 30;
-    for (var minutes = startMinutes; minutes <= endMinutes; minutes += _minimumSelectableGapMinutes) {
-      final hour = minutes ~/ 60;
-      final minute = minutes % 60;
-      times.add('${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}');
-    }
-    return times
+    return shopHourlySlotTimesCanonical()
         .map((time) => {
-              'slot_time': _canonicalTime(time),
-              'display_time': _displayTime(_canonicalTime(time)),
+              'slot_time': time,
+              'display_time': _displayTime(time),
               'status': 'Available',
               'booked_count': 0,
               'capacity': 10,
@@ -910,7 +898,7 @@ Keep the total response under 24 words.
     final Map<String, Map<String, dynamic>> byTime = {};
     for (final slot in slots) {
       final time = _canonicalTime(slot['slot_time']?.toString() ?? '');
-      if (time.isEmpty) {
+      if (time.isEmpty || !isShopHourlySlotTime(time)) {
         continue;
       }
       final status = slot['status']?.toString() ?? 'Available';
@@ -941,9 +929,22 @@ Keep the total response under 24 words.
         }
       }
     }
-    final sortedKeys = byTime.keys.toList()..sort();
-    final normalized = sortedKeys.map((time) => byTime[time]!).toList();
-    return _applySelectableSpacing(normalized);
+    final normalized = <Map<String, dynamic>>[];
+    for (final time in shopHourlySlotTimesCanonical()) {
+      final slot = byTime[time];
+      if (slot != null) {
+        normalized.add(slot);
+        continue;
+      }
+      normalized.add({
+        'slot_time': time,
+        'display_time': _displayTime(time),
+        'status': 'Available',
+        'booked_count': 0,
+        'capacity': 10,
+      });
+    }
+    return normalized;
   }
 
   String _canonicalTime(String value) {
@@ -979,38 +980,6 @@ Keep the total response under 24 words.
       return true;
     }
     return _isSlotFull(slot);
-  }
-
-  List<Map<String, dynamic>> _applySelectableSpacing(List<Map<String, dynamic>> slots) {
-    final adjusted = <Map<String, dynamic>>[];
-    int? lastSelectableMinute;
-
-    for (final slot in slots) {
-      final status = slot['status']?.toString() ?? 'Available';
-      if (!_isStatusBookable(status) || _isSlotFull(slot)) {
-        adjusted.add(slot);
-        continue;
-      }
-
-      final slotMinute = _timeToMinutes(slot['slot_time']?.toString() ?? '');
-      if (slotMinute == null) {
-        adjusted.add(slot);
-        continue;
-      }
-
-      if (lastSelectableMinute == null ||
-          slotMinute - lastSelectableMinute >= _minimumSelectableGapMinutes) {
-        adjusted.add(slot);
-        lastSelectableMinute = slotMinute;
-      } else {
-        adjusted.add({
-          ...slot,
-          'status': 'Break',
-        });
-      }
-    }
-
-    return adjusted;
   }
 
   Map<String, dynamic> _pickMostBufferedSlot({

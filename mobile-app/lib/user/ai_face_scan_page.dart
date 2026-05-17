@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -6,6 +7,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import 'api_config.dart';
@@ -20,19 +22,41 @@ import 'booking_guard.dart';
 import 'haircuts_list_page.dart';
 import '../main.dart';
 import 'scanner/overlay_models.dart';
+import 'scanner/overlay_registry.dart';
+import 'scanner/overlay_asset_cache.dart';
+import 'scanner/scanner_layout.dart';
 import 'scanner/attachment_engine.dart';
 import 'scanner/face_detector_service_stub.dart'
     if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
+import 'face_scan_results_page.dart';
+import 'services/face_scan_service.dart';
 import 'user_session.dart';
 import 'web_camera_view_stub.dart'
     if (dart.library.html) 'web_camera_view.dart';
+import 'saved_haircuts_page.dart';
+import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
+import 'widgets/menu_sheet.dart';
+import '../kiosk/kiosk_barber_page.dart';
+import '../kiosk/kiosk_session.dart';
 
 class AiFaceScanPage extends StatefulWidget {
   final Map<String, dynamic>? presetRecommendation;
   final bool previewOnly;
+  final Map<String, dynamic>? captureSummary;
+  /// Opens live camera overlay only (skips 3-angle capture). Use after static scan.
+  final bool livePreviewOnly;
+  /// Walk-in kiosk: no bottom nav; routes to kiosk queue after style pick.
+  final bool kioskMode;
 
-  const AiFaceScanPage({super.key, this.presetRecommendation, this.previewOnly = false});
+  const AiFaceScanPage({
+    super.key,
+    this.presetRecommendation,
+    this.previewOnly = false,
+    this.captureSummary,
+    this.livePreviewOnly = false,
+    this.kioskMode = false,
+  });
 
   @override
   State<AiFaceScanPage> createState() => _AiFaceScanPageState();
@@ -40,6 +64,48 @@ class AiFaceScanPage extends StatefulWidget {
 
 class _AiFaceScanPageState extends State<AiFaceScanPage>
     with WidgetsBindingObserver, RouteAware {
+  // Check if we need staging or can go straight to live preview
+  late bool _needsStaging;
+  int _stageIndex = 0;
+  bool _stagingComplete = false;
+  int _goodPositionFrames = 0;
+  bool _isGoodPosition = false;
+  Map<String, String> _capturedImages = {};
+  final Map<String, Rect> _capturedFaceRects = {};
+  bool _consentAccepted = false;
+  bool _consentLoading = true;
+  bool _finishingStaging = false;
+  
+  double? _currentHeadYaw;
+  Rect? _currentFaceRect;
+
+  static const List<_CaptureStage> _stages = [
+    _CaptureStage(
+      keyName: 'front',
+      label: 'Front view',
+      hint: 'Face the camera straight ahead and keep still.',
+      icon: Icons.face,
+      requiredYaw: 0,
+      yawTolerance: 10,
+    ),
+    _CaptureStage(
+      keyName: 'right',
+      label: 'Right view',
+      hint: 'Turn your face to the right (about 45 degrees).',
+      icon: Icons.turn_right,
+      requiredYaw: -45,
+      yawTolerance: 15,
+    ),
+    _CaptureStage(
+      keyName: 'left',
+      label: 'Left view',
+      hint: 'Turn your face to the left (about 45 degrees).',
+      icon: Icons.turn_left,
+      requiredYaw: 45,
+      yawTolerance: 15,
+    ),
+  ];
+
   final FaceDetectorService _detector = FaceDetectorService();
   final WebCameraController _webCamera = WebCameraController();
   late final AttachmentEngine _attachmentEngine;
@@ -73,6 +139,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   DateTime? _overlayHoldUntil;
 
   String _faceShape = 'Oval';
+    // Minimal-smoothing overlay tracking for real-time responsiveness (low lag).
+    Rect? _minSmoothFaceRect;
+    double? _minSmoothHeadYaw;
+    double? _minSmoothHeadRoll;
+    static const double _minSmoothRectAlpha = 0.82;
+    static const double _minSmoothAngleAlpha = 0.75;
   String _hairTexture = 'Straight';
   String _status = 'Center your face in the guide.';
 
@@ -115,51 +187,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   static const double _hairCoverRadialOpacity = 0.14;
   static const double _hairEdgeOpacity = 0.12;
   static const bool _showOverlayDebug = false;
-  static const OverlayImageSet _sampleImageOverlay = OverlayImageSet(
-    front: 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
-    left: 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
-    right: 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
-  );
   static const String _sampleHairModel3d = 'assets/models/blowouttaper.glb';
   static const bool _enable3DHairOverlay = false;
-
-  static const Map<String, OverlayImageSet> _styleOverlayImages = {
-    'blowout taper': OverlayImageSet(
-      front: 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
-      left: 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
-      right: 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
-    ),
-    'buzz cut': OverlayImageSet(
-      front: 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
-      left: 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
-      right: 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
-    ),
-    'curly taper fade': OverlayImageSet(
-      front: 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
-      left: 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
-      right: 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
-    ),
-    'low fade': OverlayImageSet(
-      front: 'assets/images/overlays/low_fade/low_fade_front.png',
-      left: 'assets/images/overlays/low_fade/low_fade_left.png',
-      right: 'assets/images/overlays/low_fade/low_fade_right.png',
-    ),
-    'french crop': OverlayImageSet(
-      front: 'assets/images/overlays/french_crop/french_crop_front.png',
-      left: 'assets/images/overlays/french_crop/french_crop_left.png',
-      right: 'assets/images/overlays/french_crop/french_crop_right.png',
-    ),
-    'textured crop': OverlayImageSet(
-      front: 'assets/images/overlays/textured_crop/textured_crop_front.png',
-      left: 'assets/images/overlays/textured_crop/textured_crop_left.png',
-      right: 'assets/images/overlays/textured_crop/textured_crop_right.png',
-    ),
-    'curly modern mullet': OverlayImageSet(
-      front: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
-      left: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
-      right: 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
-    ),
-  };
 
   static const Map<String, OverlayCalibration> _styleCalibration = {
     'blowout taper': OverlayCalibration(
@@ -225,9 +254,74 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _attachmentEngine = createAttachmentEngine(AttachmentEngineMode.auto);
+    
+    _loadConsentAndStaging();
     _applyPresetRecommendation();
     _loadCalibration();
     _setup();
+  }
+
+  Future<void> _loadConsentAndStaging() async {
+    final consented = await FaceScanService.hasConsent();
+    if (!mounted) return;
+
+    if (widget.livePreviewOnly) {
+      setState(() {
+        _consentAccepted = true;
+        _consentLoading = false;
+        _needsStaging = false;
+        _stagingComplete = true;
+        _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
+      });
+      return;
+    }
+
+    final needsStaging = UserSession.capturedFaceImages == null ||
+        UserSession.capturedFaceImages!.isEmpty;
+
+    setState(() {
+      _consentAccepted = consented;
+      _consentLoading = false;
+      _needsStaging = needsStaging;
+    });
+
+    if (_needsStaging) {
+      // Load existing images if any (from a previous session)
+      _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
+      _stagingComplete = false;
+      _stageIndex = 0;
+    } else {
+      _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
+      _stagingComplete = true;
+      if (!widget.livePreviewOnly) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _openResultsPage());
+      }
+    }
+  }
+
+  Future<void> _openResultsPage() async {
+    if (!mounted || widget.livePreviewOnly) return;
+    final validation = FaceScanService.validateCaptures(_capturedImages);
+    if (!validation.ok) {
+      setState(() {
+        _needsStaging = true;
+        _stagingComplete = false;
+        _stageIndex = 0;
+        _capturedImages = {};
+        UserSession.capturedFaceImages = null;
+      });
+      return;
+    }
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => FaceScanResultsPage(
+          captures: Map.from(_capturedImages),
+          faceShape: _faceShape,
+          hairTexture: _hairTexture,
+          presetRecommendation: widget.presetRecommendation,
+        ),
+      ),
+    );
   }
 
   Future<void> _loadCalibration() async {
@@ -322,6 +416,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _isSettingUp = true;
 
     try {
+      unawaited(OverlayAssetCache.preload());
       debugPrint('[AiFaceScan] Initializing face detector...');
       await _detector.initialize();
       debugPrint('[AiFaceScan] Face detector initialized successfully');
@@ -382,7 +477,19 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             image,
             sensorOrientation: controller.description.sensorOrientation,
           );
-          if (!mounted) return;
+          if (!mounted) {
+            _busy = false;
+            return;
+          }
+
+          // Route to staging or live preview based on phase
+          if (!_stagingComplete && _needsStaging) {
+            await _processStagingFrame(frame, image);
+            _busy = false;
+            return;
+          }
+
+          // Live preview processing (existing logic)
           if (frame == null) {
             final now = DateTime.now();
             _faceMissingAt ??= now;
@@ -435,6 +542,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             _faceSessionReady = stableWindowReached &&
               _stableFaceFrames >= _minimumStableFrames &&
               centeredInGuide;
+            final noseBase = frame.landmarks?[FaceLandmarkType.noseBase.index];
+            final leftEye = frame.landmarks?[FaceLandmarkType.leftEye.index];
+            final rightEye = frame.landmarks?[FaceLandmarkType.rightEye.index];
+            final leftEar = frame.landmarks?[FaceLandmarkType.leftEar.index];
+            final rightEar = frame.landmarks?[FaceLandmarkType.rightEar.index];
+            final noseBaseX = noseBase?['x'];
+            final noseBaseY = noseBase?['y'];
+            final leftEarX = leftEar?['x'];
+            final rightEarX = rightEar?['x'];
             final stabilizedInput =
               _stabilizeIncomingRect(_smoothedFaceRect, normalized);
             final smoothedRect =
@@ -443,15 +559,32 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                 _smoothedHeadYaw, frame.headEulerAngleY, _angleSmoothingAlpha);
             final smoothedRoll = _smoothValue(
                 _smoothedHeadRoll, frame.headEulerAngleZ, _angleSmoothingAlpha);
-            final inferredForeheadAnchor =
-                (smoothedRect.top + (smoothedRect.height * 0.18))
-                    .clamp(0.0, 1.0);
+            double inferredForeheadAnchor;
+            if (leftEye != null &&
+                rightEye != null &&
+                leftEye['y'] != null &&
+                rightEye['y'] != null) {
+              final eyeY = (leftEye['y']! + rightEye['y']!) / 2;
+              final eyeToNose = noseBaseY != null
+                  ? (noseBaseY - eyeY).abs().clamp(0.03, 0.18)
+                  : smoothedRect.height * 0.14;
+              inferredForeheadAnchor =
+                  (eyeY - eyeToNose * 1.35).clamp(smoothedRect.top, eyeY);
+            } else if (noseBaseY != null) {
+              inferredForeheadAnchor =
+                  (noseBaseY - (smoothedRect.height * 0.40)).clamp(0.0, 1.0);
+            } else {
+              inferredForeheadAnchor =
+                  (smoothedRect.top + (smoothedRect.height * 0.05)).clamp(0.0, 1.0);
+            }
             final smoothedForehead = _smoothValue(_smoothedForeheadAnchorY,
                 inferredForeheadAnchor, _anchorSmoothingAlpha);
-            final inferredEyeMidX =
-              (smoothedRect.left + (smoothedRect.width * 0.5)).clamp(0.0, 1.0);
-            final inferredEyeDistance =
-              (smoothedRect.width * 0.42).clamp(0.04, 0.65);
+            final inferredEyeMidX = noseBaseX != null
+              ? noseBaseX.clamp(0.0, 1.0)
+              : (smoothedRect.left + (smoothedRect.width * 0.5)).clamp(0.0, 1.0);
+            final inferredEyeDistance = (leftEarX != null && rightEarX != null)
+              ? ((rightEarX - leftEarX).abs() * 0.55).clamp(0.04, 0.65)
+              : (smoothedRect.width * 0.42).clamp(0.04, 0.65);
             final smoothedEyeMidX = _smoothValue(
               _smoothedEyeMidX, inferredEyeMidX, _anchorSmoothingAlpha);
             final smoothedEyeDistance = _smoothValue(_smoothedEyeDistanceNorm,
@@ -485,6 +618,30 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                       ? 'Keep still inside the guide...'
                       : 'Move your face into the guide marks.');
             });
+
+            // Update minimal-smoothing overlay tracking for low-lag real-time response.
+            final minSmoothRect = _smoothRect(
+              _minSmoothFaceRect,
+              stabilizedInput,
+              _minSmoothRectAlpha,
+            );
+            final minSmoothYaw = _smoothValue(
+              _minSmoothHeadYaw,
+              frame.headEulerAngleY,
+              _minSmoothAngleAlpha,
+            );
+            final minSmoothRoll = _smoothValue(
+              _minSmoothHeadRoll,
+              frame.headEulerAngleZ,
+              _minSmoothAngleAlpha,
+            );
+            if (mounted) {
+              setState(() {
+                _minSmoothFaceRect = minSmoothRect;
+                _minSmoothHeadYaw = minSmoothYaw;
+                _minSmoothHeadRoll = minSmoothRoll;
+              });
+            }
 
             if (_shouldAutoFetchRecommendations()) {
               _triggerAutoFetch(isWeb: false);
@@ -521,6 +678,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   void _onWebTrackingChanged() {
     if (!mounted) return;
 
+    // Route to staging or live preview based on phase
+    if (!_stagingComplete && _needsStaging) {
+      _processStagingFrameWeb();
+      return;
+    }
+
+    // Live preview processing (existing logic)
     final t = _webCamera.tracking.value;
     final rect = t.faceRect;
     if (rect == null) {
@@ -575,9 +739,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _smoothValue(_smoothedHeadYaw, t.headYaw, _angleSmoothingAlpha);
     final smoothedRoll =
         _smoothValue(_smoothedHeadRoll, t.headRoll, _angleSmoothingAlpha);
-    final eyeAnchor = ((t.eyeMidY ?? (rect.top + (rect.height * 0.36))) -
-        (rect.height * 0.16))
-      .clamp(0.0, 1.0);
+    final eyeY = (t.eyeMidY ?? (rect.top + (rect.height * 0.36))).clamp(0.0, 1.0);
+    final eyeToNose = rect.height * 0.14;
+    final eyeAnchor =
+        (eyeY - eyeToNose * 1.35).clamp(rect.top, eyeY);
     final smoothedForehead = _smoothValue(
         _smoothedForeheadAnchorY, eyeAnchor, _anchorSmoothingAlpha);
     final eyeMidX =
@@ -1078,144 +1243,135 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return styles;
   }
 
-  Widget _buildHairOnlyOverlayModel(
-      {required OverlayCalibration calibration,
-      required Map<String, dynamic>? recommendation}) {
+  // DEPRECATED: Use _buildHairOverlay instead. Kept for reference.
+  // Widget _buildHairOnlyOverlayModel(...) { ... }
+
+  /// Main overlay builder that determines which view (front/side) to render based on yaw.
+  Widget _buildHairOverlay({
+    required OverlayCalibration calibration,
+    required Map<String, dynamic>? recommendation,
+  }) {
     if (_shouldUse3DModel(recommendation)) {
       return _buildHair3DOverlayModel(calibration: calibration);
     }
 
     final yaw = (_headYaw ?? 0).clamp(-60.0, 60.0);
-    final yawAbsNorm = (yaw.abs() / 34.0).clamp(0.0, 1.0);
-    final frontOpacity = (1.0 - (yawAbsNorm * 0.45)).clamp(0.60, 1.0);
-    final sideOpacity = ((yawAbsNorm - 0.12) / 0.38).clamp(0.0, 1.0);
-    final styleName = (recommendation?['style_name']?.toString() ??
-            recommendation?['styleName']?.toString() ??
-            '')
-        .trim();
+    final yawAbs = yaw.abs();
 
-    // Resolve overlay images based on style name from recommendation
+    // Determine which view to show based on yaw angle
+    if (yawAbs <= 15) {
+      // FRONT VIEW ONLY: facing forward
+      return _buildFrontOverlay(
+        calibration: calibration,
+        recommendation: recommendation,
+      );
+    } else if (yawAbs >= 25) {
+      // SIDE VIEW ONLY: turned significantly
+      return _buildSideOverlay(
+        calibration: calibration,
+        recommendation: recommendation,
+        yaw: yaw,
+        opacity: 1.0,
+      );
+    } else {
+      // TRANSITION ZONE (15-25°): crossfade between front and side
+      final t = ((yawAbs - 15) / 10).clamp(0.0, 1.0); // 0 at 15°, 1 at 25°
+      return Stack(
+        children: [
+          Opacity(
+            opacity: 1.0 - t,
+            child: _buildFrontOverlay(
+              calibration: calibration,
+              recommendation: recommendation,
+            ),
+          ),
+          Opacity(
+            opacity: t,
+            child: _buildSideOverlay(
+              calibration: calibration,
+              recommendation: recommendation,
+              yaw: yaw,
+              opacity: t,
+            ),
+          ),
+        ],
+      );
+    }
+  }
+
+  /// Front view overlay: shows only the front image, centered and at full size.
+  Widget _buildFrontOverlay({
+    required OverlayCalibration calibration,
+    required Map<String, dynamic>? recommendation,
+  }) {
     final overlayImageSet = _resolveOverlayImageSet(recommendation);
     final frontImage = overlayImageSet.front;
-    final sideImage = yaw >= 0 ? overlayImageSet.right : overlayImageSet.left;
     final frontAsset = _assetPath(frontImage);
-    final sideAsset = _assetPath(sideImage);
-    
-    debugPrint('[AiFaceScan] === Overlay Rendering Debug ===');
-    debugPrint('[AiFaceScan] Recommendation keys: ${recommendation?.keys.toList()}');
-    debugPrint('[AiFaceScan] Full recommendation: $recommendation');
-    debugPrint('[AiFaceScan] styleName="$styleName" yaw=${yaw.toStringAsFixed(1)}');
-    debugPrint('[AiFaceScan] frontImage=$frontImage');
-    debugPrint('[AiFaceScan] sideImage=$sideImage');
-    debugPrint('[AiFaceScan] frontOpacity=$frontOpacity sideOpacity=$sideOpacity');
-    debugPrint('[AiFaceScan] === End Debug ===');
-    final sideAlignment = Alignment.center;
-    final sideInset = (0.50 - (yawAbsNorm * 0.06)).clamp(0.40, 0.52).toDouble();
-    final sideStretchX = (1.0 + (yawAbsNorm * 0.20)).clamp(1.0, 1.24).toDouble();
-    final sideStretchY = (1.0 + (yawAbsNorm * 0.06)).clamp(1.0, 1.10).toDouble();
-    const sideNudgeX = 0.0;
-    const sideFadeBegin = Alignment.centerLeft;
-    const sideFadeEnd = Alignment.centerRight;
 
     return ClipRect(
       child: Align(
         alignment: Alignment.topCenter,
         heightFactor: calibration.hairClipFactor,
-        child: SizedBox.expand(
-          child: Transform.scale(
-            scale: calibration.visualScale,
+        child: Transform.scale(
+          scale: calibration.visualScale,
+          alignment: Alignment.topCenter,
+          child: Image.asset(
+            frontAsset,
+            fit: BoxFit.contain,
             alignment: Alignment.topCenter,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                Opacity(
-                  opacity: frontOpacity,
-                  child: Image.asset(
-                    frontAsset,
-                    fit: BoxFit.contain,
-                    alignment: Alignment.topCenter,
-                    filterQuality: FilterQuality.medium,
-                    errorBuilder: (context, error, stackTrace) {
-                      debugPrint('[AiFaceScan] Failed to load front overlay asset: $frontImage | $error');
-                      return const ColoredBox(color: Colors.transparent);
-                    },
-                  ),
-                ),
-                Opacity(
-                  opacity: sideOpacity,
-                  child: Align(
-                    alignment: sideAlignment,
-                    child: ClipRect(
-                      child: Align(
-                        alignment: sideAlignment,
-                        widthFactor: sideInset,
-                        child: ShaderMask(
-                          shaderCallback: (rect) {
-                            return LinearGradient(
-                              begin: sideFadeBegin,
-                              end: sideFadeEnd,
-                              colors: const [
-                                Colors.white,
-                                Colors.white,
-                                Colors.transparent,
-                              ],
-                              stops: const [0.0, 0.62, 1.0],
-                            ).createShader(rect);
-                          },
-                          blendMode: BlendMode.dstIn,
-                          child: Transform.translate(
-                            offset: Offset(sideNudgeX, 0),
-                            child: Transform.scale(
-                              scaleX: sideStretchX,
-                              scaleY: sideStretchY,
-                              alignment: sideAlignment,
-                              child: Image.asset(
-                                sideAsset,
-                                fit: BoxFit.cover,
-                                alignment: sideAlignment,
-                                filterQuality: FilterQuality.medium,
-                                errorBuilder: (context, error, stackTrace) {
-                                  debugPrint('[AiFaceScan] Failed to load side overlay asset: $sideImage | $error');
-                                  return const ColoredBox(color: Colors.transparent);
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                if (yawAbsNorm > 0.08)
-                  Align(
-                    alignment: sideAlignment,
-                    child: ClipRect(
-                      child: Align(
-                        alignment: sideAlignment,
-                        widthFactor: 0.46,
-                        child: Opacity(
-                          opacity: (yawAbsNorm * 0.48 * sideOpacity).clamp(0.0, 0.48),
-                          child: Transform.scale(
-                            scaleX: 1.14,
-                            scaleY: 1.03,
-                            alignment: sideAlignment,
-                            child: Image.asset(
-                              sideAsset,
-                              fit: BoxFit.cover,
-                              alignment: sideAlignment,
-                              filterQuality: FilterQuality.medium,
-                              errorBuilder: (context, error, stackTrace) {
-                                debugPrint('[AiFaceScan] Failed to load side overlay asset: $sideImage | $error');
-                                return const ColoredBox(
-                                    color: Colors.transparent);
-                              },
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
+            filterQuality: FilterQuality.medium,
+            errorBuilder: (context, error, stackTrace) {
+              debugPrint('[AiFaceScan] Failed to load front overlay: $frontImage');
+              return const ColoredBox(color: Colors.transparent);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Side view overlay: shows only the side image, anchored to the ear/temple.
+  Widget _buildSideOverlay({
+    required OverlayCalibration calibration,
+    required Map<String, dynamic>? recommendation,
+    required double yaw,
+    required double opacity,
+  }) {
+    final overlayImageSet = _resolveOverlayImageSet(recommendation);
+    final isRightTurn = yaw >= 0;
+    final sideImage = isRightTurn ? overlayImageSet.right : overlayImageSet.left;
+    final sideAsset = _assetPath(sideImage);
+    final yawAbsNorm = (yaw.abs() / 34.0).clamp(0.0, 1.0);
+
+    // Side image anchors to the ear side, not the nose
+    final sideAlignment = isRightTurn ? Alignment.centerRight : Alignment.centerLeft;
+
+    return ClipRect(
+      child: Align(
+        alignment: Alignment.topCenter,
+        heightFactor: calibration.hairClipFactor,
+        child: Transform.scale(
+          scale: calibration.visualScale,
+          alignment: Alignment.topCenter,
+          child: Align(
+            alignment: sideAlignment,
+            // Wider factor so side image has room
+            widthFactor: (0.55 + (yawAbsNorm * 0.30)).clamp(0.55, 0.85),
+            child: Transform.translate(
+              offset: Offset(
+                (isRightTurn ? 1.0 : -1.0) * yawAbsNorm * 12.0,
+                0,
+              ),
+              child: Image.asset(
+                sideAsset,
+                fit: BoxFit.cover,
+                alignment: sideAlignment,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (context, error, stackTrace) {
+                  debugPrint('[AiFaceScan] Failed to load side overlay: $sideImage');
+                  return const ColoredBox(color: Colors.transparent);
+                },
+              ),
             ),
           ),
         ),
@@ -1357,6 +1513,590 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _overlayHoldUntil = now.add(_overlayHoldAfterProcessDuration);
   }
 
+  Future<void> _processStagingFrame(DetectedFaceFrame? frame, CameraImage image) async {
+    if (frame == null) {
+      setState(() {
+        _currentFaceRect = null;
+        _isGoodPosition = false;
+        _goodPositionFrames = 0;
+        _status = 'Face not detected. Keep your face visible.';
+      });
+      return;
+    }
+
+    final normalized = Rect.fromLTWH(
+      (frame.boundingBox.left / frame.imageSize.width).clamp(0.0, 1.0),
+      (frame.boundingBox.top / frame.imageSize.height).clamp(0.0, 1.0),
+      (frame.boundingBox.width / frame.imageSize.width).clamp(0.0, 1.0),
+      (frame.boundingBox.height / frame.imageSize.height).clamp(0.0, 1.0),
+    );
+
+    final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
+    final isGood = _isFaceWellPositioned(normalized, frame.headEulerAngleY, stage.requiredYaw, stage.yawTolerance);
+
+    setState(() {
+      _currentFaceRect = normalized;
+      _isGoodPosition = isGood;
+      _currentHeadYaw = frame.headEulerAngleY;
+      
+      if (isGood) {
+        _goodPositionFrames++;
+        _status = '${stage.label} - Hold position! ${(12 - _goodPositionFrames).clamp(0, 12)} frames left';
+      } else {
+        _goodPositionFrames = 0;
+        _status = stage.hint;
+      }
+    });
+
+    if (_goodPositionFrames >= 12) {
+      await _captureCurrent(image);
+    }
+  }
+
+  Future<void> _processStagingFrameWeb() async {
+    // Web staging uses the web camera controller to capture frames
+    final tracked = _webCamera.tracking.value;
+    if (tracked.faceRect == null) {
+      setState(() {
+        _currentFaceRect = null;
+        _isGoodPosition = false;
+        _goodPositionFrames = 0;
+        _status = 'Face not detected. Keep your face visible.';
+      });
+      return;
+    }
+
+    final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
+    final isGood = _isFaceWellPositioned(
+      tracked.faceRect!,
+      tracked.headYaw,
+      stage.requiredYaw,
+      stage.yawTolerance,
+    );
+
+    setState(() {
+      _currentFaceRect = tracked.faceRect;
+      _isGoodPosition = isGood;
+      _currentHeadYaw = tracked.headYaw;
+      
+      if (isGood) {
+        _goodPositionFrames++;
+        _status = '${stage.label} - Hold position! ${(12 - _goodPositionFrames).clamp(0, 12)} frames left';
+      } else {
+        _goodPositionFrames = 0;
+        _status = stage.hint;
+      }
+    });
+
+    if (_goodPositionFrames >= 12) {
+      await _captureCurrentWeb();
+    }
+  }
+
+  Future<void> _captureCurrent(CameraImage image) async {
+    if (_camera == null || !_camera!.value.isInitialized || _finishingStaging) {
+      return;
+    }
+    try {
+      final stage = _stages[_stageIndex];
+      await _camera!.stopImageStream();
+      final file = await _camera!.takePicture();
+      final bytes = await file.readAsBytes();
+      if (!FaceScanService.isValidJpeg(bytes)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Invalid ${stage.label} capture. Hold steady and try again.')),
+          );
+        }
+        await _restartStagingStream();
+        return;
+      }
+      final base64Image = base64Encode(bytes);
+      if (_currentFaceRect != null) {
+        _capturedFaceRects[stage.keyName] = _currentFaceRect!;
+      }
+      setState(() {
+        _capturedImages[stage.keyName] = base64Image;
+        _goodPositionFrames = 0;
+      });
+
+      if (_stageIndex < _stages.length - 1) {
+        setState(() => _stageIndex++);
+        await _restartStagingStream();
+      } else {
+        UserSession.capturedFaceImages = Map.from(_capturedImages);
+        UserSession.captureFaceRects = Map.from(_capturedFaceRects);
+        await _finishStagingCapture();
+      }
+    } catch (e) {
+      debugPrint('[AiFaceScan] Capture error: $e');
+      await _restartStagingStream();
+    }
+  }
+
+  Future<void> _restartStagingStream() async {
+    if (_camera == null || !_camera!.value.isInitialized || _stagingComplete) {
+      return;
+    }
+    if (_camera!.value.isStreamingImages) {
+      return;
+    }
+    await _camera!.startImageStream((image) async {
+      if (_busy || !mounted) return;
+      _busy = true;
+      try {
+        final frame = await _detector.processFrame(
+          image,
+          sensorOrientation: _camera!.description.sensorOrientation,
+        );
+        if (!mounted) {
+          _busy = false;
+          return;
+        }
+        if (!_stagingComplete && _needsStaging) {
+          await _processStagingFrame(frame, image);
+        }
+      } finally {
+        _busy = false;
+      }
+    });
+  }
+
+  Future<void> _captureCurrentWeb() async {
+    try {
+      final stage = _stages[_stageIndex];
+      final frameBytes = await _webCamera.capture();
+      if (frameBytes == null) {
+        debugPrint('[AiFaceScan] Web capture failed');
+        return;
+      }
+      
+      if (!FaceScanService.isValidJpeg(frameBytes)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Invalid ${stage.label} capture. Please try again.')),
+          );
+        }
+        return;
+      }
+      final base64Image = base64Encode(frameBytes);
+      if (_currentFaceRect != null) {
+        _capturedFaceRects[stage.keyName] = _currentFaceRect!;
+      }
+      
+      setState(() {
+        _capturedImages[stage.keyName] = base64Image;
+        _goodPositionFrames = 0;
+      });
+
+      if (_stageIndex < _stages.length - 1) {
+        setState(() => _stageIndex++);
+      } else {
+        UserSession.capturedFaceImages = Map.from(_capturedImages);
+        UserSession.captureFaceRects = Map.from(_capturedFaceRects);
+        await _finishStagingCapture();
+      }
+    } catch (e) {
+      debugPrint('[AiFaceScan] Web capture error: $e');
+    }
+  }
+
+  Future<void> _finishStagingCapture() async {
+    if (_finishingStaging) return;
+    _finishingStaging = true;
+
+    final validation = FaceScanService.validateCaptures(_capturedImages);
+    if (!validation.ok) {
+      _finishingStaging = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(validation.error ?? 'Invalid captures')),
+        );
+      }
+      return;
+    }
+
+    if (_currentFaceRect != null) {
+      _faceShape = _inferFaceShape(_currentFaceRect!.width, _currentFaceRect!.height);
+    }
+
+    if (mounted) {
+      setState(() => _stagingComplete = true);
+    }
+
+    try {
+      await FaceScanService.uploadCaptures(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: UserSession.userId,
+        captures: _capturedImages,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
+        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+      );
+    } catch (e) {
+      _finishingStaging = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Upload failed: $e')),
+        );
+        setState(() => _stagingComplete = false);
+      }
+      return;
+    }
+
+    _finishingStaging = false;
+    if (!mounted) return;
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => FaceScanResultsPage(
+          captures: Map.from(_capturedImages),
+          faceShape: _faceShape,
+          hairTexture: _hairTexture,
+          presetRecommendation: widget.presetRecommendation,
+          kioskMode: widget.kioskMode,
+        ),
+      ),
+    );
+  }
+
+  void _continueKioskFromLivePreview() {
+    final variantId = widget.presetRecommendation?['variant_id'] ??
+        widget.presetRecommendation?['variantId'];
+    if (variantId != null) {
+      KioskSession.selectedVariantId = int.tryParse('$variantId');
+      UserSession.selectedVariantId = KioskSession.selectedVariantId;
+    }
+    final styleName = widget.presetRecommendation?['style_name'] ??
+        widget.presetRecommendation?['styleName'];
+    if (styleName != null) {
+      KioskSession.selectedStyleName = styleName.toString();
+      UserSession.selectedStyleName = KioskSession.selectedStyleName;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const KioskBarberPage()),
+    );
+  }
+
+  bool _isFaceWellPositioned(Rect face, double? yaw, double requiredYaw, double tolerance) {
+    final faceCenterX = face.left + (face.width / 2);
+    final faceCenterY = face.top + (face.height / 2);
+    
+    final xCentered = faceCenterX >= 0.3 && faceCenterX <= 0.7;
+    final yCentered = faceCenterY >= 0.2 && faceCenterY <= 0.7;
+    
+    final faceArea = face.width * face.height;
+    const double minArea = 0.08;
+    const double maxArea = 0.4;
+    final bool goodSize = faceArea >= minArea && faceArea <= maxArea;
+    
+    final yawMatch = yaw != null && (yaw - requiredYaw).abs() <= tolerance;
+    
+    return xCentered && yCentered && goodSize && yawMatch;
+  }
+
+  void _onScannerBottomNav(int index) {
+    if (index == 0) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const DashboardPage()),
+      );
+    } else if (index == 1) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+    } else if (index == 2) {
+      return;
+    } else if (index == 3) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
+      );
+    } else if (index == 4) {
+      showAppMenuSheet(context);
+    }
+  }
+
+  Widget _buildStagingUI() {
+    final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
+    final progress = (_stageIndex + (_goodPositionFrames / 12.0)) / _stages.length;
+    final capturedCount = _capturedImages.length;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0A0A0A),
+      appBar: const AppTopBar(showBack: true),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'We will capture three angles of your face for the best preview.',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              LinearProgressIndicator(
+                value: progress.clamp(0.0, 1.0),
+                minHeight: 8,
+                backgroundColor: Colors.white12,
+                color: Colors.white,
+              ),
+              const SizedBox(height: 18),
+              Expanded(
+                child: kIsWeb ? _buildStagingWebCamera(currentStage) : _buildStagingCameraView(currentStage),
+              ),
+              const SizedBox(height: 14),
+              _stageStatusRow(capturedCount),
+            ],
+          ),
+        ),
+      ),
+      bottomNavigationBar: widget.kioskMode
+          ? null
+          : AppBottomNavBar(
+              currentIndex: 2,
+              onTap: _onScannerBottomNav,
+            ),
+    );
+  }
+
+  Widget? _kioskLivePreviewBottomBar() {
+    if (!widget.kioskMode || !widget.livePreviewOnly) return null;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: ElevatedButton(
+            onPressed: _continueKioskFromLivePreview,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Continue to barber selection', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStagingWebCamera(_CaptureStage stage) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white24,
+          width: 3,
+        ),
+      ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(13),
+            child: _webCameraReady 
+              ? WebCameraView(controller: _webCamera)
+              : const Center(
+                  child: Text(
+                    'Camera not available',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                ),
+          ),
+          if (_currentFaceRect != null)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _FaceOverlayPainter(
+                  faceRect: _currentFaceRect!,
+                  isGoodPosition: _isGoodPosition,
+                  stageIcon: stage.icon,
+                ),
+              ),
+            ),
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stage.label,
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  stage.hint,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      _isGoodPosition ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white54,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _isGoodPosition
+                            ? 'Position good! Hold for ${(12 - _goodPositionFrames).clamp(0, 12)} frames...'
+                            : 'Adjust position',
+                        style: TextStyle(
+                          color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStagingCameraView(_CaptureStage stage) {
+    if (_camera == null) {
+      return Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Center(
+          child: Text('Camera not available', style: TextStyle(color: Colors.white70)),
+        ),
+      );
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white24,
+          width: 3,
+        ),
+      ),
+      child: Stack(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(13),
+            child: CameraPreview(_camera!),
+          ),
+          if (_currentFaceRect != null)
+            Positioned.fill(
+              child: CustomPaint(
+                painter: _FaceOverlayPainter(
+                  faceRect: _currentFaceRect!,
+                  isGoodPosition: _isGoodPosition,
+                  stageIcon: stage.icon,
+                ),
+              ),
+            ),
+          Positioned(
+            bottom: 16,
+            left: 16,
+            right: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  stage.label,
+                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  stage.hint,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Icon(
+                      _isGoodPosition ? Icons.check_circle : Icons.radio_button_unchecked,
+                      color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white54,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _isGoodPosition
+                            ? 'Position good! Hold for ${(12 - _goodPositionFrames).clamp(0, 12)} frames...'
+                            : 'Adjust position',
+                        style: TextStyle(
+                          color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _stageStatusRow(int capturedCount) {
+    return Row(
+      children: _stages.asMap().entries.map((entry) {
+        final index = entry.key;
+        final stage = entry.value;
+        final captured = _capturedImages.containsKey(stage.keyName);
+        final active = index == _stageIndex;
+
+        return Expanded(
+          child: Container(
+            margin: EdgeInsets.only(right: index == _stages.length - 1 ? 0 : 8),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            decoration: BoxDecoration(
+              color: captured
+                  ? const Color(0xFF1B1B1B)
+                  : active
+                      ? const Color(0xFF18120A)
+                      : const Color(0xFF101010),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: captured
+                    ? Colors.white.withOpacity(0.6)
+                    : active
+                        ? Colors.white24
+                        : Colors.white12,
+              ),
+            ),
+            child: Column(
+              children: [
+                Icon(stage.icon, size: 18, color: captured ? Colors.white : Colors.white54),
+                const SizedBox(height: 6),
+                Text(
+                  stage.label,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  captured ? '✓' : active ? '...' : 'Pending',
+                  style: TextStyle(
+                    color: captured ? Colors.white : Colors.white54,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -1374,23 +2114,136 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     super.dispose();
   }
 
-  double _scannerHeightForLayout(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final isPortrait = media.orientation == Orientation.portrait;
-    if (isPortrait) {
-      return (media.size.height * 0.62).clamp(360.0, 640.0);
-    }
-    return (media.size.height * 0.72).clamp(280.0, 480.0);
+  double _scannerHeightForLayout(BuildContext context) =>
+      ScannerLayout.previewHeight(context);
+
+  Widget _buildConsentUI() {
+    var agreed = false;
+    return StatefulBuilder(
+      builder: (context, setLocal) {
+        return Scaffold(
+          backgroundColor: const Color(0xFF0A0A0A),
+          appBar: const AppTopBar(showBack: true),
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Before we capture your face for haircut recommendations, please confirm:',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '• We capture front, left, and right photos once per session.\n'
+                    '• Images are stored securely for AI styling and your appointment preview.\n'
+                    '• You can delete data by contacting the shop or signing out.\n'
+                    '• Live camera preview is optional after static capture.',
+                    style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.45),
+                  ),
+                  const Spacer(),
+                  CheckboxListTile(
+                    value: agreed,
+                    onChanged: (v) => setLocal(() => agreed = v ?? false),
+                    activeColor: Colors.white,
+                    title: const Text(
+                      'I consent to face capture and AI-powered haircut recommendations.',
+                      style: TextStyle(color: Colors.white, fontSize: 13),
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: agreed
+                          ? () async {
+                              await FaceScanService.saveConsent();
+                              if (!mounted) return;
+                              setState(() => _consentAccepted = true);
+                            }
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        minimumSize: const Size.fromHeight(48),
+                      ),
+                      child: const Text('Continue to capture', style: TextStyle(fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          bottomNavigationBar: widget.kioskMode
+              ? null
+              : AppBottomNavBar(
+                  currentIndex: 2,
+                  onTap: _onScannerBottomNav,
+                ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_consentLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0A),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    if (!_consentAccepted && !widget.livePreviewOnly) {
+      return _buildConsentUI();
+    }
+
+    if (_finishingStaging) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF090909),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Colors.white),
+              SizedBox(height: 14),
+              Text('Saving your captures...', style: TextStyle(color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Show staging UI if needed and not complete
+    if (_needsStaging && !_stagingComplete && !_initialized) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF090909),
+        body: const Center(
+          child: CircularProgressIndicator(color: Colors.white),
+        ),
+      );
+    }
+
+    if (_needsStaging && !_stagingComplete) {
+      return _buildStagingUI();
+    }
+
+    if (!widget.livePreviewOnly && !widget.previewOnly) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF090909),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    // Live preview (optional path)
     return Scaffold(
-      backgroundColor: const Color(0xFF090909),
+      backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
         onBack: () {
-          if (widget.previewOnly) {
+          if (widget.kioskMode || widget.previewOnly) {
             Navigator.of(context).pop();
           } else {
             Navigator.of(context).pushReplacement(
@@ -1399,11 +2252,19 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           }
         },
       ),
-      floatingActionButton: Padding(
+      bottomNavigationBar: widget.kioskMode
+          ? _kioskLivePreviewBottomBar()
+          : AppBottomNavBar(
+              currentIndex: 2,
+              onTap: _onScannerBottomNav,
+            ),
+      floatingActionButton: widget.kioskMode
+          ? null
+          : Padding(
         padding: const EdgeInsets.only(bottom: 70),
         child: FloatingActionButton(
           heroTag: 'scanner_ai_chat_fab',
-          backgroundColor: const Color(0xFFA99941),
+          backgroundColor: Colors.white,
           foregroundColor: Colors.black,
           tooltip: 'Open AI Barber Chat',
           onPressed: () {
@@ -1437,6 +2298,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                               fontSize: 22,
                               fontWeight: FontWeight.w700),
                         ),
+                        if (widget.previewOnly && widget.captureSummary != null) ...[
+                          const SizedBox(height: 10),
+                          _buildCaptureSummaryCard(widget.captureSummary!),
+                        ],
                         const SizedBox(height: 6),
                         Text(
                           _status,
@@ -1477,7 +2342,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                                       : () => _useSelectedStyle(),
                               style: ElevatedButton.styleFrom(
                                 minimumSize: const Size.fromHeight(50),
-                                backgroundColor: const Color(0xFFA99941),
+                                backgroundColor: Colors.white,
                                 foregroundColor: Colors.black,
                               ),
                               child: _bookingInFlight
@@ -1526,7 +2391,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                                       : () => _useSelectedStyle(),
                               style: ElevatedButton.styleFrom(
                                 minimumSize: const Size.fromHeight(50),
-                                backgroundColor: const Color(0xFFA99941),
+                                backgroundColor: Colors.white,
                                 foregroundColor: Colors.black,
                               ),
                               child: _bookingInFlight
@@ -1763,7 +2628,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: const Color(0xFFA99941)),
+                border: Border.all(color: Colors.white),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1868,7 +2733,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                             });
                           },
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFA99941),
+                            backgroundColor: Colors.white,
                             foregroundColor: Colors.black,
                           ),
                           child: const Text('Save'),
@@ -1946,25 +2811,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               if (_webCameraReady)
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final videoAspect = (_webVideoAspect != null && _webVideoAspect! > 0)
+                    final sourceAspect = (_webVideoAspect != null && _webVideoAspect! > 0)
                         ? _webVideoAspect!
                         : (9 / 16);
-                    final boxAspect = constraints.maxWidth / constraints.maxHeight;
-                    late final double width;
-                    late final double height;
-                    if (boxAspect > videoAspect) {
-                      width = constraints.maxWidth;
-                      height = width / videoAspect;
-                    } else {
-                      height = constraints.maxHeight;
-                      width = height * videoAspect;
-                    }
-
-                    return Center(
-                      child: SizedBox(
-                        width: width,
-                        height: height,
-                        child: WebCameraView(controller: _webCamera),
+                    return ClipRect(
+                      child: FittedBox(
+                        fit: BoxFit.cover,
+                        alignment: Alignment.center,
+                        child: SizedBox(
+                          width: constraints.maxWidth,
+                          height: constraints.maxWidth / sourceAspect,
+                          child: WebCameraView(controller: _webCamera),
+                        ),
                       ),
                     );
                   },
@@ -2148,6 +3006,51 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
+  Widget _buildCaptureSummaryCard(Map<String, dynamic> summary) {
+    Widget scoreRow(String label, dynamic value) {
+      final text = value?.toString() ?? '-';
+      return Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(text, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+        ],
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Capture Analysis',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          scoreRow('Front', summary['frontScore']),
+          const SizedBox(height: 6),
+          scoreRow('Right', summary['rightScore']),
+          const SizedBox(height: 6),
+          scoreRow('Left', summary['leftScore']),
+          const Divider(color: Colors.white12, height: 20),
+          scoreRow('Overall', summary['overallScore']),
+          const SizedBox(height: 6),
+          Text(
+            'Recommended style: ${summary['recommendedStyle']?.toString() ?? '-'}',
+            style: const TextStyle(color: Colors.white70, fontSize: 12),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget? _overlayLayer({
     required BoxConstraints constraints,
     required Rect? overlayFace,
@@ -2155,17 +3058,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required double overlayOpacity,
   }) {
     if (overlayFace == null || recommendation == null || overlayOpacity <= 0.01) {
-      if (recommendation == null) {
-        debugPrint('[AiFaceScan] _overlayLayer: Skipping - no recommendation');
-      } else if (overlayFace == null) {
-        debugPrint('[AiFaceScan] _overlayLayer: Skipping - no overlayFace');
-      } else {
-        debugPrint('[AiFaceScan] _overlayLayer: Skipping - opacity too low ($overlayOpacity)');
-      }
       return null;
     }
-
-    debugPrint('[AiFaceScan] _overlayLayer: Building with recommendation style_name=${recommendation['style_name']}');
 
     final calibration = _overlayCalibration(recommendation);
     final yawAbsNorm = ((_headYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
@@ -2177,11 +3071,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       constraints: constraints,
       calibration: calibration,
     );
+    // Use minimal-smooth box for real-time, low-lag overlay transforms.
+    final minSmoothBox = _computeAttachmentBoxMinSmooth(
+      face: anchorFace,
+      constraints: constraints,
+      calibration: calibration,
+    );
+    // Don't render if box is invalid (face too far, etc.)
+    if (minSmoothBox.width <= 0 || minSmoothBox.height <= 0) {
+      return null;
+    }
+    // For side views, shift the box toward the ear to match the side overlay anchor
+    final isSideView = (_headYaw?.abs() ?? 0) >= 15;
+    final sideBox = isSideView
+        ? OverlayBox(
+            left: (_headYaw ?? 0) >= 0
+                ? minSmoothBox.left + (minSmoothBox.width * 0.15) // Shift right for right turn
+                : minSmoothBox.left - (minSmoothBox.width * 0.15), // Shift left for left turn
+            top: minSmoothBox.top,
+            width: minSmoothBox.width,
+            height: minSmoothBox.height,
+            yawScale: minSmoothBox.yawScale,
+          )
+        : minSmoothBox;
+
     return Positioned(
-      left: box.left,
-      top: box.top,
-      width: box.width,
-      height: box.height,
+      left: sideBox.left,
+      top: sideBox.top,
+      width: sideBox.width,
+      height: sideBox.height,
       child: IgnorePointer(
         child: Opacity(
           opacity: overlayOpacity,
@@ -2190,9 +3108,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                 ? Alignment.centerLeft
                 : Alignment.centerRight,
             transform: Matrix4.identity()
-              ..rotateZ((_headRoll ?? 0) * math.pi / 180)
-              ..scale(box.yawScale, 1.0),
-            child: _buildHairOnlyOverlayModel(
+              ..rotateZ((_minSmoothHeadRoll ?? 0) * math.pi / 180)
+              ..scale(sideBox.yawScale, 1.0),
+            child: _buildHairOverlay(
               calibration: calibration,
               recommendation: recommendation,
             ),
@@ -3044,6 +3962,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   double _rectArea(Rect rect) => (rect.width * rect.height).clamp(0.0, 1.0);
 
   Rect? _effectiveOverlayFaceRect() {
+    // Don't return a position if face isn't ready
+    if (!_faceSessionReady) {
+      return null;
+    }
     final current = _normalizedFaceRect;
     if (current != null && _recommendations.isNotEmpty) {
       final yawAbsNorm = ((_headYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
@@ -3064,9 +3986,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       }
       return current;
     }
-    if (current != null && _isLikelyStableFace(current)) {
-      return current;
-    }
+      // Use minimal-smoothing rect for overlay placement (low-lag real-time response).
+      final minSmooth = _minSmoothFaceRect ?? current;
+      if (minSmooth != null && _isLikelyStableFace(minSmooth)) {
+        return minSmooth;
+      }
     final holdUntil = _overlayHoldUntil;
     final fallback = _lastStableFaceRect;
     if (holdUntil == null || fallback == null) {
@@ -3093,6 +4017,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   double _currentOverlayOpacity() {
+    // Don't show overlay if face isn't confirmed ready (centered, stable, enough frames)
+    if (!_faceSessionReady) {
+      return 0.0;
+    }
     if (_normalizedFaceRect != null) {
       return _overlayBaseOpacity;
     }
@@ -3111,38 +4039,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   OverlayImageSet _resolveOverlayImageSet(Map<String, dynamic>? recommendation) {
     if (recommendation == null) {
-      debugPrint('[AiFaceScan] No recommendation available, using sample overlay');
-      return _sampleImageOverlay;
+      return OverlayRegistry.sample;
     }
-
-    final styleName = (recommendation['style_name']?.toString() ??
-            recommendation['styleName']?.toString() ??
-            '')
-        .trim()
-        .toLowerCase();
-    if (styleName.isEmpty) {
-      debugPrint('[AiFaceScan] Recommendation missing style name, using sample overlay');
-      return _sampleImageOverlay;
+    final styleName = recommendation['style_name']?.toString() ??
+        recommendation['styleName']?.toString() ??
+        '';
+    if (styleName.trim().isEmpty) {
+      return OverlayRegistry.sample;
     }
-
-    final normalizedStyleName = styleName == 'curly top fade' ? 'curly taper fade' : styleName;
-
-    // Try exact match first
-    if (_styleOverlayImages.containsKey(normalizedStyleName)) {
-      debugPrint('[AiFaceScan] Matched overlay style="$styleName" via exact match');
-      return _styleOverlayImages[normalizedStyleName]!;
-    }
-
-    // Try substring match (in case style name has variations)
-    for (final entry in _styleOverlayImages.entries) {
-      if (normalizedStyleName.contains(entry.key)) {
-        debugPrint('[AiFaceScan] Matched overlay style="$styleName" via substring match -> ${entry.key}');
-        return entry.value;
-      }
-    }
-
-    debugPrint('[AiFaceScan] No overlay match for style="$styleName", using sample overlay');
-    return _sampleImageOverlay;
+    return OverlayRegistry.resolve(styleName);
   }
 
   OverlayCalibration _overlayCalibration(
@@ -3162,14 +4067,32 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return _adaptCalibrationToFace(base);
     }
 
+    var matched = false;
     for (final entry in _styleCalibration.entries) {
       if (styleName.contains(entry.key)) {
         base = entry.value;
+        matched = true;
         break;
       }
     }
+    if (!matched) {
+      base = OverlayRegistry.calibrationFor(styleName);
+    }
 
     return _adaptCalibrationToFace(base);
+  }
+
+  double _scannerSourceAspect() {
+    if (kIsWeb) {
+      return (_webVideoAspect != null && _webVideoAspect! > 0)
+          ? _webVideoAspect!
+          : (9 / 16);
+    }
+    final preview = _camera?.value.previewSize;
+    if (preview != null && preview.height > 0) {
+      return preview.height / preview.width;
+    }
+    return 3 / 4;
   }
 
   OverlayBox _computeAttachmentBox({
@@ -3192,7 +4115,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         foreheadAnchorY: _foreheadAnchorY,
         eyeMidX: anchorX,
         eyeDistanceNorm: _eyeDistanceNorm,
-        videoAspect: _webVideoAspect,
+        sourceAspect: _scannerSourceAspect(),
         faceTransformMatrix: _faceTransformMatrix,
         calibrationOffsets: AttachmentCalibrationOffsets(
           offsetX: _activeCalibration.offsetX,
@@ -3202,6 +4125,39 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         ),
       ),
     );
+    }
+
+    // Minimal-smoothing version for real-time overlay response (low-lag).
+    OverlayBox _computeAttachmentBoxMinSmooth({
+      required Rect face,
+      required BoxConstraints constraints,
+      required OverlayCalibration calibration,
+    }) {
+      final yawAbsNorm = ((_minSmoothHeadYaw ?? 0).abs() / 34.0).clamp(0.0, 1.0);
+      final anchorX = yawAbsNorm > 0.12 && _lastCenteredFaceRect != null
+          ? _lastCenteredFaceRect!.center.dx
+          : (face.left + (face.width * 0.5));
+      return _attachmentEngine.compute(
+        AttachmentInput(
+          face: face,
+          constraints: constraints,
+          calibration: calibration,
+          isWeb: kIsWeb,
+          headYaw: _minSmoothHeadYaw,
+          headRoll: _minSmoothHeadRoll,
+          foreheadAnchorY: _foreheadAnchorY,
+          eyeMidX: anchorX,
+          eyeDistanceNorm: _eyeDistanceNorm,
+          sourceAspect: _scannerSourceAspect(),
+          faceTransformMatrix: _faceTransformMatrix,
+          calibrationOffsets: AttachmentCalibrationOffsets(
+            offsetX: _activeCalibration.offsetX,
+            offsetY: _activeCalibration.offsetY,
+            scale: _activeCalibration.scale,
+            foreheadOffset: _activeCalibration.foreheadOffset,
+          ),
+        ),
+      );
   }
 
   OverlayCalibration _adaptCalibrationToFace(OverlayCalibration base) {
@@ -3264,6 +4220,101 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       visualScale: visualScale,
       yawShiftFactor: base.yawShiftFactor,
     );
+  }
+}
+
+class _CaptureStage {
+  final String keyName;
+  final String label;
+  final String hint;
+  final IconData icon;
+  final double requiredYaw;
+  final double yawTolerance;
+
+  const _CaptureStage({
+    required this.keyName,
+    required this.label,
+    required this.hint,
+    required this.icon,
+    required this.requiredYaw,
+    required this.yawTolerance,
+  });
+}
+
+class _FaceOverlayPainter extends CustomPainter {
+  final Rect faceRect;
+  final bool isGoodPosition;
+  final IconData stageIcon;
+
+  _FaceOverlayPainter({
+    required this.faceRect,
+    required this.isGoodPosition,
+    required this.stageIcon,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final scaleX = size.width;
+    final scaleY = size.height;
+
+    final rect = Rect.fromLTWH(
+      faceRect.left * scaleX,
+      faceRect.top * scaleY,
+      faceRect.width * scaleX,
+      faceRect.height * scaleY,
+    );
+
+    final borderPaint = Paint()
+      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+
+    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(20));
+    canvas.drawRRect(rrect, borderPaint);
+
+    final cornerSize = 20.0;
+    final cornerPaint = Paint()
+      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
+      ..strokeWidth = 3
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left + cornerSize, rect.top), cornerPaint);
+    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left, rect.top + cornerSize), cornerPaint);
+    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right - cornerSize, rect.top), cornerPaint);
+    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right, rect.top + cornerSize), cornerPaint);
+    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left + cornerSize, rect.bottom), cornerPaint);
+    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left, rect.bottom - cornerSize), cornerPaint);
+    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right - cornerSize, rect.bottom), cornerPaint);
+    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right, rect.bottom - cornerSize), cornerPaint);
+
+    if (isGoodPosition) {
+      final checkPaint = Paint()
+        ..color = const Color(0xFF4CAF50)
+        ..strokeWidth = 4
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      final centerX = rect.center.dx;
+      final centerY = rect.center.dy;
+      final checkSize = 30.0;
+
+      canvas.drawLine(
+        Offset(centerX - checkSize / 2, centerY),
+        Offset(centerX, centerY + checkSize / 2),
+        checkPaint,
+      );
+      canvas.drawLine(
+        Offset(centerX, centerY + checkSize / 2),
+        Offset(centerX + checkSize / 2, centerY - checkSize / 2),
+        checkPaint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(_FaceOverlayPainter oldDelegate) {
+    return oldDelegate.faceRect != faceRect || oldDelegate.isGoodPosition != isGoodPosition;
   }
 }
 

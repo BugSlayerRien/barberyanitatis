@@ -68,7 +68,7 @@ try {
 
     $pdo = new PDO($dsn, $dbUser, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 
-    $tables = ['appointment_payment_intents', 'orders', 'payment_events'];
+    $tables = ['appointment_details', 'appointment_payment_intents', 'appointment_payments', 'appointment_refunds', 'appointments'];
     $report = [];
 
     foreach ($tables as $table) {
@@ -81,6 +81,9 @@ try {
             'order_reference',
             'source_id',
             'paymongo_source_id',
+            'provider_ref',
+            'intent_token',
+            'transaction_ref',
         ], function ($c) use ($cols) {
             return in_array($c, $cols, true);
         }));
@@ -112,7 +115,7 @@ try {
             'name' => $dbName,
             'sslmode' => $sslMode,
         ],
-        'write_priority' => ['appointment_payment_intents', 'orders', 'payment_events'],
+        'write_priority' => ['appointment_payment_intents', 'appointment_payments', 'appointments'],
         'tables' => $report,
     ]);
 } catch (PDOException $e) {

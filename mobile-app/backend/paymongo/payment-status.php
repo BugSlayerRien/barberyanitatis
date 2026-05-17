@@ -29,16 +29,20 @@ function paymongo_update_table_status(PDO $pdo, string $tableName, string $exter
     }
 
     $updatedAtSql = isset($colSet['updated_at']) ? ', updated_at = NOW()' : '';
+    $paidAtSql = '';
+    if (isset($colSet['paid_at']) && in_array(strtolower($status), ['paid', 'succeeded'], true)) {
+        $paidAtSql = ', paid_at = NOW()';
+    }
 
     $whereByExternal = [];
-    foreach (['intent_id', 'paymongo_intent_id', 'external_reference', 'order_reference', 'source_id', 'paymongo_source_id', 'provider_ref', 'intent_token'] as $candidate) {
+    foreach (['intent_id', 'paymongo_intent_id', 'external_reference', 'order_reference', 'source_id', 'paymongo_source_id', 'provider_ref', 'intent_token', 'transaction_ref'] as $candidate) {
         if (isset($colSet[$candidate])) {
             $whereByExternal[] = "CAST($candidate AS TEXT) = :external";
         }
     }
 
     if (!empty($whereByExternal)) {
-        $sql = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql} WHERE " . implode(' OR ', $whereByExternal);
+        $sql = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql}{$paidAtSql} WHERE " . implode(' OR ', $whereByExternal);
         $stmt = $pdo->prepare($sql);
         $stmt->execute(['status' => $status, 'external' => $externalId]);
         $affected = $stmt->rowCount();
@@ -55,7 +59,7 @@ function paymongo_update_table_status(PDO $pdo, string $tableName, string $exter
             }
         }
         if (!empty($whereByMeta)) {
-            $sql2 = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql} WHERE " . implode(' OR ', $whereByMeta);
+            $sql2 = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql}{$paidAtSql} WHERE " . implode(' OR ', $whereByMeta);
             $stmt2 = $pdo->prepare($sql2);
             $stmt2->execute(['status' => $status, 'meta' => $metadataRef]);
             $affected = $stmt2->rowCount();
@@ -68,35 +72,178 @@ function paymongo_update_table_status(PDO $pdo, string $tableName, string $exter
     return 0;
 }
 
-function paymongo_update_order_status(string $externalId, string $status, ?string $metadataRef = null): void {
-    $dbHost = getenv('DB_HOST') ?: '127.0.0.1';
-    $dbPort = getenv('DB_PORT') ?: '5432';
-    $dbName = getenv('DB_NAME') ?: '';
-    $dbUser = getenv('DB_USER') ?: '';
-    $dbPass = getenv('DB_PASS') ?: '';
-    $sslMode = getenv('DB_SSLMODE');
+function paymongo_find_intent_context(PDO $pdo, string $externalId, ?string $metadataRef = null): ?array {
+    $sql = "SELECT appointment_id, amount, method
+            FROM appointment_payment_intents
+            WHERE CAST(intent_token AS TEXT) = :external
+               OR CAST(provider_ref AS TEXT) = :external
+            ORDER BY created_at DESC
+            LIMIT 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(['external' => $externalId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (is_array($row)) {
+        return $row;
+    }
 
-    if (!$dbName || !$dbUser) {
+    if ($metadataRef !== null && $metadataRef !== '') {
+        $metaStmt = $pdo->prepare(
+            "SELECT appointment_id, amount, method
+             FROM appointment_payment_intents
+             WHERE CAST(appointment_id AS TEXT) = :meta
+             ORDER BY created_at DESC
+             LIMIT 1"
+        );
+        $metaStmt->execute(['meta' => $metadataRef]);
+        $metaRow = $metaStmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($metaRow)) {
+            return $metaRow;
+        }
+    }
+
+    return null;
+}
+
+function paymongo_is_success_status(string $status): bool
+{
+    return in_array(strtolower(trim($status)), ['paid', 'succeeded', 'captured'], true);
+}
+
+function paymongo_payment_row_status(string $gatewayStatus): string
+{
+    return paymongo_is_success_status($gatewayStatus) ? 'Captured' : $gatewayStatus;
+}
+
+function paymongo_intent_row_status(string $gatewayStatus): string
+{
+    if (paymongo_is_success_status($gatewayStatus)) {
+        return 'Paid';
+    }
+
+    $normalized = strtolower(trim($gatewayStatus));
+    if (in_array($normalized, ['failed', 'expired', 'canceled', 'cancelled'], true)) {
+        return 'Failed';
+    }
+
+    return $gatewayStatus;
+}
+
+function paymongo_get_pdo(): ?PDO
+{
+    try {
+        require_once dirname(__DIR__, 3) . '/api/db.php';
+        load_repository_env();
+
+        return get_db_connection();
+    } catch (Throwable $e) {
+        @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . ' DB connect error: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+
+        return null;
+    }
+}
+
+function paymongo_sync_payment_row(PDO $pdo, string $externalId, string $status, ?string $metadataRef = null): void {
+    $intentContext = paymongo_find_intent_context($pdo, $externalId, $metadataRef);
+    $appointmentId = null;
+
+    if ($intentContext && isset($intentContext['appointment_id'])) {
+        $appointmentId = intval($intentContext['appointment_id']);
+    }
+
+    if (($appointmentId === null || $appointmentId <= 0) && $metadataRef !== null && ctype_digit((string) $metadataRef)) {
+        $appointmentId = intval($metadataRef);
+    }
+
+    if ($appointmentId === null || $appointmentId <= 0) {
+        return;
+    }
+
+    $paymentStatus = paymongo_payment_row_status($status);
+    $existingStmt = $pdo->prepare('SELECT payment_id FROM appointment_payments WHERE transaction_ref = :ref LIMIT 1');
+    $existingStmt->execute(['ref' => $externalId]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+    $amount = isset($intentContext['amount']) ? floatval($intentContext['amount']) : 0;
+    $method = isset($intentContext['method']) ? (string) $intentContext['method'] : 'unknown';
+
+    if (is_array($existing)) {
+        $updateStmt = $pdo->prepare(
+            'UPDATE appointment_payments
+             SET status = :status
+             WHERE payment_id = :payment_id'
+        );
+        $updateStmt->execute([
+            'status' => $paymentStatus,
+            'payment_id' => $existing['payment_id'],
+        ]);
+        return;
+    }
+
+    $insertStmt = $pdo->prepare(
+        'INSERT INTO appointment_payments (appointment_id, amount, method, status, transaction_ref)
+         VALUES (:appointment_id, :amount, :method, :status, :transaction_ref)'
+    );
+    $insertStmt->execute([
+        'appointment_id' => $appointmentId,
+        'amount' => $amount,
+        'method' => $method,
+        'status' => $paymentStatus,
+        'transaction_ref' => $externalId,
+    ]);
+}
+
+function paymongo_finalize_successful_payment(PDO $pdo, string $externalId, ?string $metadataRef = null): void
+{
+    $intentStatus = paymongo_intent_row_status('paid');
+    $affected = paymongo_update_table_status($pdo, 'appointment_payment_intents', $externalId, $intentStatus, $metadataRef);
+
+    paymongo_sync_payment_row($pdo, $externalId, 'paid', $metadataRef);
+
+    $intentContext = paymongo_find_intent_context($pdo, $externalId, $metadataRef);
+    $appointmentId = null;
+    if ($intentContext && isset($intentContext['appointment_id'])) {
+        $appointmentId = (int) $intentContext['appointment_id'];
+    } elseif ($metadataRef !== null && ctype_digit((string) $metadataRef)) {
+        $appointmentId = (int) $metadataRef;
+    }
+
+    if ($appointmentId !== null && $appointmentId > 0) {
+        $promoteStmt = $pdo->prepare(
+            "UPDATE appointments
+             SET status = 'Scheduled', updated_at = CURRENT_TIMESTAMP
+             WHERE appointment_id = :appointment_id
+               AND status = 'PendingPayment'"
+        );
+        $promoteStmt->execute([':appointment_id' => $appointmentId]);
+    }
+
+    @file_put_contents(
+        __DIR__ . '/paymongo_events.log',
+        date('c') . " Finalized payment {$externalId} => Captured/Paid (intent rows: {$affected}, appointment: {$appointmentId})" . PHP_EOL,
+        FILE_APPEND
+    );
+}
+
+function paymongo_update_order_status(string $externalId, string $status, ?string $metadataRef = null): void {
+    $pdo = paymongo_get_pdo();
+    if (!$pdo instanceof PDO) {
         @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " DB config missing. {$externalId} => {$status}\n", FILE_APPEND);
         return;
     }
 
-    $dsn = "pgsql:host={$dbHost};port={$dbPort};dbname={$dbName}";
-    if ($sslMode) {
-        $dsn .= ";sslmode={$sslMode}";
-    }
-
     try {
-        $pdo = new PDO($dsn, $dbUser, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        if (paymongo_is_success_status($status)) {
+            paymongo_finalize_successful_payment($pdo, $externalId, $metadataRef);
+            return;
+        }
 
-        $affected = paymongo_update_table_status($pdo, 'appointment_payment_intents', $externalId, $status, $metadataRef);
+        $intentStatus = paymongo_intent_row_status($status);
+        $affected = paymongo_update_table_status($pdo, 'appointment_payment_intents', $externalId, $intentStatus, $metadataRef);
         if ($affected <= 0) {
-            $affected = paymongo_update_table_status($pdo, 'orders', $externalId, $status, $metadataRef);
+            paymongo_update_table_status($pdo, 'appointment_payments', $externalId, paymongo_payment_row_status($status), $metadataRef);
         }
 
-        if ($affected > 0) {
-            @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Updated order(s) for {$externalId} => {$status} (rows: {$affected})\n", FILE_APPEND);
-        }
+        @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Updated payment rows for {$externalId} => {$intentStatus}\n", FILE_APPEND);
     } catch (PDOException $e) {
         @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " DB error: {$e->getMessage()}\n", FILE_APPEND);
     }

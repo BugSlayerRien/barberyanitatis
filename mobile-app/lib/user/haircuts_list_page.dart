@@ -19,6 +19,8 @@ import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
 import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
+import 'scanner/overlay_preview_image.dart';
+import 'scanner/overlay_registry.dart';
 
 class HaircutsListPage extends StatefulWidget {
   const HaircutsListPage({super.key});
@@ -31,44 +33,6 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   final Map<String, Future<Uint8List>> _webImageCache = {};
   static const String _librarySampleHairFront =
       'assets/images/overlays/blowout_taper/blowout_taper_front.png';
-
-  static const Map<String, Map<String, String>> _localStyleAssets = {
-    'blowout taper': {
-      'front': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
-      'side': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
-      'back': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
-    },
-    'buzz cut': {
-      'front': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
-      'side': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
-      'back': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
-    },
-    'low fade': {
-      'front': 'assets/images/overlays/low_fade/low_fade_front.png',
-      'side': 'assets/images/overlays/low_fade/low_fade_left.png',
-      'back': 'assets/images/overlays/low_fade/low_fade_right.png',
-    },
-    'french crop': {
-      'front': 'assets/images/overlays/french_crop/french_crop_front.png',
-      'side': 'assets/images/overlays/french_crop/french_crop_left.png',
-      'back': 'assets/images/overlays/french_crop/french_crop_right.png',
-    },
-    'curly taper fade': {
-      'front': 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
-      'side': 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
-      'back': 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
-    },
-    'textured crop': {
-      'front': 'assets/images/overlays/textured_crop/textured_crop_front.png',
-      'side': 'assets/images/overlays/textured_crop/textured_crop_left.png',
-      'back': 'assets/images/overlays/textured_crop/textured_crop_right.png',
-    },
-    'curly modern mullet': {
-      'front': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
-      'side': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
-      'back': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
-    },
-  };
 
   List<Map<String, dynamic>> _allStyles = [];
   List<String> _categories = const ['All'];
@@ -256,35 +220,19 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                   fit: StackFit.expand,
                   children: [
                     Container(color: Colors.white),
-                    if (previewImage.startsWith('assets/'))
-                      Image.asset(
-                        previewImage,
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.high,
-                        errorBuilder: (context, error, stackTrace) {
-                          debugPrint('[HaircutLibrary] Image.asset error for $previewImage: $error');
-                          return const Center(
-                            child: Icon(
-                              Icons.image_not_supported_outlined,
-                              color: Colors.black38,
-                              size: 34,
-                            ),
-                          );
-                        },
-                      )
-                    else
-                      Image.network(
-                        previewImage,
-                        fit: BoxFit.contain,
-                        filterQuality: FilterQuality.high,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Image.asset(
-                            _librarySampleHairFront,
+                    previewImage.startsWith('assets/')
+                        ? OverlayPreviewImage(assetPath: previewImage, fit: BoxFit.contain)
+                        : Image.network(
+                            previewImage,
                             fit: BoxFit.contain,
                             filterQuality: FilterQuality.high,
-                          );
-                        },
-                      ),
+                            errorBuilder: (context, error, stackTrace) {
+                              return OverlayPreviewImage(
+                                assetPath: _librarySampleHairFront,
+                                fit: BoxFit.contain,
+                              );
+                            },
+                          ),
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -353,25 +301,30 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     );
   }
 
+  String _previewPath(String raw, String fallback) {
+    if (fallback.startsWith('assets/')) return fallback;
+    final trimmed = raw.trim();
+    if (trimmed.startsWith('assets/')) return trimmed;
+    final resolved = ApiConfig.resolveImageUrl(trimmed);
+    if (resolved.startsWith('assets/')) return resolved;
+    if (trimmed.isEmpty || trimmed.contains('/database/assets/')) return fallback;
+    return fallback;
+  }
+
   Map<String, dynamic> _mapVariant(Map<String, dynamic> variant) {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
     final hairTexture = _normalizeTexture((variant['hair_texture'] ?? '').toString());
-    final styleName = variant['style_name']?.toString().trim().toLowerCase() ?? '';
-    final normalizedStyleName = styleName == 'curly top fade' ? 'curly taper fade' : styleName;
-    final localAssets = _localStyleAssets[normalizedStyleName];
+    final displayName = variant['style_name']?.toString().trim() ?? 'Style';
+    final normalizedStyleName = OverlayRegistry.normalizeStyleName(displayName);
+    final overlay = OverlayRegistry.resolve(displayName);
     final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
     final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
     final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
-    final frontResolved = ApiConfig.resolveImageUrl(frontRaw);
-    final sideResolved = ApiConfig.resolveImageUrl(sideRaw);
-    final backResolved = ApiConfig.resolveImageUrl(backRaw);
-    final front = localAssets?['front'] ?? (frontResolved.isEmpty ? '' : frontResolved);
-    final side = localAssets?['side'] ?? (sideResolved.isEmpty ? front : sideResolved);
-    final back = localAssets?['back'] ?? (backResolved.isEmpty ? front : backResolved);
+    final front = _previewPath(frontRaw, overlay.front);
+    final side = _previewPath(sideRaw, overlay.left);
+    final back = _previewPath(backRaw, overlay.right);
     return {
-        'name': normalizedStyleName == 'curly taper fade'
-          ? 'Curly Taper Fade'
-          : variant['style_name']?.toString() ?? 'Style',
+      'name': displayName.isNotEmpty ? displayName : 'Style',
       'description': variant['description']?.toString() ?? 'AI recommended',
       'image': front,
       'details': _buildDetails(variant),
@@ -426,18 +379,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         .where((entry) => entry.value > 1)
         .map((entry) => entry.key)
         .toList();
-    final localOnly = _localStyleAssets.keys
-        .where((key) => !nameCounts.containsKey(key))
-        .toList();
-
     if (duplicates.isNotEmpty) {
       debugPrint('[HaircutLibrary] Duplicate styles from API: ${duplicates.join(', ')}');
     }
     if (missingAssets.isNotEmpty) {
       debugPrint('[HaircutLibrary] Styles missing assets (front/side/back): ${missingAssets.join(', ')}');
-    }
-    if (localOnly.isNotEmpty) {
-      debugPrint('[HaircutLibrary] Local asset overrides not found in API: ${localOnly.join(', ')}');
     }
   }
 

@@ -110,6 +110,9 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         final mapped = {
           'appointmentId': appointmentId,
           'barberID': appt['barberID'],
+          'frontViewUrl': appt['frontViewUrl'],
+          'sideViewUrl': appt['sideViewUrl'],
+          'backViewUrl': appt['backViewUrl'],
           'status': isPaymentOverride && forcedState == 'Paid'
               ? 'Scheduled'
               : status,
@@ -924,8 +927,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
 
     final newDate = suggestion['slotDate']?.toString() ?? '';
     final newStart = suggestion['slotTime']?.toString() ?? '';
-    final durationLabel = appointment['duration']?.toString() ?? '40 min';
-    final duration = int.tryParse(durationLabel.split(' ').first) ?? 40;
+    const duration = 60;
     final newEnd = _addMinutes(newStart, duration);
 
     final response = await http.post(

@@ -54,7 +54,7 @@ class AttachmentInput {
   final double? foreheadAnchorY;
   final double? eyeMidX;
   final double? eyeDistanceNorm;
-  final double? videoAspect;
+  final double? sourceAspect;
   final List<double>? faceTransformMatrix;
   final AttachmentCalibrationOffsets calibrationOffsets;
 
@@ -68,7 +68,7 @@ class AttachmentInput {
     required this.foreheadAnchorY,
     required this.eyeMidX,
     required this.eyeDistanceNorm,
-    required this.videoAspect,
+    required this.sourceAspect,
     required this.faceTransformMatrix,
     required this.calibrationOffsets,
   });
@@ -109,7 +109,7 @@ class HeuristicAttachmentEngine extends AttachmentEngine {
       foreheadAnchorY: input.foreheadAnchorY,
       eyeMidX: input.eyeMidX,
       eyeDistanceNorm: input.eyeDistanceNorm,
-      videoAspect: input.videoAspect,
+      sourceAspect: input.sourceAspect,
     );
     return _applyCalibrationOffsets(box, input);
   }
@@ -161,7 +161,7 @@ class MatrixAttachmentEngine extends AttachmentEngine {
       foreheadAnchorY: input.foreheadAnchorY,
       eyeMidX: stabilized.eyeMidX,
       eyeDistanceNorm: stabilized.eyeDistanceNorm,
-      videoAspect: input.videoAspect,
+      sourceAspect: input.sourceAspect,
     );
     return _applyCalibrationOffsets(box, input);
   }

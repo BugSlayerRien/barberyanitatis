@@ -3,29 +3,31 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/shop_schedule.php';
 
 try {
     $pdo = get_db_connection();
+    auto_complete_due_appointments($pdo);
 
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
     $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_active = TRUE')->fetchColumn();
     $pendingAppointments = (int)$pdo->query("SELECT COUNT(*) FROM appointments WHERE status = 'Scheduled'")->fetchColumn();
 
-    $monthlyRevenueStmt = $pdo->prepare(
-        "SELECT COALESCE(SUM(amount), 0)
-         FROM payments
-         WHERE status = 'Paid'
-           AND YEAR(createdAt) = YEAR(CURRENT_DATE())
-           AND MONTH(createdAt) = MONTH(CURRENT_DATE())"
-    );
+        $monthlyRevenueStmt = $pdo->prepare(
+                "SELECT COALESCE(SUM(total_amount), 0)::numeric
+                 FROM payments
+                 WHERE payment_status = 'Paid'
+                     AND created_at >= date_trunc('month', CURRENT_DATE)
+                     AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'"
+        );
     $monthlyRevenueStmt->execute();
     $monthlyRevenue = (float)$monthlyRevenueStmt->fetchColumn();
 
     $recentAppointmentsStmt = $pdo->prepare(
-        "SELECT a.appointmentID, u.fullName, a.createdAt
+        "SELECT a.appointment_id, u.full_name, a.created_at
          FROM appointments a
-         JOIN users u ON a.userID = u.userID
-         ORDER BY a.createdAt DESC
+         JOIN users u ON a.user_id = u.user_id
+         ORDER BY a.created_at DESC
          LIMIT 5"
     );
     $recentAppointmentsStmt->execute();
@@ -35,8 +37,8 @@ try {
         return [
             'icon' => '📅',
             'title' => 'New appointment created',
-            'description' => $row['fullName'] . ' booked an appointment',
-            'time' => $row['createdAt'],
+            'description' => ($row['full_name'] ?? $row['fullName'] ?? 'Customer') . ' booked an appointment',
+            'time' => $row['created_at'] ?? $row['createdAt'] ?? null,
         ];
     }, $recentAppointments);
 

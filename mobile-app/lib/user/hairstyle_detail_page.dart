@@ -18,6 +18,8 @@ import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'user_session.dart';
 import 'api_config.dart';
+import 'scanner/overlay_preview_image.dart';
+import 'scanner/overlay_registry.dart';
 
 class HairstyleDetailPage extends StatefulWidget {
   final Map<String, dynamic> style;
@@ -105,53 +107,13 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   }
 
   Map<String, String>? _styleAssetSet() {
-    final styleName = widget.style['name']?.toString().trim().toLowerCase() ?? '';
-    switch (styleName) {
-      case 'blowout taper':
-        return {
-          'front': 'assets/images/overlays/blowout_taper/blowout_taper_front.png',
-          'left': 'assets/images/overlays/blowout_taper/blowout_taper_left.png',
-          'right': 'assets/images/overlays/blowout_taper/blowout_taper_right.png',
-        };
-      case 'buzz cut':
-        return {
-          'front': 'assets/images/overlays/buzz_cut/buzz_cut_front.png',
-          'left': 'assets/images/overlays/buzz_cut/buzz_cut_left.png',
-          'right': 'assets/images/overlays/buzz_cut/buzz_cut_right.png',
-        };
-      case 'low fade':
-        return {
-          'front': 'assets/images/overlays/low_fade/low_fade_front.png',
-          'left': 'assets/images/overlays/low_fade/low_fade_left.png',
-          'right': 'assets/images/overlays/low_fade/low_fade_right.png',
-        };
-      case 'french crop':
-        return {
-          'front': 'assets/images/overlays/french_crop/french_crop_front.png',
-          'left': 'assets/images/overlays/french_crop/french_crop_left.png',
-          'right': 'assets/images/overlays/french_crop/french_crop_right.png',
-        };
-      case 'curly taper fade':
-        return {
-          'front': 'assets/images/overlays/curly_taper/curly_taper_fade_front.png',
-          'left': 'assets/images/overlays/curly_taper/curly_taper_fade_left.png',
-          'right': 'assets/images/overlays/curly_taper/curly_taper_fade_right.png',
-        };
-      case 'textured crop':
-        return {
-          'front': 'assets/images/overlays/textured_crop/textured_crop_front.png',
-          'left': 'assets/images/overlays/textured_crop/textured_crop_left.png',
-          'right': 'assets/images/overlays/textured_crop/textured_crop_right.png',
-        };
-      case 'curly modern mullet':
-        return {
-          'front': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_front.png',
-          'left': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_left.png',
-          'right': 'assets/images/overlays/curly_modern_mullet/curly_modern_mullet_right.png',
-        };
-      default:
-        return null;
-    }
+    final styleName = widget.style['name']?.toString() ?? '';
+    final overlay = OverlayRegistry.resolve(styleName);
+    return {
+      'front': overlay.front,
+      'left': overlay.left,
+      'right': overlay.right,
+    };
   }
 
   String? _resolveDetailImage(String? raw) {
@@ -208,15 +170,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
 
   Widget _buildDetailImage(String url) {
     if (url.startsWith('assets/')) {
-      return Image.asset(
-        url,
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.high,
-        errorBuilder: (context, error, stackTrace) {
-          debugPrint('[HairstyleDetail] Asset load failed for $url: $error');
-          return Container(color: Colors.white);
-        },
-      );
+      return OverlayPreviewImage(assetPath: url, fit: BoxFit.contain);
     }
 
     return Image.network(

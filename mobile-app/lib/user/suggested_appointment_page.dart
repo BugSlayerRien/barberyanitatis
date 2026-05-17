@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'ai_funnel_service.dart';
+import 'services/face_scan_service.dart';
 import 'api_config.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
@@ -26,6 +28,57 @@ class SuggestedAppointmentPage extends StatefulWidget {
 
 class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   bool _booking = false;
+  bool _refreshingSuggestion = false;
+  late Map<String, dynamic> _suggestion;
+
+  @override
+  void initState() {
+    super.initState();
+    _suggestion = Map<String, dynamic>.from(widget.suggestion);
+    unawaited(_refreshSuggestionIfStale());
+  }
+
+  Future<void> _refreshSuggestionIfStale() async {
+    final date = _suggestion['slotDate']?.toString() ?? '';
+    final time = _suggestion['slotTime']?.toString() ?? '';
+    if (date.isEmpty || time.isEmpty || !_isPastOrInvalidSlot(date: date, time: time)) {
+      return;
+    }
+
+    setState(() => _refreshingSuggestion = true);
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'suggestBestSlot'}),
+      );
+      if (!mounted || response.statusCode != 200 || response.body.isEmpty) {
+        return;
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final refreshed = data['suggestion'] as Map<String, dynamic>?;
+      if (refreshed == null) {
+        return;
+      }
+
+      final refreshedDate = refreshed['slotDate']?.toString() ?? '';
+      final refreshedTime = refreshed['slotTime']?.toString() ?? '';
+      if (refreshedDate.isEmpty ||
+          refreshedTime.isEmpty ||
+          _isPastOrInvalidSlot(date: refreshedDate, time: refreshedTime)) {
+        return;
+      }
+
+      setState(() => _suggestion = refreshed);
+    } catch (_) {
+      // Keep the original suggestion; booking guard still blocks stale times.
+    } finally {
+      if (mounted) {
+        setState(() => _refreshingSuggestion = false);
+      }
+    }
+  }
 
   bool _isPastOrInvalidSlot({required String date, required String time}) {
     final dateParts = date.split('-');
@@ -132,7 +185,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
       return;
     }
 
-    final suggestion = widget.suggestion;
+    final suggestion = _suggestion;
     final barberId = suggestion['barberID'] is int
         ? suggestion['barberID'] as int
         : int.tryParse('${suggestion['barberID']}') ?? 0;
@@ -172,9 +225,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     }
 
     final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
-    final baseDuration = int.tryParse(service['base_duration']?.toString() ?? '') ?? 0;
-    final durationHint = UserSession.selectedEstimatedMinutes;
-    final duration = durationHint != null && durationHint > 0 ? durationHint : baseDuration;
+    const duration = 60;
     final endTime = _addMinutes(startTime, duration);
 
     final response = await http.post(
@@ -233,6 +284,15 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
         backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
       );
+      try {
+        await FaceScanService.attachPreviewsToAppointment(
+          appointmentId: appointmentId,
+          scanSessionId: UserSession.ensureScanSessionId(),
+          variantId: UserSession.selectedVariantId!,
+        );
+      } catch (_) {
+        // Non-blocking: catalog images still show if attach fails.
+      }
     }
 
     if (!mounted) {
@@ -294,12 +354,32 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     );
   }
 
+  String _formatDisplayDate(String rawDate) {
+    final parts = rawDate.split('-');
+    if (parts.length != 3) {
+      return rawDate;
+    }
+    final year = int.tryParse(parts[0]);
+    final month = int.tryParse(parts[1]);
+    final day = int.tryParse(parts[2]);
+    if (year == null || month == null || day == null) {
+      return rawDate;
+    }
+    return '$month/$day/$year';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final barberName = widget.suggestion['barberName']?.toString() ?? 'Barber';
-    final slotDate = widget.suggestion['slotDate']?.toString() ?? '';
-    final slotTime = formatTo12Hour(widget.suggestion['slotTime']?.toString() ?? '');
-    final isFallback = widget.suggestion['isFallback'] == true;
+    final barberName = _suggestion['barberName']?.toString() ?? 'Barber';
+    final slotDate = _suggestion['slotDate']?.toString() ?? '';
+    final slotTime = formatTo12Hour(_suggestion['slotTime']?.toString() ?? '');
+    final isFallback = _suggestion['isFallback'] == true;
+    final isStale = slotDate.isNotEmpty &&
+        _suggestion['slotTime']?.toString().isNotEmpty == true &&
+        _isPastOrInvalidSlot(
+          date: slotDate,
+          time: _suggestion['slotTime']?.toString() ?? '',
+        );
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -340,8 +420,24 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                   else
                     const SizedBox(height: 12),
                   _detailRow('Barber', barberName),
-                  _detailRow('Date', slotDate),
+                  _detailRow('Date', _formatDisplayDate(slotDate)),
                   _detailRow('Time', slotTime),
+                  if (_refreshingSuggestion)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        'Updating to the next available time...',
+                        style: TextStyle(color: Colors.white54, fontSize: 13),
+                      ),
+                    )
+                  else if (isStale)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        'This suggested time is no longer available. Please choose manually.',
+                        style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
+                      ),
+                    ),
                   const SizedBox(height: 18),
                   Row(
                     children: [
@@ -365,7 +461,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: ElevatedButton(
-                          onPressed: _booking ? null : _proceedToPayment,
+                          onPressed: _booking || _refreshingSuggestion || isStale ? null : _proceedToPayment,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: Colors.black,

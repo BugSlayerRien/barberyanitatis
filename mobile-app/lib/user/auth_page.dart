@@ -1,21 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
-import '../receptionist/receptionist_dashboard_page.dart';
-import '../admins/admin_dashboard_page.dart';
-import '../barber/barber_dashboard_page.dart';
 import 'forgot_password_page.dart';
-import 'reset_password_page.dart';
-import 'dashboard_page.dart';
 import 'api_config.dart';
+import 'auth_bootstrap.dart';
 import 'user_session.dart';
-import 'web_utils.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
 const Color kGoldColor = Colors.white;
@@ -35,14 +29,8 @@ class _AuthPageState extends State<AuthPage> {
   static const String _googleServerClientId =
       String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
 
-  final AppLinks _appLinks = AppLinks();
-  StreamSubscription<Uri>? _deepLinkSubscription;
-  StreamSubscription<AuthState>? _authStateSubscription;
-
   bool _isLogin = true;
   bool _isLoading = false;
-  bool _didNavigateAfterSignIn = false;
-  String? _lastProcessedAuthCallbackUri;
   // Login controllers
   final TextEditingController _loginUser = TextEditingController();
   final TextEditingController _loginPass = TextEditingController();
@@ -63,13 +51,11 @@ class _AuthPageState extends State<AuthPage> {
   @override
   void initState() {
     super.initState();
-    _bootstrapAuthListeners();
+    unawaited(_resumeIfAlreadySignedIn());
   }
 
   @override
   void dispose() {
-    _deepLinkSubscription?.cancel();
-    _authStateSubscription?.cancel();
     _loginUser.dispose();
     _loginPass.dispose();
     _firstName.dispose();
@@ -81,200 +67,25 @@ class _AuthPageState extends State<AuthPage> {
     super.dispose();
   }
 
-  Future<void> _bootstrapAuthListeners() async {
-    _authStateSubscription =
-        Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
-      if (data.event == AuthChangeEvent.signedIn && data.session != null) {
-        _applySupabaseSession(data.session!);
-        _goToSignedInDestination();
-      } else if (data.event == AuthChangeEvent.passwordRecovery &&
-          data.session != null) {
-        _applySupabaseSession(data.session!);
-        if (!mounted) return;
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const ResetPasswordPage()),
-        );
-      } else if (data.event == AuthChangeEvent.signedOut) {
-        await UserSession.clear();
-        _didNavigateAfterSignIn = false;
-        _lastProcessedAuthCallbackUri = null;
-      }
-    });
-
-    _deepLinkSubscription = _appLinks.uriLinkStream.listen(
-      (uri) async => _handleAuthCallbackUri(uri),
-      onError: (Object error) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Deep link error: $error')),
-        );
-      },
-    );
-
-    try {
-      if (kIsWeb) {
-        await _handleAuthCallbackUri(Uri.base);
-      } else {
-        final initialLink = await _appLinks.getInitialAppLink();
-        if (initialLink != null) {
-          await _handleAuthCallbackUri(initialLink);
-        }
-      }
-
-      final existingSession = Supabase.instance.client.auth.currentSession;
-      if (existingSession != null) {
-        _applySupabaseSession(existingSession);
-        _goToSignedInDestination();
-      }
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to inspect auth callback: $error')),
-      );
-    }
-  }
-
-  bool _isSupabaseAuthCallbackUri(Uri uri) {
-    if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
-      return true;
-    }
-
-    final fragmentParameters = _readAuthCallbackParameters(uri);
-    final hasOAuthFragment = fragmentParameters.containsKey('access_token') ||
-        fragmentParameters.containsKey('refresh_token') ||
-        fragmentParameters.containsKey('error') ||
-        fragmentParameters.containsKey('error_description');
-    final hasOAuthQuery = uri.queryParameters.containsKey('code');
-    return hasOAuthFragment || hasOAuthQuery;
-  }
-
-  Future<void> _handleAuthCallbackUri(Uri uri) async {
-    if (!_isSupabaseAuthCallbackUri(uri)) {
+  Future<void> _resumeIfAlreadySignedIn() async {
+    if (AuthBootstrap.didNavigateAfterSignIn) {
       return;
     }
 
-    final uriKey = uri.toString();
-    if (_lastProcessedAuthCallbackUri == uriKey) {
+    final session = Supabase.instance.client.auth.currentSession;
+    if (session == null) {
       return;
     }
-    _lastProcessedAuthCallbackUri = uriKey;
 
-    try {
-      final currentSession = Supabase.instance.client.auth.currentSession;
-      if (currentSession != null) {
-        _applySupabaseSession(currentSession);
-        _goToSignedInDestination();
-        return;
-      }
-
-      final normalizedUri = _normalizeAuthCallbackUri(uri);
-      final response = await Supabase.instance.client.auth.getSessionFromUrl(
-        normalizedUri,
-      );
-      _applySupabaseSession(response.session);
-      if (kIsWeb) {
-        try {
-          clearUrlFragment();
-        } catch (_) {}
-      }
-      _goToSignedInDestination();
+    await AuthBootstrap.applySupabaseSession(session);
+    if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
       return;
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Supabase callback failed: $error')),
-      );
-      _lastProcessedAuthCallbackUri = null;
     }
-  }
-
-  Map<String, String> _readAuthCallbackParameters(Uri uri) {
-    final fragment = uri.fragment;
-    if (fragment.isEmpty) {
-      return const <String, String>{};
-    }
-
-    final normalizedFragment =
-        fragment.startsWith('?') ? fragment.substring(1) : fragment;
-    if (normalizedFragment.isEmpty) {
-      return const <String, String>{};
-    }
-
-    try {
-      return Uri.splitQueryString(normalizedFragment);
-    } catch (_) {
-      return const <String, String>{};
-    }
-  }
-
-  Uri _normalizeAuthCallbackUri(Uri uri) {
-    final fragmentParameters = _readAuthCallbackParameters(uri);
-    if (fragmentParameters.isEmpty) {
-      return uri;
-    }
-
-    return uri.replace(
-      fragment: '',
-      queryParameters: {
-        ...uri.queryParameters,
-        ...fragmentParameters,
-      },
-    );
+    AuthBootstrap.navigateToSignedInHome();
   }
 
   String _webOAuthRedirectTo() {
     return Uri.base.origin;
-  }
-
-  void _applySupabaseSession(Session session) {
-    final user = session.user;
-    final metadata = user.userMetadata ?? <String, dynamic>{};
-    final appMetadata = user.appMetadata;
-    final rawRole = '${appMetadata['role'] ?? metadata['role']}'.trim();
-    final role = rawRole.isEmpty || rawRole == 'null' ? null : rawRole;
-    final fullNameValue = metadata['full_name'];
-    final nameValue = metadata['name'];
-    final resolvedFullName = fullNameValue != null &&
-        fullNameValue.toString().trim().isNotEmpty
-      ? fullNameValue.toString().trim()
-      : nameValue != null && nameValue.toString().trim().isNotEmpty
-        ? nameValue.toString().trim()
-        : user.email;
-
-    UserSession.userId = user.id.hashCode.abs();
-    UserSession.fullName = resolvedFullName;
-    UserSession.email = user.email;
-    UserSession.roles = role != null && role.isNotEmpty
-        ? [role.toLowerCase()]
-        : ['authenticated'];
-  }
-
-  void _goToSignedInDestination() {
-    if (!mounted) {
-      return;
-    }
-
-    if (_didNavigateAfterSignIn) {
-      return;
-    }
-    _didNavigateAfterSignIn = true;
-
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Signed in successfully')));
-
-    if (UserSession.roles.contains('admin')) {
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
-    } else if (UserSession.roles.contains('receptionist')) {
-      Navigator.of(context).pushReplacement(MaterialPageRoute(
-          builder: (_) => const ReceptionistDashboardPage()));
-    } else if (UserSession.roles.contains('barber')) {
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
-    } else {
-      Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const DashboardPage()));
-    }
   }
 
   Future<void> _login() async {
@@ -298,7 +109,7 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
+      final phpLogin = await http.post(
         Uri.parse('$_apiBaseUrl/auth.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
@@ -308,48 +119,34 @@ class _AuthPageState extends State<AuthPage> {
         }),
       );
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (phpLogin.statusCode == 200 && phpLogin.body.isNotEmpty) {
+        final phpData = jsonDecode(phpLogin.body) as Map<String, dynamic>;
+        final phpUser = phpData['user'] as Map<String, dynamic>?;
+        if (phpUser != null) {
+          AuthBootstrap.applyPhpAuthUser(phpUser);
+          if (!mounted) return;
+          AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
+          return;
+        }
+      }
+
+      final response = await Supabase.instance.client.auth.signInWithPassword(
+        email: email,
+        password: password,
+      );
+
+      final session = response.session;
+      if (session == null) {
+        throw Exception('Login succeeded but no Supabase session was returned.');
+      }
+
+      await AuthBootstrap.applySupabaseSession(session);
       if (!mounted) return;
-
-      if (response.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'Login failed.')),
-        );
-        return;
-      }
-
-      final user = data['user'] as Map<String, dynamic>? ?? {};
-      final roles = (user['roles'] as List<dynamic>? ?? [])
-          .map((role) => role.toString().toLowerCase())
-          .toList();
-
-      UserSession.userId = user['userID'] is int
-          ? user['userID'] as int
-          : int.tryParse('${user['userID']}');
-      UserSession.fullName = user['fullName']?.toString();
-      UserSession.email = user['email']?.toString();
-      UserSession.roles = roles;
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Login successful')));
-
-      if (roles.contains('admin')) {
-        Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
-      } else if (roles.contains('receptionist')) {
-        Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => const ReceptionistDashboardPage()));
-      } else if (roles.contains('barber')) {
-        Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
-      } else {
-        Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const DashboardPage()));
-      }
+      AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login failed: $e')),
+        SnackBar(content: Text(_readableLoginError(e, email: email))),
       );
     } finally {
       if (mounted) {
@@ -365,7 +162,9 @@ class _AuthPageState extends State<AuthPage> {
     final phone = _phone.text.trim();
     final password = _regPass.text;
     final confirm = _confirm.text;
+    final fullName = '$firstName $lastName'.trim();
 
+    // Validation 1: Required fields
     if (firstName.isEmpty ||
         lastName.isEmpty ||
         email.isEmpty ||
@@ -376,28 +175,49 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
+    // Validation 2: Email format
     if (!_isValidEmail(email)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid email address.')),
+        const SnackBar(content: Text('Please enter a valid email address (e.g., yourname@example.com).')),
       );
       return;
     }
 
-    if (password.length < 6) {
+    // Validation 3: Check for duplicate email
+    try {
+      final response = await http.post(
+        Uri.parse('$_apiBaseUrl/auth.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'checkEmailExists',
+          'email': email,
+        }),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['exists'] == true) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This email is already registered. Try signing in instead.')),
+          );
+          return;
+        }
+      }
+    } catch (_) {
+      // Email check failed; continue anyway (service might be down)
+    }
+
+    // Validation 4: Password strength
+    final passwordError = _getPasswordValidationError(password);
+    if (passwordError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Password must be at least 6 characters.')),
+        SnackBar(content: Text(passwordError)),
       );
       return;
     }
 
-    if (phone.isNotEmpty && !_isValidPhone(phone)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid phone number.')),
-      );
-      return;
-    }
-
+    // Validation 5: Passwords match
     if (password != confirm) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Passwords do not match.')),
@@ -405,14 +225,23 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
+    // Validation 6: Phone number (if provided)
+    if (phone.isNotEmpty && !_isValidPhone(phone)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid Philippine phone number (e.g., 09123456789).')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
+      // Sign up with email confirmation enabled (auto-confirm for dev)
       final response = await Supabase.instance.client.auth.signUp(
         email: email,
         password: password,
         data: {
-          'full_name': '$firstName $lastName',
+          'full_name': fullName,
           'phone': phone,
         },
         emailRedirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
@@ -422,18 +251,34 @@ class _AuthPageState extends State<AuthPage> {
 
       final session = response.session;
       if (session != null) {
-        _applySupabaseSession(session);
+        // Signup succeeded and user is signed in
+        await AuthBootstrap.applySupabaseSession(session);
+        
+        // Sync the new user to public.users table
+        try {
+          await http.post(
+            Uri.parse('$_apiBaseUrl/auth_sync.php'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'email': email,
+              'full_name': fullName,
+            }),
+          );
+        } catch (_) {
+          // Sync failed but user is authenticated; continue anyway
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Registration successful.')),
+          const SnackBar(content: Text('Registration successful. Welcome!')),
         );
-        _goToSignedInDestination();
+        AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
         return;
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
             content:
-                Text('Registration successful. Check your email to confirm your account.')),
+                Text('Registration successful. You can now sign in.')),
       );
       setState(() => _isLogin = true);
     } catch (e) {
@@ -517,19 +362,7 @@ class _AuthPageState extends State<AuthPage> {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Google sign-in successful')));
 
-      if (UserSession.roles.contains('admin')) {
-        Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AdminDashboardPage()));
-      } else if (UserSession.roles.contains('receptionist')) {
-        Navigator.of(context).push(MaterialPageRoute(
-            builder: (_) => const ReceptionistDashboardPage()));
-      } else if (UserSession.roles.contains('barber')) {
-        Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const BarberDashboardPage()));
-      } else {
-        Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const DashboardPage()));
-      }
+      AuthBootstrap.navigateToSignedInHome(showSnackBar: false);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -834,13 +667,13 @@ class _AuthPageState extends State<AuthPage> {
           controller: _regEmail,
           keyboardType: TextInputType.emailAddress,
           style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your email'),
+          decoration: _fieldDecoration('Enter your email', helperText: 'Format: yourname@example.com'),
         ),
         const SizedBox(height: 12),
         TextField(
             controller: _phone,
             style: const TextStyle(color: Colors.white),
-            decoration: _fieldDecoration('Enter phone number'),
+            decoration: _fieldDecoration('Enter phone number', helperText: 'PH format: 09123456789 or 02-1234567'),
             keyboardType: TextInputType.phone),
         const SizedBox(height: 12),
         TextField(
@@ -848,6 +681,7 @@ class _AuthPageState extends State<AuthPage> {
             obscureText: _obscureReg1,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration('Enter your password',
+                helperText: 'Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special (!@#\$%^&*)',
                 suffix: IconButton(
                     icon: Icon(
                         _obscureReg1 ? Icons.visibility_off : Icons.visibility,
@@ -893,10 +727,12 @@ class _AuthPageState extends State<AuthPage> {
     );
   }
 
-  InputDecoration _fieldDecoration(String hint, {Widget? suffix}) {
+  InputDecoration _fieldDecoration(String hint, {Widget? suffix, String? helperText}) {
     return InputDecoration(
       hintText: hint,
       hintStyle: const TextStyle(color: Colors.white54),
+      helperText: helperText,
+      helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
       filled: true,
       fillColor: const Color(0xFF1A1A1A),
       border: OutlineInputBorder(
@@ -911,8 +747,75 @@ class _AuthPageState extends State<AuthPage> {
   }
 
   bool _isValidPhone(String phone) {
-    final digits = phone.replaceAll(RegExp(r'\D'), '');
-    return digits.length >= 7 && digits.length <= 15;
+    // Accept Philippine phone numbers
+    // Formats: 09123456789 (11 digits), 02-1234567 (8-10 digits), +63912345678
+    final cleaned = phone.replaceAll(RegExp(r'\D'), '');
+    
+    // PH mobile: 09xxxxxxxxx (11 digits) or 639xxxxxxxxx (international, 12 digits)
+    if (cleaned.startsWith('09') && cleaned.length == 11) {
+      return true;
+    }
+    if (cleaned.startsWith('639') && cleaned.length == 12) {
+      return true;
+    }
+
+    // PH landline: 0X-xxxxxxx to 0XX-xxxxx (area codes 02-08, 8-10 total digits)
+    // Valid: 02-1234567 (9 digits), 032-123456 (9 digits), etc.
+    if ((cleaned.startsWith('02') || cleaned.startsWith('03') ||
+         cleaned.startsWith('04') || cleaned.startsWith('05') ||
+         cleaned.startsWith('06') || cleaned.startsWith('07') ||
+         cleaned.startsWith('08')) &&
+        cleaned.length >= 8 && cleaned.length <= 10) {
+      return true;
+    }
+
+    return false;
+  }
+
+  String? _getPasswordValidationError(String password) {
+    // Check minimum length
+    if (password.length < 8) {
+      return 'Password must be at least 8 characters long.';
+    }
+    
+    // Check for uppercase letter
+    if (!password.contains(RegExp(r'[A-Z]'))) {
+      return 'Password must contain at least one uppercase letter (A-Z).';
+    }
+    
+    // Check for lowercase letter
+    if (!password.contains(RegExp(r'[a-z]'))) {
+      return 'Password must contain at least one lowercase letter (a-z).';
+    }
+    
+    // Check for number
+    if (!password.contains(RegExp(r'\d'))) {
+      return 'Password must contain at least one number (0-9).';
+    }
+    
+    // Check for special character
+    if (!password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:,.<>?]'))) {
+      return 'Password must contain at least one special character (!@#\$%^&*).';
+    }
+    
+    return null;  // Valid password
+  }
+
+  String _readableLoginError(Object error, {required String email}) {
+    final raw = error.toString().replaceFirst('Exception:', '').trim();
+    final lower = raw.toLowerCase();
+    if (lower.contains('invalid_grant') ||
+        lower.contains('grant') ||
+        lower.contains('invalid login credentials')) {
+      if (email.endsWith('@tatis.local')) {
+        return 'Sign-in failed. For staff/barber demo accounts use: barber@tatis.local / Barber123!, receptionist@tatis.local / Reception123!, or admin@tatis.local / Admin123!';
+      }
+      return 'Invalid email or password. OAuth-only accounts must use Google/Facebook sign-in.';
+    }
+    if (lower.contains('failed to fetch') || lower.contains('network')) {
+      return 'Cannot reach the auth server. Check your internet connection and API URL.';
+    }
+    return 'Login failed: $raw';
   }
 
   String _readableGoogleSignInError(Object error) {

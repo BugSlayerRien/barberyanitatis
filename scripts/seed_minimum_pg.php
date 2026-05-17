@@ -181,7 +181,7 @@ function seed_time_slots(PDO $pdo, int $barberId): void
 {
     $slotStmt = $pdo->prepare(
         'INSERT INTO time_slots (barber_id, slot_date, slot_time, duration, status)
-         VALUES (:barber_id, :slot_date, :slot_time, 35, :status)
+         VALUES (:barber_id, :slot_date, :slot_time, 60, :status)
          ON CONFLICT (barber_id, slot_date, slot_time)
          DO UPDATE SET status = EXCLUDED.status, duration = EXCLUDED.duration'
     );
@@ -189,7 +189,7 @@ function seed_time_slots(PDO $pdo, int $barberId): void
     $today = new DateTimeImmutable('today');
     for ($d = 0; $d < 3; $d++) {
         $date = $today->modify('+' . $d . ' day')->format('Y-m-d');
-        foreach (['09:00:00', '09:50:00', '10:40:00'] as $time) {
+        foreach (['09:00:00', '10:00:00', '11:00:00', '12:00:00', '13:00:00', '14:00:00', '15:00:00', '16:00:00', '17:00:00', '18:00:00'] as $time) {
             $slotStmt->execute([
                 ':barber_id' => $barberId,
                 ':slot_date' => $date,

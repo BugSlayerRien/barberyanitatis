@@ -132,16 +132,20 @@ function try_update_table_status(PDO $pdo, $tableName, $externalId, $status, $me
     }
 
     $updatedAtSql = isset($colSet['updated_at']) ? ', updated_at = NOW()' : '';
+    $paidAtSql = '';
+    if (isset($colSet['paid_at']) && in_array(strtolower($status), ['paid', 'succeeded'], true)) {
+        $paidAtSql = ', paid_at = NOW()';
+    }
 
     $whereByExternal = [];
-    foreach (['intent_id', 'paymongo_intent_id', 'external_reference', 'order_reference', 'source_id', 'paymongo_source_id', 'provider_ref', 'intent_token'] as $candidate) {
+    foreach (['intent_id', 'paymongo_intent_id', 'external_reference', 'order_reference', 'source_id', 'paymongo_source_id', 'provider_ref', 'intent_token', 'transaction_ref'] as $candidate) {
         if (isset($colSet[$candidate])) {
             $whereByExternal[] = "CAST($candidate AS TEXT) = :external";
         }
     }
 
     if (!empty($whereByExternal)) {
-        $sql = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql} WHERE " . implode(' OR ', $whereByExternal);
+        $sql = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql}{$paidAtSql} WHERE " . implode(' OR ', $whereByExternal);
         $stmt = $pdo->prepare($sql);
         $stmt->execute(['status' => $status, 'external' => $externalId]);
         $affected = $stmt->rowCount();
@@ -158,7 +162,7 @@ function try_update_table_status(PDO $pdo, $tableName, $externalId, $status, $me
             }
         }
         if (!empty($whereByMeta)) {
-            $sql2 = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql} WHERE " . implode(' OR ', $whereByMeta);
+            $sql2 = "UPDATE {$tableName} SET {$statusCol} = :status{$updatedAtSql}{$paidAtSql} WHERE " . implode(' OR ', $whereByMeta);
             $stmt2 = $pdo->prepare($sql2);
             $stmt2->execute(['status' => $status, 'meta' => $metadataRef]);
             $affected = $stmt2->rowCount();
@@ -169,6 +173,87 @@ function try_update_table_status(PDO $pdo, $tableName, $externalId, $status, $me
     }
 
     return 0;
+}
+
+function find_intent_context(PDO $pdo, $externalId, $metadataRef = null) {
+    $sql = "SELECT appointment_id, amount, method
+            FROM appointment_payment_intents
+            WHERE CAST(intent_token AS TEXT) = :external
+               OR CAST(provider_ref AS TEXT) = :external
+            ORDER BY created_at DESC
+            LIMIT 1";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(['external' => $externalId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (is_array($row)) {
+        return $row;
+    }
+
+    if ($metadataRef !== null && $metadataRef !== '') {
+        $metaStmt = $pdo->prepare(
+            "SELECT appointment_id, amount, method
+             FROM appointment_payment_intents
+             WHERE CAST(appointment_id AS TEXT) = :meta
+             ORDER BY created_at DESC
+             LIMIT 1"
+        );
+        $metaStmt->execute(['meta' => $metadataRef]);
+        $metaRow = $metaStmt->fetch(PDO::FETCH_ASSOC);
+        if (is_array($metaRow)) {
+            return $metaRow;
+        }
+    }
+
+    return null;
+}
+
+function sync_payment_row(PDO $pdo, $externalId, $status, $metadataRef = null) {
+    $intentContext = find_intent_context($pdo, $externalId, $metadataRef);
+    $appointmentId = null;
+
+    if ($intentContext && isset($intentContext['appointment_id'])) {
+        $appointmentId = intval($intentContext['appointment_id']);
+    }
+
+    if (($appointmentId === null || $appointmentId <= 0) && $metadataRef !== null && ctype_digit((string) $metadataRef)) {
+        $appointmentId = intval($metadataRef);
+    }
+
+    if ($appointmentId === null || $appointmentId <= 0) {
+        return;
+    }
+
+    $existingStmt = $pdo->prepare('SELECT payment_id FROM appointment_payments WHERE transaction_ref = :ref LIMIT 1');
+    $existingStmt->execute(['ref' => $externalId]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+    $amount = isset($intentContext['amount']) ? floatval($intentContext['amount']) : 0;
+    $method = isset($intentContext['method']) ? strval($intentContext['method']) : 'unknown';
+
+    if (is_array($existing)) {
+        $updateStmt = $pdo->prepare(
+            'UPDATE appointment_payments
+             SET status = :status
+             WHERE payment_id = :payment_id'
+        );
+        $updateStmt->execute([
+            'status' => $status,
+            'payment_id' => $existing['payment_id'],
+        ]);
+        return;
+    }
+
+    $insertStmt = $pdo->prepare(
+        'INSERT INTO appointment_payments (appointment_id, amount, method, status, transaction_ref)
+         VALUES (:appointment_id, :amount, :method, :status, :transaction_ref)'
+    );
+    $insertStmt->execute([
+        'appointment_id' => $appointmentId,
+        'amount' => $amount,
+        'method' => $method,
+        'status' => $status,
+        'transaction_ref' => $externalId,
+    ]);
 }
 
 function update_order_status($externalId, $status, $metadataRef = null) {
@@ -192,16 +277,16 @@ function update_order_status($externalId, $status, $metadataRef = null) {
     try {
         $pdo = new PDO($dsn, $dbUser, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
 
-        // Priority update order:
-        // 1) appointment_payment_intents (existing project fallback source-of-truth)
-        // 2) orders (legacy/general schemas)
+        // Priority update order against project tables.
         $affected = try_update_table_status($pdo, 'appointment_payment_intents', $externalId, $status, $metadataRef);
         if ($affected <= 0) {
-            $affected = try_update_table_status($pdo, 'orders', $externalId, $status, $metadataRef);
+            $affected = try_update_table_status($pdo, 'appointment_payments', $externalId, $status, $metadataRef);
         }
 
+        sync_payment_row($pdo, $externalId, $status, $metadataRef);
+
         if ($affected > 0) {
-            @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Updated order(s) for $externalId => $status (rows: $affected)\n", FILE_APPEND);
+            @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Updated payment rows for $externalId => $status (rows: $affected)\n", FILE_APPEND);
             return;
         }
 

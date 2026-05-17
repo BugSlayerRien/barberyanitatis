@@ -122,8 +122,23 @@
               </label>
             </div>
           </div>
-          <div class="card">
-            <p>Use the admin panel to manage users (Customers, Barbers, Receptionists, Admins). Hook this view to the MySQL API when ready.</p>
+          <div class="users-stack">
+            <div class="card">
+              <h3>Customers</h3>
+              <div class="list" id="customers-table"></div>
+            </div>
+            <div class="card">
+              <h3>Barbers</h3>
+              <div class="list" id="barbers-table"></div>
+            </div>
+            <div class="card">
+              <h3>Receptionists</h3>
+              <div class="list" id="receptionists-table"></div>
+            </div>
+            <div class="card">
+              <h3>Admins</h3>
+              <div class="list" id="admins-table"></div>
+            </div>
           </div>
         </section>
 
@@ -179,14 +194,42 @@
             </div>
           </div>
           <div class="card">
-            <p>Edit service catalog, pricing, and availability for the barbershop.</p>
+            <div class="list" id="services-table"></div>
           </div>
         </section>
 
         <section id="settings-view" hidden>
           <div class="section-title">System Settings</div>
           <div class="card">
-            <p>Configure email notifications, operational hours, and security settings.</p>
+            <div class="form-grid">
+              <label>Enable email notifications
+                <input type="checkbox" id="setting-email" />
+              </label>
+              <label>Notification from email
+                <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" />
+              </label>
+              <label>Test notification email
+                <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" />
+              </label>
+              <label>Open time
+                <input class="input" type="time" id="setting-open" value="09:00" />
+              </label>
+              <label>Close time
+                <input class="input" type="time" id="setting-close" value="20:00" />
+              </label>
+              <label>Require MFA
+                <input type="checkbox" id="setting-mfa" />
+              </label>
+              <label>Automatic backups
+                <input type="checkbox" id="setting-backup" />
+              </label>
+            </div>
+            <div class="row-wrap" style="margin-top:12px; gap: 8px; flex-wrap: wrap;">
+              <button class="btn secondary" id="settings-save" type="button">Save settings</button>
+              <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
+              <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
+              <button class="btn secondary" id="settings-download-backup" type="button">Download backup</button>
+            </div>
           </div>
         </section>
       </main>
@@ -218,6 +261,7 @@
       </div>
     </dialog>
 
+    <script src="../assets/api-config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

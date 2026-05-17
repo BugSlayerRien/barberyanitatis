@@ -23,12 +23,15 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: "Century Gothic", "Montserrat", "Segoe UI", sans-serif;
+  overflow: hidden;
 }
 
 .app {
   display: grid;
   grid-template-columns: 260px 1fr;
   min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .sidebar {
@@ -161,6 +164,20 @@ body {
 
 .main {
   padding: 24px 24px 28px;
+  min-height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.main > section {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+}
+
+.main > section[hidden] {
+  display: none !important;
 }
 
 .header {
@@ -277,6 +294,12 @@ body {
 .split {
   display: grid;
   grid-template-columns: 1.35fr 1fr;
+  gap: 12px;
+}
+
+.users-stack {
+  display: flex;
+  flex-direction: column;
   gap: 12px;
 }
 

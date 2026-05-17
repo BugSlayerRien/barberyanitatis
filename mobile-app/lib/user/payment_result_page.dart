@@ -78,8 +78,26 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
               // Wait longer to ensure backend has processed payment and updated database
               await Future.delayed(const Duration(milliseconds: 1500));
               if (mounted) {
+                final appointmentId = int.tryParse(
+                      _params['appointment_id'] ??
+                          _params['appointmentId'] ??
+                          '',
+                    ) ??
+                    0;
+                final receiptRef = _params['source'] ??
+                    _params['id'] ??
+                    _params['resource_id'] ??
+                    '';
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+                  MaterialPageRoute(
+                    builder: (_) => AppointmentsPage(
+                      highlightAppointmentId:
+                          appointmentId > 0 ? appointmentId : null,
+                      forcedPaymentState: 'Paid',
+                      forcedReceiptRef:
+                          receiptRef.isNotEmpty ? receiptRef : null,
+                    ),
+                  ),
                   (route) => false,
                 );
               }

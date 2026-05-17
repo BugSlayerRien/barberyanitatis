@@ -53,7 +53,7 @@ class _ReceptionistAppointmentsPageState
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Today\'s Appointments',
+            'Appointments Tracker',
             style: TextStyle(
                 color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
           ),
@@ -97,9 +97,12 @@ class _ReceptionistAppointmentsPageState
   }
 
   Widget _buildAppointmentCard(Map<String, dynamic> data) {
-    final statusColor = data['status'] == 'CONFIRMED'
-        ? const Color(0xFF4CAF50)
-        : const Color(0xFFFF9800);
+    final status = data['status']?.toString() ?? 'Scheduled';
+    final statusColor = status == 'Completed'
+        ? const Color(0xFF9E9E9E)
+        : status == 'Scheduled' || status == 'CheckedIn' || status == 'InProgress'
+            ? const Color(0xFF4CAF50)
+            : const Color(0xFFFF9800);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -166,7 +169,7 @@ class _ReceptionistAppointmentsPageState
               ),
               GestureDetector(
                 onTap: () {
-                  if (data['status'] == 'PENDING') {
+                  if (status == 'PendingPayment') {
                     _showStatusChangeDialog(data);
                   }
                 },
@@ -179,7 +182,7 @@ class _ReceptionistAppointmentsPageState
                     border: Border.all(color: statusColor),
                   ),
                   child: Text(
-                    data['status'] as String,
+                    status,
                     style: TextStyle(
                         color: statusColor,
                         fontWeight: FontWeight.bold,

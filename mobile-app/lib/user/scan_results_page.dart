@@ -13,6 +13,12 @@ import 'haircuts_list_page.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 
+/// DEPRECATED: This page is no longer used in the booking flow.
+/// The active path is: ai_face_scan_page → haircuts_list_page → time_slot_page → payment_page
+/// ScanResultsPage was an earlier design that has been superseded by the current workflow.
+/// Callers: 0 (no external references found in codebase)
+/// Scheduled for removal in next refactoring cycle.
+@Deprecated('Use the active booking flow: ai_face_scan_page → haircuts_list_page → time_slot_page instead')
 class ScanResultsPage extends StatefulWidget {
   final String imageUrl;
   final List<Map<String, dynamic>> recommendations;

@@ -201,7 +201,7 @@ async function saveProfileEdits() {
 
   const profile = state.currentUser || getStoredUser();
   try {
-    const response = await fetch("../../api/staff_profile.php", {
+    const response = await fetch(resolveApiUrl("staff_profile.php"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -462,7 +462,7 @@ async function loadAiStatus() {
   if (!panel || !badge) return;
 
   try {
-    const response = await fetch("../../api/ai_status.php");
+    const response = await fetch(resolveApiUrl("ai_status.php"));
     if (!response.ok) throw new Error("Unable to fetch AI status");
     const data = await response.json();
 
@@ -494,7 +494,7 @@ async function loadAiStatus() {
 
 async function loadDashboard() {
   try {
-    const response = await fetch("../../api/admin_dashboard.php");
+    const response = await fetch(resolveApiUrl("admin_dashboard.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.activities = data.activities ?? [];
@@ -563,6 +563,7 @@ function renderUserTables() {
       { key: "full_name", label: "Name" },
       { key: "email", label: "Email" },
       { key: "phone", label: "Phone" },
+      { key: "role", label: "Role" },
       { key: "is_active", label: "Active" },
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
@@ -570,7 +571,7 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "customers"
       ? data.customers.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="customer" data-id="${row.user_id}">Edit</button>`,
+          actions: `<button class="btn btn-edit" data-type="customer" data-id="${row.user_id}">Edit</button> <button class="btn secondary btn-delete" data-type="customer" data-id="${row.user_id}">Delete</button>`,
         }))
       : [])
   );
@@ -581,6 +582,7 @@ function renderUserTables() {
       { key: "full_name", label: "Name" },
       { key: "specialty", label: "Specialty" },
       { key: "rating", label: "Rating" },
+      { key: "role", label: "Role" },
       { key: "is_active", label: "Active" },
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
@@ -588,7 +590,7 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "barbers"
       ? data.barbers.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button>`,
+          actions: `<button class="btn btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button> <button class="btn secondary btn-delete" data-type="barber" data-id="${row.barber_id}">Delete</button>`,
         }))
       : [])
   );
@@ -606,7 +608,7 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "receptionists"
       ? data.receptionists.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button>`,
+          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn secondary btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
         }))
       : [])
   );
@@ -624,7 +626,7 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "admins"
       ? data.admins.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button>`,
+          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn secondary btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
         }))
       : [])
   );
@@ -632,7 +634,7 @@ function renderUserTables() {
 
 async function loadUsers() {
   try {
-    const response = await fetch("../../api/admin_users.php");
+    const response = await fetch(resolveApiUrl("admin_users.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.users = {
@@ -648,15 +650,48 @@ async function loadUsers() {
 }
 
 async function updateUser(payload) {
-  const response = await fetch("../../api/admin_users.php", {
+  const response = await fetch(resolveApiUrl("admin_users.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     throw new Error(data.error || "Update failed");
   }
+}
+
+async function assignPortalRole(payload) {
+  const response = await fetch(resolveApiUrl("admin_users.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const data = await parseJsonResponse(response);
+    throw new Error(data.error || "Role update failed");
+  }
+}
+
+function findPortalRoleForEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  const admin = state.users.admins.find((row) => String(row.email || "").toLowerCase() === normalized);
+  if (admin) {
+    return "Admin";
+  }
+
+  const receptionist = state.users.receptionists.find(
+    (row) => String(row.email || "").toLowerCase() === normalized
+  );
+  if (receptionist) {
+    return "Receptionist";
+  }
+
+  return "";
 }
 
 function getUserRowForEdit(type, id) {
@@ -688,6 +723,7 @@ function openAccountEditor(type, id) {
   state.accountEditor = { type, id: Number(id) };
 
   if (type === "customer") {
+    const portalRole = findPortalRoleForEmail(row.email ?? "");
     title.textContent = "Edit Customer";
     form.innerHTML = `
       <label>Full Name
@@ -699,6 +735,17 @@ function openAccountEditor(type, id) {
       <label>Phone
         <input class="input" id="ae-phone" value="${row.phone ?? ""}" />
       </label>
+      <label>App Role
+        <input class="input" value="Customer" disabled />
+      </label>
+      <label>Portal Access Role
+        <select class="select" id="ae-portal-role">
+          <option value="" ${portalRole === "" ? "selected" : ""}>Customer only (no portal)</option>
+          <option value="Receptionist" ${portalRole === "Receptionist" ? "selected" : ""}>Receptionist</option>
+          <option value="Admin" ${portalRole === "Admin" ? "selected" : ""}>Admin</option>
+        </select>
+      </label>
+      <p class="login-meta" style="margin: 0 0 8px;">New portal users get temporary password <strong>ChangeMe123!</strong> until reset.</p>
       <label>Active
         <select class="select" id="ae-active">
           <option value="1" ${Number(row.is_active) === 1 ? "selected" : ""}>Yes</option>
@@ -725,6 +772,9 @@ function openAccountEditor(type, id) {
       </label>
       <label>Rating
         <input class="input" id="ae-rating" type="number" min="0" max="5" step="0.1" value="${Number(row.rating ?? 5)}" />
+      </label>
+      <label>Role
+        <input class="input" value="Barber" disabled />
       </label>
       <label>Active
         <select class="select" id="ae-active">
@@ -779,7 +829,19 @@ async function saveAccountEditor() {
   try {
     if (type === "customer") {
       const phone = document.getElementById("ae-phone")?.value?.trim() || "";
-      await updateUser({ action: "update", type, id, fullName, email, phone, isActive: activeValue });
+      const portalRole = document.getElementById("ae-portal-role")?.value || "";
+      await updateUser({ action: "update", type, id, fullName, email, phone, role: "customer", isActive: activeValue });
+      if (portalRole) {
+        await assignPortalRole({
+          action: "assignPortalRole",
+          email,
+          fullName,
+          role: portalRole,
+          isActive: activeValue === 1,
+        });
+      } else {
+        await assignPortalRole({ action: "removePortalRole", email });
+      }
     }
 
     if (type === "barber") {
@@ -795,6 +857,7 @@ async function saveAccountEditor() {
         specialty,
         yearsExperience,
         rating,
+        role: "barber",
         isActive: activeValue,
       });
     }
@@ -813,9 +876,31 @@ async function saveAccountEditor() {
   }
 }
 
+async function deleteAccount(type, id) {
+  const label = type === "customer" ? "customer" : type === "barber" ? "barber" : "staff account";
+  if (!window.confirm(`Delete this ${label}? This will deactivate the account.`)) {
+    return;
+  }
+
+  try {
+    await updateUser({ action: "delete", type, id });
+    toast("Account deactivated.");
+    await loadUsers();
+  } catch (error) {
+    toast(error.message || "Delete failed");
+  }
+}
+
 function renderServices() {
   const query = document.getElementById("services-search")?.value || "";
-  const rows = filterRows(state.services, query, ["service_name", "category", "description"]);
+  // Normalize service display fields: prefer `service_name`, fall back to `service_code` when empty
+  const normalized = (state.services || []).map((r) => ({
+    ...r,
+    service_name: r.service_name || r.service_code || "(Unnamed Service)",
+    category: r.category || r.service_category || "(Uncategorized)",
+  }));
+
+  const rows = filterRows(normalized, query, ["service_name", "category", "description"]);
   renderTable(
     "services-table",
     [
@@ -835,7 +920,7 @@ function renderServices() {
 
 async function loadServices() {
   try {
-    const response = await fetch("../../api/admin_services.php");
+    const response = await fetch(resolveApiUrl("admin_services.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.services = data.services ?? [];
@@ -911,7 +996,7 @@ function renderAudit() {
 
 async function loadAudit() {
   try {
-    const response = await fetch("../../api/admin_audit.php");
+    const response = await fetch(resolveApiUrl("admin_audit.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.audit = data.events ?? [];
@@ -1092,7 +1177,7 @@ function renderAiBrief(summary, suggestive, predictive) {
 
 async function loadAnalytics() {
   try {
-    const response = await fetch("../../api/admin_analytics.php");
+    const response = await fetch(resolveApiUrl("admin_analytics.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.analytics = data.metrics ?? null;
@@ -1208,7 +1293,7 @@ async function renderAiInsights(metrics, summary) {
 
 async function loadSettings() {
   try {
-    const response = await fetch("../../api/admin_settings.php");
+    const response = await fetch(resolveApiUrl("admin_settings.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     const settings = data.settings ?? {};
@@ -1217,6 +1302,10 @@ async function loadSettings() {
     document.getElementById("setting-close").value = settings.closeTime || "18:00";
     document.getElementById("setting-mfa").checked = settings.forceMfa === 1;
     document.getElementById("setting-backup").checked = settings.autoBackupEnabled === 1;
+    const fromEmail = document.getElementById("setting-from-email");
+    if (fromEmail) {
+      fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
+    }
   } catch (_) {
     // no-op
   }
@@ -1256,6 +1345,13 @@ document.addEventListener("click", async (event) => {
     openAccountEditor(type, Number(id));
   }
 
+  if (target.classList.contains("btn-delete")) {
+    const type = target.dataset.type;
+    const id = target.dataset.id;
+    if (!type || !id) return;
+    await deleteAccount(type, Number(id));
+  }
+
   if (target.classList.contains("btn-service")) {
     const id = target.dataset.id;
     if (!id) return;
@@ -1266,7 +1362,7 @@ document.addEventListener("click", async (event) => {
       const basePrice = prompt("Base price:", "0") ?? "0";
       const category = prompt("Category:", "Haircut") ?? "Haircut";
       const isActive = prompt("Active (1/0):", "1") ?? "1";
-      const response = await fetch("../../api/admin_services.php", {
+      const response = await fetch(resolveApiUrl("admin_services.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1369,8 +1465,9 @@ document.getElementById("settings-save")?.addEventListener("click", async () => 
       closeTime: document.getElementById("setting-close").value,
       forceMfa: document.getElementById("setting-mfa").checked ? 1 : 0,
       autoBackupEnabled: document.getElementById("setting-backup").checked ? 1 : 0,
+      notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
     };
-    const response = await fetch("../../api/admin_settings.php", {
+    const response = await fetch(resolveApiUrl("admin_settings.php"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -1389,7 +1486,7 @@ document.querySelectorAll("[data-export]").forEach((button) => {
   button.addEventListener("click", async () => {
     const table = button.getAttribute("data-export");
     try {
-      const response = await fetch("../../api/admin_settings.php", {
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "exportCsv", table }),
@@ -1418,7 +1515,7 @@ document.getElementById("services-import")?.addEventListener("click", async () =
   const file = input.files[0];
   const text = await file.text();
   try {
-    const response = await fetch("../../api/admin_settings.php", {
+    const response = await fetch(resolveApiUrl("admin_settings.php"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "importServicesCsv", csvText: text }),
@@ -1431,6 +1528,69 @@ document.getElementById("services-import")?.addEventListener("click", async () =
     await loadServices();
   } catch (error) {
     toast(error.message || "Import failed");
+  }
+});
+
+document.getElementById("settings-test-email")?.addEventListener("click", async () => {
+  const email = document.getElementById("setting-test-email")?.value?.trim() || "";
+  if (!email) {
+    toast("Enter a test email address first.");
+    return;
+  }
+  try {
+    const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "sendTestEmail", email }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!response.ok) {
+      throw new Error(data.error || data.message || "Test email failed");
+    }
+    toast(data.message || "Test email sent.");
+  } catch (error) {
+    toast(error.message || "Test email failed");
+  }
+});
+
+document.getElementById("settings-process-notifications")?.addEventListener("click", async () => {
+  try {
+    const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "processNotifications" }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!response.ok) {
+      throw new Error(data.error || data.message || "Queue processing failed");
+    }
+    toast(data.message || "Notifications processed.");
+  } catch (error) {
+    toast(error.message || "Queue processing failed");
+  }
+});
+
+document.getElementById("settings-download-backup")?.addEventListener("click", async () => {
+  try {
+    const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "downloadBackup" }),
+    });
+    const data = await parseJsonResponse(response);
+    if (!response.ok) {
+      throw new Error(data.error || "Backup failed");
+    }
+    const blob = new Blob([JSON.stringify(data.backup ?? {}, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = data.fileName || `tatis_backup_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(data.message || "Backup downloaded.");
+  } catch (error) {
+    toast(error.message || "Backup failed");
   }
 });
 

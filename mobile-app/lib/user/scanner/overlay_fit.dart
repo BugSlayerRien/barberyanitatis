@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'cover_viewport.dart';
 import 'overlay_models.dart';
 
 const double kOverlayTargetFaceAreaWeb = 0.145;
@@ -26,51 +27,27 @@ OverlayBox computeOverlayBox({
   required double? foreheadAnchorY,
   required double? eyeMidX,
   required double? eyeDistanceNorm,
-  double? videoAspect,
+  double? sourceAspect,
 }) {
   var mappedFace = face;
   var mappedEyeMidX = eyeMidX;
   var mappedEyeDistanceNorm = eyeDistanceNorm;
   var mappedForeheadAnchorY = foreheadAnchorY;
 
-  // Web tracker coordinates are normalized to the raw video frame.
-  // Convert them into container-normalized space when the video is letterboxed.
-  if (isWeb && videoAspect != null && videoAspect > 0) {
-    final cw = constraints.maxWidth;
-    final ch = constraints.maxHeight;
-    final containerAspect = cw / ch;
-
-    var displayW = cw;
-    var displayH = ch;
-    var offsetX = 0.0;
-    var offsetY = 0.0;
-
-    if (containerAspect > videoAspect) {
-      displayH = ch;
-      displayW = displayH * videoAspect;
-      offsetX = (cw - displayW) * 0.5;
-    } else {
-      displayW = cw;
-      displayH = displayW / videoAspect;
-      offsetY = (ch - displayH) * 0.5;
-    }
-
-    final mappedLeft = (offsetX + (face.left * displayW)) / cw;
-    final mappedTop = (offsetY + (face.top * displayH)) / ch;
-    final mappedWidth = (face.width * displayW) / cw;
-    final mappedHeight = (face.height * displayH) / ch;
-    mappedFace = Rect.fromLTWH(mappedLeft, mappedTop, mappedWidth, mappedHeight);
-
-    if (eyeMidX != null) {
-      mappedEyeMidX = ((offsetX + (eyeMidX * displayW)) / cw).clamp(0.0, 1.0);
-    }
-    if (eyeDistanceNorm != null) {
-      mappedEyeDistanceNorm = ((eyeDistanceNorm * displayW) / cw).clamp(0.02, 0.90);
-    }
-    if (foreheadAnchorY != null) {
-      mappedForeheadAnchorY =
-          ((offsetY + (foreheadAnchorY * displayH)) / ch).clamp(0.0, 1.0);
-    }
+  // Face rects are in raw camera/photo space; map through BoxFit.cover crop.
+  if (sourceAspect != null && sourceAspect > 0) {
+    final mapped = CoverViewportMapper.map(
+      face: face,
+      sourceAspect: sourceAspect,
+      constraints: constraints,
+      foreheadAnchorY: foreheadAnchorY,
+      eyeMidX: eyeMidX,
+      eyeDistanceNorm: eyeDistanceNorm,
+    );
+    mappedFace = mapped.face;
+    mappedEyeMidX = mapped.eyeMidX;
+    mappedEyeDistanceNorm = mapped.eyeDistanceNorm;
+    mappedForeheadAnchorY = mapped.foreheadAnchorY;
   }
 
   final faceWidth = mappedFace.width * constraints.maxWidth;
@@ -80,6 +57,17 @@ OverlayBox computeOverlayBox({
   final faceAreaNorm = (mappedFace.width * mappedFace.height).clamp(0.03, 0.45);
   final targetArea =
       isWeb ? kOverlayTargetFaceAreaWeb : kOverlayTargetFaceAreaMobile;
+
+  // Don't render overlay if face is too small (too far from camera)
+  if (faceAreaNorm < 0.06) {
+    return OverlayBox(
+      left: 0,
+      top: 0,
+      width: 0,
+      height: 0,
+      yawScale: 1.0,
+    );
+  }
 
   final distanceFactor = (targetArea / faceAreaNorm).clamp(0.72, 1.28);
   final distanceVerticalFactor =
@@ -105,7 +93,7 @@ OverlayBox computeOverlayBox({
   final yawAbsNorm = (yawDeg.abs() / 45.0).clamp(0.0, 1.0);
   final yawWidthFactor = (1.0 - (yawAbsNorm * 0.30)).clamp(0.62, 1.0);
   final yawHeightFactor = (1.0 - (yawAbsNorm * 0.12)).clamp(0.85, 1.0);
-  const yawHorizontalShift = 0.0;
+  final yawHorizontalShift = yawDeg.sign * yawAbsNorm * 0.08;
 
     final eyeDistNorm =
       (mappedEyeDistanceNorm ?? (mappedFace.width * 0.42)).clamp(0.05, 0.70);
@@ -144,27 +132,34 @@ OverlayBox computeOverlayBox({
         .clamp(0.0, 1.0);
   final faceCenterX = anchorXNorm * constraints.maxWidth;
   final xOffsetPx = faceWidth * (calibration.xOffset + yawHorizontalShift);
-  const sideBias = 0.0;
-  final left = (faceCenterX - (clampedWidth * 0.5) + xOffsetPx + sideBias)
-      .clamp(-clampedWidth * 0.15, constraints.maxWidth - (clampedWidth * 0.85));
+  final sideBias = yawDeg.sign * yawAbsNorm * clampedWidth * 0.10;
+    final left = (faceCenterX - (clampedWidth * 0.5) + xOffsetPx + sideBias)
+      .clamp(-clampedWidth * 0.45, constraints.maxWidth - (clampedWidth * 0.55));
 
   double anchorYNorm;
   if (mappedForeheadAnchorY != null) {
     anchorYNorm = mappedForeheadAnchorY.clamp(0.0, 1.0);
   } else {
-    anchorYNorm = (mappedFace.top + (mappedFace.height * 0.12)).clamp(0.0, 1.0);
+    anchorYNorm = (mappedFace.top + (mappedFace.height * 0.06)).clamp(0.0, 1.0);
   }
 
   final yawAnchorShift = -yawAbsNorm * 0.02 * yawDeg.sign;
-  final adjustedAnchorYNorm = (anchorYNorm + yawAnchorShift).clamp(0.02, 0.35);
+  final adjustedAnchorYNorm = (anchorYNorm + yawAnchorShift).clamp(0.02, 0.32);
   final anchorY = adjustedAnchorYNorm * constraints.maxHeight;
 
-  final topRaw = anchorY - (clampedHeight * (0.12 + (yawAbsNorm * 0.03))) +
-      (faceHeight * calibration.yOffset * distanceVerticalFactor) +
-      (rollTiltFactor * rollNorm * faceHeight * 0.02);
+  final yOffsetFactor =
+      (mappedForeheadAnchorY != null && mappedEyeMidX != null) ? 0.35 : 0.85;
+
+  // hairClipFactor = fraction of overlay height above the forehead anchor (hairline in PNG).
+  final hairAnchorRatio = calibration.hairClipFactor.clamp(0.50, 0.66);
+
+  final topRaw = anchorY -
+      (clampedHeight * hairAnchorRatio) +
+      (faceHeight * calibration.yOffset * distanceVerticalFactor * yOffsetFactor) +
+      (rollTiltFactor * rollNorm * faceHeight * 0.01);
 
   final top = topRaw
-      .clamp(-clampedHeight * 0.35, constraints.maxHeight - (clampedHeight * 0.15));
+      .clamp(-clampedHeight * 0.42, constraints.maxHeight - (clampedHeight * 0.12));
 
   return OverlayBox(
     left: left.toDouble(),

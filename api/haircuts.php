@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/hairstyle_overlay_paths.php';
 
 require_method('POST');
 
@@ -20,15 +21,9 @@ try {
         $styleName = trim((string)($row['style_name'] ?? ''));
         if (strcasecmp($styleName, 'Curly Top Fade') === 0) {
             $row['style_name'] = 'Curly Taper Fade';
-            if (isset($row['style_code']) && is_string($row['style_code'])) {
-                $row['style_code'] = 'STYLE-CURLY-TAPER-FADE';
-            }
-            $row['front_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_front.png';
-            $row['side_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_left.png';
-            $row['back_view_url'] = 'assets/images/overlays/curly_taper/curly_taper_fade_right.png';
         }
 
-        return $row;
+        return apply_hairstyle_overlay_paths($row);
     };
 
     if ($action === 'list') {

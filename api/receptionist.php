@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/shop_schedule.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -49,7 +50,9 @@ if (!in_array($action, $allowedActions, true)) {
 
 try {
     $pdo = get_db_connection();
+    ensure_walkin_guest_name_column($pdo);
     ensure_financial_tables($pdo);
+    auto_complete_due_appointments($pdo);
 
     if ($action === 'dashboard') {
         $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE');
@@ -71,8 +74,10 @@ try {
         $appointmentsStmt = $pdo->prepare(
             'SELECT a.appointment_id, a.barber_id, u.full_name AS name,
                     string_agg(s.service_name, \', \' ORDER BY s.service_name) AS service,
+                    a.appointment_date,
                     a.start_time AS time,
-                    SUM(s.base_duration) AS duration,
+                    a.end_time,
+                    :slot_duration AS duration,
                     SUM(ad.final_price) AS price,
                     a.status,
                     b.full_name AS barber
@@ -81,16 +86,18 @@ try {
              JOIN barbers b ON a.barber_id = b.barber_id
              JOIN appointment_details ad ON a.appointment_id = ad.appointment_id
              JOIN services s ON ad.service_id = s.service_id
-             WHERE a.appointment_date = CURRENT_DATE
-             GROUP BY a.appointment_id, a.barber_id, u.full_name, a.start_time, a.status, b.full_name
-             ORDER BY a.start_time ASC'
+             WHERE a.appointment_date >= CURRENT_DATE - INTERVAL \'7 day\'
+               AND a.status NOT IN (\'Cancelled\', \'NoShow\')
+             GROUP BY a.appointment_id, a.barber_id, u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name
+             ORDER BY a.appointment_date ASC, a.start_time ASC'
         );
+        $appointmentsStmt->bindValue(':slot_duration', shop_appointment_duration_minutes(), PDO::PARAM_INT);
         $appointmentsStmt->execute();
         $appointments = $appointmentsStmt->fetchAll();
 
         $walkinsStmt = $pdo->prepare(
             'SELECT wq.queue_id, wq.queue_number, wq.barber_id,
-                    CONCAT(\'Walk-in #\', RIGHT(wq.queue_number, 3)) AS name,
+                    COALESCE(NULLIF(TRIM(wq.guest_name), \'\'), \'Walk-in #\' || RIGHT(wq.queue_number, 3)) AS name,
                     string_agg(s.service_name, \', \' ORDER BY s.service_name) AS service,
                     wq.wait_time_minutes,
                     wq.status,
@@ -100,7 +107,7 @@ try {
              JOIN services s ON wsd.service_id = s.service_id
              LEFT JOIN barbers b ON wq.barber_id = b.barber_id
              WHERE DATE(wq.created_at) = CURRENT_DATE
-             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.wait_time_minutes, wq.status, b.full_name
+             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
              ORDER BY wq.queue_id ASC'
         );
         $walkinsStmt->execute();
@@ -119,8 +126,10 @@ try {
                     'barber_id' => (int)$row['barber_id'],
                     'name' => $row['name'],
                     'service' => $row['service'],
+                    'appointment_date' => (string)$row['appointment_date'],
                     'time' => $row['time'],
-                    'duration' => $row['duration'],
+                    'end_time' => $row['end_time'],
+                    'duration' => ((int)$row['duration']) . ' min',
                     'price' => $row['price'],
                     'status' => $row['status'],
                     'barber' => $row['barber'],

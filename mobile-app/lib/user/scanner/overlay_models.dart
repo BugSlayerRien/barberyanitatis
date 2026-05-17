@@ -40,7 +40,7 @@ class OverlayCalibration {
     required this.heightScale,
     required this.xOffset,
     required this.yOffset,
-    this.hairClipFactor = 0.57,
+    this.hairClipFactor = 0.58,
     this.visualScale = 1.0,
     this.yawShiftFactor = 0.07,
   });
@@ -49,8 +49,8 @@ class OverlayCalibration {
     widthScale: 1.12,
     heightScale: 1.22,
     xOffset: 0.00,
-    yOffset: -0.18,
-    hairClipFactor: 0.74,
+    yOffset: 0.04,
+    hairClipFactor: 0.58,
     visualScale: 1.16,
     yawShiftFactor: 0.06,
   );

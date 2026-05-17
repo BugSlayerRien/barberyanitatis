@@ -26,6 +26,35 @@ String formatTo12Hour(String input) {
   return '$hour12:$minuteText $suffix';
 }
 
+const int kShopSlotStartHour = 9;
+const int kShopSlotEndHour = 19;
+
+/// On-the-hour starts from 9:00 AM through 7:00 PM (service ends by 8:00 PM).
+bool isShopHourlySlotTime(String time) {
+  final match = RegExp(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?$').firstMatch(time.trim());
+  if (match == null) {
+    return false;
+  }
+
+  final hour = int.tryParse(match.group(1) ?? '');
+  final minute = int.tryParse(match.group(2) ?? '');
+  if (hour == null || minute == null) {
+    return false;
+  }
+
+  return minute == 0 && hour >= kShopSlotStartHour && hour <= kShopSlotEndHour;
+}
+
+List<String> shopHourlySlotTimesCanonical() {
+  return List<String>.generate(
+    kShopSlotEndHour - kShopSlotStartHour + 1,
+    (index) {
+      final hour = kShopSlotStartHour + index;
+      return '${hour.toString().padLeft(2, '0')}:00:00';
+    },
+  );
+}
+
 DateTime? tryParseSlotDateTime({
   required DateTime date,
   required String time,

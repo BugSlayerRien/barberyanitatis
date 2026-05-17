@@ -1,21 +1,27 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'app_navigator.dart';
+
+export 'app_navigator.dart' show navigatorKey, routeObserver;
+import 'user/auth_bootstrap.dart';
 import 'user/auth_page.dart';
 import 'user/splash_page.dart';
+import 'kiosk/kiosk_home_page.dart';
 import 'package:app_links/app_links.dart';
 import 'user/payment_result_page.dart';
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+import 'user/scanner/overlay_asset_cache.dart';
 
 // --- 1. Define Custom Colors ---
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBlackColor = Color(0xFF111111);
 const Color kOrangeColor = Color(0xFFF37022);
+
+const String _appMode = String.fromEnvironment('APP_MODE', defaultValue: 'customer');
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,10 +38,18 @@ Future<void> main() async {
     authCallbackUrlHostname: 'login-callback',
   );
 
+  await AuthBootstrap.initialize();
+
+  // Preload haircut overlay PNGs in background (reduces scanner/results lag).
+  unawaited(OverlayAssetCache.preload());
+
   // Setup deep link listener to handle app scheme callbacks (payment return)
   final AppLinks _appLinks = AppLinks();
   _appLinks.uriLinkStream.listen((uri) {
-    if (uri == null) return;
+    if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
+      unawaited(AuthBootstrap.handleAuthCallbackUri(uri));
+      return;
+    }
     if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
       final params = uri.queryParameters;
       try {
@@ -71,7 +85,7 @@ class TatisBarbershopApp extends StatelessWidget {
           labelLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.labelLarge),
         ),
       ),
-      home: const SplashPage(),
+      home: _appMode == 'kiosk' ? const KioskHomePage() : const SplashPage(),
       routes: {
         '/payment-result': (context) => const PaymentResultPage(),
       },

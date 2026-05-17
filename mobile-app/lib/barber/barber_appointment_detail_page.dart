@@ -63,14 +63,15 @@ class BarberAppointmentDetailPage extends StatelessWidget {
       entries.add(_PreviewImage(label: label, url: ApiConfig.resolveImageUrl(value)));
     }
 
-    add('Front', appointment['frontViewUrl'] ?? appointment['front_view_url']);
-    add('Left', appointment['sideViewUrl'] ?? appointment['side_view_url']);
-    add('Right', appointment['backViewUrl'] ?? appointment['back_view_url']);
+    add('Front', appointment['customerFrontUrl'] ?? appointment['frontViewUrl'] ?? appointment['front_view_url']);
+    add('Left', appointment['customerLeftUrl'] ?? appointment['sideViewUrl'] ?? appointment['side_view_url']);
+    add('Right', appointment['customerRightUrl'] ?? appointment['backViewUrl'] ?? appointment['back_view_url']);
     return entries;
   }
 
   Widget _imageGallery(List<_PreviewImage> images) {
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF121212),
@@ -90,7 +91,7 @@ class BarberAppointmentDetailPage extends StatelessWidget {
             runSpacing: 10,
             children: images.map((image) {
               return SizedBox(
-                width: 110,
+                width: 108,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

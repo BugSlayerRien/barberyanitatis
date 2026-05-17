@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/shop_schedule.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -59,16 +60,21 @@ function ensure_financial_tables(PDO $pdo): void
 
 function derive_payment_state(?string $paymentStatus, ?string $intentStatus): string
 {
-    if ($paymentStatus === 'Captured') {
+    $payment = $paymentStatus !== null ? trim((string)$paymentStatus) : '';
+    if ($payment !== '' && in_array(strtolower($payment), ['captured', 'paid', 'succeeded'], true)) {
         return 'Paid';
     }
 
-    if ($intentStatus !== null) {
-        if (in_array($intentStatus, ['PendingGateway', 'Verifying'], true)) {
+    $intent = $intentStatus !== null ? trim((string)$intentStatus) : '';
+    if ($intent !== '') {
+        if (in_array($intent, ['PendingGateway', 'Verifying', 'Processing'], true)) {
             return 'Verifying';
         }
-        if (in_array($intentStatus, ['Failed', 'Expired', 'Cancelled'], true)) {
+        if (in_array($intent, ['Failed', 'Expired', 'Cancelled'], true)) {
             return 'Failed';
+        }
+        if (in_array(strtolower($intent), ['paid', 'succeeded', 'captured'], true)) {
+            return 'Paid';
         }
     }
 
@@ -179,6 +185,7 @@ try {
     $pdo = get_db_connection();
     ensure_financial_tables($pdo);
     ensure_appointments_status_constraint($pdo);
+    auto_complete_due_appointments($pdo);
 
     if ($action === 'create') {
         $userID = (int)($input['userID'] ?? 0);
@@ -201,23 +208,25 @@ try {
             json_response(['error' => 'Invalid appointmentDate format (expected YYYY-MM-DD).'], 422);
         }
 
-        $appointmentDateTimeStart = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $appointmentDate . ' ' . $startTime);
-        $appointmentDateTimeEnd = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $appointmentDate . ' ' . $endTime);
+        $shopTz = new DateTimeZone(shop_timezone());
+        $appointmentDateTimeStart = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $appointmentDate . ' ' . $startTime, $shopTz);
+        $appointmentDateTimeEnd = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $appointmentDate . ' ' . $endTime, $shopTz);
         if ($appointmentDateTimeStart === false || $appointmentDateTimeEnd === false) {
             json_response(['error' => 'Invalid appointment date/time value.'], 422);
         }
 
-        if ($appointmentDateTimeEnd <= $appointmentDateTimeStart) {
-            json_response(['error' => 'endTime must be later than startTime.'], 422);
+        if (!shop_is_time_within_hours($startTime) || !shop_is_allowed_slot_time($startTime)) {
+            json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
         }
 
-        $durationMinutes = (int)floor(($appointmentDateTimeEnd->getTimestamp() - $appointmentDateTimeStart->getTimestamp()) / 60);
-        if ($durationMinutes < 10 || $durationMinutes > 240) {
-            json_response(['error' => 'Invalid appointment duration.'], 422);
+        $durationMinutes = shop_appointment_duration_minutes();
+        $endTime = shop_add_minutes_to_time($startTime, $durationMinutes);
+        $appointmentDateTimeEnd = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $appointmentDate . ' ' . $endTime, $shopTz);
+        if ($appointmentDateTimeEnd === false || $appointmentDateTimeEnd <= $appointmentDateTimeStart) {
+            json_response(['error' => 'Invalid appointment time range.'], 422);
         }
 
-        $now = new DateTimeImmutable('now');
-        if ($appointmentDateTimeStart < $now) {
+        if ($appointmentDateTimeStart < shop_now()) {
             json_response(['error' => 'Cannot book an appointment in the past.'], 422);
         }
 
@@ -419,6 +428,16 @@ try {
             ':message' => 'Your booking ' . $bookingCode . ' is scheduled on ' . $appointmentDate . ' at ' . $startTime . '.',
         ]);
 
+        // Log appointment creation to audit trail
+        audit_log($pdo, 'CREATE', 'appointments', (string)$appointmentID, null, [
+            'booking_code' => $bookingCode,
+            'user_id' => $userID,
+            'barber_id' => $barberID,
+            'appointment_date' => $appointmentDate,
+            'start_time' => $startTime,
+            'status' => 'PendingPayment',
+        ], $userID);
+
         $pdo->commit();
 
         json_response([
@@ -473,7 +492,10 @@ try {
         $serviceStmt = $pdo->prepare(
             "SELECT ad.appointment_id, ad.service_id, ad.variant_id, ad.final_price,
                     s.service_name, s.base_duration,
-                    hs.style_name AS hairstyle_name
+                    hs.style_name AS hairstyle_name,
+                    COALESCE(ad.customer_front_url, hv.front_view_url) AS front_view_url,
+                    COALESCE(ad.customer_left_url, hv.side_view_url) AS side_view_url,
+                    COALESCE(ad.customer_right_url, hv.back_view_url) AS back_view_url
              FROM appointment_details ad
              JOIN services s ON ad.service_id = s.service_id
              LEFT JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
@@ -484,10 +506,17 @@ try {
         $serviceRows = $serviceStmt->fetchAll();
 
         $serviceMap = [];
+        $imageMap = [];
         foreach ($serviceRows as $row) {
             $aid = (int)$row['appointment_id'];
             if (!isset($serviceMap[$aid])) {
                 $serviceMap[$aid] = [];
+                // Store the first variant's image URLs for this appointment
+                $imageMap[$aid] = [
+                    'frontViewUrl' => $row['front_view_url'],
+                    'sideViewUrl' => $row['side_view_url'],
+                    'backViewUrl' => $row['back_view_url'],
+                ];
             }
             $serviceMap[$aid][] = [
                 'serviceID' => (int)$row['service_id'],
@@ -499,7 +528,7 @@ try {
             ];
         }
 
-        $appointments = array_map(function ($row) use ($serviceMap, $pdo) {
+        $appointments = array_map(function ($row) use ($serviceMap, $imageMap, $pdo) {
             $aid = (int)$row['appointment_id'];
             $intentStatus = $row['intent_status'] !== null ? (string)$row['intent_status'] : null;
             $paymentStatus = $row['payment_status'] !== null ? (string)$row['payment_status'] : null;
@@ -534,6 +563,9 @@ try {
                 'canRetryPayment' => $canRetryPayment,
                 'canReschedule' => $paymentState === 'Paid' && in_array((string)$row['status'], ['Scheduled', 'PendingPayment'], true),
                 'services' => $serviceMap[$aid] ?? [],
+                'frontViewUrl' => ($imageMap[$aid]['frontViewUrl'] ?? null),
+                'sideViewUrl' => ($imageMap[$aid]['sideViewUrl'] ?? null),
+                'backViewUrl' => ($imageMap[$aid]['backViewUrl'] ?? null),
             ];
         }, $appointments);
 
@@ -594,6 +626,13 @@ try {
             ':message' => 'Your appointment on ' . (string)$appt['appointment_date'] . ' at ' . (string)$appt['start_time'] . ' was cancelled.',
         ]);
 
+        // Log appointment cancellation to audit trail
+        audit_log($pdo, 'CANCEL', 'appointments', (string)$appointmentID, [
+            'status' => $appt['status'],
+        ], [
+            'status' => 'Cancelled',
+        ], (int)$appt['user_id']);
+
         $pdo->commit();
 
         json_response(['message' => 'Appointment cancelled']);
@@ -616,12 +655,16 @@ try {
             json_response(['error' => 'Invalid appointmentDate format (expected YYYY-MM-DD).'], 422);
         }
 
-        $newStartDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newStartTime);
-        $newEndDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newEndTime);
+        $shopTz = new DateTimeZone(shop_timezone());
+        $newStartDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newStartTime, $shopTz);
+        $newEndDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newEndTime, $shopTz);
         if ($newStartDt === false || $newEndDt === false || $newEndDt <= $newStartDt) {
             json_response(['error' => 'Invalid reschedule time range.'], 422);
         }
-        if ($newStartDt < new DateTimeImmutable('now')) {
+        if (!shop_is_allowed_slot_time($newStartTime)) {
+            json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
+        }
+        if ($newStartDt < shop_now()) {
             json_response(['error' => 'Cannot reschedule to a past timeslot.'], 422);
         }
 
@@ -773,9 +816,41 @@ try {
         $stmt->execute([':barber_id' => $barberID]);
         $appointments = $stmt->fetchAll();
 
-        $appointments = array_map(function ($row) {
+        if (count($appointments) === 0) {
+            json_response(['appointments' => []]);
+        }
+
+        $appointmentIds = array_map(fn($row) => (int)$row['appointment_id'], $appointments);
+        $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
+
+        $imageStmt = $pdo->prepare(
+            "SELECT ad.appointment_id,
+                    COALESCE(ad.customer_front_url, hv.front_view_url) AS front_view_url,
+                    COALESCE(ad.customer_left_url, hv.side_view_url) AS side_view_url,
+                    COALESCE(ad.customer_right_url, hv.back_view_url) AS back_view_url
+             FROM appointment_details ad
+             LEFT JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
+             WHERE ad.appointment_id IN ($inClause)"
+        );
+        $imageStmt->execute($appointmentIds);
+        $imageRows = $imageStmt->fetchAll();
+
+        $imageMap = [];
+        foreach ($imageRows as $row) {
+            $aid = (int)$row['appointment_id'];
+            if (!isset($imageMap[$aid])) {
+                $imageMap[$aid] = [
+                    'frontViewUrl' => $row['front_view_url'],
+                    'sideViewUrl' => $row['side_view_url'],
+                    'backViewUrl' => $row['back_view_url'],
+                ];
+            }
+        }
+
+        $appointments = array_map(function ($row) use ($imageMap) {
+            $aid = (int)$row['appointment_id'];
             return [
-                'appointmentID' => (int)$row['appointment_id'],
+                'appointmentID' => $aid,
                 'bookingCode' => $row['booking_code'],
                 'appointmentDate' => $row['appointment_date'],
                 'startTime' => $row['start_time'],
@@ -783,6 +858,9 @@ try {
                 'status' => $row['status'],
                 'customerID' => (int)$row['customer_id'],
                 'customerName' => $row['customer_name'],
+                'frontViewUrl' => ($imageMap[$aid]['frontViewUrl'] ?? null),
+                'sideViewUrl' => ($imageMap[$aid]['sideViewUrl'] ?? null),
+                'backViewUrl' => ($imageMap[$aid]['backViewUrl'] ?? null),
             ];
         }, $appointments);
 

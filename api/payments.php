@@ -114,17 +114,21 @@ function get_latest_intent(PDO $pdo, int $appointmentID): ?array
 
 function build_payment_state(?array $payment, ?array $intent): string
 {
-    if ($payment && (string)$payment['status'] === 'Captured') {
+    $paymentStatus = $payment ? trim((string)$payment['status']) : '';
+    if ($paymentStatus !== '' && in_array(strtolower($paymentStatus), ['captured', 'paid', 'succeeded'], true)) {
         return 'Paid';
     }
 
     if ($intent) {
-        $intentStatus = (string)$intent['status'];
-        if (in_array($intentStatus, ['PendingGateway', 'Verifying'], true)) {
+        $intentStatus = trim((string)$intent['status']);
+        if (in_array($intentStatus, ['PendingGateway', 'Verifying', 'Processing'], true)) {
             return 'Verifying';
         }
         if (in_array($intentStatus, ['Failed', 'Expired', 'Cancelled'], true)) {
             return 'Failed';
+        }
+        if (in_array(strtolower($intentStatus), ['paid', 'succeeded', 'captured'], true)) {
+            return 'Paid';
         }
     }
 
@@ -348,6 +352,15 @@ try {
             ':message' => 'Payment intent created for booking ' . (string)$appointment['booking_code'] . '. Please complete checkout before expiry.',
         ]);
 
+        // Log payment intent creation to audit trail
+        audit_log($pdo, 'CREATE_INTENT', 'appointment_payment_intents', (string)$intent['intent_id'], null, [
+            'appointment_id' => $appointmentID,
+            'amount' => round($amount, 2),
+            'method' => $method,
+            'provider' => $provider,
+            'status' => 'PendingGateway',
+        ], (int)$appointment['user_id']);
+
         json_response([
             'message' => 'Payment intent created.',
             'intent' => to_intent_payload($intent, 'Verifying'),
@@ -485,6 +498,14 @@ try {
 
             $payment = finalize_paid_intent($pdo, $intent, $appointment, (string)$intent['method']);
 
+            // Log payment completion to audit trail
+            audit_log($pdo, 'PAYMENT_CAPTURED', 'appointment_payment_intents', (string)$intent['intent_id'], [
+                'status' => 'Verifying',
+            ], [
+                'status' => 'Paid',
+                'provider_ref' => $providerRef !== '' ? $providerRef : ('MOCK-' . strtoupper(bin2hex(random_bytes(4)))),
+            ], (int)$appointment['user_id']);
+
             $pdo->commit();
 
             $intent = get_latest_intent($pdo, (int)$intent['appointment_id']);
@@ -516,6 +537,14 @@ try {
             ':title' => 'Payment failed',
             ':message' => 'Payment for booking ' . (string)$appointment['booking_code'] . ' failed. You can retry payment before your slot expires.',
         ]);
+
+        // Log payment failure to audit trail
+        audit_log($pdo, 'PAYMENT_FAILED', 'appointment_payment_intents', (string)$intent['intent_id'], [
+            'status' => 'Verifying',
+        ], [
+            'status' => 'Failed',
+            'failure_reason' => (string)($input['failureReason'] ?? 'Payment failed on provider side.'),
+        ], (int)$appointment['user_id']);
 
         $pdo->commit();
 

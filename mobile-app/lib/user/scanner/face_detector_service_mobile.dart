@@ -10,12 +10,16 @@ class DetectedFaceFrame {
   final Size imageSize;
   final double? headEulerAngleY;
   final double? headEulerAngleZ;
+  final Map<int, Map<String, double>>? landmarks;
+  final List<Map<String, double>>? faceContour;
 
   const DetectedFaceFrame({
     required this.boundingBox,
     required this.imageSize,
     this.headEulerAngleY,
     this.headEulerAngleZ,
+    this.landmarks,
+    this.faceContour,
   });
 }
 
@@ -34,8 +38,9 @@ class FaceDetectorService {
       _faceDetector = FaceDetector(
         options: FaceDetectorOptions(
           performanceMode: FaceDetectorMode.fast,
-          enableLandmarks: false,
-          enableContours: false,
+          enableLandmarks: true,
+          enableContours: true,
+          enableClassification: true,
           enableTracking: true,
         ),
       );
@@ -68,11 +73,36 @@ class FaceDetectorService {
       }
 
       final face = faces.first;
+      final landmarks = <int, Map<String, double>>{};
+      for (final entry in face.landmarks.entries) {
+        final landmark = entry.value;
+        if (landmark == null) {
+          continue;
+        }
+        final position = landmark.position;
+        landmarks[entry.key.rawValue] = <String, double>{
+          'x': (position.dx / image.width).clamp(0.0, 1.0).toDouble(),
+          'y': (position.dy / image.height).clamp(0.0, 1.0).toDouble(),
+        };
+      }
+
+      final faceContourPoints = face.contours[FaceContourType.face]?.points;
+      final faceContour = faceContourPoints
+          ?.map((point) => <String, double>{
+                'x': (point.dx / image.width).clamp(0.0, 1.0).toDouble(),
+                'y': (point.dy / image.height).clamp(0.0, 1.0).toDouble(),
+              })
+          .toList();
+
       return DetectedFaceFrame(
         boundingBox: face.boundingBox,
         imageSize: Size(image.width.toDouble(), image.height.toDouble()),
         headEulerAngleY: face.headEulerAngleY,
         headEulerAngleZ: face.headEulerAngleZ,
+        landmarks: landmarks.isEmpty ? null : landmarks,
+        faceContour: (faceContour == null || faceContour.isEmpty)
+            ? null
+            : faceContour,
       );
     } catch (e, st) {
       debugPrint('[FaceDetectorService] Processing error: $e\nStackTrace: $st');

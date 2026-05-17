@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class UserSession {
@@ -15,6 +16,11 @@ class UserSession {
   static int? selectedServiceId;
   static int? selectedEstimatedMinutes;
   static Map<String, String>? selectedPreviewImages;
+  /// Customer-specific composited previews (face + chosen haircut overlay).
+  static Map<String, String>? customerPreviewImages;
+  static Map<String, String>? capturedFaceImages;
+  /// Normalized face rectangles per capture angle (front/left/right).
+  static Map<String, Rect>? captureFaceRects;
   static String? activeScanSessionId;
   static bool hasRecentRecommendations = false;
 
@@ -97,6 +103,22 @@ class UserSession {
     return activeScanSessionId!;
   }
 
+  /// Clears scan/booking selection state without signing out.
+  static void resetScanState() {
+    selectedStyleName = null;
+    selectedVariantId = null;
+    selectedServiceId = null;
+    selectedEstimatedMinutes = null;
+    selectedPreviewImages = null;
+    customerPreviewImages = null;
+    capturedFaceImages = null;
+    captureFaceRects = null;
+    activeScanSessionId = null;
+    hasRecentRecommendations = false;
+    lastScan = null;
+    lastRecommendations = [];
+  }
+
   static Future<void> clear() async {
     userId = null;
     fullName = null;
@@ -107,6 +129,9 @@ class UserSession {
     selectedServiceId = null;
     selectedEstimatedMinutes = null;
     selectedPreviewImages = null;
+    customerPreviewImages = null;
+    capturedFaceImages = null;
+    captureFaceRects = null;
     activeScanSessionId = null;
     hasRecentRecommendations = false;
     lastScan = null;

@@ -7,12 +7,16 @@ class DetectedFaceFrame {
   final Size imageSize;
   final double? headEulerAngleY;
   final double? headEulerAngleZ;
+  final Map<int, Map<String, double>>? landmarks;
+  final List<Map<String, double>>? faceContour;
 
   const DetectedFaceFrame({
     required this.boundingBox,
     required this.imageSize,
     this.headEulerAngleY,
     this.headEulerAngleZ,
+    this.landmarks,
+    this.faceContour,
   });
 }
 
