@@ -1,21 +1,63 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'app_navigator.dart';
+
+export 'app_navigator.dart' show navigatorKey, routeObserver;
+import 'user/auth_bootstrap.dart';
 import 'user/auth_page.dart';
 import 'user/splash_page.dart';
+import 'kiosk/kiosk_home_page.dart';
+import 'package:app_links/app_links.dart';
+import 'user/payment_result_page.dart';
+import 'user/scanner/overlay_asset_cache.dart';
 
 // --- 1. Define Custom Colors ---
 const Color kGoldColor = Color(0xFFA99941);
 const Color kDarkBlackColor = Color(0xFF111111);
 const Color kOrangeColor = Color(0xFFF37022);
 
+const String _appMode = String.fromEnvironment('APP_MODE', defaultValue: 'customer');
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  try {
-    await Firebase.initializeApp();
-  } catch (_) {
-    // Allow app to start even if Firebase isn't configured yet.
+  if (kIsWeb) {
+    // Use path-based routing so OAuth fragments (#access_token=...) are not
+    // interpreted as Flutter route paths.
+    setUrlStrategy(PathUrlStrategy());
   }
+
+  await Supabase.initialize(
+    url: 'https://sergfnujsutcschocuuz.supabase.co',
+    anonKey:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
+    authCallbackUrlHostname: 'login-callback',
+  );
+
+  await AuthBootstrap.initialize();
+
+  // Preload haircut overlay PNGs in background (reduces scanner/results lag).
+  unawaited(OverlayAssetCache.preload());
+
+  // Setup deep link listener to handle app scheme callbacks (payment return)
+  final AppLinks _appLinks = AppLinks();
+  _appLinks.uriLinkStream.listen((uri) {
+    if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
+      unawaited(AuthBootstrap.handleAuthCallbackUri(uri));
+      return;
+    }
+    if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
+      final params = uri.queryParameters;
+      try {
+        navigatorKey.currentState?.pushNamed('/payment-result', arguments: params);
+      } catch (_) {}
+    }
+  }, onError: (_) {});
+
   runApp(const TatisBarbershopApp());
 }
 
@@ -29,6 +71,8 @@ class TatisBarbershopApp extends StatelessWidget {
     return MaterialApp(
       title: 'Tatis Barbershop',
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
+      navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
         fontFamily: 'CenturyGothic',
@@ -41,7 +85,12 @@ class TatisBarbershopApp extends StatelessWidget {
           labelLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.labelLarge),
         ),
       ),
-      home: const SplashPage(),
+      home: _appMode == 'kiosk' ? const KioskHomePage() : const SplashPage(),
+      routes: {
+        '/payment-result': (context) => const PaymentResultPage(),
+      },
+      onUnknownRoute: (_) =>
+          MaterialPageRoute(builder: (_) => const SplashPage()),
     );
   }
 }

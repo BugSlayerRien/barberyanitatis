@@ -10,46 +10,134 @@
     <div class="app">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-badge">TB</div>
+          <div class="brand-badge brand-badge-logo" aria-label="Tatis logo"></div>
           <div>
-            <h1>RECEPTIONIST</h1>
-            <div class="badge">Barberya ni Tatis</div>
+            <h1>Barberya ni Tatis</h1>
+            <div class="badge">RECEPTIONIST</div>
           </div>
         </div>
         <nav class="nav">
-          <button class="active" data-view="analytics">AI Analytics<span>Walk-ins & KPIs</span></button>
-          <button data-view="appointments">Appointments<span>Today</span></button>
-          <button data-view="walkins">Walk-ins<span>Queue</span></button>
-          <button data-view="tracking">Tracking<span>Service status</span></button>
-          <button data-view="barbers">Barbers<span>Team list</span></button>
-          <button data-view="logout">Logout<span>Exit</span></button>
+          <div class="nav-category">Dashboard</div>
+          <button class="active" data-view="dashboard" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3z"></path><path d="M13 21h8v-6h-8z"></path><path d="M13 11h8V3h-8z"></path><path d="M3 21h8v-6H3z"></path></svg></span>
+            <span class="nav-label">Dashboard</span>
+          </button>
+
+          <div class="nav-category">Operations</div>
+          <button data-view="tracking" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg></span>
+            <span class="nav-label">Tracking</span>
+          </button>
+
+          <div class="nav-category">Team</div>
+          <button data-view="barbers" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
+            <span class="nav-label">Barbers</span>
+          </button>
+
+          <div class="nav-category">Session</div>
+          <button data-view="logout" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>
+            <span class="nav-label">Logout</span>
+          </button>
         </nav>
+        <div class="sidebar-footer">
+          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+        </div>
       </aside>
       <main class="main">
         <div class="header">
-          <h2>Receptionist Dashboard</h2>
-          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+          <div>
+            <h2>Receptionist Control Desk</h2>
+            <p class="subtitle">Queue flow, appointment actions, and AI service readiness in one branded desk.</p>
+          </div>
+          <div class="toolbar">
+            <label class="switch">
+              <input type="checkbox" id="auto-refresh-toggle" />
+              Auto-refresh
+            </label>
+            <button class="btn" id="refresh-dashboard">Refresh</button>
+            <button class="profile-chip" id="profile-avatar-btn" type="button" title="View profile">
+              <span class="profile-chip-avatar" id="profile-avatar-initial">R</span>
+              <span class="profile-chip-name" id="profile-avatar-name">Receptionist</span>
+            </button>
+          </div>
         </div>
 
-        <section id="analytics-view">
+        <section id="dashboard-view">
+          <div class="card hero-card" style="margin-bottom: 16px;">
+            <h3>Front Desk Priority</h3>
+            <p class="meta">Keep waiting times low, assign barbers quickly, and prevent service bottlenecks during peak hours.</p>
+          </div>
           <div class="grid stats" id="analytics-stats"></div>
-          <div class="section-title">Today Summary</div>
-          <div class="card">
-            <p>Monitor walk-ins, appointments, and service progress. Connect this view to the MySQL API for live data.</p>
+          <div class="split" style="margin-top: 16px;">
+            <div>
+              <div class="section-title">Today Summary</div>
+              <div class="card">
+                <p id="summary-text">Loading summary...</p>
+              </div>
+            </div>
+            <div>
+              <div class="section-title">Quick Actions</div>
+              <div class="card">
+                <div class="row-wrap">
+                  <button class="btn" data-jump="tracking" type="button">Open Tracking</button>
+                  <button class="btn secondary" data-jump="barbers" type="button">View Barbers</button>
+                </div>
+                <p class="meta" style="margin-top: 10px;">Use the buttons in the sidebar for the full appointments and walk-ins queues.</p>
+              </div>
+            </div>
           </div>
-        </section>
 
-        <section id="appointments-view" hidden>
-          <div class="section-title">Today’s Appointments</div>
-          <div class="card">
-            <table class="table" id="appointments-table"></table>
-          </div>
-        </section>
-
-        <section id="walkins-view" hidden>
-          <div class="section-title">Walk-in Queue</div>
-          <div class="card">
-            <table class="table" id="walkins-table"></table>
+          <div class="split" style="margin-top: 16px;">
+            <div>
+              <div class="section-title">Today’s Appointments</div>
+              <div class="card" style="margin-bottom: 12px;">
+                <div class="row-wrap">
+                  <input class="input" id="appointments-search" placeholder="Search client, service, barber" style="max-width: 320px;" />
+                  <select class="select" id="appointments-status-filter" style="max-width: 220px;">
+                    <option value="all">All statuses</option>
+                    <option value="Scheduled">Scheduled</option>
+                    <option value="CheckedIn">Checked In</option>
+                    <option value="InProgress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Cancelled">Cancelled</option>
+                    <option value="NoShow">No Show</option>
+                  </select>
+                  <button class="btn" id="appointments-export">Export CSV</button>
+                </div>
+              </div>
+              <div class="card">
+                <table class="table" id="appointments-table"></table>
+              </div>
+            </div>
+            <div>
+              <div class="section-title">Walk-in Queue</div>
+              <div class="card" style="margin-bottom: 12px;">
+                <div class="row-wrap">
+                  <input class="input" id="walkins-search" placeholder="Search queue, service, status" style="max-width: 320px;" />
+                </div>
+              </div>
+              <div class="card" style="margin-bottom: 16px;">
+                <form id="walkin-form" class="form-grid">
+                  <label>
+                    <div class="meta">Services</div>
+                    <select id="walkin-services" class="select" multiple required></select>
+                  </label>
+                  <label>
+                    <div class="meta">Preferred Barber</div>
+                    <select id="walkin-barber" class="select">
+                      <option value="">Unassigned</option>
+                    </select>
+                  </label>
+                  <button type="submit" class="btn">Add Walk-in</button>
+                  <div id="walkin-error" class="meta" style="color: var(--danger);"></div>
+                </form>
+              </div>
+              <div class="card">
+                <table class="table" id="walkins-table"></table>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -65,6 +153,22 @@
       </main>
     </div>
 
+    <dialog id="profile-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner">
+        <div class="row-wrap" style="justify-content: space-between; align-items: center;">
+          <h3 style="margin: 0;">Profile</h3>
+          <button class="icon-btn" id="profile-dialog-edit" type="button" title="Edit profile">✎</button>
+        </div>
+        <div class="list" id="profile-dialog-content"></div>
+        <div class="row-wrap" style="margin-top: 10px; justify-content: flex-end;">
+          <button class="btn" id="profile-dialog-save" type="button" hidden>Save</button>
+          <button class="btn secondary" id="profile-dialog-cancel" type="button" hidden>Cancel</button>
+          <button class="btn" id="profile-dialog-close" type="button">Close</button>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="../assets/api-config.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

@@ -1,0 +1,14 @@
+⚠️  DEMO CREDENTIALS - DO NOT USE WITHOUT FIXING SUPABASE AUTH FIRST
+Read SYSTEM_STATUS.md before attempting login!
+
+DEMO ACCOUNTS (Will NOT work until Supabase auth is configured):
+admin@tatis.local / Admin123!
+receptionist@tatis.local / Reception123!
+barber@tatis.local / Barber123!
+customer@tatis.local / Customer123!
+
+MOBILE APP: https://sergfnujsutcschocuuz.supabase.co (hardcoded in main.dart)
+WEB ADMIN: http://localhost/barberyanitatis/tatis_barbershop/web-admin/login.html
+PHP API: http://localhost/barberyanitatis/tatis_barbershop/api/
+
+CRITICAL: See SYSTEM_STATUS.md for what's broken and what to fix first.

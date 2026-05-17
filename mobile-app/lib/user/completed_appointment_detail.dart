@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'api_config.dart';
+
 class CompletedAppointmentDetailPage extends StatelessWidget {
   final Map<String, dynamic> appointment;
 
@@ -7,6 +9,11 @@ class CompletedAppointmentDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final previewImages = _previewImages();
+    final heroImage = previewImages.isNotEmpty
+        ? previewImages.first.url
+        : 'assets/images/kalbo.png';
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
@@ -28,8 +35,11 @@ class CompletedAppointmentDetailPage extends StatelessWidget {
               width: double.infinity,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                image: const DecorationImage(image: AssetImage('assets/images/kalbo.png'), fit: BoxFit.cover),
                 border: Border.all(color: const Color(0xFFA99941), width: 1),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: _buildHeroImage(heroImage),
               ),
             ),
             const SizedBox(height: 16),
@@ -52,6 +62,10 @@ class CompletedAppointmentDetailPage extends StatelessWidget {
             Text('Duration: ${appointment['duration']}', style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 12),
             Text('Price: ${appointment['price']}', style: const TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold)),
+            if (previewImages.isNotEmpty) ...[
+              const SizedBox(height: 20),
+              _previewGallery(previewImages),
+            ],
             const SizedBox(height: 24),
             const Spacer(),
             Row(
@@ -91,4 +105,99 @@ class CompletedAppointmentDetailPage extends StatelessWidget {
       ),
     );
   }
+
+  List<_PreviewImage> _previewImages() {
+    final entries = <_PreviewImage>[];
+
+    void add(String label, dynamic raw) {
+      final value = raw?.toString().trim() ?? '';
+      if (value.isEmpty) {
+        return;
+      }
+      entries.add(_PreviewImage(label: label, url: ApiConfig.resolveImageUrl(value)));
+    }
+
+    add('Front', appointment['customerFrontUrl'] ?? appointment['frontViewUrl'] ?? appointment['front_view_url']);
+    add('Left', appointment['customerLeftUrl'] ?? appointment['sideViewUrl'] ?? appointment['side_view_url']);
+    add('Right', appointment['customerRightUrl'] ?? appointment['backViewUrl'] ?? appointment['back_view_url']);
+    return entries;
+  }
+
+  Widget _buildHeroImage(String imageUrl) {
+    if (imageUrl.startsWith('assets/')) {
+      return Image.asset(imageUrl, fit: BoxFit.cover);
+    }
+
+    return Image.network(
+      imageUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => Image.asset(
+        'assets/images/kalbo.png',
+        fit: BoxFit.cover,
+      ),
+    );
+  }
+
+  Widget _previewGallery(List<_PreviewImage> images) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Hair Preview',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: images.map((image) {
+              return SizedBox(
+                width: 108,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AspectRatio(
+                      aspectRatio: 1,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: Image.network(
+                          image.url,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(
+                            color: const Color(0xFF1B1B1B),
+                            alignment: Alignment.center,
+                            child: const Icon(Icons.image_not_supported_outlined, color: Colors.white38),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      image.label,
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PreviewImage {
+  final String label;
+  final String url;
+
+  const _PreviewImage({required this.label, required this.url});
 }
