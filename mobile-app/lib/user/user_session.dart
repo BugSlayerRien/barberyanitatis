@@ -5,8 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class UserSession {
   static const String _userCalibrationKey = 'user_hair_calibration';
+  static const String _preferredHairTextureKey = 'preferred_hair_texture';
 
   static int? userId;
+  /// Straight, Wavy, or Curly — set during onboarding and editable in profile.
+  static String? preferredHairTexture;
   static String? fullName;
   static String? email;
   static List<String> roles = [];
@@ -29,6 +32,42 @@ class UserSession {
   static UserCalibration? _cachedUserCalibration;
 
   static UserCalibration? get userCalibration => _cachedUserCalibration;
+
+  static Future<String?> loadPreferredHairTexture() async {
+    if (preferredHairTexture != null && preferredHairTexture!.trim().isNotEmpty) {
+      return preferredHairTexture;
+    }
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getString(_preferredHairTextureKey)?.trim();
+    if (stored != null && stored.isNotEmpty) {
+      preferredHairTexture = _normalizeHairTexture(stored);
+    }
+    return preferredHairTexture;
+  }
+
+  static Future<void> savePreferredHairTexture(String texture) async {
+    final normalized = _normalizeHairTexture(texture);
+    if (normalized == null) {
+      return;
+    }
+    preferredHairTexture = normalized;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_preferredHairTextureKey, normalized);
+  }
+
+  static String? _normalizeHairTexture(String raw) {
+    final value = raw.trim().toLowerCase();
+    switch (value) {
+      case 'straight':
+        return 'Straight';
+      case 'wavy':
+        return 'Wavy';
+      case 'curly':
+        return 'Curly';
+      default:
+        return null;
+    }
+  }
 
   static Future<UserCalibration?> loadUserCalibration() async {
     final prefs = await SharedPreferences.getInstance();
@@ -136,8 +175,10 @@ class UserSession {
     hasRecentRecommendations = false;
     lastScan = null;
     lastRecommendations = [];
+    preferredHairTexture = null;
     _cachedUserCalibration = null;
-    // Clear calibration data from persistent storage
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_preferredHairTextureKey);
     await clearUserCalibration();
   }
 }

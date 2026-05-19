@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/replicate_helper.php';
 
 require_method('POST');
 
@@ -309,6 +310,61 @@ try {
             'frontViewUrl' => $front,
             'sideViewUrl' => $left,
             'backViewUrl' => $right,
+        ]);
+    }
+
+    if ($action === 'generateReplicatePreview') {
+        if (!replicate_is_configured()) {
+            json_response([
+                'error' => 'Replicate is not configured',
+                'hint' => 'Set REPLICATE_API_TOKEN in .env on the server.',
+            ], 503);
+        }
+
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+        $styleName = trim((string)($input['styleName'] ?? 'Selected haircut'));
+        $angle = trim((string)($input['angle'] ?? 'front'));
+        if ($scanSessionId === '') {
+            json_response(['error' => 'scanSessionId required'], 422);
+        }
+        if (!in_array($angle, ['front', 'left', 'right'], true)) {
+            json_response(['error' => 'angle must be front, left, or right'], 422);
+        }
+
+        $captureStmt = $pdo->prepare(
+            'SELECT file_path FROM face_scan_captures WHERE scan_session_id = :scan_session_id AND angle = :angle LIMIT 1'
+        );
+        $captureStmt->execute([
+            ':scan_session_id' => $scanSessionId,
+            ':angle' => $angle,
+        ]);
+        $capture = $captureStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$capture || empty($capture['file_path'])) {
+            json_response(['error' => 'Capture not found for this session'], 404);
+        }
+
+        $absolutePath = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim((string)$capture['file_path'], '/'));
+        if (!is_readable($absolutePath)) {
+            json_response(['error' => 'Capture file is not readable'], 500);
+        }
+
+        $bytes = file_get_contents($absolutePath);
+        if ($bytes === false || $bytes === '') {
+            json_response(['error' => 'Capture file is empty'], 500);
+        }
+
+        $mime = is_valid_jpeg_bytes($bytes) ? 'image/jpeg' : 'image/png';
+        $dataUrl = 'data:' . $mime . ';base64,' . base64_encode($bytes);
+        $generated = replicate_tryon_from_face_image($dataUrl, $styleName);
+        if (!$generated['ok']) {
+            json_response(['error' => $generated['error']], 502);
+        }
+
+        json_response([
+            'message' => 'Replicate preview generated',
+            'imageUrl' => $generated['imageUrl'],
+            'provider' => 'replicate',
+            'angle' => $angle,
         ]);
     }
 

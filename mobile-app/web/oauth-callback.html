@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Signing in…</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a0a;
+      color: #fff;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+    }
+    .box { text-align: center; padding: 24px; max-width: 420px; }
+    p { color: #aaa; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <main class="box">
+    <h2>Completing sign-in…</h2>
+    <p id="status">Returning to the app.</p>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var code = params.get('code');
+      var error = params.get('error') || params.get('error_description');
+      // Primary: passed on redirect URL (any Flutter web port — not hardcoded).
+      var returnTo = params.get('return_to');
+      if (!returnTo) {
+        returnTo = sessionStorage.getItem('tatis_oauth_return_to');
+      }
+      if (!returnTo && document.referrer) {
+        try {
+          var ref = new URL(document.referrer);
+          if (
+            (ref.protocol === 'http:' || ref.protocol === 'https:') &&
+            ref.host &&
+            ref.host.indexOf('supabase.co') === -1
+          ) {
+            returnTo = ref.origin + '/';
+          }
+        } catch (ignore) {}
+      }
+      if (!returnTo) {
+        document.getElementById('status').textContent =
+          'Missing return_to. Open the app from your Flutter web tab and sign in again. In Supabase, add Redirect URL: http://localhost:* and ' +
+          'http://localhost/barberyanitatis/tatis_barbershop/mobile-app/web/oauth-callback.html**';
+        return;
+      }
+
+      var target;
+      try {
+        target = new URL(returnTo);
+      } catch (e) {
+        document.getElementById('status').textContent =
+          'Could not read return URL. Re-open the app and try Google/Facebook sign-in again.';
+        return;
+      }
+
+      if (error) {
+        target.searchParams.set('error', error);
+        target.searchParams.set('error_description', error);
+      } else if (code) {
+        target.searchParams.set('code', code);
+      } else {
+        document.getElementById('status').textContent =
+          'No sign-in code received. Close this tab and try again from the app.';
+        return;
+      }
+
+      window.location.replace(target.toString());
+    })();
+  </script>
+</body>
+</html>

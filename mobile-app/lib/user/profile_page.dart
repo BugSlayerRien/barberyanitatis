@@ -1,7 +1,17 @@
-import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'dart:convert';
 import 'dart:io';
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'customer_navigation.dart';
 import 'widgets/app_top_bar.dart';
+import 'api_config.dart';
+import 'user_session.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -11,39 +21,252 @@ class ProfilePage extends StatefulWidget {
 }
 
 class _ProfilePageState extends State<ProfilePage> {
-  String _username = 'Customer';
-  String _email = 'customer@gmail.com';
-  File? _profileImage;
-  bool _isEditingUsername = false;
-  late TextEditingController _usernameController;
+  static const _genderOptions = ['Male', 'Female', 'Prefer not to tell'];
+  static const _hairTextureOptions = ['Straight', 'Wavy', 'Curly'];
+
+  bool _loading = true;
+  String? _error;
+  bool _saving = false;
+  String _fullName = '';
+  String _email = '';
+  String _phone = '';
+  String _accountAge = '';
+  int _haircutsDone = 0;
+  String _gender = '';
+  String _hairTexture = '';
+  String _profileImageUrl = '';
+  Uint8List? _profileImageBytes;
+  XFile? _profileImage;
+  late TextEditingController _nameController;
+  late TextEditingController _phoneController;
 
   @override
   void initState() {
     super.initState();
-    _usernameController = TextEditingController(text: _username);
+    _nameController = TextEditingController();
+    _phoneController = TextEditingController();
+    _loadProfile();
   }
 
   @override
   void dispose() {
-    _usernameController.dispose();
+    _nameController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final ImagePicker picker = ImagePicker();
-    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
-    if (image != null) {
-      setState(() {
-        _profileImage = File(image.path);
-      });
-    }
+  bool get _hasLocalSession {
+    return UserSession.userId != null ||
+        (UserSession.fullName ?? '').trim().isNotEmpty ||
+        (UserSession.email ?? '').trim().isNotEmpty;
   }
 
-  void _saveUsername() {
+  String _readProfileValue(Map<String, dynamic> metadata, String key) {
+    return metadata[key]?.toString().trim() ?? '';
+  }
+
+  String _genderForUi(String dbValue) {
+    final value = dbValue.trim();
+    if (value.isEmpty || value.toLowerCase() == 'other') {
+      return 'Prefer not to tell';
+    }
+    if (_genderOptions.contains(value)) {
+      return value;
+    }
+    return 'Prefer not to tell';
+  }
+
+  String _hairTextureForUi(String dbValue) {
+    final value = dbValue.trim();
+    if (value.isEmpty) {
+      return '';
+    }
+    for (final option in _hairTextureOptions) {
+      if (option.toLowerCase() == value.toLowerCase()) {
+        return option;
+      }
+    }
+    return value;
+  }
+
+  void _applyProfileData({
+    required String fullName,
+    required String email,
+    required String phone,
+    required String accountAge,
+    required int haircutsDone,
+    required String gender,
+    required String hairTexture,
+    required String profileImageUrl,
+    Uint8List? profileImageBytes,
+  }) {
     setState(() {
-      _username = _usernameController.text.isEmpty ? 'Customer' : _usernameController.text;
-      _isEditingUsername = false;
+      _fullName = fullName;
+      _email = email;
+      _phone = phone;
+      _accountAge = accountAge.isNotEmpty ? accountAge : '—';
+      _gender = _genderForUi(gender);
+      _hairTexture = _hairTextureForUi(hairTexture);
+      _haircutsDone = haircutsDone;
+      _profileImageUrl = profileImageUrl;
+      _profileImageBytes = profileImageBytes;
+      _nameController.text = _fullName;
+      _phoneController.text = _phone;
+      _loading = false;
+      _error = null;
     });
+  }
+
+  Future<Map<String, dynamic>?> _loadProfileFromApi(int userId) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/profile.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'get',
+        'userID': userId,
+      }),
+    );
+
+    final body = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
+
+    if (response.statusCode != 200) {
+      throw Exception(body['error']?.toString() ?? 'Failed to load profile');
+    }
+
+    final profile = body['profile'];
+    if (profile is! Map) {
+      throw Exception('Profile response was invalid');
+    }
+    return Map<String, dynamic>.from(profile);
+  }
+
+  Future<Map<String, dynamic>> _saveProfileToApi({
+    required int userId,
+    required String fullName,
+    required String phone,
+    required String gender,
+    required String hairTexture,
+    String? profileImageBase64,
+  }) async {
+    final payload = <String, dynamic>{
+      'action': 'update',
+      'userID': userId,
+      'fullName': fullName,
+      'phone': phone,
+      'gender': gender,
+      'hairTexture': hairTexture,
+    };
+    if (profileImageBase64 != null && profileImageBase64.isNotEmpty) {
+      payload['profile_image_base64'] = profileImageBase64;
+    }
+
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/profile.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+
+    final body = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
+
+    if (response.statusCode != 200) {
+      throw Exception(body['error']?.toString() ?? 'Failed to save profile');
+    }
+
+    final profile = body['profile'];
+    if (profile is Map) {
+      return Map<String, dynamic>.from(profile);
+    }
+    return body;
+  }
+
+  Future<void> _syncSupabaseMetadata(Map<String, dynamic> updates) async {
+    final currentSession = Supabase.instance.client.auth.currentSession;
+    final currentUser =
+        currentSession?.user ?? Supabase.instance.client.auth.currentUser;
+    if (currentUser == null) {
+      return;
+    }
+
+    await Supabase.instance.client.auth.updateUser(
+      UserAttributes(data: updates),
+    );
+  }
+
+  Future<void> _loadProfile() async {
+    final userId = UserSession.userId;
+    final currentSession = Supabase.instance.client.auth.currentSession;
+    final user = currentSession?.user ?? Supabase.instance.client.auth.currentUser;
+
+    if (userId == null && user == null && !_hasLocalSession) {
+      setState(() {
+        _loading = false;
+        _error = 'Please sign in again.';
+      });
+      return;
+    }
+
+    try {
+      if (userId != null && userId > 0) {
+        final profile = await _loadProfileFromApi(userId);
+        if (profile != null) {
+          _applyProfileData(
+            fullName: profile['fullName']?.toString().trim() ?? (UserSession.fullName ?? ''),
+            email: profile['email']?.toString().trim() ?? (UserSession.email ?? ''),
+            phone: profile['phone']?.toString().trim() ?? '',
+            accountAge: profile['accountAge']?.toString().trim() ?? '',
+            haircutsDone: profile['haircutsDone'] is int
+                ? profile['haircutsDone'] as int
+                : int.tryParse('${profile['haircutsDone']}') ?? 0,
+            gender: profile['gender']?.toString().trim() ?? '',
+            hairTexture: profile['hairTexture']?.toString().trim() ?? '',
+            profileImageUrl: profile['profileImage']?.toString().trim() ?? '',
+          );
+          return;
+        }
+      }
+
+      final metadata = user?.userMetadata ?? <String, dynamic>{};
+      final resolvedFullName = _readProfileValue(metadata, 'full_name').isNotEmpty
+          ? _readProfileValue(metadata, 'full_name')
+          : _readProfileValue(metadata, 'name').isNotEmpty
+              ? _readProfileValue(metadata, 'name')
+              : (UserSession.fullName ?? '').trim();
+      final resolvedEmail = (user?.email ?? UserSession.email ?? '').trim();
+      final resolvedPhone = _readProfileValue(metadata, 'phone');
+      final resolvedAccountAge = _readProfileValue(metadata, 'account_age');
+      final resolvedGender = _readProfileValue(metadata, 'gender');
+      final resolvedHairTexture = _readProfileValue(metadata, 'hair_texture');
+      final resolvedProfileImageUrl = _readProfileValue(metadata, 'avatar_url');
+      final resolvedProfileImageBase64 =
+          _readProfileValue(metadata, 'profile_image_base64');
+      final resolvedHaircutsDone = metadata['haircuts_done'] is int
+          ? metadata['haircuts_done'] as int
+          : int.tryParse('${metadata['haircuts_done']}') ?? 0;
+
+      _applyProfileData(
+        fullName: resolvedFullName,
+        email: resolvedEmail,
+        phone: resolvedPhone,
+        accountAge: resolvedAccountAge,
+        haircutsDone: resolvedHaircutsDone,
+        gender: resolvedGender,
+        hairTexture: resolvedHairTexture,
+        profileImageUrl: resolvedProfileImageUrl,
+        profileImageBytes: resolvedProfileImageBase64.isNotEmpty
+            ? base64Decode(resolvedProfileImageBase64)
+            : null,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = 'Error loading profile: ${e.toString()}';
+      });
+    }
   }
 
   @override
@@ -52,151 +275,434 @@ class _ProfilePageState extends State<ProfilePage> {
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
-        onBack: () => Navigator.of(context).pop(),
+        onBack: () => navigateBackToCustomerHome(context),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // Profile Picture
-            GestureDetector(
-              onTap: _pickImage,
-              child: Container(
-                width: 120,
-                height: 120,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white, width: 2),
-                  gradient: LinearGradient(
-                    colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.all(24),
+                child: CircularProgressIndicator(color: Colors.white),
+              )
+            else if (_error != null)
+              Text(_error!, style: const TextStyle(color: Colors.white70))
+            else ...[
+              GestureDetector(
+                onTap: _pickImage,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                    ),
+                  ),
+                  child: ClipOval(
+                    child: _profileImage != null
+                        ? (kIsWeb
+                            ? Image.network(_profileImage!.path, fit: BoxFit.cover)
+                            : Image.file(File(_profileImage!.path), fit: BoxFit.cover))
+                        : (_profileImageBytes != null
+                            ? Image.memory(_profileImageBytes!, fit: BoxFit.cover)
+                            : (_profileImageUrl.isNotEmpty
+                                ? Image.network(
+                                    ApiConfig.resolveImageUrl(_profileImageUrl),
+                                    fit: BoxFit.cover,
+                                  )
+                                : Center(
+                                    child: Text(
+                                      _fullName.isNotEmpty
+                                          ? _fullName
+                                              .trim()
+                                              .split(' ')
+                                              .map((e) => e.isNotEmpty ? e[0] : '')
+                                              .take(2)
+                                              .join()
+                                              .toUpperCase()
+                                          : 'U',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 32,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ))),
                   ),
                 ),
-                child: _profileImage != null
-                    ? ClipOval(
-                        child: Image.file(_profileImage!, fit: BoxFit.cover),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                _fullName.isNotEmpty ? _fullName : 'Customer',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 10),
+              _buildTierBadge(),
+              const SizedBox(height: 18),
+              _highlightCard('Account Age', _accountAge),
+              const SizedBox(height: 16),
+              _editCard('Full Name', _nameController, hint: 'Enter full name'),
+              const SizedBox(height: 16),
+              _infoCard('Email', _email.isNotEmpty ? _email : '—'),
+              const SizedBox(height: 16),
+              _dropdownCard(
+                label: 'Gender',
+                value: _gender.isEmpty ? 'Prefer not to tell' : _gender,
+                options: _genderOptions,
+                onChanged: (value) => setState(() => _gender = value ?? 'Prefer not to tell'),
+              ),
+              const SizedBox(height: 16),
+              _dropdownCard(
+                label: 'Hair Texture',
+                value: _hairTexture.isEmpty ? _hairTextureOptions.first : _hairTexture,
+                options: _hairTextureOptions,
+                onChanged: (value) => setState(() => _hairTexture = value ?? _hairTextureOptions.first),
+              ),
+              const SizedBox(height: 16),
+              _editCard('Mobile Number', _phoneController, hint: 'Enter mobile number'),
+              const SizedBox(height: 16),
+              _infoCard('Haircuts Done', _haircutsDone.toString()),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _saving ? null : _saveProfile,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                child: _saving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(color: Colors.black, strokeWidth: 2),
                       )
-                    : Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            Icon(Icons.camera_alt, color: Colors.white, size: 40),
-                            SizedBox(height: 8),
-                            Text('Tap to add\nphoto', textAlign: TextAlign.center, style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          ],
-                        ),
+                    : const Text(
+                        'Save Changes',
+                        style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16),
                       ),
               ),
-            ),
-            const SizedBox(height: 32),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 
-            // Username Section
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white, width: 1),
+  Future<void> _pickImage() async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() => _profileImage = image);
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    setState(() => _saving = true);
+    try {
+      final newFullName = _nameController.text.trim();
+      final newPhone = _phoneController.text.trim();
+      final newGender = _gender.trim().isEmpty ? 'Prefer not to tell' : _gender.trim();
+      final newHairTexture =
+          _hairTexture.trim().isEmpty ? _hairTextureOptions.first : _hairTexture.trim();
+
+      if (newFullName.isEmpty) {
+        throw StateError('Full name is required.');
+      }
+
+      Uint8List? newProfileImageBytes;
+      String? profileImageBase64;
+
+      if (_profileImage != null) {
+        final bytes = await _profileImage!.readAsBytes();
+        newProfileImageBytes = bytes;
+        profileImageBase64 = base64Encode(bytes);
+      }
+
+      final userId = UserSession.userId;
+      if (userId != null && userId > 0) {
+        final saved = await _saveProfileToApi(
+          userId: userId,
+          fullName: newFullName,
+          phone: newPhone,
+          gender: newGender,
+          hairTexture: newHairTexture,
+          profileImageBase64: profileImageBase64,
+        );
+
+        UserSession.fullName = newFullName;
+
+        if (!mounted) return;
+        _applyProfileData(
+          fullName: saved['fullName']?.toString().trim() ?? newFullName,
+          email: saved['email']?.toString().trim() ?? _email,
+          phone: saved['phone']?.toString().trim() ?? newPhone,
+          accountAge: saved['accountAge']?.toString().trim() ?? _accountAge,
+          haircutsDone: saved['haircutsDone'] is int
+              ? saved['haircutsDone'] as int
+              : _haircutsDone,
+          gender: saved['gender']?.toString().trim() ?? newGender,
+          hairTexture: saved['hairTexture']?.toString().trim() ?? newHairTexture,
+          profileImageUrl: saved['profileImage']?.toString().trim() ?? _profileImageUrl,
+          profileImageBytes: newProfileImageBytes ?? _profileImageBytes,
+        );
+        setState(() {
+          _profileImage = null;
+          _saving = false;
+        });
+
+        await _syncSupabaseMetadata({
+          'full_name': newFullName,
+          'phone': newPhone,
+          'gender': newGender,
+          'hair_texture': newHairTexture,
+          if (profileImageBase64 != null) 'profile_image_base64': profileImageBase64,
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated successfully.')),
+        );
+        return;
+      }
+
+      final currentSession = Supabase.instance.client.auth.currentSession;
+      final currentUser =
+          currentSession?.user ?? Supabase.instance.client.auth.currentUser;
+      if (currentUser == null) {
+        throw StateError('No active session found. Please sign in again.');
+      }
+
+      final updates = <String, dynamic>{
+        'full_name': newFullName,
+        'phone': newPhone,
+        'gender': newGender,
+        'hair_texture': newHairTexture,
+        if (profileImageBase64 != null) 'profile_image_base64': profileImageBase64,
+      };
+
+      await Supabase.instance.client.auth.updateUser(
+        UserAttributes(data: updates),
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _fullName = newFullName;
+        _phone = newPhone;
+        _gender = newGender;
+        _hairTexture = newHairTexture;
+        _profileImageBytes = newProfileImageBytes ?? _profileImageBytes;
+        _profileImage = null;
+        _saving = false;
+      });
+
+      UserSession.fullName = newFullName;
+      await UserSession.savePreferredHairTexture(newHairTexture);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Profile updated successfully.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not save profile: $e')),
+      );
+    }
+  }
+
+  Widget _cardShell({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white, width: 1),
+      ),
+      child: child,
+    );
+  }
+
+  Widget _highlightCard(String label, String value) {
+    return _cardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 22,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoCard(String label, String value) {
+    return _cardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 10),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dropdownCard({
+    required String label,
+    required String value,
+    required List<String> options,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return _cardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            value: options.contains(value) ? value : options.first,
+            dropdownColor: const Color(0xFF1A1A1A),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: const Color(0xFF111111),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('Username', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                      if (!_isEditingUsername)
-                        GestureDetector(
-                          onTap: () => setState(() => _isEditingUsername = true),
-                          child: const Text('Edit', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
-                        ),
-                    ],
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+            items: options
+                .map(
+                  (option) => DropdownMenuItem<String>(
+                    value: option,
+                    child: Text(option),
                   ),
-                  const SizedBox(height: 12),
-                  if (_isEditingUsername)
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _usernameController,
-                            style: const TextStyle(color: Colors.white),
-                            decoration: InputDecoration(
-                              filled: true,
-                              fillColor: Colors.black,
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        ElevatedButton(
-                          onPressed: _saveUsername,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          ),
-                          child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    )
-                  else
-                    Text(_username, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
+                )
+                .toList(),
+            onChanged: onChanged,
+          ),
+        ],
+      ),
+    );
+  }
 
-            // Email Section
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white, width: 1),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Email', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      const Icon(Icons.email, color: Colors.white, size: 20),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(_email, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 32),
+  String _tierLabel(int count) {
+    if (count >= 20) return 'Platinum';
+    if (count >= 10) return 'Gold';
+    if (count >= 5) return 'Silver';
+    if (count >= 2) return 'Bronze';
+    return 'Rookie';
+  }
 
-            // Save Button
-            ElevatedButton(
-              onPressed: () {
-                // Save profile changes
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile saved successfully')));
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(50),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+  Color _tierColor(String tier) {
+    switch (tier) {
+      case 'Platinum':
+        return const Color(0xFFE5E4E2);
+      case 'Gold':
+        return const Color(0xFFA99941);
+      case 'Silver':
+        return const Color(0xFFC0C0C0);
+      case 'Bronze':
+        return const Color(0xFFCD7F32);
+      default:
+        return Colors.white70;
+    }
+  }
+
+  Widget _buildTierBadge() {
+    final tier = _tierLabel(_haircutsDone);
+    final color = _tierColor(tier);
+    return InkWell(
+      onTap: () {
+        showDialog(
+          context: context,
+          builder: (_) => AlertDialog(
+            backgroundColor: const Color(0xFF1A1A1A),
+            title: const Text('Loyalty Badge', style: TextStyle(color: Colors.white)),
+            content: Text(
+              'Tier: $tier\nCompleted haircuts: $_haircutsDone',
+              style: const TextStyle(color: Colors.white70),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close', style: TextStyle(color: Colors.white)),
               ),
-              child: const Text('Save', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color, width: 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified, color: color, size: 16),
+            const SizedBox(width: 6),
+            Text(
+              tier,
+              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _editCard(String label, TextEditingController controller, {String? hint}) {
+    return _cardShell(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          const SizedBox(height: 10),
+          TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+            decoration: InputDecoration(
+              hintText: hint,
+              hintStyle: const TextStyle(color: Colors.white38),
+              filled: true,
+              fillColor: const Color(0xFF111111),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            ),
+          ),
+        ],
       ),
     );
   }

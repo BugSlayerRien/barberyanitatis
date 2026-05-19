@@ -1,0 +1,41 @@
+Appointment time and scheduling validations (mobile flow)
+
+1) Entry point and source of truth
+- Mobile sends booking requests to booking.php (action=create).
+- Final validation is enforced on backend, so all roles and clients follow the same rules.
+
+2) Date and time format validation
+- appointmentDate must be valid YYYY-MM-DD.
+- startTime and endTime are normalized to HH:MM:SS.
+- If date/time format is invalid, request is rejected with 422.
+
+3) Time logic and duration checks
+- endTime must be strictly later than startTime.
+- Duration is computed from start and end.
+- Allowed range is 10 to 240 minutes.
+- Past appointments are blocked (start datetime must be in the future).
+
+4) Account and role integrity checks
+- userID must point to an active customer account.
+- barberID must point to an active barber account.
+
+5) Scheduling conflict checks
+- Customer cannot have another active appointment (Scheduled, CheckedIn, InProgress).
+- Barber cannot have overlapping active appointments for the same date/time range.
+
+6) Slot availability checks and synchronization
+- The selected start slot must exist in time_slots and be Available.
+- On successful booking, that slot is updated to Booked.
+- On cancellation, the slot is released back to Available.
+- On receptionist status update:
+	- Cancelled/NoShow => slot becomes Available
+	- Other active states => slot stays Booked
+
+7) Why this works in mobile too
+- Mobile UI may guide the user, but backend decides final validity.
+- This prevents race conditions and inconsistent schedules across customer, receptionist, and barber views.
+
+Relevant files
+- api/booking.php
+- api/receptionist.php
+- api/time_slots.php

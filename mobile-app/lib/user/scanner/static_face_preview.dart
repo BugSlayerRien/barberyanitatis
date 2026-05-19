@@ -104,9 +104,12 @@ class _StaticFacePreviewState extends State<StaticFacePreview> {
               top: box.top,
               width: box.width,
               height: box.height,
-              child: OverlayPreviewImage(
-                assetPath: assetPath,
-                fit: BoxFit.contain,
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: OverlayPreviewImage(
+                  assetPath: assetPath,
+                  fit: BoxFit.fitWidth,
+                ),
               ),
             ),
           ],

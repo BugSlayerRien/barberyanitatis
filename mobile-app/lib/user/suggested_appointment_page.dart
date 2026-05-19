@@ -27,6 +27,7 @@ class SuggestedAppointmentPage extends StatefulWidget {
 }
 
 class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
+  static const Duration _bookingLeadTime = Duration(hours: 3);
   bool _booking = false;
   bool _refreshingSuggestion = false;
   late Map<String, dynamic> _suggestion;
@@ -100,7 +101,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
       return true;
     }
 
-    return !slotDateTime.isAfter(DateTime.now());
+    return !slotDateTime.isAfter(DateTime.now().add(_bookingLeadTime));
   }
 
   Future<Map<String, dynamic>?> _loadDefaultService() async {
