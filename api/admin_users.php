@@ -86,6 +86,83 @@ function require_account_payload(array $input): array
     return [$type, $id];
 }
 
+function generate_barber_code(PDO $pdo, int $userId): string
+{
+    $preferred = 'BRB' . str_pad((string)max(1, $userId), 4, '0', STR_PAD_LEFT);
+    $check = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE barber_code = :barber_code');
+    $check->execute([':barber_code' => $preferred]);
+    if ((int)$check->fetchColumn() === 0) {
+        return $preferred;
+    }
+
+    for ($i = 900; $i < 10000; $i++) {
+        $candidate = 'BRB' . $i;
+        $check->execute([':barber_code' => $candidate]);
+        if ((int)$check->fetchColumn() === 0) {
+            return $candidate;
+        }
+    }
+
+    return 'BRB' . time();
+}
+
+function promote_customer_to_barber(PDO $pdo, int $userId, string $fullName, string $email): array
+{
+    $normalizedEmail = strtolower(trim($email));
+    if ($normalizedEmail === '') {
+        json_response(['error' => 'Email is required to promote a barber account'], 422);
+    }
+
+    $existingStmt = $pdo->prepare(
+        'SELECT barber_id, barber_code, full_name, email, specialty, years_experience, rating, is_active, created_at
+         FROM barbers
+         WHERE lower(email) = lower(:email)
+         LIMIT 1'
+    );
+    $existingStmt->execute([':email' => $normalizedEmail]);
+    $existing = $existingStmt->fetch(PDO::FETCH_ASSOC);
+
+    if ($existing) {
+        $reactivate = $pdo->prepare(
+            "UPDATE barbers
+             SET full_name = :full_name,
+                 is_active = TRUE
+             WHERE barber_id = :barber_id
+             RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role"
+        );
+        $reactivate->execute([
+            ':full_name' => $fullName,
+            ':barber_id' => (int)$existing['barber_id'],
+        ]);
+        $updated = $reactivate->fetch(PDO::FETCH_ASSOC);
+        audit_log($pdo, 'USER_PROMOTE_BARBER', 'barbers', (string)$existing['barber_id'], $existing, $updated, null);
+        return $updated ?: $existing;
+    }
+
+    $barberCode = generate_barber_code($pdo, $userId);
+    $defaultBarberPassword = password_hash('ChangeMe123!', PASSWORD_BCRYPT);
+    $insert = $pdo->prepare(
+        "INSERT INTO barbers (barber_code, full_name, email, password_hash, specialty, years_experience, rating, is_active)
+         VALUES (:barber_code, :full_name, :email, :password_hash, :specialty, :years_experience, 5.00, TRUE)
+         RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role"
+    );
+    $insert->execute([
+        ':barber_code' => $barberCode,
+        ':password_hash' => $defaultBarberPassword,
+        ':full_name' => $fullName,
+        ':email' => $normalizedEmail,
+        ':specialty' => 'General',
+        ':years_experience' => 1,
+    ]);
+    $created = $insert->fetch(PDO::FETCH_ASSOC);
+    if (!$created) {
+        json_response(['error' => 'Unable to create barber account'], 500);
+    }
+
+    audit_log($pdo, 'USER_PROMOTE_BARBER', 'barbers', (string)$created['barber_id'], null, $created, null);
+    return $created;
+}
+
 function update_account(PDO $pdo, string $type, int $id, array $input): array
 {
     $existing = fetch_account_row($pdo, $type, $id);
@@ -121,6 +198,12 @@ function update_account(PDO $pdo, string $type, int $id, array $input): array
             json_response(['error' => 'Unable to update customer account'], 500);
         }
         audit_log($pdo, 'USER_UPDATE', 'users', (string)$id, $existing, $updated, null);
+
+        $appRole = strtolower(trim((string)($input['appRole'] ?? 'customer')));
+        if ($appRole === 'barber') {
+            promote_customer_to_barber($pdo, $id, $fullName, $email);
+        }
+
         return $updated;
     }
 

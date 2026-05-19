@@ -35,7 +35,10 @@ Future<void> main() async {
     url: 'https://sergfnujsutcschocuuz.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
-    authCallbackUrlHostname: 'login-callback',
+    // Web OAuth returns via XAMPP oauth-callback.html → your Flutter origin in ?return_to=.
+    // Supabase "Site URL" = your Flutter web app origin (any port per run), not https://*.supabase.co.
+    authCallbackUrlHostname: kIsWeb ? null : 'login-callback',
+    authFlowType: AuthFlowType.pkce,
   );
 
   await AuthBootstrap.initialize();

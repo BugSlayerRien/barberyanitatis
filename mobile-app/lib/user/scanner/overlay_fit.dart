@@ -3,16 +3,17 @@ import 'package:flutter/material.dart';
 import 'cover_viewport.dart';
 import 'overlay_models.dart';
 
-const double kOverlayTargetFaceAreaWeb = 0.145;
-const double kOverlayTargetFaceAreaMobile = 0.165;
+const double kOverlayTargetFaceAreaWeb = 0.20;
+const double kOverlayTargetFaceAreaMobile = 0.22;
 
 String pickOverlayImageForYaw(OverlayImageSet set, double? yawDeg) {
   final yaw = yawDeg ?? 0;
+  // Asset filenames were swapped: user's "left" PNG is the right profile view.
   if (yaw >= 12) {
-    return set.left;
+    return set.right;
   }
   if (yaw <= -12) {
-    return set.right;
+    return set.left;
   }
   return set.front;
 }
@@ -69,7 +70,7 @@ OverlayBox computeOverlayBox({
     );
   }
 
-  final distanceFactor = (targetArea / faceAreaNorm).clamp(0.72, 1.28);
+  final distanceFactor = (targetArea / faceAreaNorm).clamp(0.95, 1.55);
   final distanceVerticalFactor =
       1.0 + ((faceAreaNorm - targetArea) * 1.2).clamp(-0.12, 0.18);
 
@@ -151,7 +152,7 @@ OverlayBox computeOverlayBox({
       (mappedForeheadAnchorY != null && mappedEyeMidX != null) ? 0.35 : 0.85;
 
   // hairClipFactor = fraction of overlay height above the forehead anchor (hairline in PNG).
-  final hairAnchorRatio = calibration.hairClipFactor.clamp(0.50, 0.66);
+  final hairAnchorRatio = calibration.hairClipFactor.clamp(0.42, 0.58);
 
   final topRaw = anchorY -
       (clampedHeight * hairAnchorRatio) +

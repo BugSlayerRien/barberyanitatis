@@ -70,70 +70,76 @@ function estimate_barber_wait_minutes(PDO $pdo, ?int $barberId): int
 }
 
 try {
-    $pdo = get_db_connection();
-    ensure_walkin_guest_name_column($pdo);
-    auto_complete_due_appointments($pdo);
+    // Read-heavy actions: retry whole handler on TLS / "connection reset" (kiosk tablet Wi‑Fi).
+    if ($action === 'services' || $action === 'barberQueue') {
+        with_pdo_retry(function (PDO $pdo) use ($action): void {
+            ensure_walkin_guest_name_column($pdo);
+            auto_complete_due_appointments($pdo);
 
-    if ($action === 'services') {
-        $stmt = $pdo->prepare(
-            'SELECT service_id, service_name, description, base_duration,
-                    CASE WHEN LOWER(category) = \'haircut\' THEN 100 ELSE base_price END AS base_price,
-                    category
-             FROM services
-             WHERE is_active = TRUE
-             ORDER BY service_name'
-        );
-        $stmt->execute();
-        json_response(['services' => $stmt->fetchAll()]);
-    }
+            if ($action === 'services') {
+                $stmt = $pdo->prepare(
+                    'SELECT service_id, service_name, description, base_duration,
+                            CASE WHEN LOWER(category) = \'haircut\' THEN 100 ELSE base_price END AS base_price,
+                            category
+                     FROM services
+                     WHERE is_active = TRUE
+                     ORDER BY service_name'
+                );
+                $stmt->execute();
+                json_response(['services' => $stmt->fetchAll()]);
+            }
 
-    if ($action === 'barberQueue') {
-        $barbersStmt = $pdo->query(
-            'SELECT barber_id, full_name, specialty, rating, years_experience, is_active
-             FROM barbers
-             WHERE is_active = TRUE
-             ORDER BY full_name'
-        );
-        $barbers = [];
-        foreach ($barbersStmt->fetchAll() as $row) {
-            $barberId = (int)$row['barber_id'];
-            $waitMinutes = estimate_barber_wait_minutes($pdo, $barberId);
-
-            $queueStmt = $pdo->prepare(
-                "SELECT COUNT(*)::int
-                 FROM walkin_queue
-                 WHERE DATE(created_at) = CURRENT_DATE
-                   AND barber_id = :barber_id
-                   AND status IN ('Waiting', 'Assigned', 'InProgress')"
+            $barbersStmt = $pdo->query(
+                'SELECT barber_id, full_name, specialty, rating, years_experience, is_active
+                 FROM barbers
+                 WHERE is_active = TRUE
+                 ORDER BY full_name'
             );
-            $queueStmt->execute([':barber_id' => $barberId]);
-            $queueCount = (int)$queueStmt->fetchColumn();
+            $barbers = [];
+            foreach ($barbersStmt->fetchAll() as $row) {
+                $barberId = (int)$row['barber_id'];
+                $waitMinutes = estimate_barber_wait_minutes($pdo, $barberId);
 
-            $barbers[] = [
-                'barber_id' => $barberId,
-                'full_name' => $row['full_name'],
-                'specialty' => $row['specialty'],
-                'rating' => $row['rating'],
-                'years_experience' => $row['years_experience'],
-                'waitMinutes' => $waitMinutes,
-                'queueCount' => $queueCount,
-                'waitLabel' => $waitMinutes <= 0 ? 'Available now' : 'Available in ' . $waitMinutes . ' min',
-            ];
-        }
+                $queueStmt = $pdo->prepare(
+                    "SELECT COUNT(*)::int
+                     FROM walkin_queue
+                     WHERE DATE(created_at) = CURRENT_DATE
+                       AND barber_id = :barber_id
+                       AND status IN ('Waiting', 'Assigned', 'InProgress')"
+                );
+                $queueStmt->execute([':barber_id' => $barberId]);
+                $queueCount = (int)$queueStmt->fetchColumn();
 
-        $anyWait = estimate_barber_wait_minutes($pdo, null);
+                $barbers[] = [
+                    'barber_id' => $barberId,
+                    'full_name' => $row['full_name'],
+                    'specialty' => $row['specialty'],
+                    'rating' => $row['rating'],
+                    'years_experience' => $row['years_experience'],
+                    'waitMinutes' => $waitMinutes,
+                    'queueCount' => $queueCount,
+                    'waitLabel' => $waitMinutes <= 0 ? 'Available now' : 'Available in ' . $waitMinutes . ' min',
+                ];
+            }
 
-        json_response([
-            'barbers' => $barbers,
-            'firstAvailable' => [
-                'waitMinutes' => $anyWait,
-                'waitLabel' => $anyWait <= 0 ? 'Next available' : 'About ' . $anyWait . ' min',
-            ],
-            'serviceMinutes' => kiosk_service_duration_minutes($pdo),
-        ]);
+            $anyWait = estimate_barber_wait_minutes($pdo, null);
+
+            json_response([
+                'barbers' => $barbers,
+                'firstAvailable' => [
+                    'waitMinutes' => $anyWait,
+                    'waitLabel' => $anyWait <= 0 ? 'Next available' : 'About ' . $anyWait . ' min',
+                ],
+                'serviceMinutes' => kiosk_service_duration_minutes($pdo),
+            ]);
+        });
     }
 
     if ($action === 'createWalkin') {
+        $pdo = get_db_connection();
+        ensure_walkin_guest_name_column($pdo);
+        auto_complete_due_appointments($pdo);
+
         $serviceIDs = $input['serviceIDs'] ?? [];
         $barberID = (int)($input['barberID'] ?? 0);
         $guestName = trim((string)($input['guestName'] ?? ''));
@@ -243,8 +249,8 @@ try {
         ]);
     }
 } catch (PDOException $e) {
-    if (isset($pdo) && $pdo->inTransaction()) {
+    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+    json_response(db_error_response_payload($e), 500);
 }

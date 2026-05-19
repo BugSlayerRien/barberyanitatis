@@ -99,10 +99,10 @@ function variant_catalog_line(array $row): string
 function categorize_variant_rule(array $row): string
 {
     $name = strtolower((string)($row['style_name'] ?? ''));
-    if (preg_match('/mullet|edgar|quiff|burst|messy|curtains|two.?block/', $name) === 1) {
+    if (preg_match('/mullet|edgar|quiff|burst|messy|curtains|pompadour/', $name) === 1) {
         return 'alternative';
     }
-    if (preg_match('/crop|taper|fade|buzz|caesar|french|pompadour|classic/', $name) === 1) {
+    if (preg_match('/crop|taper|fade|buzz|caesar|french|classic|two.?block/', $name) === 1) {
         return 'formal';
     }
     if (preg_match('/curly|wavy|youth|modern/', $name) === 1) {
@@ -111,49 +111,135 @@ function categorize_variant_rule(array $row): string
     return 'youthful';
 }
 
-function build_rule_based_insights(array $variants, string $faceShape, string $hairTexture): array
+function apply_category_rules_to_insights(array $insights): array
 {
-    $topPicks = array_slice($variants, 0, 3);
-    $categories = ['formal' => [], 'alternative' => [], 'youthful' => []];
+    $categories = $insights['categories'] ?? [];
+    if (!is_array($categories)) {
+        $categories = [];
+    }
 
-    foreach ($variants as $row) {
-        $cat = categorize_variant_rule($row);
-        if (count($categories[$cat]) >= 3) {
+    $pools = ['formal' => [], 'alternative' => [], 'youthful' => []];
+    foreach (array_keys($pools) as $cat) {
+        foreach (($categories[$cat] ?? []) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $target = categorize_variant_rule($row);
+            $pools[$target][] = enrich_variant_copy($row, '', '', $target);
+        }
+    }
+
+  foreach ($insights['topPicks'] ?? [] as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $target = categorize_variant_rule($row);
+        $id = (int)($row['variant_id'] ?? 0);
+        $already = false;
+        foreach ($pools[$target] as $existing) {
+            if ((int)($existing['variant_id'] ?? 0) === $id) {
+                $already = true;
+                break;
+            }
+        }
+        if (!$already && $id > 0) {
+            $pools[$target][] = enrich_variant_copy($row, '', '', $target);
+        }
+    }
+
+    $used = [];
+    $normalizedCategories = [];
+    foreach ($pools as $cat => $pool) {
+        $normalizedCategories[$cat] = pick_unique_variants($pool, $used, 3);
+    }
+
+    $insights['categories'] = $normalizedCategories;
+
+    $topPicks = [];
+    foreach ($insights['topPicks'] ?? [] as $row) {
+        if (!is_array($row)) {
             continue;
         }
         $copy = $row;
-        $style = (string)($row['style_name'] ?? 'This style');
-        $copy['fit_reason'] = "The {$style} balances your {$faceShape} face shape and {$hairTexture} hair texture for a {$cat} look.";
-        $copy['category'] = $cat;
-        $categories[$cat][] = $copy;
+        $copy['category'] = categorize_variant_rule($row);
+        $topPicks[] = $copy;
+    }
+    $insights['topPicks'] = $topPicks;
+
+    return $insights;
+}
+
+function enrich_variant_copy(array $row, string $faceShape, string $hairTexture, string $category = ''): array
+{
+    $copy = $row;
+    $style = (string)($row['style_name'] ?? 'This style');
+    $copy['fit_reason'] = $category !== ''
+        ? "The {$style} balances your {$faceShape} face shape and {$hairTexture} hair texture for a {$category} look."
+        : "{$style} complements your {$faceShape} face and {$hairTexture} hair for everyday wear.";
+    if ($category !== '') {
+        $copy['category'] = $category;
+    }
+    return $copy;
+}
+
+function pick_unique_variants(array $variants, array &$usedIds, int $limit = 1): array
+{
+    $picked = [];
+    foreach ($variants as $row) {
+        $id = (int)($row['variant_id'] ?? 0);
+        if ($id <= 0 || isset($usedIds[$id])) {
+            continue;
+        }
+        $usedIds[$id] = true;
+        $picked[] = $row;
+        if (count($picked) >= $limit) {
+            break;
+        }
+    }
+    return $picked;
+}
+
+function build_rule_based_insights(array $variants, string $faceShape, string $hairTexture): array
+{
+    if ($variants === []) {
+        return [
+            'topPicks' => [],
+            'categories' => ['formal' => [], 'alternative' => [], 'youthful' => []],
+            'aiSummary' => 'No matching hairstyles are available yet.',
+            'aiPowered' => false,
+        ];
+    }
+
+    $usedIds = [];
+    $topRows = pick_unique_variants($variants, $usedIds, 3);
+    $topWithReason = array_map(
+        static fn(array $row): array => enrich_variant_copy($row, $faceShape, $hairTexture),
+        $topRows
+    );
+
+    $categories = ['formal' => [], 'alternative' => [], 'youthful' => []];
+    $byCategory = ['formal' => [], 'alternative' => [], 'youthful' => []];
+    foreach ($variants as $row) {
+        $byCategory[categorize_variant_rule($row)][] = $row;
     }
 
     foreach (array_keys($categories) as $cat) {
-        if ($categories[$cat] === []) {
-            $fallback = $variants[array_rand($variants)] ?? null;
-            if ($fallback !== null) {
-                $copy = $fallback;
-                $copy['fit_reason'] = 'A versatile option that works with your current features.';
-                $copy['category'] = $cat;
-                $categories[$cat][] = $copy;
-            }
+        $pool = $byCategory[$cat];
+        $picked = pick_unique_variants($pool, $usedIds, 3);
+        if ($picked === []) {
+            $picked = pick_unique_variants($variants, $usedIds, 3);
+        }
+        foreach ($picked as $row) {
+            $categories[$cat][] = enrich_variant_copy($row, $faceShape, $hairTexture, $cat);
         }
     }
 
-    $topWithReason = [];
-    foreach ($topPicks as $row) {
-        $copy = $row;
-        $style = (string)($row['style_name'] ?? 'This cut');
-        $copy['fit_reason'] = "{$style} complements your {$faceShape} face and {$hairTexture} hair for everyday wear.";
-        $topWithReason[] = $copy;
-    }
-
-    return [
+    return apply_category_rules_to_insights([
         'topPicks' => $topWithReason,
         'categories' => $categories,
         'aiSummary' => "Based on your {$faceShape} face and {$hairTexture} hair, we grouped styles into formal, alternative, and youthful options.",
         'aiPowered' => false,
-    ];
+    ]);
 }
 
 function build_gemini_insights(array $variants, string $faceShape, string $hairTexture, string $hairDensity): ?array
@@ -245,16 +331,16 @@ PROMPT;
         return null;
     }
 
-    return [
+    return apply_category_rules_to_insights([
         'topPicks' => $topPicks,
         'categories' => $categories,
         'aiSummary' => trim((string)($parsed['aiSummary'] ?? '')),
         'aiPowered' => true,
-    ];
+    ]);
 }
 
 try {
-    $pdo = get_db_connection();
+    with_pdo_retry(function (PDO $pdo) use ($action, $userID, $faceShape, $hairTexture, $hairDensity): void {
     $recommendations = fetch_live_recommendations($pdo, $faceShape, $hairTexture);
 
     if ($action === 'rankByFeatures') {
@@ -293,6 +379,7 @@ try {
     }
 
     json_response(['error' => 'Invalid action'], 400);
+    });
 } catch (PDOException $e) {
-    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+    json_response(db_error_response_payload($e), 500);
 }

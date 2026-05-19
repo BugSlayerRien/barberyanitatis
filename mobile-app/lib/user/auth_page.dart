@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'forgot_password_page.dart';
 import 'api_config.dart';
 import 'auth_bootstrap.dart';
+import 'auth_redirect.dart';
 import 'user_session.dart';
 
 // Local copy of the white color used in the app to avoid circular imports
@@ -24,8 +25,6 @@ class AuthPage extends StatefulWidget {
 
 class _AuthPageState extends State<AuthPage> {
   final String _apiBaseUrl = ApiConfig.baseUrl;
-  static const String _supabaseRedirectUri =
-      'io.supabase.flutter://login-callback';
   static const String _googleServerClientId =
       String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
 
@@ -84,10 +83,6 @@ class _AuthPageState extends State<AuthPage> {
     AuthBootstrap.navigateToSignedInHome();
   }
 
-  String _webOAuthRedirectTo() {
-    return Uri.base.origin;
-  }
-
   Future<void> _login() async {
     final email = _loginUser.text.trim();
     final password = _loginPass.text;
@@ -119,8 +114,11 @@ class _AuthPageState extends State<AuthPage> {
         }),
       );
 
-      if (phpLogin.statusCode == 200 && phpLogin.body.isNotEmpty) {
-        final phpData = jsonDecode(phpLogin.body) as Map<String, dynamic>;
+      final phpData = phpLogin.body.isNotEmpty
+          ? jsonDecode(phpLogin.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+
+      if (phpLogin.statusCode == 200) {
         final phpUser = phpData['user'] as Map<String, dynamic>?;
         if (phpUser != null) {
           AuthBootstrap.applyPhpAuthUser(phpUser);
@@ -128,6 +126,23 @@ class _AuthPageState extends State<AuthPage> {
           AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
           return;
         }
+      }
+
+      if (phpLogin.statusCode == 401) {
+        final code = phpData['code']?.toString() ?? '';
+        final message = phpData['error']?.toString() ?? 'Invalid email or password.';
+        if (code == 'NO_LOCAL_PASSWORD' ||
+            code == 'WRONG_PASSWORD' ||
+            code == 'OAUTH_ONLY') {
+          throw Exception(message);
+        }
+      } else if (phpLogin.statusCode != 200) {
+        // Server or DB error — do not fall through to Supabase (misleading errors).
+        final err = phpData['error']?.toString() ?? 'Login server error.';
+        final details = phpData['details']?.toString();
+        throw Exception(
+          (details != null && details.trim().isNotEmpty) ? '$err $details' : err,
+        );
       }
 
       final response = await Supabase.instance.client.auth.signInWithPassword(
@@ -244,7 +259,7 @@ class _AuthPageState extends State<AuthPage> {
           'full_name': fullName,
           'phone': phone,
         },
-        emailRedirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+        emailRedirectTo: AuthRedirect.supabaseRedirectUri,
       );
 
       if (!mounted) return;
@@ -378,13 +393,26 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseGoogle() async {
     setState(() => _isLoading = true);
     try {
-      // Launch supabase OAuth flow (will open browser and redirect to the custom scheme)
+      AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.google,
-        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+        authScreenLaunchMode: LaunchMode.platformDefault,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Google sign-in...')));
+      if (kIsWeb) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Complete Google sign-in, then you will return to ${AuthRedirect.webAppReturnUri}',
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Opening browser for Google sign-in...')),
+        );
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Supabase Google sign-in failed: $e')));
@@ -396,11 +424,11 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseFacebook() async {
     setState(() => _isLoading = true);
     try {
-      // On web: redirect back to the running app URL so callback tokens are captured.
-      // On mobile: use the deep-link scheme for the OAuth callback.
+      AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
         Provider.facebook,
-        redirectTo: kIsWeb ? _webOAuthRedirectTo() : _supabaseRedirectUri,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+        authScreenLaunchMode: LaunchMode.platformDefault,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
@@ -808,9 +836,14 @@ class _AuthPageState extends State<AuthPage> {
         lower.contains('grant') ||
         lower.contains('invalid login credentials')) {
       if (email.endsWith('@tatis.local')) {
-        return 'Sign-in failed. For staff/barber demo accounts use: barber@tatis.local / Barber123!, receptionist@tatis.local / Reception123!, or admin@tatis.local / Admin123!';
+        return '@tatis.local accounts log in via your API (Postgres + auth.php), not Supabase. '
+            'This message means API login failed, then Supabase had no match. '
+            'Fix: ensure seed_minimum_pg.php ran (or set password_hash on your row). '
+            'Demo: barber@tatis.local / Barber123!, customer@tatis.local / Customer123!, '
+            'receptionist@tatis.local / Reception123!, admin@tatis.local / Admin123!. '
+            'Also verify the app ApiConfig URL reaches auth.php.';
       }
-      return 'Invalid email or password. OAuth-only accounts must use Google/Facebook sign-in.';
+      return 'Invalid email or password. If you registered with Google or Facebook, use those buttons. If you registered with email, confirm your email first or reset your password.';
     }
     if (lower.contains('failed to fetch') || lower.contains('network')) {
       return 'Cannot reach the auth server. Check your internet connection and API URL.';

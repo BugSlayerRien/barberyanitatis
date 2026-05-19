@@ -129,6 +129,11 @@ function future_slot_sql_clause(): string
     return '(slot_date > :shop_today OR (slot_date = :shop_today AND slot_time > :shop_now_time))';
 }
 
+function bookable_slot_sql_clause(): string
+{
+    return '(slot_date > :lead_date OR (slot_date = :lead_date AND slot_time >= :lead_time))';
+}
+
 try {
     $pdo = get_db_connection();
     auto_complete_due_appointments($pdo);
@@ -149,25 +154,42 @@ try {
             }
         }
 
-        $shopToday = shop_today();
-        $shopNowTime = shop_current_time();
+        $leadStart = shop_next_bookable_slot_start();
+        $leadDate = $leadStart->format('Y-m-d');
+        $leadTime = $leadStart->format('H:i:s');
         $shopWindowEnd = shop_window_end_date(7);
 
+        // Pick the barber/day with the most open slots, then the earliest hour on that day
+        // (must be at least shop_booking_lead_hours from now).
         $bestStmt = $pdo->prepare(
-            "SELECT barber_id, slot_date, COUNT(*) AS available_count
-             FROM time_slots
-             WHERE status = 'Available'
-               AND slot_date <= :window_end_date
-               AND " . future_slot_sql_clause() . "
-               AND EXTRACT(MINUTE FROM slot_time) = 0
-               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
-             GROUP BY barber_id, slot_date
-             ORDER BY slot_date ASC, available_count DESC, barber_id ASC
-             LIMIT 1"
+            "WITH eligible AS (
+                SELECT barber_id, slot_date, slot_time
+                  FROM time_slots
+                 WHERE status = 'Available'
+                   AND slot_date <= :window_end_date
+                   AND " . bookable_slot_sql_clause() . "
+                   AND EXTRACT(MINUTE FROM slot_time) = 0
+                   AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
+             ),
+             day_counts AS (
+                SELECT barber_id, slot_date, COUNT(*) AS available_count
+                  FROM eligible
+                 GROUP BY barber_id, slot_date
+             )
+             SELECT e.barber_id,
+                    e.slot_date,
+                    e.slot_time,
+                    dc.available_count
+               FROM eligible e
+               JOIN day_counts dc
+                 ON dc.barber_id = e.barber_id
+                AND dc.slot_date = e.slot_date
+              ORDER BY dc.available_count DESC, e.slot_date ASC, e.slot_time ASC
+              LIMIT 1"
         );
         $bestStmt->execute([
-            ':shop_today' => $shopToday,
-            ':shop_now_time' => $shopNowTime,
+            ':lead_date' => $leadDate,
+            ':lead_time' => $leadTime,
             ':window_end_date' => $shopWindowEnd,
         ]);
         $best = $bestStmt->fetch();
@@ -176,30 +198,7 @@ try {
             json_response(['error' => 'No available slots found'], 404);
         }
 
-        $timeStmt = $pdo->prepare(
-            "SELECT slot_time FROM time_slots
-               WHERE barber_id = :barber_id
-                AND slot_date = :slot_date
-                AND status = 'Available'
-                AND slot_date <= :window_end_date
-                AND " . future_slot_sql_clause() . "
-                AND EXTRACT(MINUTE FROM slot_time) = 0
-                AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
-             ORDER BY slot_time ASC LIMIT 1"
-        );
-        $timeStmt->execute([
-            ':barber_id' => $best['barber_id'],
-            ':slot_date' => $best['slot_date'],
-            ':shop_today' => $shopToday,
-            ':shop_now_time' => $shopNowTime,
-            ':window_end_date' => $shopWindowEnd,
-        ]);
-        $timeRow = $timeStmt->fetch();
-        if (!$timeRow) {
-            json_response(['error' => 'No available time for suggested slot'], 404);
-        }
-
-        $normalizedSlotTime = shop_normalize_slot_time((string)$timeRow['slot_time']);
+        $normalizedSlotTime = shop_normalize_slot_time((string)$best['slot_time']);
         if ($normalizedSlotTime === null || !shop_is_future_slot((string)$best['slot_date'], $normalizedSlotTime)) {
             json_response(['error' => 'No available time for suggested slot'], 404);
         }

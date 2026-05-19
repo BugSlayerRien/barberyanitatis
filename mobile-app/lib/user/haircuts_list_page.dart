@@ -5,11 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'ai_funnel_service.dart';
-import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
-import 'dashboard_page.dart';
-import 'ai_face_scan_page.dart';
+import 'customer_navigation.dart';
 import 'saved_haircuts_page.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
@@ -43,7 +41,15 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   @override
   void initState() {
     super.initState();
+    _initCategory();
     _loadStyles();
+  }
+
+  Future<void> _initCategory() async {
+    final preferred = await UserSession.loadPreferredHairTexture();
+    if (preferred != null && preferred.isNotEmpty && mounted) {
+      setState(() => _selectedCategory = preferred);
+    }
   }
 
   Future<void> _loadStyles() async {
@@ -73,15 +79,17 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
           .toList();
 
       _logLibraryAudit(variants);
-      final mapped = _dedupeStyles(variants.map(_mapVariant).toList());
-      const ordered = ['Straight', 'Wavy', 'Curly', 'Coily', 'Mixed'];
-      final categories = ['All', ...ordered];
+      final mapped = _dedupeStyles(
+        variants.map(_mapVariant).where(_hasDisplayableAssets).toList(),
+      );
+      const ordered = ['Straight', 'Wavy', 'Curly'];
+      final categories = [...ordered];
 
       setState(() {
         _allStyles = mapped;
         _categories = categories;
         if (!_categories.contains(_selectedCategory)) {
-          _selectedCategory = 'All';
+          _selectedCategory = _categories.isNotEmpty ? _categories.first : 'Straight';
         }
         _loading = false;
       });
@@ -95,14 +103,15 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final styles = _selectedCategory == 'All'
-      ? _allStyles
-      : _allStyles.where((item) => item['hairTexture'] == _selectedCategory).toList();
+    final styles = _allStyles
+        .where((item) => item['hairTexture'] == _selectedCategory)
+        .toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
+        onBack: () => navigateBackToCustomerHome(context),
         onProfileTap: () {
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => ProfilePage()));
         },
@@ -169,11 +178,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         currentIndex: 0,
         onTap: (index) {
           if (index == 0) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DashboardPage()));
+            navigateToCustomerHome(context);
           } else if (index == 1) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
+            openCustomerTab(context, CustomerTab.appointments);
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            openCustomerTab(context, CustomerTab.scanner);
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
@@ -325,7 +334,9 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     final back = _previewPath(backRaw, overlay.right);
     return {
       'name': displayName.isNotEmpty ? displayName : 'Style',
-      'description': variant['description']?.toString() ?? 'AI recommended',
+      'description': (variant['description']?.toString().trim().isNotEmpty ?? false)
+          ? variant['description'].toString().trim()
+          : 'A versatile cut with clean lines and easy styling.',
       'image': front,
       'details': _buildDetails(variant),
       'rating': _scoreToRating(confidence),
@@ -439,6 +450,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     return details.join('\n');
   }
 
+  bool _hasDisplayableAssets(Map<String, dynamic> style) {
+    final name = style['name']?.toString() ?? '';
+    return OverlayRegistry.hasDedicatedAssets(name);
+  }
+
   String _normalizeTexture(String value) {
     final normalized = value.trim().toLowerCase();
     switch (normalized) {
@@ -511,9 +527,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You already have an active appointment.')),
       );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-      );
+      openCustomerTab(context, CustomerTab.appointments);
       return;
     }
 

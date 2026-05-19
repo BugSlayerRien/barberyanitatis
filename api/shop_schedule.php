@@ -82,6 +82,34 @@ function shop_is_allowed_slot_time(string $time): bool
     return shop_normalize_slot_time($time) !== null;
 }
 
+function shop_booking_lead_hours(): int
+{
+    return 3;
+}
+
+/**
+ * Earliest bookable slot start (on-the-hour, within shop hours, at least N hours from now).
+ */
+function shop_next_bookable_slot_start(): DateTimeImmutable
+{
+    $minimum = shop_now()->modify('+' . shop_booking_lead_hours() . ' hours');
+    $minute = (int)$minimum->format('i');
+    $second = (int)$minimum->format('s');
+    if ($minute > 0 || $second > 0) {
+        $minimum = $minimum->setTime((int)$minimum->format('H'), 0)->modify('+1 hour');
+    }
+
+    $hour = (int)$minimum->format('H');
+    if ($hour < 9) {
+        return $minimum->setTime(9, 0);
+    }
+    if ($hour > 19) {
+        return $minimum->modify('+1 day')->setTime(9, 0);
+    }
+
+    return $minimum;
+}
+
 function shop_is_future_slot(string $slotDate, string $slotTime): bool
 {
     $normalized = shop_normalize_slot_time($slotTime);
@@ -98,7 +126,7 @@ function shop_is_future_slot(string $slotDate, string $slotTime): bool
         return false;
     }
 
-    return $slotDateTime > shop_now();
+    return $slotDateTime >= shop_next_bookable_slot_start();
 }
 
 function shop_window_end_date(int $windowDays = 7): string

@@ -15,8 +15,7 @@ if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'create'], tru
 }
 
 try {
-    $pdo = get_db_connection();
-
+    with_pdo_retry(function (PDO $pdo) use ($input, $action): void {
     $normalizeHaircutRow = static function (array $row): array {
         $styleName = trim((string)($row['style_name'] ?? ''));
         if (strcasecmp($styleName, 'Curly Top Fade') === 0) {
@@ -45,7 +44,7 @@ try {
                 $stmt = $pdo->prepare(<<<'SQL'
 SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
              hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
-             hs.style_name, hs.style_code, hs.description,
+             hs.style_name, hs.style_code, hs.description, hs.maintenance, hs.difficulty,
              (
                  hv.confidence_score
                  + CASE
@@ -141,6 +140,7 @@ SQL
 
         json_response(['message' => 'Haircut created', 'haircutID' => (int)$pdo->lastInsertId()], 201);
     }
+    });
 } catch (PDOException $e) {
-    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+    json_response(db_error_response_payload($e), 500);
 }

@@ -97,25 +97,17 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           .toList();
       final cats = data['categories'] as Map<String, dynamic>? ?? {};
 
-      setState(() {
-        _topPicks = top;
-        _categories = {
+      _applyRecommendationPayload(
+        topPicks: top,
+        categories: {
           'formal': _mapList(cats['formal']),
           'alternative': _mapList(cats['alternative']),
           'youthful': _mapList(cats['youthful']),
-        };
-        _aiSummary = data['aiSummary']?.toString() ?? '';
-        _aiPowered = data['aiPowered'] == true;
-        _selected ??= widget.presetRecommendation ?? (top.isNotEmpty ? top.first : null);
-        _recommendationsLoading = false;
-      });
-
-      UserSession.lastScan = {
-        'faceShape': widget.faceShape,
-        'hairTexture': widget.hairTexture,
-      };
-      UserSession.lastRecommendations = top;
-      UserSession.hasRecentRecommendations = top.isNotEmpty;
+        },
+        aiSummary: data['aiSummary']?.toString() ?? '',
+        aiPowered: data['aiPowered'] == true,
+        preserveSelection: false,
+      );
 
       await AiFunnelService.trackScan(
         scanSessionId: UserSession.ensureScanSessionId(),
@@ -138,6 +130,62 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   List<Map<String, dynamic>> _mapList(dynamic raw) {
     if (raw is! List) return [];
     return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  void _applyRecommendationPayload({
+    required List<Map<String, dynamic>> topPicks,
+    required Map<String, List<Map<String, dynamic>>> categories,
+    required String aiSummary,
+    required bool aiPowered,
+    required bool preserveSelection,
+  }) {
+    final selectedId = preserveSelection && _selected != null
+        ? '${_selected!['variant_id'] ?? _selected!['variantId']}'
+        : null;
+
+    setState(() {
+      _topPicks = topPicks;
+      _categories = categories;
+      _aiSummary = aiSummary;
+      _aiPowered = aiPowered;
+      _recommendationsLoading = false;
+      if (!preserveSelection) {
+        _selected ??= widget.presetRecommendation ?? (topPicks.isNotEmpty ? topPicks.first : null);
+      } else if (selectedId != null && selectedId.isNotEmpty) {
+        for (final row in topPicks) {
+          if ('${row['variant_id'] ?? row['variantId']}' == selectedId) {
+            _selected = row;
+            break;
+          }
+        }
+      }
+    });
+
+    UserSession.lastScan = {
+      'faceShape': widget.faceShape,
+      'hairTexture': widget.hairTexture,
+    };
+    UserSession.lastRecommendations = List<Map<String, dynamic>>.from(topPicks);
+    UserSession.hasRecentRecommendations = topPicks.isNotEmpty;
+  }
+
+  Future<void> _openLivePreview() async {
+    final selectedBefore = _selected;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiFaceScanPage(
+          livePreviewOnly: true,
+          presetRecommendation: _selected,
+        ),
+      ),
+    );
+    if (!mounted) {
+      return;
+    }
+    if (selectedBefore != null) {
+      _selected = selectedBefore;
+    }
+    await _loadRecommendations();
   }
 
   void _selectStyle(Map<String, dynamic> style) {
@@ -377,6 +425,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               Text(_aiSummary, style: const TextStyle(color: Colors.white70, fontSize: 13)),
             ],
             const SizedBox(height: 14),
+            _buildCaptureThumbnails(),
+            const SizedBox(height: 10),
             ScannerLayout.previewFrame(
               context: context,
               child: captureB64 != null && _selected != null
@@ -479,16 +529,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             if (!widget.kioskMode) ...[
               const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => AiFaceScanPage(
-                        livePreviewOnly: true,
-                        presetRecommendation: _selected,
-                      ),
-                    ),
-                  );
-                },
+                onPressed: _openLivePreview,
                 icon: const Icon(Icons.videocam_outlined, color: Colors.white),
                 label: const Text('Try live preview (optional)', style: TextStyle(color: Colors.white)),
               ),
@@ -518,6 +559,67 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ),
           ),
       ],
+    );
+  }
+
+  Widget _buildCaptureThumbnails() {
+    return SizedBox(
+      height: 88,
+      child: Row(
+        children: List.generate(_angleKeys.length, (index) {
+          final key = _angleKeys[index];
+          final b64 = widget.captures[key];
+          final selected = index == _previewAngleIndex;
+          return Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(left: index == 0 ? 0 : 6),
+              child: GestureDetector(
+                onTap: () => setState(() => _previewAngleIndex = index),
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: selected ? Colors.white : Colors.white24,
+                      width: selected ? 2 : 1,
+                    ),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: b64 != null && b64.isNotEmpty
+                      ? Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.memory(
+                              base64Decode(b64),
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                            ),
+                            Container(
+                              alignment: Alignment.bottomCenter,
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              color: Colors.black54,
+                              child: Text(
+                                _angleLabels[index],
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Center(
+                          child: Text(
+                            _angleLabels[index],
+                            style: const TextStyle(color: Colors.white38, fontSize: 11),
+                          ),
+                        ),
+                ),
+              ),
+            ),
+          );
+        }),
+      ),
     );
   }
 

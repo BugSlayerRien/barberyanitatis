@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app_navigator.dart';
@@ -24,7 +23,8 @@ Future<void> runKioskApp() async {
     url: 'https://sergfnujsutcschocuuz.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
-    authCallbackUrlHostname: 'login-callback',
+    authCallbackUrlHostname: kIsWeb ? null : 'login-callback',
+    authFlowType: AuthFlowType.pkce,
   );
 
   await AuthBootstrap.initialize();
@@ -38,7 +38,11 @@ class KioskApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final baseTextTheme = ThemeData.dark().textTheme.apply(fontFamily: 'CenturyGothic');
+    final base = ThemeData.dark();
+    final centuryTextTheme =
+        base.textTheme.apply(fontFamily: 'CenturyGothic');
+    final centuryPrimaryTextTheme =
+        base.primaryTextTheme.apply(fontFamily: 'CenturyGothic');
     return MaterialApp(
       title: 'Tatis Walk-In Kiosk',
       debugShowCheckedModeBanner: false,
@@ -48,12 +52,40 @@ class KioskApp extends StatelessWidget {
         brightness: Brightness.dark,
         scaffoldBackgroundColor: KioskColors.background,
         fontFamily: 'CenturyGothic',
-        textTheme: baseTextTheme.copyWith(
-          titleSmall: GoogleFonts.montserrat(textStyle: baseTextTheme.titleSmall),
-          titleMedium: GoogleFonts.montserrat(textStyle: baseTextTheme.titleMedium),
-          titleLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.titleLarge),
+        textTheme: centuryTextTheme,
+        primaryTextTheme: centuryPrimaryTextTheme,
+        appBarTheme: base.appBarTheme.copyWith(
+          titleTextStyle: centuryTextTheme.titleLarge,
+          toolbarTextStyle: centuryTextTheme.bodyMedium,
+        ),
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            textStyle: const TextStyle(
+              fontFamily: 'CenturyGothic',
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            textStyle: const TextStyle(
+              fontFamily: 'CenturyGothic',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            textStyle: const TextStyle(fontFamily: 'CenturyGothic'),
+          ),
         ),
       ),
+      builder: (context, child) {
+        return DefaultTextStyle.merge(
+          style: const TextStyle(fontFamily: 'CenturyGothic'),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: const KioskHomePage(),
       routes: {
         '/payment-result': (context) => const PaymentResultPage(),

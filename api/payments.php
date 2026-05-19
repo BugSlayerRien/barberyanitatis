@@ -9,7 +9,7 @@ require_method('POST');
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? ''));
 
-$allowed = ['createIntent', 'getIntentStatus', 'mockProviderWebhook', 'listWallet', 'capturePayment'];
+$allowed = ['createIntent', 'getIntentStatus', 'mockProviderWebhook', 'listWallet', 'capturePayment', 'confirmGatewayPayment'];
 if (!in_array($action, $allowed, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -366,6 +366,93 @@ try {
             'intent' => to_intent_payload($intent, 'Verifying'),
             'gatewayMode' => 'mock',
         ]);
+    }
+
+    if ($action === 'confirmGatewayPayment') {
+        $appointmentID = (int)($input['appointmentID'] ?? 0);
+        $providerRef = trim((string)($input['providerRef'] ?? ''));
+        if ($appointmentID <= 0) {
+            json_response(['error' => 'Invalid appointmentID'], 422);
+        }
+
+        $appointment = get_appointment($pdo, $appointmentID);
+        $latestPayment = get_latest_payment($pdo, $appointmentID);
+        if ($latestPayment && (string)$latestPayment['status'] === 'Captured') {
+            json_response([
+                'message' => 'Payment already captured.',
+                'paymentState' => 'Paid',
+                'receiptRef' => (string)$latestPayment['transaction_ref'],
+            ]);
+        }
+
+        if ($providerRef !== '') {
+            $stmt = $pdo->prepare(
+                "SELECT intent_id, appointment_id, amount, method, provider, status, intent_token, provider_ref,
+                        failure_reason, expires_at, paid_at, created_at, updated_at
+                 FROM appointment_payment_intents
+                 WHERE appointment_id = :appointment_id
+                    OR CAST(intent_token AS TEXT) = :provider_ref
+                    OR CAST(provider_ref AS TEXT) = :provider_ref
+                 ORDER BY intent_id DESC
+                 LIMIT 1"
+            );
+            $stmt->execute([
+                ':appointment_id' => $appointmentID,
+                ':provider_ref' => $providerRef,
+            ]);
+            $intent = $stmt->fetch() ?: null;
+        } else {
+            $intent = get_latest_intent($pdo, $appointmentID);
+        }
+
+        if (!$intent) {
+            json_response(['error' => 'Payment intent not found for this appointment'], 404);
+        }
+
+        if ((string)$intent['status'] === 'Paid') {
+            $latestPayment = get_latest_payment($pdo, $appointmentID);
+            if ($latestPayment && (string)$latestPayment['status'] === 'Captured') {
+                json_response([
+                    'message' => 'Payment already finalized.',
+                    'paymentState' => 'Paid',
+                    'receiptRef' => (string)$latestPayment['transaction_ref'],
+                ]);
+            }
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $updStmt = $pdo->prepare(
+                "UPDATE appointment_payment_intents
+                 SET status = 'Paid',
+                     provider_ref = CASE
+                         WHEN :provider_ref <> '' THEN :provider_ref
+                         ELSE provider_ref
+                     END,
+                     paid_at = COALESCE(paid_at, NOW()),
+                     updated_at = NOW()
+                 WHERE intent_id = :intent_id"
+            );
+            $updStmt->execute([
+                ':provider_ref' => $providerRef,
+                ':intent_id' => (int)$intent['intent_id'],
+            ]);
+
+            $intent['status'] = 'Paid';
+            $payment = finalize_paid_intent($pdo, $intent, $appointment, (string)$intent['method']);
+            $pdo->commit();
+
+            json_response([
+                'message' => 'Payment verified and captured.',
+                'paymentState' => 'Paid',
+                'receiptRef' => (string)$payment['transaction_ref'],
+            ]);
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            json_response(['error' => 'Failed to finalize payment', 'details' => $e->getMessage()], 500);
+        }
     }
 
     if ($action === 'getIntentStatus') {

@@ -23,6 +23,7 @@ class TimeSlotPage extends StatefulWidget {
 }
 
 class _TimeSlotPageState extends State<TimeSlotPage> {
+  static const Duration _bookingLeadTime = Duration(hours: 3);
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
   static const int _appointmentDurationMinutes = 60;
@@ -732,9 +733,10 @@ Keep the total response under 24 words.
                         date: _activeDate,
                         time: _selectedTime ?? '',
                       );
-                      if (selectedDateTime == null || !selectedDateTime.isAfter(DateTime.now())) {
+                      final earliestBookable = DateTime.now().add(_bookingLeadTime);
+                      if (selectedDateTime == null || !selectedDateTime.isAfter(earliestBookable)) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('This time has already passed. Please pick a new time.')),
+                          const SnackBar(content: Text('Please book at least 3 hours from now.')),
                         );
                         return;
                       }
@@ -1082,7 +1084,7 @@ Keep the total response under 24 words.
     if (slotDateTime == null) {
       return false;
     }
-    return slotDateTime.isAfter(DateTime.now());
+    return slotDateTime.isAfter(DateTime.now().add(_bookingLeadTime));
   }
 
   int _slotBookedCount(Map<String, dynamic> slot) {

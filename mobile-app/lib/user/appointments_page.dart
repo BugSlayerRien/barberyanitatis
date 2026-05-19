@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'completed_appointment_detail.dart';
 import 'profile_page.dart';
+import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'ai_face_scan_page.dart';
 import 'saved_haircuts_page.dart';
@@ -192,10 +193,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
-        onBack: () {
-          Navigator.of(context).pushReplacement(
-              MaterialPageRoute(builder: (_) => const DashboardPage()));
-        },
+        onBack: () => navigateBackToCustomerHome(context),
         onProfileTap: () {
           Navigator.of(context)
               .push(MaterialPageRoute(builder: (_) => const ProfilePage()));
@@ -717,13 +715,11 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         currentIndex: 1,
         onTap: (index) {
           if (index == 0) {
-            Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const DashboardPage()));
+            navigateToCustomerHome(context);
           } else if (index == 1) {
             // already on Appointments
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(
-                MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            openCustomerTab(context, CustomerTab.scanner);
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),

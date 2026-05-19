@@ -414,7 +414,42 @@ try {
             json_response(['message' => 'Login successful', 'user' => build_user_payload('barber', $barber)]);
         }
 
-        json_response(['error' => 'Invalid credentials'], 401);
+        if ($staff) {
+            json_response([
+                'error' => empty($staff['password_hash'])
+                    ? 'This staff account has no password set. Contact your administrator.'
+                    : 'Invalid email or password.',
+                'code' => empty($staff['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
+                'accountType' => 'staff',
+            ], 401);
+        }
+
+        if ($user) {
+            if (empty($user['password_hash'])) {
+                json_response([
+                    'error' => 'This account uses Google/Facebook sign-in. Tap those buttons instead of email/password.',
+                    'code' => 'OAUTH_ONLY',
+                    'accountType' => 'customer',
+                ], 401);
+            }
+            json_response([
+                'error' => 'Invalid email or password.',
+                'code' => 'WRONG_PASSWORD',
+                'accountType' => 'customer',
+            ], 401);
+        }
+
+        if ($barber) {
+            json_response([
+                'error' => empty($barber['password_hash'])
+                    ? 'This barber account has no app password yet. Set password_hash in the barbers table, or sign in with barber@tatis.local / Barber123! (demo).'
+                    : 'Invalid email or password.',
+                'code' => empty($barber['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
+                'accountType' => 'barber',
+            ], 401);
+        }
+
+        json_response(['error' => 'Invalid credentials', 'code' => 'NOT_FOUND_LOCAL'], 401);
     }
 
     if ($action === 'googleLogin') {
@@ -628,7 +663,7 @@ try {
     if ($sqlState === '23505') {
         json_response(['error' => 'Email is already in use.'], 409);
     }
-    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+    json_response(db_error_response_payload($e), 500);
 } catch (Throwable $e) {
     json_response(['error' => 'Unexpected error', 'details' => $e->getMessage()], 500);
 }

@@ -80,17 +80,17 @@ class FaceDetectorService {
           continue;
         }
         final position = landmark.position;
-        landmarks[entry.key.rawValue] = <String, double>{
-          'x': (position.dx / image.width).clamp(0.0, 1.0).toDouble(),
-          'y': (position.dy / image.height).clamp(0.0, 1.0).toDouble(),
+        landmarks[entry.key.index] = <String, double>{
+          'x': (position.x / image.width).clamp(0.0, 1.0).toDouble(),
+          'y': (position.y / image.height).clamp(0.0, 1.0).toDouble(),
         };
       }
 
       final faceContourPoints = face.contours[FaceContourType.face]?.points;
       final faceContour = faceContourPoints
           ?.map((point) => <String, double>{
-                'x': (point.dx / image.width).clamp(0.0, 1.0).toDouble(),
-                'y': (point.dy / image.height).clamp(0.0, 1.0).toDouble(),
+                'x': (point.x / image.width).clamp(0.0, 1.0).toDouble(),
+                'y': (point.y / image.height).clamp(0.0, 1.0).toDouble(),
               })
           .toList();
 

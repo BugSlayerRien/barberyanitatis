@@ -7,10 +7,10 @@ import 'ai_funnel_service.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
+import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
-import 'haircut_preview_scanner_page.dart';
 import 'saved_haircuts_page.dart';
 import 'suggested_appointment_page.dart';
 import 'widgets/app_top_bar.dart';
@@ -343,6 +343,31 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
   }
 
+  void _openTryHaircut() {
+    final hasCaptures = UserSession.capturedFaceImages != null &&
+        UserSession.capturedFaceImages!.isNotEmpty;
+
+    if (hasCaptures) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => AiFaceScanPage(
+            livePreviewOnly: true,
+            presetRecommendation: widget.style,
+          ),
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiFaceScanPage(
+          presetRecommendation: widget.style,
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleFavorite() async {
     final userId = UserSession.userId;
     final variantId = _getVariantId();
@@ -555,9 +580,25 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         ),
                       ],
                     ),
-                    const SizedBox(height: 28),
-
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
+                    Text(
+                      widget.style['description']?.toString().trim().isNotEmpty == true
+                          ? widget.style['description'].toString().trim()
+                          : 'A clean, modern haircut selected for your look.',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                        height: 1.5,
+                      ),
+                    ),
+                    if ((widget.style['details']?.toString().trim().isNotEmpty ?? false)) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        widget.style['details']!.toString().trim(),
+                        style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.45),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
 
                     // Buttons
                     ElevatedButton(
@@ -629,15 +670,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton(
-                      onPressed: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => HaircutPreviewScannerPage(
-                              style: widget.style,
-                            ),
-                          ),
-                        );
-                      },
+                      onPressed: _openTryHaircut,
                       style: OutlinedButton.styleFrom(
                         backgroundColor: Colors.transparent,
                         foregroundColor: Colors.white,
@@ -664,11 +697,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
         currentIndex: 0,
         onTap: (index) {
           if (index == 0) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const DashboardPage()));
+            navigateToCustomerHome(context);
           } else if (index == 1) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AppointmentsPage()));
+            openCustomerTab(context, CustomerTab.appointments);
           } else if (index == 2) {
-            Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const AiFaceScanPage()));
+            openCustomerTab(context, CustomerTab.scanner);
           } else if (index == 3) {
             Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),

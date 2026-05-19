@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Flutter Web (Chrome)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}/tatis_barbershop/mobile-app",
+      "toolArgs": [
+        "-d",
+        "chrome"
+      ]
+    },
+    {
+      "name": "Flutter (Gemini Chatbot)",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "cwd": "${workspaceFolder}/tatis_barbershop/mobile-app",
+      "toolArgs": [
+        "--dart-define=GEMINI_CHATBOT_API_KEY=AQ.Ab8RN6KlvnR-121WQ5uxMLL8cMZN7yWFg8-319S1KXo169ZEBQ"
+      ]
+    }
+  ]
+}

@@ -149,12 +149,12 @@ class OverlayRegistry {
 
   static const Map<String, OverlayCalibration> calibrations = {
     'blowout taper': OverlayCalibration(
-      widthScale: 1.18,
-      heightScale: 1.28,
+      widthScale: 1.22,
+      heightScale: 1.34,
       xOffset: 0,
-      yOffset: -0.22,
-      hairClipFactor: 0.58,
-      visualScale: 1.18,
+      yOffset: -0.04,
+      hairClipFactor: 0.48,
+      visualScale: 1.24,
     ),
     'buzz cut': OverlayCalibration(
       widthScale: 0.96,
@@ -236,6 +236,19 @@ class OverlayRegistry {
     var name = raw.trim().toLowerCase();
     if (name.isEmpty) return name;
     return _aliases[name] ?? name;
+  }
+
+  /// True when this style has bundled overlay PNGs in the app (not a generic fallback).
+  static bool hasDedicatedAssets(String styleName) {
+    final normalized = normalizeStyleName(styleName);
+    if (normalized.isEmpty) return false;
+    if (_sets.containsKey(normalized)) return true;
+    for (final key in _sets.keys) {
+      if (normalized.contains(key) || key.contains(normalized)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   static OverlayImageSet resolve(String styleName) {

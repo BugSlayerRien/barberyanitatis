@@ -673,6 +673,16 @@ async function assignPortalRole(payload) {
   }
 }
 
+function findBarberRoleForEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  return (state.users.barbers || []).some(
+    (row) => String(row.email || "").trim().toLowerCase() === normalized && Number(row.is_active) === 1,
+  );
+}
+
 function findPortalRoleForEmail(email) {
   const normalized = String(email || "").trim().toLowerCase();
   if (!normalized) {
@@ -723,7 +733,7 @@ function openAccountEditor(type, id) {
   state.accountEditor = { type, id: Number(id) };
 
   if (type === "customer") {
-    const portalRole = findPortalRoleForEmail(row.email ?? "");
+    const appRole = findBarberRoleForEmail(row.email ?? "") ? "barber" : "customer";
     title.textContent = "Edit Customer";
     form.innerHTML = `
       <label>Full Name
@@ -736,16 +746,11 @@ function openAccountEditor(type, id) {
         <input class="input" id="ae-phone" value="${row.phone ?? ""}" />
       </label>
       <label>App Role
-        <input class="input" value="Customer" disabled />
-      </label>
-      <label>Portal Access Role
-        <select class="select" id="ae-portal-role">
-          <option value="" ${portalRole === "" ? "selected" : ""}>Customer only (no portal)</option>
-          <option value="Receptionist" ${portalRole === "Receptionist" ? "selected" : ""}>Receptionist</option>
-          <option value="Admin" ${portalRole === "Admin" ? "selected" : ""}>Admin</option>
+        <select class="select" id="ae-app-role">
+          <option value="customer" ${appRole === "customer" ? "selected" : ""}>Customer</option>
+          <option value="barber" ${appRole === "barber" ? "selected" : ""}>Barber</option>
         </select>
       </label>
-      <p class="login-meta" style="margin: 0 0 8px;">New portal users get temporary password <strong>ChangeMe123!</strong> until reset.</p>
       <label>Active
         <select class="select" id="ae-active">
           <option value="1" ${Number(row.is_active) === 1 ? "selected" : ""}>Yes</option>
@@ -829,19 +834,18 @@ async function saveAccountEditor() {
   try {
     if (type === "customer") {
       const phone = document.getElementById("ae-phone")?.value?.trim() || "";
-      const portalRole = document.getElementById("ae-portal-role")?.value || "";
-      await updateUser({ action: "update", type, id, fullName, email, phone, role: "customer", isActive: activeValue });
-      if (portalRole) {
-        await assignPortalRole({
-          action: "assignPortalRole",
-          email,
-          fullName,
-          role: portalRole,
-          isActive: activeValue === 1,
-        });
-      } else {
-        await assignPortalRole({ action: "removePortalRole", email });
-      }
+      const appRole = document.getElementById("ae-app-role")?.value || "customer";
+      await updateUser({
+        action: "update",
+        type,
+        id,
+        fullName,
+        email,
+        phone,
+        role: "customer",
+        appRole,
+        isActive: activeValue,
+      });
     }
 
     if (type === "barber") {

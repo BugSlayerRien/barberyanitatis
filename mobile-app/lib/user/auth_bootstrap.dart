@@ -110,6 +110,13 @@ class AuthBootstrap {
       return true;
     }
 
+    if (kIsWeb && isSupabaseAuthCallbackUri(Uri.base)) {
+      final handled = await handleAuthCallbackUri(Uri.base);
+      if (handled || _didNavigateAfterSignIn) {
+        return true;
+      }
+    }
+
     if (!kIsWeb) {
       final initialLink = await AppLinks().getInitialAppLink();
       if (initialLink != null) {
@@ -164,12 +171,22 @@ class AuthBootstrap {
       }
 
       final normalizedUri = _normalizeAuthCallbackUri(uri);
-      final response = await Supabase.instance.client.auth.getSessionFromUrl(
-        normalizedUri,
-      );
+      Session? session;
 
-      final session = response.session;
+      try {
+        final response = await Supabase.instance.client.auth.getSessionFromUrl(
+          normalizedUri,
+        );
+        session = response.session;
+      } catch (e) {
+        debugPrint('[AuthBootstrap] getSessionFromUrl failed: $e');
+      }
+
+      session ??= await _recoverSessionFromFragment(uri);
+
       if (session == null) {
+        debugPrint('[AuthBootstrap] No session recovered from OAuth callback.');
+        _lastProcessedAuthCallbackUri = null;
         return false;
       }
 
@@ -182,9 +199,31 @@ class AuthBootstrap {
 
       _scheduleNavigation(() => navigateToSignedInHome());
       return true;
-    } catch (_) {
+    } catch (e, stack) {
+      debugPrint('[AuthBootstrap] OAuth callback failed: $e\n$stack');
       _lastProcessedAuthCallbackUri = null;
       return false;
+    }
+  }
+
+  static Future<Session?> _recoverSessionFromFragment(Uri uri) async {
+    final fragmentParameters = _readAuthCallbackParameters(uri);
+    final accessToken = fragmentParameters['access_token'];
+    final refreshToken = fragmentParameters['refresh_token'];
+    if (accessToken == null ||
+        accessToken.isEmpty ||
+        refreshToken == null ||
+        refreshToken.isEmpty) {
+      return null;
+    }
+
+    try {
+      final response =
+          await Supabase.instance.client.auth.setSession(refreshToken);
+      return response.session;
+    } catch (e) {
+      debugPrint('[AuthBootstrap] setSession from fragment failed: $e');
+      return null;
     }
   }
 
@@ -279,7 +318,16 @@ class AuthBootstrap {
   }
 
   static void _scheduleNavigation(VoidCallback navigate) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => navigate());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      navigate();
+      if (!_didNavigateAfterSignIn) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_didNavigateAfterSignIn) {
+            navigate();
+          }
+        });
+      }
+    });
   }
 
   static Map<String, String> _readAuthCallbackParameters(Uri uri) {
