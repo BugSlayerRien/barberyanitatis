@@ -17,8 +17,10 @@ const DEFAULT_PAGE_SIZE = 8;
 const PAGE_SIZE_BY_KEY = {
   "appointments-table": 8,
   "walkins-table": 8,
-  "tracking-list": 6,
-  "barbers-list": 6,
+  "tracking-regular-list": 6,
+  "tracking-exclusive-list": 6,
+  "barbers-regular-list": 6,
+  "barbers-exclusive-list": 6,
 };
 
 const navButtons = document.querySelectorAll(".nav button");
@@ -342,19 +344,33 @@ function rerenderByPaginationKey(key) {
     renderWalkins(state.walkins);
     return;
   }
-  if (key === "tracking-list") {
-    renderTracking(buildTracking(state.appointments, state.walkins));
+  if (key === "tracking-regular-list" || key === "tracking-exclusive-list") {
+    renderSplitTracking(state.appointments, state.walkins);
     return;
   }
-  if (key === "barbers-list") {
-    const items = (window.__barbersCache || []).map((barber) => ({
+  if (key === "barbers-regular-list" || key === "barbers-exclusive-list") {
+    renderSplitBarbers(window.__barbersCache || []);
+  }
+}
+
+function normalizeBarberChannel(channel) {
+  const value = String(channel || "appointment").toLowerCase();
+  if (value === "walk_in" || value === "walkin" || value === "regular") {
+    return "walk_in";
+  }
+  return "appointment";
+}
+
+function mapBarberCards(barbers, channel) {
+  return (barbers || [])
+    .filter((barber) => normalizeBarberChannel(barber.barber_channel) === channel)
+    .map((barber) => ({
       name: barber.full_name,
       specialty: barber.specialty ?? "N/A",
       rating: barber.rating ?? "-",
       experience: barber.years_experience ? `${barber.years_experience} yrs` : "N/A",
+      channelLabel: channel === "walk_in" ? "Regular" : "Exclusive",
     }));
-    renderBarbers(items);
-  }
 }
 
 function parseAppointmentDateTime(item) {
@@ -372,7 +388,29 @@ function buildTracking(appointments, walkins) {
 
   (appointments || []).forEach((item) => {
     const status = String(item.status || "Scheduled");
-    if (["Cancelled", "NoShow", "Completed", "PendingPayment"].includes(status)) {
+    if (["Cancelled", "NoShow", "Completed"].includes(status)) {
+      return;
+    }
+
+    if (status === "PendingPayment") {
+      const displaySchedule = item.time_range
+        ? `${formatScheduleLabel(item.appointment_date, "")} • ${item.time_range}`
+        : formatScheduleLabel(item.appointment_date, item.time);
+      items.push({
+        kind: "appointment",
+        appointmentId: item.appointment_id,
+        name: item.name,
+        memberLabel: item.member_label || item.name,
+        isGroup: item.is_group === true,
+        peopleCount: item.people_count || 1,
+        service: item.service,
+        barber: item.barber || "",
+        schedule: displaySchedule,
+        status: "PENDING PAYMENT",
+        progress: 0.12,
+        timeRemaining: "Awaiting payment",
+        color: "#FF9800",
+      });
       return;
     }
 
@@ -399,11 +437,16 @@ function buildTracking(appointments, walkins) {
       }
     }
 
-    const schedule = formatScheduleLabel(item.appointment_date, item.time);
+    const schedule = item.time_range
+      ? `${formatScheduleLabel(item.appointment_date, "")} • ${item.time_range}`
+      : formatScheduleLabel(item.appointment_date, item.time);
     items.push({
       kind: "appointment",
       appointmentId: item.appointment_id,
       name: item.name,
+      memberLabel: item.member_label || item.name,
+      isGroup: item.is_group === true,
+      peopleCount: item.people_count || 1,
       service: item.service,
       barber: item.barber || "",
       schedule,
@@ -513,9 +556,9 @@ function renderAppointments(appointments) {
         .map(
           (item) => `
             <tr>
-              <td>${item.name}</td>
+              <td>${item.name}${item.is_group ? ` <span class="tag info">Group · ${item.people_count || 1}</span>` : ""}</td>
               <td>${item.service}</td>
-              <td>${item.time}</td>
+              <td>${item.time_range || item.time}</td>
               <td>${item.duration}</td>
               <td>${item.price}</td>
               <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "Scheduled" ? "info" : "warning"}">${item.status}</span></td>
@@ -577,16 +620,16 @@ function renderWalkins(walkins) {
   `;
 }
 
-function renderTracking(items) {
-  const list = document.getElementById("tracking-list");
+function renderTracking(items, listId) {
+  const list = document.getElementById(listId);
   if (!list) return;
   list.innerHTML = "";
   if (!items || !items.length) {
-    list.innerHTML = '<div class="card">No tracking data.</div>';
+    list.innerHTML = '<div class="card">No clients in this queue.</div>';
     return;
   }
 
-  const paged = paginateRows("tracking-list", items);
+  const paged = paginateRows(listId, items);
   paged.items.forEach((item) => {
     const card = document.createElement("div");
     card.className = "card";
@@ -595,12 +638,20 @@ function renderTracking(items) {
     card.innerHTML = `
       <div class="row-wrap" style="justify-content: space-between; align-items: flex-start;">
         <div>
-          <h4 style="margin: 0 0 4px;">${item.name}</h4>
+          <h4 style="margin: 0 0 4px;">${item.name}${item.isGroup ? ` <span class="tag info" style="margin-left:6px;">Group · ${item.peopleCount}</span>` : ""}</h4>
           <p style="margin: 0 0 4px;">${item.service}</p>
           <p class="meta" style="margin: 0 0 4px; color: #c9b46a;">${item.schedule || ""}</p>
           ${item.barber ? `<p class="meta" style="margin: 0;">Barber: ${item.barber}</p>` : ""}
         </div>
-        <span class="tag ${item.status === "WAITING" ? "info" : item.status === "IN PROGRESS" ? "success" : "warning"}">${item.status}</span>
+        <span class="tag ${
+          item.status === "WAITING"
+            ? "info"
+            : item.status === "IN PROGRESS"
+              ? "success"
+              : item.status === "PENDING PAYMENT"
+                ? "warning"
+                : "warning"
+        }">${item.status}</span>
       </div>
       <div class="progress" style="margin-top: 10px; height: 8px;">
         <span style="width: ${pct}%; background: ${item.color};"></span>
@@ -620,46 +671,57 @@ function renderTracking(items) {
     list.appendChild(card);
   });
 
-  const pager = paginationMarkup("tracking-list", paged.currentPage, paged.totalPages);
+  const pager = paginationMarkup(listId, paged.currentPage, paged.totalPages);
   if (pager) {
     list.insertAdjacentHTML("beforeend", pager);
   }
 }
 
+function renderSplitTracking(appointments, walkins) {
+  const tracking = buildTracking(appointments, walkins);
+  renderTracking(tracking.filter((item) => item.kind === "walkin"), "tracking-regular-list");
+  renderTracking(tracking.filter((item) => item.kind === "appointment"), "tracking-exclusive-list");
+}
 
-function renderBarbers(items) {
-  const list = document.getElementById("barbers-list");
+function renderBarbers(items, listId) {
+  const list = document.getElementById(listId);
   if (!list) return;
   list.innerHTML = "";
   if (!items || !items.length) {
-    list.innerHTML = "<div class=\"card\">No barbers available.</div>";
+    list.innerHTML = "<div class=\"card\">No barbers in this group.</div>";
     return;
   }
 
-  const paged = paginateRows("barbers-list", items);
+  const paged = paginateRows(listId, items);
   paged.items.forEach((item) => {
     const card = document.createElement("div");
     card.className = "card gradient";
     card.innerHTML = `
       <h4>${item.name}</h4>
       <p>${item.specialty}</p>
+      <div class="meta">${item.channelLabel || ""}</div>
       <div class="meta">Rating: ${item.rating}</div>
       <div class="meta">Experience: ${item.experience}</div>
     `;
     list.appendChild(card);
   });
 
-  const pager = paginationMarkup("barbers-list", paged.currentPage, paged.totalPages);
+  const pager = paginationMarkup(listId, paged.currentPage, paged.totalPages);
   if (pager) {
     list.insertAdjacentHTML("beforeend", pager);
   }
 }
 
+function renderSplitBarbers(barbers) {
+  renderBarbers(mapBarberCards(barbers, "walk_in"), "barbers-regular-list");
+  renderBarbers(mapBarberCards(barbers, "appointment"), "barbers-exclusive-list");
+}
+
 async function loadOptions() {
   try {
     const [servicesResponse, barbersResponse] = await Promise.all([
-      postJson(apiUrl("services.php"), { action: "list" }),
-      postJson(apiUrl("barbers.php"), { action: "list" }),
+      postJson(apiUrl("services.php"), { action: "list", channel: "walk_in" }),
+      postJson(apiUrl("barbers.php"), { action: "list", channel: "all" }),
     ]);
 
     const services = servicesResponse.services ?? [];
@@ -683,17 +745,58 @@ async function loadOptions() {
     }
 
     window.__barbersCache = barbers;
-    renderBarbers(
-      barbers.map((barber) => ({
-        name: barber.full_name,
-        specialty: barber.specialty ?? "N/A",
-        rating: barber.rating ?? "-",
-        experience: barber.years_experience ? `${barber.years_experience} yrs` : "N/A",
-      })),
-    );
+    renderSplitBarbers(barbers);
+    await loadBarberUnavailabilityRequests();
   } catch (error) {
     window.__barbersCache = [];
-    renderBarbers([]);
+    renderSplitBarbers([]);
+  }
+}
+
+async function loadBarberUnavailabilityRequests() {
+  const list = document.getElementById("barber-unavailability-list");
+  if (!list) return;
+
+  try {
+    const data = await postJson(apiUrl("barber_schedule.php"), { action: "listRequests", status: "Pending" });
+    const rows = data.requests ?? [];
+    if (!rows.length) {
+      list.innerHTML = '<div class="card">No pending requests.</div>';
+      return;
+    }
+
+    list.innerHTML = "";
+    rows.forEach((row) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <h4>${row.barber_name ?? "Barber"}</h4>
+        <p>Date: ${row.request_date}</p>
+        <p>${row.note ?? ""}</p>
+        <div class="row-wrap">
+          <button class="btn" data-approve="${row.request_id}" type="button">Approve</button>
+          <button class="btn secondary" data-reject="${row.request_id}" type="button">Reject</button>
+        </div>
+      `;
+      list.appendChild(card);
+    });
+
+    list.querySelectorAll("[data-approve]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = Number(btn.getAttribute("data-approve"));
+        await postJson(apiUrl("barber_schedule.php"), { action: "reviewRequest", requestID: id, decision: "Approved" });
+        await loadBarberUnavailabilityRequests();
+      });
+    });
+    list.querySelectorAll("[data-reject]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = Number(btn.getAttribute("data-reject"));
+        await postJson(apiUrl("barber_schedule.php"), { action: "reviewRequest", requestID: id, decision: "Rejected" });
+        await loadBarberUnavailabilityRequests();
+      });
+    });
+  } catch (error) {
+    list.innerHTML = '<div class="card">Could not load time-off requests.</div>';
   }
 }
 
@@ -706,7 +809,7 @@ async function loadDashboard() {
     renderStats(data.stats ?? []);
     renderAppointments(state.appointments);
     renderWalkins(state.walkins);
-    renderTracking(buildTracking(state.appointments, state.walkins));
+    renderSplitTracking(state.appointments, state.walkins);
     renderSummary(data.stats ?? [], state.appointments, state.walkins);
   } catch (error) {
     state.appointments = [];
@@ -714,8 +817,8 @@ async function loadDashboard() {
     renderStats([]);
     renderAppointments([]);
     renderWalkins([]);
-    renderTracking([]);
-    renderBarbers([]);
+    renderSplitTracking([], []);
+    renderSplitBarbers([]);
   }
 
   document.getElementById("last-updated").textContent = new Date().toLocaleString();

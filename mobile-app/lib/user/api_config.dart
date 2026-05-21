@@ -1,18 +1,84 @@
+import 'dart:io';
+
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 
+/// Resolves where the PHP API lives (XAMPP) for web vs emulator vs physical phone.
 class ApiConfig {
-  static const String webBaseUrl = 'http://localhost/barberyanitatis/tatis_barbershop/api';
-  // Local LAN address for device testing — updated to your Wi-Fi IP (192.168.1.6)
-  static const String emulatorBaseUrl = 'http://192.168.1.6/barberyanitatis/tatis_barbershop/api';
+  static const String _apiPath = '/barberyanitatis/tatis_barbershop/api';
+  static const String webBaseUrl = 'http://localhost$_apiPath';
+
+  /// PC Wi‑Fi IPv4 from `ipconfig` (override: `--dart-define=LAN_HOST=192.168.1.x`).
+  static const String defaultLanHost =
+      String.fromEnvironment('LAN_HOST', defaultValue: '192.168.1.4');
+
+  static const String androidEmulatorBaseUrl = 'http://10.0.2.2$_apiPath';
+  static String lanBaseUrl(String host) => 'http://$host$_apiPath';
+
+  static String? _cachedBaseUrl;
+  static Future<void>? _initFuture;
+
+  /// Call once from `main()` before `runApp` so physical vs emulator URL is correct.
+  static Future<void> ensureInitialized() {
+    _initFuture ??= _resolveAndCache();
+    return _initFuture!;
+  }
+
+  static Future<void> _resolveAndCache() async {
+    _cachedBaseUrl = await _resolveBaseUrl();
+  }
 
   static String get baseUrl {
     const configured = String.fromEnvironment('API_BASE_URL', defaultValue: '');
     if (configured.isNotEmpty) {
       return configured;
     }
-    return kIsWeb
-        ? webBaseUrl
-      : emulatorBaseUrl;
+    if (_cachedBaseUrl != null && _cachedBaseUrl!.isNotEmpty) {
+      return _cachedBaseUrl!;
+    }
+    return _resolveBaseUrlSync();
+  }
+
+  static String _resolveBaseUrlSync() {
+    if (kIsWeb) {
+      return webBaseUrl;
+    }
+    if (Platform.isAndroid) {
+      return lanBaseUrl(defaultLanHost);
+    }
+    if (Platform.isIOS) {
+      return lanBaseUrl(defaultLanHost);
+    }
+    return webBaseUrl;
+  }
+
+  static Future<String> _resolveBaseUrl() async {
+    const configured = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    if (configured.isNotEmpty) {
+      return configured;
+    }
+    if (kIsWeb) {
+      return webBaseUrl;
+    }
+    if (Platform.isAndroid) {
+      try {
+        final android = await DeviceInfoPlugin().androidInfo;
+        if (!android.isPhysicalDevice) {
+          return androidEmulatorBaseUrl;
+        }
+      } catch (_) {}
+      return lanBaseUrl(defaultLanHost);
+    }
+    if (Platform.isIOS) {
+      try {
+        final ios = await DeviceInfoPlugin().iosInfo;
+        if (!ios.isPhysicalDevice) {
+          return webBaseUrl;
+        }
+      } catch (_) {}
+      return lanBaseUrl(defaultLanHost);
+    }
+    return webBaseUrl;
   }
 
   static String get rootUrl {

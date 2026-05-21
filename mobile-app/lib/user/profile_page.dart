@@ -646,7 +646,13 @@ class _ProfilePageState extends State<ProfilePage> {
             backgroundColor: const Color(0xFF1A1A1A),
             title: const Text('Loyalty Badge', style: TextStyle(color: Colors.white)),
             content: Text(
-              'Tier: $tier\nCompleted haircuts: $_haircutsDone',
+              'Tier: $tier\n'
+              'Completed appointments: $_haircutsDone\n\n'
+              'Rookie: 0–1 completed\n'
+              'Bronze: 2–4\n'
+              'Silver: 5–9\n'
+              'Gold: 10–19\n'
+              'Platinum: 20+',
               style: const TextStyle(color: Colors.white70),
             ),
             actions: [

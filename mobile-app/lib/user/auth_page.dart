@@ -24,7 +24,7 @@ class AuthPage extends StatefulWidget {
 }
 
 class _AuthPageState extends State<AuthPage> {
-  final String _apiBaseUrl = ApiConfig.baseUrl;
+  String get _apiBaseUrl => ApiConfig.baseUrl;
   static const String _googleServerClientId =
       String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
 
@@ -395,7 +395,7 @@ class _AuthPageState extends State<AuthPage> {
     try {
       AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
-        Provider.google,
+        OAuthProvider.google,
         redirectTo: AuthRedirect.supabaseRedirectUri,
         authScreenLaunchMode: LaunchMode.platformDefault,
       );
@@ -426,7 +426,7 @@ class _AuthPageState extends State<AuthPage> {
     try {
       AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
-        Provider.facebook,
+        OAuthProvider.facebook,
         redirectTo: AuthRedirect.supabaseRedirectUri,
         authScreenLaunchMode: LaunchMode.platformDefault,
       );

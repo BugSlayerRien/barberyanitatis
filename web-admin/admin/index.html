@@ -107,7 +107,7 @@
         <section id="users-view" hidden>
           <div class="section-title">Manage Users</div>
           <div class="card" style="margin-bottom: 12px;">
-            <div class="form-grid">
+            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
               <label>Search
                 <input class="input" id="users-search" placeholder="Name, email, specialty" />
               </label>
@@ -120,6 +120,7 @@
                   <option value="admins">Admins</option>
                 </select>
               </label>
+              <button class="btn" id="users-add-account" type="button">Add account</button>
             </div>
           </div>
           <div class="users-stack">
@@ -180,17 +181,14 @@
             <p class="ai-action-note" id="analytics-action-note">Action buttons stay disabled until AI recommends them.</p>
             <div class="row-wrap" id="analytics-actions"></div>
           </div>
-          <div class="card">
-            <h3>Key Metrics</h3>
-            <div class="grid stats" id="analytics-metrics"></div>
-          </div>
         </section>
 
         <section id="services-view" hidden>
           <div class="section-title">Manage Services</div>
           <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap">
+            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
               <input class="input" id="services-search" placeholder="Search service or category" style="max-width: 360px;" />
+              <button class="btn" id="services-add" type="button">Add service</button>
             </div>
           </div>
           <div class="card">
@@ -257,6 +255,17 @@
         <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
           <button class="btn" id="account-editor-save" type="button">Save</button>
           <button class="btn secondary" id="account-editor-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="service-editor-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner">
+        <h3 id="service-editor-title" style="margin: 0 0 10px;">Service</h3>
+        <div id="service-editor-form" class="form-grid"></div>
+        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
+          <button class="btn" id="service-editor-save" type="button">Save</button>
+          <button class="btn secondary" id="service-editor-cancel" type="button">Cancel</button>
         </div>
       </div>
     </dialog>

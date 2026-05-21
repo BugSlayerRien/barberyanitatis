@@ -10,6 +10,7 @@ import 'payment_page.dart';
 import 'api_config.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
+import 'services/face_scan_service.dart';
 
 class TimeSlotPage extends StatefulWidget {
   final int barberId;
@@ -23,7 +24,6 @@ class TimeSlotPage extends StatefulWidget {
 }
 
 class _TimeSlotPageState extends State<TimeSlotPage> {
-  static const Duration _bookingLeadTime = Duration(hours: 3);
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
   static const int _appointmentDurationMinutes = 60;
@@ -733,10 +733,13 @@ Keep the total response under 24 words.
                         date: _activeDate,
                         time: _selectedTime ?? '',
                       );
-                      final earliestBookable = DateTime.now().add(_bookingLeadTime);
-                      if (selectedDateTime == null || !selectedDateTime.isAfter(earliestBookable)) {
+                      if (selectedDateTime == null || !isSlotBookableAt(selectedDateTime)) {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Please book at least 3 hours from now.')),
+                          const SnackBar(
+                            content: Text(
+                              'Please choose a slot at least 1 hour ahead (next full hour after that).',
+                            ),
+                          ),
                         );
                         return;
                       }
@@ -809,6 +812,15 @@ Keep the total response under 24 words.
                           sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
                           backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
                         );
+                        try {
+                          await FaceScanService.attachPreviewsToAppointment(
+                            appointmentId: appointmentId,
+                            scanSessionId: UserSession.ensureScanSessionId(),
+                            variantId: UserSession.selectedVariantId!,
+                          );
+                        } catch (_) {
+                          // Catalog images still apply if attach fails.
+                        }
                       }
 
                       if (!context.mounted) return;
@@ -1084,7 +1096,7 @@ Keep the total response under 24 words.
     if (slotDateTime == null) {
       return false;
     }
-    return slotDateTime.isAfter(DateTime.now().add(_bookingLeadTime));
+    return isSlotBookableAt(slotDateTime);
   }
 
   int _slotBookedCount(Map<String, dynamic> slot) {

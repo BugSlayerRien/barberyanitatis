@@ -12,7 +12,6 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
-import 'booking_guard.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'suggested_appointment_page.dart';
@@ -56,6 +55,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
 
   Future<void> _loadAppointments() async {
     if (UserSession.userId == null) {
+      if (!mounted) return;
       setState(() {
         _loading = false;
         _error = 'Please sign in again.';
@@ -63,6 +63,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       return;
     }
 
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
@@ -82,8 +83,13 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           ? jsonDecode(response.body) as Map<String, dynamic>
           : {};
       if (response.statusCode != 200) {
+        final details = data['details']?.toString();
+        final message = data['error']?.toString() ?? 'Failed to load appointments.';
+        if (!mounted) return;
         setState(() {
-          _error = data['error']?.toString() ?? 'Failed to load appointments.';
+          _error = details != null && details.isNotEmpty
+              ? '$message\n$details'
+              : message;
           _loading = false;
         });
         return;
@@ -108,12 +114,45 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         final forcedState = widget.forcedPaymentState;
         final forcedReceipt = widget.forcedReceiptRef;
 
+        final isGroup = appt['isGroup'] == true;
+        final displayTitle = isGroup
+            ? (appt['displayTitle']?.toString() ?? firstService['hairstyleName']?.toString() ?? 'Group booking')
+            : (firstService['hairstyleName']?.toString() ??
+                firstService['serviceName']?.toString() ??
+                'Haircut');
+        final timeRangeRaw = appt['timeRange']?.toString() ?? '';
+        final timeRange = timeRangeRaw.isNotEmpty
+            ? formatTimeRangeTo12h(timeRangeRaw)
+            : '';
+        final peopleCount = (appt['peopleCount'] as num?)?.toInt() ??
+            (isGroup ? (appt['groupMembers'] as List?)?.length ?? 1 : 1);
+        final perPersonMinutes =
+            (firstService['durationMinutes'] as num?)?.toInt() ?? 60;
+        final totalDurationMinutes = (appt['totalDurationMinutes'] as num?)?.toInt() ??
+            (perPersonMinutes * peopleCount);
+        final totalPrice = isGroup
+            ? (appt['totalPrice']?.toString() ?? firstService['price']?.toString() ?? '0')
+            : (firstService['price']?.toString() ?? '0');
+
         final mapped = {
           'appointmentId': appointmentId,
+          'isGroup': isGroup,
+          'bookingGroupID': appt['bookingGroupID'],
+          'displayTitle': displayTitle,
+          'groupMembers': appt['groupMembers'] ?? [],
+          'groupMemberNames': appt['groupMemberNames'] ?? [],
+          'peopleCount': peopleCount,
+          'totalDurationMinutes': totalDurationMinutes,
+          'timeRange': timeRange,
+          'holdExpiresAt': appt['holdExpiresAt']?.toString(),
+          'intentCreatedAt': appt['intentCreatedAt']?.toString(),
           'barberID': appt['barberID'],
           'frontViewUrl': appt['frontViewUrl'],
           'sideViewUrl': appt['sideViewUrl'],
           'backViewUrl': appt['backViewUrl'],
+          'customerFrontUrl': appt['frontViewUrl'],
+          'customerLeftUrl': appt['sideViewUrl'],
+          'customerRightUrl': appt['backViewUrl'],
           'status': isPaymentOverride && forcedState == 'Paid'
               ? 'Scheduled'
               : status,
@@ -141,30 +180,34 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
               ? true
               : appt['canReschedule'] == true,
           'intentFailureReason': appt['intentFailureReason']?.toString(),
-          'service': firstService['hairstyleName']?.toString() ??
-              firstService['serviceName']?.toString() ??
-              'Haircut',
+          'service': displayTitle,
           'serviceID': firstService['serviceID'],
           'variantID': firstService['variantID'],
           'barber': 'with ${appt['barberName'] ?? ''}',
           'date': appt['appointmentDate']?.toString() ?? '',
-          'time': formatTo12Hour(appt['startTime']?.toString() ?? ''),
-          'duration': firstService['durationMinutes'] != null
-              ? '${firstService['durationMinutes']} min'
-              : '—',
-          'price': firstService['price'] != null
-              ? '₱${firstService['price']}'
-              : '₱0',
+          'time': timeRange.isNotEmpty
+              ? timeRange
+              : formatTo12Hour(appt['startTime']?.toString() ?? ''),
+          'endTime': appt['endTime']?.toString() ?? '',
+          'duration': isGroup
+              ? '$totalDurationMinutes min ($peopleCount × $perPersonMinutes min)'
+              : (firstService['durationMinutes'] != null
+                  ? '${firstService['durationMinutes']} min'
+                  : '—'),
+          'price': '₱$totalPrice',
           'rating': status == 'Completed' ? '★★★★★' : null,
         };
 
         if (status == 'Completed') {
           completed.add(mapped);
-        } else if (BookingGuard.isActiveStatus(status)) {
+        } else if (status == 'Cancelled' || status == 'NoShow') {
+          completed.add(mapped);
+        } else {
           upcoming.add(mapped);
         }
       }
 
+      if (!mounted) return;
       setState(() {
         _upcomingAppointments = upcoming;
         _completedAppointments = completed;
@@ -173,6 +216,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         _loading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = 'Failed to load appointments: $e';
         _loading = false;
@@ -334,13 +378,25 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
+                                if (appointment['isGroup'] == true)
+                                  const Padding(
+                                    padding: EdgeInsets.only(right: 8),
+                                    child: Icon(
+                                      Icons.groups_rounded,
+                                      color: Color(0xFFA99941),
+                                      size: 28,
+                                    ),
+                                  ),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
                                     children: [
                                       Text(
-                                        appointment['service'] as String,
+                                        appointment['isGroup'] == true
+                                            ? (appointment['displayTitle'] as String? ??
+                                                appointment['service'] as String)
+                                            : appointment['service'] as String,
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,
@@ -493,7 +549,35 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                                   const SizedBox.shrink(),
                                 Row(
                                   children: [
-                                    if (isUpcoming)
+                                    if (isUpcoming) ...[
+                                      TextButton(
+                                        onPressed: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  CompletedAppointmentDetailPage(
+                                                appointment: appointment,
+                                                isUpcoming: true,
+                                              ),
+                                            ),
+                                          );
+                                        },
+                                        style: TextButton.styleFrom(
+                                          foregroundColor: const Color(0xFFA99941),
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 12,
+                                            vertical: 8,
+                                          ),
+                                        ),
+                                        child: const Text(
+                                          'View',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
                                       Wrap(
                                         spacing: 8,
                                         runSpacing: 8,
@@ -589,8 +673,8 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
                                                   ),
                                           ),
                                         ],
-                                      )
-                                    else
+                                      ),
+                                    ] else
                                       Row(
                                         children: [
                                           ElevatedButton(
@@ -819,23 +903,27 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       );
     }
 
-    if ((paymentState == 'Unpaid' || paymentState == 'Verifying') &&
-        expiresAtRaw != null &&
-        expiresAtRaw.isNotEmpty) {
-      final expiresAt = DateTime.tryParse(expiresAtRaw)?.toLocal();
-      if (expiresAt != null) {
-        final left = expiresAt.difference(DateTime.now());
+    if (paymentState == 'Unpaid' || paymentState == 'Verifying') {
+      final holdEnds = reservationHoldEndsAt(
+        holdExpiresAt: appointment['holdExpiresAt']?.toString(),
+        intentCreatedAt: appointment['intentCreatedAt']?.toString(),
+      );
+      if (holdEnds != null) {
+        final left = holdEnds.difference(DateTime.now());
         if (left.inSeconds > 0) {
-          final mins = left.inMinutes;
-          final secs = left.inSeconds % 60;
           return Text(
-            'Reservation hold: ${mins.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}',
+            formatReservationHoldLabel(left),
             style: const TextStyle(
-                color: Color(0xFFE67E22),
-                fontSize: 11,
-                fontWeight: FontWeight.w600),
+              color: Color(0xFFE67E22),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           );
         }
+        return const Text(
+          'Reservation hold expired — pay or rebook soon',
+          style: TextStyle(color: Color(0xFFE67E22), fontSize: 11),
+        );
       }
     }
 
@@ -959,7 +1047,9 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
           content:
               Text(data['message']?.toString() ?? 'Appointment rescheduled.')),
     );
-    _loadAppointments();
+    if (mounted) {
+      _loadAppointments();
+    }
   }
 
   String _addMinutes(String time, int minutes) {
@@ -982,7 +1072,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         _processingAppointmentIds.contains(appointmentId)) {
       return;
     }
-    if (appointmentId > 0) {
+    if (appointmentId > 0 && mounted) {
       setState(() => _processingAppointmentIds.add(appointmentId));
     }
 
@@ -1150,7 +1240,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
     if (normalizedId > 0 && _processingAppointmentIds.contains(normalizedId)) {
       return;
     }
-    if (normalizedId > 0) {
+    if (normalizedId > 0 && mounted) {
       setState(() => _processingAppointmentIds.add(normalizedId));
     }
     try {
@@ -1160,6 +1250,7 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
         body: jsonEncode({
           'action': 'cancel',
           'appointmentID': appointmentId,
+          'userID': UserSession.userId,
           'reason': reason,
         }),
       );
@@ -1176,9 +1267,10 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
             .showSnackBar(SnackBar(content: Text(message)));
         return;
       }
-      setState(() {
-        _upcomingAppointments.remove(appointment);
-      });
+      await _loadAppointments();
+      if (!mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Appointment cancelled')));
     } catch (e) {
@@ -1319,7 +1411,9 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
       return;
     }
 
-    setState(() => _processingAppointmentIds.add(appointmentID));
+    if (mounted) {
+      setState(() => _processingAppointmentIds.add(appointmentID));
+    }
 
     try {
       final response = await http.post(

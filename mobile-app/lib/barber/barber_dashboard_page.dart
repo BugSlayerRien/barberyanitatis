@@ -11,6 +11,7 @@ import '../user/widgets/menu_sheet.dart';
 import '../user/user_session.dart';
 import 'barber_appointment_detail_page.dart';
 import 'barber_profile_page.dart';
+import 'barber_calendar_page.dart';
 
 class BarberDashboardPage extends StatefulWidget {
   const BarberDashboardPage({super.key});
@@ -21,8 +22,9 @@ class BarberDashboardPage extends StatefulWidget {
 
 class _BarberDashboardPageState extends State<BarberDashboardPage> {
   static const int _tabDashboard = 0;
-  static const int _tabProfile = 1;
-  static const int _tabMenu = 2;
+  static const int _tabCalendar = 1;
+  static const int _tabProfile = 2;
+  static const int _tabMenu = 3;
 
   int _currentTab = _tabDashboard;
   bool _loading = true;
@@ -180,6 +182,16 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               },
             ),
             _navButton(
+              icon: Icons.calendar_month_outlined,
+              isActive: _currentTab == _tabCalendar,
+              onTap: () {
+                setState(() => _currentTab = _tabCalendar);
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BarberCalendarPage()),
+                );
+              },
+            ),
+            _navButton(
               icon: Icons.person_outline,
               isActive: _currentTab == _tabProfile,
               onTap: () {
@@ -325,10 +337,16 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   }
 
   Widget _appointmentTile(BuildContext context, Map<String, dynamic> appt) {
-    final customerName = appt['customerName']?.toString() ?? 'Customer';
+    final isGroup = appt['isGroup'] == true;
+    final customerName = isGroup
+        ? (appt['displayTitle']?.toString() ?? appt['customerName']?.toString() ?? 'Group booking')
+        : (appt['customerName']?.toString() ?? 'Customer');
     final date = appt['appointmentDate']?.toString() ?? '';
+    final timeRange = appt['timeRange']?.toString() ?? '';
     final startTime = formatTo12Hour(appt['startTime']?.toString() ?? '');
+    final scheduleLabel = timeRange.isNotEmpty ? timeRange : startTime;
     final status = appt['status']?.toString() ?? 'Unknown';
+    final peopleCount = (appt['peopleCount'] as num?)?.toInt() ?? 1;
 
     return InkWell(
       onTap: () {
@@ -353,13 +371,32 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    customerName,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          customerName,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
+                        ),
+                      ),
+                      if (isGroup)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFA99941).withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: const Color(0xFFA99941)),
+                          ),
+                          child: Text(
+                            'Group · $peopleCount',
+                            style: const TextStyle(color: Color(0xFFA99941), fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    '$date  $startTime',
+                    '$date  $scheduleLabel',
                     style: const TextStyle(color: Colors.white70, fontSize: 13),
                   ),
                   const SizedBox(height: 4),

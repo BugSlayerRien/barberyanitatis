@@ -30,6 +30,7 @@ import 'scanner/attachment_engine.dart';
 import 'scanner/face_detector_service_stub.dart'
     if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
 import 'face_scan_results_page.dart';
+import 'services/booking_slots_service.dart';
 import 'services/face_scan_service.dart';
 import 'user_session.dart';
 import 'web_camera_view_stub.dart'
@@ -163,6 +164,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _calibrationSyncInFlight = false;
   DateTime? _lastCalibrationSyncAt;
   bool _bookingInFlight = false;
+  Map<String, dynamic>? _overlayPresetOnly;
 
   static const double _rectSmoothingAlpha = 0.58;
   static const double _angleSmoothingAlpha = 0.28;
@@ -1465,60 +1467,42 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   void _seedRecommendationsForLivePreview() {
     final preset = widget.presetRecommendation;
-    final cached = UserSession.lastRecommendations ?? const <Map<String, dynamic>>[];
 
-    _recommendations
-      ..clear()
-      ..addAll(cached.map((row) => Map<String, dynamic>.from(row)).take(3));
+    _recommendations.clear();
+    _selectedIndex = 0;
+
+    if (widget.livePreviewOnly) {
+      _loadingRecommendations = false;
+      _status = 'Live preview — move your head to see the selected style.';
+      if (preset != null) {
+        final normalized = _normalizePresetRecommendation(preset);
+        _recommendations.add(normalized);
+        _overlayPresetOnly = normalized;
+      } else {
+        _overlayPresetOnly = null;
+      }
+      return;
+    }
+
+    _loadingRecommendations = true;
+    _status = 'Loading personalized suggestions...';
 
     if (preset != null) {
-      final normalized = _normalizePresetRecommendation(preset);
-      final presetId =
-          '${normalized['variant_id'] ?? normalized['variantId'] ?? ''}'.trim();
-      final existingIndex = _recommendations.indexWhere((row) {
-        final rowId = '${row['variant_id'] ?? row['variantId'] ?? ''}'.trim();
-        return presetId.isNotEmpty && rowId == presetId;
-      });
-
-      if (existingIndex >= 0) {
-        _selectedIndex = existingIndex;
-      } else {
-        if (_recommendations.isEmpty) {
-          _recommendations.add(normalized);
-        } else {
-          _recommendations[0] = normalized;
-        }
-        _selectedIndex = 0;
-      }
+      _overlayPresetOnly = _normalizePresetRecommendation(preset);
     } else {
-      _selectedIndex = 0;
+      _overlayPresetOnly = null;
     }
 
-    if (_recommendations.length >= 3) {
-      UserSession.lastRecommendations = List<Map<String, dynamic>>.from(_recommendations);
-      UserSession.hasRecentRecommendations = true;
-      _status = _recommendations.length >= 3
-          ? 'Suggestions are ready. Pick one to preview.'
-          : 'Previewing your selected haircut. Center your face to refresh top picks.';
-    } else if (preset != null) {
-      final normalized = _normalizePresetRecommendation(preset);
-      _recommendations.add(normalized);
-      _selectedIndex = 0;
-      _status = 'Previewing your selected haircut. Center your face to load top picks.';
-    }
-
-    if (widget.livePreviewOnly && _recommendations.length < 3) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || _loadingRecommendations) {
-          return;
-        }
-        if (kIsWeb) {
-          _fetchRecommendationsWeb(showToastOnError: false, autoTriggered: true);
-        } else {
-          _fetchRecommendations(autoTriggered: true);
-        }
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_loadingRecommendations) {
+        return;
+      }
+      if (kIsWeb) {
+        _fetchRecommendationsWeb(showToastOnError: false, autoTriggered: true);
+      } else {
+        _fetchRecommendations(autoTriggered: true);
+      }
+    });
   }
 
   Map<String, dynamic> _normalizePresetRecommendation(Map<String, dynamic> preset) {
@@ -2535,6 +2519,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                                   : const Text('Proceed to Booking'),
                             ),
                           ),
+                          if (!widget.livePreviewOnly) ...[
                           const SizedBox(height: 14),
                           if (_loadingRecommendations)
                             const Padding(
@@ -2557,6 +2542,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                           const SizedBox(height: 8),
                           _buildTopThreePanel(),
                           const SizedBox(height: 10),
+                          ],
                           Align(
                             alignment: Alignment.centerLeft,
                             child: OutlinedButton.icon(
@@ -2922,7 +2908,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final scannerHeight = _scannerHeightForLayout(context);
     final recommendation = _recommendations.isNotEmpty
         ? _recommendations[_selectedIndex.clamp(0, _recommendations.length - 1)]
-        : null;
+        : _overlayPresetOnly;
     final overlayFace = _effectiveOverlayFaceRect();
     final overlayOpacity = _currentOverlayOpacity();
 
@@ -3680,6 +3666,34 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Widget _buildTopThreePanel() {
+    if (_loadingRecommendations && _recommendations.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
+            ),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Finding your top 3 haircuts...',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     if (_recommendations.isEmpty) {
       return Container(
         width: double.infinity,
@@ -3881,7 +3895,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _useSelectedStyle() async {
-    if (_recommendations.isEmpty) {
+    if (_bookingInFlight || _recommendations.isEmpty) {
       return;
     }
 
@@ -3905,80 +3919,84 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-      );
-      return;
-    }
-
-    UserSession.selectedVariantId = variantId;
-    UserSession.selectedServiceId = int.tryParse(style['serviceId']?.toString() ?? '');
-    UserSession.selectedStyleName = style['name']?.toString();
-    UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
-    UserSession.selectedPreviewImages = {
-      'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
-      'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
-      'backViewUrl': style['backViewUrl']?.toString() ?? '',
-    };
-
-    await AiFunnelService.saveSelection(
-      scanSessionId: UserSession.ensureScanSessionId(),
-      userId: userId,
-      variantId: variantId,
-      styleName: UserSession.selectedStyleName ?? 'Style',
-      faceShape: UserSession.lastScan?['faceShape']?.toString(),
-      hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
-      hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
-      hairLength: UserSession.lastScan?['hairLength']?.toString(),
-      estimatedMinutes: UserSession.selectedEstimatedMinutes,
-      frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-      sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-      backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
-    );
-
     setState(() => _bookingInFlight = true);
-    final suggestion = await _fetchSuggestedSlot();
-    if (!mounted) {
-      return;
-    }
-    setState(() => _bookingInFlight = false);
 
-    if (suggestion == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No available slots found. Please choose manually.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
-    }
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
-      ),
-    );
-  }
-
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return null;
+      final hasActive = await BookingGuard.hasActiveAppointment(userId: userId)
+          .timeout(const Duration(seconds: 8));
+      if (!mounted) {
+        return;
       }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
+      if (hasActive) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
+      }
+
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedServiceId = int.tryParse(style['serviceId']?.toString() ?? '');
+      UserSession.selectedStyleName = style['name']?.toString();
+      UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+      UserSession.selectedPreviewImages = {
+        'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
+        'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
+        'backViewUrl': style['backViewUrl']?.toString() ?? '',
+      };
+
+      unawaited(
+        AiFunnelService.saveSelection(
+          scanSessionId: UserSession.ensureScanSessionId(),
+          userId: userId,
+          variantId: variantId,
+          styleName: UserSession.selectedStyleName ?? 'Style',
+          faceShape: UserSession.lastScan?['faceShape']?.toString(),
+          hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+          hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+          hairLength: UserSession.lastScan?['hairLength']?.toString(),
+          estimatedMinutes: UserSession.selectedEstimatedMinutes,
+          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+        ).catchError((_) {}),
+      );
+
+      final result = await BookingSlotsService.fetchBestSuggestion();
+      if (!mounted) {
+        return;
+      }
+
+      if (result.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage!)),
+        );
+        return;
+      }
+
+      if (!result.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No available slots found. Please choose manually.'),
+          ),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+        );
+        return;
+      }
+
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _bookingInFlight = false);
+      }
     }
   }
 

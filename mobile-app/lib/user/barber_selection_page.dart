@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'calendar_page.dart';
+import 'group_size_page.dart';
 import 'appointments_page.dart';
 import 'profile_page.dart';
 import 'dashboard_page.dart';
@@ -44,7 +44,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'list'}),
+        body: jsonEncode({'action': 'list', 'channel': 'appointment'}),
       );
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
@@ -130,7 +130,7 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
     setState(() => _openingCalendarBarberId = barberId);
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => CalendarPage(
+        builder: (_) => GroupSizePage(
           barberId: barberId,
           barberName: barberName,
         ),

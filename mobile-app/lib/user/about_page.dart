@@ -22,18 +22,53 @@ class AboutPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Barberya ni Tatis is an AI-powered barbershop experience that helps you discover '
-              'personalized hairstyles and book appointments with confidence.',
-              style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.5),
+              'Best Barbershop In San Rafael Bulacan!',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                height: 1.3,
+              ),
             ),
-            const SizedBox(height: 20),
-            const Text('Meet the Developers', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            _ownerCard(),
+            const SizedBox(height: 24),
+            const Text(
+              'Developers',
+              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 12),
-            _devCard('Alex Rivera', 'Mobile Developer'),
-            _devCard('Jamie Lee', 'UI/UX Designer'),
-            _devCard('Taylor Cruz', 'Backend Engineer'),
+            _devCard('Jeomir Clyde Galvez', 'Project Manager'),
+            _devCard('Rien Miro Gappi', 'Fullstack'),
+            _devCard('LeBron Paul Suarez', 'Frontend'),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _ownerCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFA99941).withValues(alpha: 0.4)),
+      ),
+      child: const Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Owner — Francis Vasallo',
+            style: TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold, fontSize: 15),
+          ),
+          SizedBox(height: 8),
+          Text(
+            'Francis brings 15 years of barbering experience, specializing in clean fades, '
+            'precision cuts, and styles tailored to each client’s look and lifestyle.',
+            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
+          ),
+        ],
       ),
     );
   }
@@ -52,7 +87,7 @@ class AboutPage extends StatelessWidget {
           const CircleAvatar(
             radius: 24,
             backgroundColor: Colors.white12,
-            child: Icon(Icons.person, color: Colors.white),
+            child: Icon(Icons.code, color: Colors.white),
           ),
           const SizedBox(width: 12),
           Column(

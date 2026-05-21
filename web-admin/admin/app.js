@@ -15,6 +15,7 @@ const state = {
   currentUser: null,
   profileEditMode: false,
   accountEditor: null,
+  serviceEditor: null,
   analytics: null,
   statusChart: null,
   servicesChart: null,
@@ -580,6 +581,7 @@ function renderUserTables() {
     "barbers-table",
     [
       { key: "full_name", label: "Name" },
+      { key: "queue_label", label: "Queue" },
       { key: "specialty", label: "Specialty" },
       { key: "rating", label: "Rating" },
       { key: "role", label: "Role" },
@@ -590,6 +592,7 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "barbers"
       ? data.barbers.map((row) => ({
           ...row,
+          queue_label: String(row.barber_channel || "").toLowerCase() === "walk_in" ? "Regular" : "Exclusive",
           actions: `<button class="btn btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button> <button class="btn secondary btn-delete" data-type="barber" data-id="${row.barber_id}">Delete</button>`,
         }))
       : [])
@@ -718,6 +721,74 @@ function getUserRowForEdit(type, id) {
   return null;
 }
 
+function openAccountCreateDialog() {
+  const dialog = document.getElementById("account-editor-dialog");
+  const title = document.getElementById("account-editor-title");
+  const form = document.getElementById("account-editor-form");
+  if (!(dialog instanceof HTMLDialogElement) || !title || !form) return;
+
+  state.accountEditor = { mode: "create" };
+  title.textContent = "Add account";
+  form.innerHTML = `
+    <label>Account type
+      <select class="select" id="ae-create-kind">
+        <option value="customer">Customer (mobile app)</option>
+        <option value="barber">Barber</option>
+        <option value="staff">Staff (Admin / Receptionist portal)</option>
+      </select>
+    </label>
+    <label>Full name
+      <input class="input" id="ae-fullName" placeholder="Full name" />
+    </label>
+    <label>Email
+      <input class="input" id="ae-email" type="email" placeholder="email@example.com" />
+    </label>
+    <label>Password (min 8 characters)
+      <input class="input" id="ae-password" type="password" autocomplete="new-password" />
+    </label>
+    <label id="ae-phone-wrap">Phone (optional)
+      <input class="input" id="ae-phone" placeholder="+63..." />
+    </label>
+    <label id="ae-barber-fields" style="display:none;">Specialty
+      <input class="input" id="ae-specialty" placeholder="General" />
+    </label>
+    <label id="ae-barber-years-wrap" style="display:none;">Years experience
+      <input class="input" id="ae-years" type="number" min="0" value="1" />
+    </label>
+    <label id="ae-barber-channel-wrap" style="display:none;">Barber queue
+      <select class="select" id="ae-barber-channel">
+        <option value="appointment">Exclusive (appointments)</option>
+        <option value="walk_in">Regular (walk-in / kiosk)</option>
+      </select>
+    </label>
+    <label id="ae-staff-role-wrap" style="display:none;">Portal role
+      <select class="select" id="ae-create-staff-role">
+        <option value="Receptionist">Receptionist</option>
+        <option value="Admin">Admin</option>
+      </select>
+    </label>
+  `;
+
+  const kindEl = document.getElementById("ae-create-kind");
+  const syncCreateFields = () => {
+    const kind = kindEl?.value || "customer";
+    const phoneWrap = document.getElementById("ae-phone-wrap");
+    const bf = document.getElementById("ae-barber-fields");
+    const by = document.getElementById("ae-barber-years-wrap");
+    const bc = document.getElementById("ae-barber-channel-wrap");
+    const sr = document.getElementById("ae-staff-role-wrap");
+    if (phoneWrap) phoneWrap.style.display = kind === "customer" ? "" : "none";
+    if (bf) bf.style.display = kind === "barber" ? "" : "none";
+    if (by) by.style.display = kind === "barber" ? "" : "none";
+    if (bc) bc.style.display = kind === "barber" ? "" : "none";
+    if (sr) sr.style.display = kind === "staff" ? "" : "none";
+  };
+  kindEl?.addEventListener("change", syncCreateFields);
+  syncCreateFields();
+
+  dialog.showModal();
+}
+
 function openAccountEditor(type, id) {
   const dialog = document.getElementById("account-editor-dialog");
   const title = document.getElementById("account-editor-title");
@@ -730,7 +801,7 @@ function openAccountEditor(type, id) {
     return;
   }
 
-  state.accountEditor = { type, id: Number(id) };
+  state.accountEditor = { mode: "edit", type, id: Number(id) };
 
   if (type === "customer") {
     const appRole = findBarberRoleForEmail(row.email ?? "") ? "barber" : "customer";
@@ -778,6 +849,12 @@ function openAccountEditor(type, id) {
       <label>Rating
         <input class="input" id="ae-rating" type="number" min="0" max="5" step="0.1" value="${Number(row.rating ?? 5)}" />
       </label>
+      <label>Barber queue
+        <select class="select" id="ae-barber-channel">
+          <option value="appointment" ${String(row.barber_channel || "appointment").toLowerCase() !== "walk_in" ? "selected" : ""}>Exclusive (appointments)</option>
+          <option value="walk_in" ${String(row.barber_channel || "").toLowerCase() === "walk_in" ? "selected" : ""}>Regular (walk-in / kiosk)</option>
+        </select>
+      </label>
       <label>Role
         <input class="input" value="Barber" disabled />
       </label>
@@ -819,7 +896,48 @@ function openAccountEditor(type, id) {
 
 async function saveAccountEditor() {
   const dialog = document.getElementById("account-editor-dialog");
-  if (!(dialog instanceof HTMLDialogElement) || !state.accountEditor) return;
+  if (!(dialog instanceof HTMLDialogElement)) return;
+
+  if (state.accountEditor?.mode === "create") {
+    const kind = document.getElementById("ae-create-kind")?.value || "customer";
+    const fullName = document.getElementById("ae-fullName")?.value?.trim() || "";
+    const email = document.getElementById("ae-email")?.value?.trim() || "";
+    const password = document.getElementById("ae-password")?.value || "";
+    if (!fullName || !email || password.length < 8) {
+      toast("Name, email, and password (8+ characters) are required.");
+      return;
+    }
+    try {
+      const payload = {
+        action: "create",
+        accountKind: kind,
+        fullName,
+        email,
+        password,
+      };
+      if (kind === "customer") {
+        payload.phone = document.getElementById("ae-phone")?.value?.trim() || "";
+      }
+      if (kind === "barber") {
+        payload.specialty = document.getElementById("ae-specialty")?.value?.trim() || "General";
+        payload.yearsExperience = Number(document.getElementById("ae-years")?.value ?? 1);
+        payload.barberChannel = document.getElementById("ae-barber-channel")?.value || "appointment";
+      }
+      if (kind === "staff") {
+        payload.role = document.getElementById("ae-create-staff-role")?.value || "Receptionist";
+      }
+      await updateUser(payload);
+      toast("Account created.");
+      await loadUsers();
+      dialog.close();
+      state.accountEditor = null;
+    } catch (error) {
+      toast(error.message || "Create failed");
+    }
+    return;
+  }
+
+  if (!state.accountEditor) return;
 
   const { type, id } = state.accountEditor;
   const fullName = document.getElementById("ae-fullName")?.value?.trim() || "";
@@ -852,6 +970,7 @@ async function saveAccountEditor() {
       const specialty = document.getElementById("ae-specialty")?.value?.trim() || "";
       const yearsExperience = Number(document.getElementById("ae-years")?.value ?? 0);
       const rating = Number(document.getElementById("ae-rating")?.value ?? 5);
+      const barberChannel = document.getElementById("ae-barber-channel")?.value || "appointment";
       await updateUser({
         action: "update",
         type,
@@ -861,6 +980,7 @@ async function saveAccountEditor() {
         specialty,
         yearsExperience,
         rating,
+        barberChannel,
         role: "barber",
         isActive: activeValue,
       });
@@ -895,30 +1015,143 @@ async function deleteAccount(type, id) {
   }
 }
 
+function formatServiceChannel(channel) {
+  const value = String(channel || "appointment").toLowerCase();
+  if (value === "walk_in" || value === "walkin" || value === "regular") {
+    return "Regular (kiosk) — ₱100";
+  }
+  return "Exclusive (appointments) — ₱500";
+}
+
+function openServiceEditor(existing) {
+  const dialog = document.getElementById("service-editor-dialog");
+  const title = document.getElementById("service-editor-title");
+  const form = document.getElementById("service-editor-form");
+  if (!(dialog instanceof HTMLDialogElement) || !title || !form) return;
+
+  const isEdit = Boolean(existing);
+  state.serviceEditor = { mode: isEdit ? "edit" : "create", serviceId: existing?.service_id ?? null };
+  title.textContent = isEdit ? "Edit service" : "Add service";
+
+  const channel = existing?.service_channel ?? "appointment";
+  const active = existing?.is_active === false || existing?.is_active === "f" ? "0" : "1";
+
+  form.innerHTML = `
+    <label>Service name
+      <input class="input" id="se-name" value="${existing?.service_name ?? ""}" />
+    </label>
+    <label>Description
+      <input class="input" id="se-description" value="${existing?.description ?? ""}" />
+    </label>
+    <label>Duration (minutes)
+      <input class="input" id="se-duration" type="number" min="1" value="${Number(existing?.base_duration ?? 30)}" />
+    </label>
+    <label>Price (PHP)
+      <input class="input" id="se-price" type="number" min="0" step="0.01"
+        value="${Number(existing?.base_price ?? (channel === "walk_in" ? 100 : 500))}" />
+    </label>
+    <label>Category
+      <select class="select" id="se-category">
+        <option value="Haircut" ${(existing?.category ?? "Haircut") === "Haircut" ? "selected" : ""}>Haircut</option>
+        <option value="Styling" ${existing?.category === "Styling" ? "selected" : ""}>Styling</option>
+        <option value="Beard" ${existing?.category === "Beard" ? "selected" : ""}>Beard</option>
+        <option value="Treatment" ${existing?.category === "Treatment" ? "selected" : ""}>Treatment</option>
+      </select>
+    </label>
+    <label>Channel
+      <select class="select" id="se-channel">
+        <option value="walk_in" ${channel === "walk_in" ? "selected" : ""}>Regular (kiosk) — walk-in</option>
+        <option value="appointment" ${channel !== "walk_in" ? "selected" : ""}>Exclusive (appointments)</option>
+      </select>
+    </label>
+    <label>Active
+      <select class="select" id="se-active">
+        <option value="1" ${active === "1" ? "selected" : ""}>Yes</option>
+        <option value="0" ${active === "0" ? "selected" : ""}>No</option>
+      </select>
+    </label>
+  `;
+
+  dialog.showModal();
+}
+
+async function saveServiceEditor() {
+  const dialog = document.getElementById("service-editor-dialog");
+  if (!(dialog instanceof HTMLDialogElement) || !state.serviceEditor) return;
+
+  const payload = {
+    serviceName: document.getElementById("se-name")?.value?.trim() || "",
+    description: document.getElementById("se-description")?.value?.trim() || "",
+    baseDuration: Number(document.getElementById("se-duration")?.value ?? 30),
+    basePrice: Number(document.getElementById("se-price")?.value ?? 0),
+    category: document.getElementById("se-category")?.value || "Haircut",
+    serviceChannel: document.getElementById("se-channel")?.value || "appointment",
+    isActive: Number(document.getElementById("se-active")?.value ?? 1) !== 0,
+  };
+
+  if (!payload.serviceName || payload.baseDuration <= 0) {
+    toast("Service name and duration are required.");
+    return;
+  }
+
+  try {
+    if (state.serviceEditor.mode === "create") {
+      await saveService("create", payload);
+      toast("Service created.");
+    } else {
+      await saveService("update", { serviceID: state.serviceEditor.serviceId, ...payload });
+      toast("Service updated.");
+    }
+    await loadServices();
+    dialog.close();
+    state.serviceEditor = null;
+  } catch (error) {
+    toast(error.message || "Save failed");
+  }
+}
+
+async function saveService(action, payload) {
+  const response = await fetch(resolveApiUrl("admin_services.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Save failed");
+  }
+}
+
 function renderServices() {
   const query = document.getElementById("services-search")?.value || "";
-  // Normalize service display fields: prefer `service_name`, fall back to `service_code` when empty
   const normalized = (state.services || []).map((r) => ({
     ...r,
     service_name: r.service_name || r.service_code || "(Unnamed Service)",
     category: r.category || r.service_category || "(Uncategorized)",
+    channel_label: formatServiceChannel(r.service_channel),
+    base_price: `₱${Number(r.base_price ?? 0).toFixed(2)}`,
+    is_active: r.is_active === false || r.is_active === "f" ? "No" : "Yes",
   }));
 
-  const rows = filterRows(normalized, query, ["service_name", "category", "description"]);
+  const rows = filterRows(normalized, query, ["service_name", "category", "description", "channel_label"]);
   renderTable(
     "services-table",
     [
       { key: "service_name", label: "Service" },
+      { key: "channel_label", label: "Channel" },
       { key: "category", label: "Category" },
-      { key: "base_duration", label: "Duration" },
+      { key: "base_duration", label: "Duration (min)" },
       { key: "base_price", label: "Price" },
       { key: "is_active", label: "Active" },
       { key: "actions", label: "Actions" },
     ],
     rows.map((row) => ({
       ...row,
-      actions: `<button class="btn btn-service" data-id="${row.service_id}">Edit</button>`,
-    }))
+      actions: `
+        <button class="btn secondary btn-service" data-id="${row.service_id}" type="button">Edit</button>
+        <button class="btn secondary btn-service-delete" data-id="${row.service_id}" type="button">Delete</button>
+      `,
+    })),
   );
 }
 
@@ -1185,7 +1418,6 @@ async function loadAnalytics() {
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.analytics = data.metrics ?? null;
-    renderAnalyticsMetrics(data.metrics ?? null);
     renderAnalyticsCharts(data.metrics ?? null);
     await renderAiInsights(data.metrics ?? null, data.summary ?? "");
   } catch (_) {
@@ -1194,7 +1426,6 @@ async function loadAnalytics() {
     if (summaryEl) summaryEl.textContent = "Failed to load AI summary.";
     const brief = document.getElementById("analytics-ai-brief");
     if (brief) brief.innerHTML = '<div class="ai-brief-item">AI insights are currently unavailable.</div>';
-    renderAnalyticsMetrics(null);
     destroyAnalyticsCharts();
     renderAiActions([]);
   }
@@ -1359,35 +1590,20 @@ document.addEventListener("click", async (event) => {
   if (target.classList.contains("btn-service")) {
     const id = target.dataset.id;
     if (!id) return;
+    const existing = (state.services || []).find((row) => String(row.service_id) === String(id));
+    openServiceEditor(existing);
+  }
+
+  if (target.classList.contains("btn-service-delete")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    if (!confirm("Deactivate this service?")) return;
     try {
-      const serviceName = prompt("Service name:") ?? "";
-      const description = prompt("Description:") ?? "";
-      const baseDuration = prompt("Duration (minutes):", "30") ?? "30";
-      const basePrice = prompt("Base price:", "0") ?? "0";
-      const category = prompt("Category:", "Haircut") ?? "Haircut";
-      const isActive = prompt("Active (1/0):", "1") ?? "1";
-      const response = await fetch(resolveApiUrl("admin_services.php"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update",
-          serviceID: Number(id),
-          serviceName,
-          description,
-          baseDuration: Number(baseDuration),
-          basePrice: Number(basePrice),
-          category,
-          isActive: Number(isActive),
-        }),
-      });
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Update failed");
-      }
-      toast("Service updated.");
+      await saveService("delete", { serviceID: Number(id) });
+      toast("Service deactivated.");
       await loadServices();
     } catch (error) {
-      toast(error.message || "Update failed");
+      toast(error.message || "Delete failed");
     }
   }
 
@@ -1418,6 +1634,14 @@ document.getElementById("services-search")?.addEventListener("input", () => {
   resetPagination(["services-table"]);
   renderServices();
 });
+
+document.getElementById("services-add")?.addEventListener("click", () => openServiceEditor(null));
+document.getElementById("service-editor-save")?.addEventListener("click", saveServiceEditor);
+document.getElementById("service-editor-cancel")?.addEventListener("click", () => {
+  const dialog = document.getElementById("service-editor-dialog");
+  if (dialog instanceof HTMLDialogElement) dialog.close();
+  state.serviceEditor = null;
+});
 document.getElementById("audit-search")?.addEventListener("input", () => {
   resetPagination(["audit-list"]);
   renderAudit();
@@ -1445,6 +1669,7 @@ document.getElementById("profile-dialog-close")?.addEventListener("click", () =>
   if (dialog instanceof HTMLDialogElement) dialog.close();
 });
 document.getElementById("account-editor-save")?.addEventListener("click", saveAccountEditor);
+document.getElementById("users-add-account")?.addEventListener("click", openAccountCreateDialog);
 document.getElementById("account-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("account-editor-dialog");
   if (dialog instanceof HTMLDialogElement) dialog.close();

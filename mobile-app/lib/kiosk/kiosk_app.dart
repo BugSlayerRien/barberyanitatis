@@ -6,6 +6,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app_navigator.dart';
+import '../user/api_config.dart';
 import '../user/auth_bootstrap.dart';
 import '../user/payment_result_page.dart';
 import '../user/scanner/overlay_asset_cache.dart';
@@ -15,6 +16,7 @@ import 'kiosk_theme.dart';
 /// Boots the walk-in kiosk shell (shared with standalone `kiosk/` project).
 Future<void> runKioskApp() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ApiConfig.ensureInitialized();
   if (kIsWeb) {
     setUrlStrategy(PathUrlStrategy());
   }
@@ -23,8 +25,9 @@ Future<void> runKioskApp() async {
     url: 'https://sergfnujsutcschocuuz.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
-    authCallbackUrlHostname: kIsWeb ? null : 'login-callback',
-    authFlowType: AuthFlowType.pkce,
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
 
   await AuthBootstrap.initialize();

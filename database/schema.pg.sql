@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS barbers (
   years_experience INT,
   bio TEXT,
   rating NUMERIC(3,2) NOT NULL DEFAULT 5.00,
+  barber_channel TEXT NOT NULL DEFAULT 'appointment' CHECK (barber_channel IN ('walk_in', 'appointment')),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -123,6 +124,7 @@ CREATE TABLE IF NOT EXISTS services (
   base_duration INT NOT NULL,
   base_price NUMERIC(10,2) NOT NULL,
   category TEXT NOT NULL DEFAULT 'Haircut' CHECK (category IN ('Haircut', 'Styling', 'Beard', 'Treatment')),
+  service_channel TEXT NOT NULL DEFAULT 'appointment' CHECK (service_channel IN ('walk_in', 'appointment')),
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
