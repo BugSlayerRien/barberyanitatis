@@ -7,18 +7,16 @@ plugins {
 
 android {
     namespace = "com.example.tatis_barbershop"
-    // Ensure compileSdk is set to 35 to match plugin requirements
-    // (some plugins require a higher compile SDK than Flutter's default)
-    compileSdk = 35
+    compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_1_8
+        jvmTarget = "17"
     }
 
     defaultConfig {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 
@@ -18,6 +19,7 @@ import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'user_session.dart';
 import 'api_config.dart';
+import 'services/booking_slots_service.dart';
 import 'scanner/overlay_preview_image.dart';
 import 'scanner/overlay_registry.dart';
 
@@ -410,80 +412,83 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      ).timeout(const Duration(seconds: 12));
-      if (response.statusCode != 200) {
-        return {
-          '_error': true,
-          '_message': 'Unable to check available times right now.',
-        };
-      }
-      if (response.body.isEmpty) {
-        return null;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
-    } catch (_) {
-      return {
-        '_error': true,
-        '_message': 'Unable to check available times right now. Please try again.',
-      };
-    }
+  void _trackSelectionInBackground({
+    required int userId,
+    required int variantId,
+  }) {
+    unawaited(
+      AiFunnelService.saveSelection(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: userId,
+        variantId: variantId,
+        styleName: UserSession.selectedStyleName ?? 'Style',
+        faceShape: UserSession.lastScan?['faceShape']?.toString(),
+        hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
+        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+        hairLength: UserSession.lastScan?['hairLength']?.toString(),
+        estimatedMinutes: UserSession.selectedEstimatedMinutes,
+      ).catchError((_) {}),
+    );
   }
 
   Future<void> _proceedToBookingFlow() async {
-    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
-    if (!mounted) {
-      return;
+    if (!_bookingInFlight) {
+      setState(() => _bookingInFlight = true);
     }
-    if (hasActive) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
+
+    try {
+      final hasActive = await BookingGuard.hasActiveAppointment(
+        userId: UserSession.userId,
+      ).timeout(const Duration(seconds: 8));
+      if (!mounted) {
+        return;
+      }
+      if (hasActive) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
+      }
+
+      final result = await BookingSlotsService.fetchBestSuggestion();
+      if (!mounted) {
+        return;
+      }
+
+      if (result.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage!)),
+        );
+        return;
+      }
+
+      if (!result.isSuccess) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No open times available right now. You can still pick a barber manually.',
+            ),
+          ),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+        );
+        return;
+      }
+
       Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        MaterialPageRoute(
+          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
+        ),
       );
-      return;
+    } finally {
+      if (mounted) {
+        setState(() => _bookingInFlight = false);
+      }
     }
-
-    setState(() => _bookingInFlight = true);
-    final suggestion = await _fetchSuggestedSlot();
-    if (mounted) {
-      setState(() => _bookingInFlight = false);
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    if (suggestion != null && suggestion['_error'] == true) {
-      final message = suggestion['_message']?.toString() ?? 'Unable to check available times right now.';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
-      return;
-    }
-
-    if (suggestion == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No open times available right now. You can still try this haircut.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
-    }
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
-      ),
-    );
   }
 
   @override
@@ -629,26 +634,16 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
 
                         final userId = UserSession.userId;
                         if (userId != null) {
-                          try {
-                            await AiFunnelService.saveSelection(
-                              scanSessionId: UserSession.ensureScanSessionId(),
-                              userId: userId,
-                              variantId: normalizedVariantId,
-                              styleName: UserSession.selectedStyleName ?? 'Style',
-                              faceShape: UserSession.lastScan?['faceShape']?.toString(),
-                              hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
-                              hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
-                              hairLength: UserSession.lastScan?['hairLength']?.toString(),
-                              estimatedMinutes: UserSession.selectedEstimatedMinutes,
-                            );
-                          } catch (_) {
-                            // Do not block booking flow if tracking fails.
-                          }
+                          _trackSelectionInBackground(
+                            userId: userId,
+                            variantId: normalizedVariantId,
+                          );
                         }
 
                         if (!context.mounted) {
                           return;
                         }
+                        setState(() => _bookingInFlight = true);
                         await _proceedToBookingFlow();
                       },
                       style: ElevatedButton.styleFrom(

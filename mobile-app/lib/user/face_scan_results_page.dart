@@ -1,12 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
-import 'api_config.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
@@ -18,6 +15,7 @@ import 'scanner/overlay_asset_cache.dart';
 import 'scanner/overlay_registry.dart';
 import 'scanner/scanner_layout.dart';
 import 'scanner/static_face_preview.dart';
+import 'services/booking_slots_service.dart';
 import 'services/face_scan_service.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
@@ -49,6 +47,7 @@ class FaceScanResultsPage extends StatefulWidget {
 
 class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   bool _recommendationsLoading = true;
+  bool _categoriesLoading = false;
   String? _error;
   String _aiSummary = '';
   bool _aiPowered = false;
@@ -61,8 +60,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   Map<String, dynamic>? _selected;
   int _previewAngleIndex = 0;
   bool _bookingInFlight = false;
-  bool _compositingForSave = false;
-
   static const _angleKeys = ['front', 'left', 'right'];
   static const _angleLabels = ['Front', 'Left', 'Right'];
 
@@ -77,11 +74,54 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     _loadRecommendations();
   }
 
-  Future<void> _loadRecommendations() async {
+  Future<void> _loadRecommendations({bool preserveSelection = false}) async {
     setState(() {
       _recommendationsLoading = true;
+      _categoriesLoading = true;
       _error = null;
     });
+
+    try {
+      final quick = await FaceScanService.fetchQuickRankings(
+        faceShape: widget.faceShape,
+        hairTexture: widget.hairTexture,
+        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
+        userId: UserSession.userId,
+      );
+
+      if (!mounted) return;
+
+      if (quick.isNotEmpty) {
+        final local = FaceScanService.buildLocalInsightsFromRankings(
+          rankings: quick,
+          faceShape: widget.faceShape,
+          hairTexture: widget.hairTexture,
+        );
+        final localCats = local['categories'] as Map<String, dynamic>? ?? {};
+        setState(() {
+          final topPicksRaw = List<dynamic>.from(
+            local['topPicks'] as List<dynamic>? ?? quick.take(3).toList(),
+          );
+          _topPicks = topPicksRaw
+              .map((e) => Map<String, dynamic>.from(e as Map))
+              .toList();
+          _categories = {
+            'formal': _mapList(localCats['formal']),
+            'alternative': _mapList(localCats['alternative']),
+            'youthful': _mapList(localCats['youthful']),
+          };
+          _aiSummary = local['aiSummary']?.toString() ?? '';
+          _recommendationsLoading = false;
+          _categoriesLoading = true;
+          if (!preserveSelection) {
+            _selected ??= widget.presetRecommendation ?? _topPicks.first;
+          }
+        });
+      }
+    } catch (_) {
+      // Full insights load may still succeed.
+    }
+
     try {
       final data = await FaceScanService.fetchRecommendations(
         faceShape: widget.faceShape,
@@ -98,7 +138,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       final cats = data['categories'] as Map<String, dynamic>? ?? {};
 
       _applyRecommendationPayload(
-        topPicks: top,
+        topPicks: top.isNotEmpty ? top : _topPicks,
         categories: {
           'formal': _mapList(cats['formal']),
           'alternative': _mapList(cats['alternative']),
@@ -106,7 +146,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         },
         aiSummary: data['aiSummary']?.toString() ?? '',
         aiPowered: data['aiPowered'] == true,
-        preserveSelection: false,
+        preserveSelection: preserveSelection,
       );
 
       await AiFunnelService.trackScan(
@@ -120,10 +160,40 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _recommendationsLoading = false;
-      });
+      if (_topPicks.isEmpty) {
+        setState(() {
+          _error = e.toString();
+          _recommendationsLoading = false;
+          _categoriesLoading = false;
+        });
+      } else if (_topPicks.isNotEmpty) {
+        final local = FaceScanService.buildLocalInsightsFromRankings(
+          rankings: _topPicks,
+          faceShape: widget.faceShape,
+          hairTexture: widget.hairTexture,
+        );
+        final localCats = local['categories'] as Map<String, dynamic>? ?? {};
+        _applyRecommendationPayload(
+          topPicks: _topPicks,
+          categories: {
+            'formal': _mapList(localCats['formal']),
+            'alternative': _mapList(localCats['alternative']),
+            'youthful': _mapList(localCats['youthful']),
+          },
+          aiSummary: local['aiSummary']?.toString() ?? '',
+          aiPowered: false,
+          preserveSelection: preserveSelection,
+        );
+      } else {
+        setState(() {
+          _categoriesLoading = false;
+          _recommendationsLoading = false;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _categoriesLoading = false);
+      }
     }
   }
 
@@ -170,6 +240,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   }
 
   Future<void> _openLivePreview() async {
+    UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
     final selectedBefore = _selected;
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -185,7 +256,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     if (selectedBefore != null) {
       _selected = selectedBefore;
     }
-    await _loadRecommendations();
+    await _loadRecommendations(preserveSelection: true);
   }
 
   void _selectStyle(Map<String, dynamic> style) {
@@ -198,6 +269,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       'Style';
 
   Future<void> _bookSelected() async {
+    if (_bookingInFlight) {
+      return;
+    }
+
     final selected = _selected;
     if (selected == null) return;
 
@@ -224,44 +299,41 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       return;
     }
 
+    setState(() => _bookingInFlight = true);
+
     final userId = UserSession.userId;
     if (userId == null) {
+      setState(() => _bookingInFlight = false);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please log in again.')),
       );
       return;
     }
 
-    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-      );
-      return;
-    }
-
-    setState(() {
-      _bookingInFlight = true;
-      _compositingForSave = true;
-    });
-
     try {
-      Map<String, String> previewUrls = {};
-      final composited = await FaceScanCompositor.compositeAllAngles(
-        capturesBase64: widget.captures,
-        styleName: _selectedStyleName,
-        faceRectsByAngle: _faceRects,
-      );
-      if (composited.isNotEmpty) {
-        previewUrls = await FaceScanService.saveCompositedPreviews(
-          scanSessionId: UserSession.ensureScanSessionId(),
-          variantId: variantId,
-          previewsBase64: composited,
+      if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
         );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
       }
+
+      final scanSessionId = UserSession.ensureScanSessionId();
+      UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
+
+      await FaceScanService.ensureCapturesOnServer(
+        scanSessionId: scanSessionId,
+        userId: userId,
+        captures: widget.captures,
+        faceShape: widget.faceShape,
+        hairTexture: widget.hairTexture,
+      );
+
+      final previewUrls = FaceScanService.captureFileUrls(scanSessionId);
 
       UserSession.selectedVariantId = variantId;
       UserSession.selectedStyleName = _selectedStyleName;
@@ -274,31 +346,45 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             };
       UserSession.customerPreviewImages = UserSession.selectedPreviewImages;
 
-      await AiFunnelService.saveSelection(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: userId,
-        variantId: variantId,
-        styleName: UserSession.selectedStyleName ?? 'Style',
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
-        hairDensity: null,
-        hairLength: null,
-        estimatedMinutes: int.tryParse(
-          '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
+      unawaited(
+        _saveCompositedPreviewsInBackground(
+          scanSessionId: scanSessionId,
+          variantId: variantId,
+          userId: userId,
         ),
-        frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-        sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-        backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
       );
 
-      final suggestion = await _fetchSuggestedSlot();
-      if (!mounted) return;
-      setState(() {
-        _bookingInFlight = false;
-        _compositingForSave = false;
-      });
+      unawaited(
+        AiFunnelService.saveSelection(
+          scanSessionId: UserSession.ensureScanSessionId(),
+          userId: userId,
+          variantId: variantId,
+          styleName: UserSession.selectedStyleName ?? 'Style',
+          faceShape: widget.faceShape,
+          hairTexture: widget.hairTexture,
+          hairDensity: null,
+          hairLength: null,
+          estimatedMinutes: int.tryParse(
+            '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
+          ),
+          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+        ).catchError((_) {}),
+      );
 
-      if (suggestion == null) {
+      final result = await BookingSlotsService.fetchBestSuggestion();
+      if (!mounted) return;
+      setState(() => _bookingInFlight = false);
+
+      if (result.errorMessage != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(result.errorMessage!)),
+        );
+        return;
+      }
+
+      if (!result.isSuccess) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('No available slots found. Please choose manually.'),
@@ -312,33 +398,44 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
         ),
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _bookingInFlight = false;
-        _compositingForSave = false;
-      });
+      setState(() => _bookingInFlight = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Booking prep failed: $e')),
       );
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
+  Future<void> _saveCompositedPreviewsInBackground({
+    required String scanSessionId,
+    required int variantId,
+    required int userId,
+  }) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
+      final composited = await FaceScanCompositor.compositeAllAngles(
+        capturesBase64: widget.captures,
+        styleName: _selectedStyleName,
+        faceRectsByAngle: _faceRects,
       );
-      if (response.statusCode != 200 || response.body.isEmpty) return null;
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
+      if (composited.isEmpty) {
+        return;
+      }
+      final saved = await FaceScanService.saveCompositedPreviews(
+        scanSessionId: scanSessionId,
+        variantId: variantId,
+        previewsBase64: composited,
+        userId: userId,
+        faceShape: widget.faceShape,
+        hairTexture: widget.hairTexture,
+      );
+      UserSession.selectedPreviewImages = saved;
+      UserSession.customerPreviewImages = saved;
     } catch (_) {
-      return null;
+      // Raw capture URLs are already stored for booking.
     }
   }
 
@@ -485,23 +582,52 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                     ),
                     SizedBox(width: 10),
-                    Text('Loading AI suggestions...', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                    Text('Finding styles for your face...', style: TextStyle(color: Colors.white54, fontSize: 13)),
                   ],
                 ),
               ),
             ] else ...[
-              const SizedBox(height: 18),
-              _sectionTitle('Top picks'),
-              ..._topPicks.map(_styleTile),
-              const SizedBox(height: 16),
-              _sectionTitle('Formal'),
-              ..._categories['formal']!.map(_styleTile),
-              const SizedBox(height: 12),
-              _sectionTitle('Alternative'),
-              ..._categories['alternative']!.map(_styleTile),
-              const SizedBox(height: 12),
-              _sectionTitle('Youthful'),
-              ..._categories['youthful']!.map(_styleTile),
+              if (_topPicks.isNotEmpty) ...[
+                const SizedBox(height: 18),
+                _sectionTitle('Top picks'),
+                ..._topPicks.map(_styleTile),
+              ],
+              if (_categoriesLoading) ...[
+                const SizedBox(height: 16),
+                const Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+                      ),
+                      SizedBox(width: 10),
+                      Text(
+                        'Grouping formal, alternative, and youthful picks...',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              ] else ...[
+                if (_categories['formal']!.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  _sectionTitle('Formal'),
+                  ..._categories['formal']!.map(_styleTile),
+                ],
+                if (_categories['alternative']!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _sectionTitle('Alternative'),
+                  ..._categories['alternative']!.map(_styleTile),
+                ],
+                if (_categories['youthful']!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _sectionTitle('Youthful'),
+                  ..._categories['youthful']!.map(_styleTile),
+                ],
+              ],
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -545,19 +671,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ],
           ],
         ),
-        if (_compositingForSave)
-          Container(
-            color: Colors.black54,
-            alignment: Alignment.center,
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Colors.white),
-                SizedBox(height: 12),
-                Text('Preparing your haircut preview...', style: TextStyle(color: Colors.white)),
-              ],
-            ),
-          ),
       ],
     );
   }

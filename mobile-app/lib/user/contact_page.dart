@@ -16,31 +16,91 @@ class ContactPage extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: Padding(
+      body: ListView(
         padding: const EdgeInsets.all(20),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1A1A1A),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white10),
-          ),
-          child: const Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('Contact Us', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
-              SizedBox(height: 8),
-              Text('This is a placeholder contact page.', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              SizedBox(height: 12),
-              Text('Email: support@tatisbarbershop.com', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              SizedBox(height: 6),
-              Text('Phone: +63 900 000 0000', style: TextStyle(color: Colors.white70, fontSize: 12)),
-              SizedBox(height: 6),
-              Text('Address: 123 Placeholder Street, City', style: TextStyle(color: Colors.white70, fontSize: 12)),
+        children: [
+          _locationCard(
+            title: 'For Premium Haircuts',
+            icon: Icons.storefront_outlined,
+            lines: const [
+              'Kalsadang Luma, Pantubig, Bulacan',
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          _locationCard(
+            title: 'For VIP Clients and Exclusive Haircuts',
+            icon: Icons.star_outline,
+            lines: const [
+              'Near St. Paul College',
+            ],
+          ),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1A1A1A),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Need help with a booking?',
+                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Visit the shop during operating hours or ask our receptionist when you arrive.',
+                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _locationCard({
+    required String title,
+    required IconData icon,
+    required List<String> lines,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: const Color(0xFFA99941), size: 28),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                ...lines.map(
+                  (line) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      line,
+                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

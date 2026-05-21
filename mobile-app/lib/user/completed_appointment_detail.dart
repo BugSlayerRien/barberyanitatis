@@ -1,203 +1,251 @@
 import 'package:flutter/material.dart';
 
-import 'api_config.dart';
+import 'appointments_page.dart';
+import 'customer_navigation.dart';
+import 'profile_page.dart';
+import 'saved_haircuts_page.dart';
+import 'ai_face_scan_page.dart';
+import 'widgets/app_top_bar.dart';
+import 'widgets/app_bottom_nav.dart';
+import 'widgets/appointment_preview_carousel.dart';
+import 'widgets/menu_sheet.dart';
+import 'time_format_utils.dart';
 
-class CompletedAppointmentDetailPage extends StatelessWidget {
+class CompletedAppointmentDetailPage extends StatefulWidget {
   final Map<String, dynamic> appointment;
+  final bool isUpcoming;
 
-  const CompletedAppointmentDetailPage({super.key, required this.appointment});
+  const CompletedAppointmentDetailPage({
+    super.key,
+    required this.appointment,
+    this.isUpcoming = false,
+  });
+
+  @override
+  State<CompletedAppointmentDetailPage> createState() => _CompletedAppointmentDetailPageState();
+}
+
+class _CompletedAppointmentDetailPageState extends State<CompletedAppointmentDetailPage> {
+  int _navIndex = 1;
 
   @override
   Widget build(BuildContext context) {
-    final previewImages = _previewImages();
-    final heroImage = previewImages.isNotEmpty
-        ? previewImages.first.url
-        : 'assets/images/kalbo.png';
+    final previewImages = previewImagesFromAppointment(widget.appointment);
+    final isGroup = widget.appointment['isGroup'] == true;
+    final serviceName = isGroup
+        ? (widget.appointment['displayTitle']?.toString() ?? widget.appointment['service']?.toString() ?? 'Group')
+        : (widget.appointment['service']?.toString() ?? 'Haircut');
+    final barberName = widget.appointment['barber']?.toString() ?? '';
+    final date = widget.appointment['date']?.toString() ?? '';
+    final timeRaw = widget.appointment['time']?.toString() ?? '';
+    final time = timeRaw.contains(':') && !timeRaw.contains('M')
+        ? formatTimeRangeTo12h(timeRaw)
+        : timeRaw;
+    final duration = widget.appointment['duration']?.toString() ?? '—';
+    final price = widget.appointment['price']?.toString() ?? '₱0';
+    final groupMembers = (widget.appointment['groupMembers'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final status = widget.appointment['status']?.toString() ?? '';
+    final paymentState = widget.appointment['paymentState']?.toString() ?? '';
+    final receiptRef = widget.appointment['receiptRef']?.toString() ?? '';
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text('Appointment Details', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      appBar: AppTopBar(
+        showBack: true,
+        onBack: () => Navigator.of(context).pop(),
+        onProfileTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ProfilePage()),
+          );
+        },
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              height: 220,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFA99941), width: 1),
-              ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: _buildHeroImage(heroImage),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(appointment['service'] as String, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
-            const SizedBox(height: 8),
-            Text(appointment['barber'] as String, style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                const Icon(Icons.calendar_today, color: Color(0xFFA99941), size: 16),
-                const SizedBox(width: 8),
-                Text(appointment['date'] as String, style: const TextStyle(color: Colors.white70)),
-                const SizedBox(width: 16),
-                const Icon(Icons.access_time, color: Color(0xFFA99941), size: 16),
-                const SizedBox(width: 8),
-                Text(appointment['time'] as String, style: const TextStyle(color: Colors.white70)),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text('Duration: ${appointment['duration']}', style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 12),
-            Text('Price: ${appointment['price']}', style: const TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold)),
-            if (previewImages.isNotEmpty) ...[
-              const SizedBox(height: 20),
-              _previewGallery(previewImages),
-            ],
-            const SizedBox(height: 24),
-            const Spacer(),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFE74C3C),
-                      side: const BorderSide(color: Color(0xFFE74C3C), width: 1),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: () {
-                      Navigator.of(context).pop();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFA99941),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    child: const Text('Done', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<_PreviewImage> _previewImages() {
-    final entries = <_PreviewImage>[];
-
-    void add(String label, dynamic raw) {
-      final value = raw?.toString().trim() ?? '';
-      if (value.isEmpty) {
-        return;
-      }
-      entries.add(_PreviewImage(label: label, url: ApiConfig.resolveImageUrl(value)));
-    }
-
-    add('Front', appointment['customerFrontUrl'] ?? appointment['frontViewUrl'] ?? appointment['front_view_url']);
-    add('Left', appointment['customerLeftUrl'] ?? appointment['sideViewUrl'] ?? appointment['side_view_url']);
-    add('Right', appointment['customerRightUrl'] ?? appointment['backViewUrl'] ?? appointment['back_view_url']);
-    return entries;
-  }
-
-  Widget _buildHeroImage(String imageUrl) {
-    if (imageUrl.startsWith('assets/')) {
-      return Image.asset(imageUrl, fit: BoxFit.cover);
-    }
-
-    return Image.network(
-      imageUrl,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => Image.asset(
-        'assets/images/kalbo.png',
-        fit: BoxFit.cover,
-      ),
-    );
-  }
-
-  Widget _previewGallery(List<_PreviewImage> images) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF121212),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
         children: [
-          const Text(
-            'Hair Preview',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 14),
+          Row(
+            children: [
+              if (isGroup) ...[
+                const Icon(Icons.groups_rounded, color: Color(0xFFA99941), size: 28),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  serviceName,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 22,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: images.map((image) {
-              return SizedBox(
-                width: 108,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 8),
+          Text(barberName, style: const TextStyle(color: Colors.white70, fontSize: 15)),
+          if (isGroup && groupMembers.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Group members',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            ...groupMembers.map((member) {
+              final name = member['name']?.toString() ?? 'Guest';
+              final slotTime = member['startTime']?.toString() ?? '';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
                   children: [
-                    AspectRatio(
-                      aspectRatio: 1,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image.network(
-                          image.url,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Container(
-                            color: const Color(0xFF1B1B1B),
-                            alignment: Alignment.center,
-                            child: const Icon(Icons.image_not_supported_outlined, color: Colors.white38),
-                          ),
-                        ),
+                    const Icon(Icons.person_outline, color: Color(0xFFA99941), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '$name · ${formatTimeRangeTo12h(slotTime)}',
+                        style: const TextStyle(color: Colors.white70),
                       ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      image.label,
-                      style: const TextStyle(color: Colors.white70, fontSize: 12),
                     ),
                   ],
                 ),
               );
-            }).toList(),
+            }),
+          ],
+          if (widget.isUpcoming) ...[
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (status.isNotEmpty)
+                  _chip(
+                    status == 'PendingPayment' ? 'Pending payment' : status,
+                    status == 'PendingPayment'
+                        ? const Color(0xFFE67E22)
+                        : const Color(0xFF4CAF50),
+                  ),
+                if (paymentState.isNotEmpty)
+                  _chip(
+                    paymentState,
+                    paymentState == 'Paid'
+                        ? const Color(0xFF4CAF50)
+                        : const Color(0xFFE67E22),
+                  ),
+              ],
+            ),
+            if (receiptRef.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Receipt: $receiptRef',
+                style: const TextStyle(color: Colors.white54, fontSize: 12),
+              ),
+            ],
+          ],
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              const Icon(Icons.calendar_today, color: Color(0xFFA99941), size: 18),
+              const SizedBox(width: 8),
+              Text(date, style: const TextStyle(color: Colors.white70)),
+              const SizedBox(width: 20),
+              const Icon(Icons.access_time, color: Color(0xFFA99941), size: 18),
+              const SizedBox(width: 8),
+              Text(time, style: const TextStyle(color: Colors.white70)),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Text('Duration: $duration', style: const TextStyle(color: Colors.white70)),
+          const SizedBox(height: 8),
+          Text(
+            'Price: $price',
+            style: const TextStyle(
+              color: Color(0xFFA99941),
+              fontWeight: FontWeight.bold,
+              fontSize: 16,
+            ),
+          ),
+          if (previewImages.isNotEmpty) ...[
+            const SizedBox(height: 24),
+            AppointmentPreviewCarousel(images: previewImages),
+          ],
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFFE74C3C),
+                    side: const BorderSide(color: Color(0xFFE74C3C), width: 1),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('Back', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFA99941),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  child: const Text('Done', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
+      bottomNavigationBar: AppBottomNavBar(
+        currentIndex: _navIndex,
+        onTap: (index) {
+          if (index == _navIndex) {
+            return;
+          }
+          setState(() => _navIndex = index);
+          switch (index) {
+            case 0:
+              navigateToCustomerHome(context);
+              break;
+            case 1:
+              Navigator.of(context).pushReplacement(
+                MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+              );
+              break;
+            case 2:
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+              );
+              break;
+            case 3:
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
+              );
+              break;
+            case 4:
+              showAppMenuSheet(context);
+              break;
+          }
+        },
+      ),
     );
   }
-}
 
-class _PreviewImage {
-  final String label;
-  final String url;
-
-  const _PreviewImage({required this.label, required this.url});
+  Widget _chip(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withOpacity(0.6)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 11),
+      ),
+    );
+  }
 }

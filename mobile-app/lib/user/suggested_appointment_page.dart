@@ -27,7 +27,7 @@ class SuggestedAppointmentPage extends StatefulWidget {
 }
 
 class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
-  static const Duration _bookingLeadTime = Duration(hours: 3);
+  static const Duration _bookingLeadTime = Duration(hours: 2);
   bool _booking = false;
   bool _refreshingSuggestion = false;
   late Map<String, dynamic> _suggestion;
@@ -375,6 +375,9 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     final slotDate = _suggestion['slotDate']?.toString() ?? '';
     final slotTime = formatTo12Hour(_suggestion['slotTime']?.toString() ?? '');
     final isFallback = _suggestion['isFallback'] == true;
+    final suggestionReason = formatSuggestionReasonTo12h(
+      _suggestion['suggestionReason']?.toString() ?? '',
+    );
     final isStale = slotDate.isNotEmpty &&
         _suggestion['slotTime']?.toString().isNotEmpty == true &&
         _isPastOrInvalidSlot(
@@ -410,7 +413,15 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                     'Suggested Appointment',
                     style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                   ),
-                  if (isFallback)
+                  if (suggestionReason.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Text(
+                        suggestionReason,
+                        style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                      ),
+                    )
+                  else if (isFallback)
                     const Padding(
                       padding: EdgeInsets.only(top: 8, bottom: 8),
                       child: Text(

@@ -143,12 +143,30 @@
 
         <section id="tracking-view" hidden>
           <div class="section-title">Tracking</div>
-          <div class="list" id="tracking-list"></div>
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin-top: 0;">Regular queue (walk-in / kiosk)</h3>
+            <div class="list" id="tracking-regular-list"></div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top: 0;">Exclusive queue (appointments)</h3>
+            <div class="list" id="tracking-exclusive-list"></div>
+          </div>
         </section>
 
         <section id="barbers-view" hidden>
           <div class="section-title">Barbers</div>
-          <div class="list" id="barbers-list"></div>
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin-top: 0;">Regular barbers</h3>
+            <div class="list" id="barbers-regular-list"></div>
+          </div>
+          <div class="card">
+            <h3 style="margin-top: 0;">Exclusive barbers</h3>
+            <div class="list" id="barbers-exclusive-list"></div>
+          </div>
+          <div class="card" style="margin-top: 12px;">
+            <h3 style="margin-top: 0;">Barber time-off requests</h3>
+            <div class="list" id="barber-unavailability-list"></div>
+          </div>
         </section>
       </main>
     </div>
