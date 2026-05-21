@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/barber_channel.php';
 
 require_method('POST');
 
@@ -74,26 +75,29 @@ try {
     if ($action === 'services' || $action === 'barberQueue') {
         with_pdo_retry(function (PDO $pdo) use ($action): void {
             ensure_walkin_guest_name_column($pdo);
+            ensure_barber_channel_column($pdo);
             auto_complete_due_appointments($pdo);
 
             if ($action === 'services') {
+                require_once __DIR__ . '/service_channel.php';
+                ensure_service_channel_column($pdo);
+                $walkInFilter = service_channel_filter_sql('walk_in');
                 $stmt = $pdo->prepare(
-                    'SELECT service_id, service_name, description, base_duration,
-                            CASE WHEN LOWER(category) = \'haircut\' THEN 100 ELSE base_price END AS base_price,
-                            category
+                    "SELECT service_id, service_name, description, base_duration, base_price, category, service_channel
                      FROM services
-                     WHERE is_active = TRUE
-                     ORDER BY service_name'
+                     WHERE is_active = TRUE{$walkInFilter}
+                     ORDER BY service_name"
                 );
                 $stmt->execute();
                 json_response(['services' => $stmt->fetchAll()]);
             }
 
+            $walkInFilter = barber_channel_filter_sql('walk_in');
             $barbersStmt = $pdo->query(
-                'SELECT barber_id, full_name, specialty, rating, years_experience, is_active
+                "SELECT barber_id, full_name, specialty, rating, years_experience, is_active, barber_channel
                  FROM barbers
-                 WHERE is_active = TRUE
-                 ORDER BY full_name'
+                 WHERE is_active = TRUE{$walkInFilter}
+                 ORDER BY full_name"
             );
             $barbers = [];
             foreach ($barbersStmt->fetchAll() as $row) {
@@ -138,6 +142,7 @@ try {
     if ($action === 'createWalkin') {
         $pdo = get_db_connection();
         ensure_walkin_guest_name_column($pdo);
+        ensure_barber_channel_column($pdo);
         auto_complete_due_appointments($pdo);
 
         $serviceIDs = $input['serviceIDs'] ?? [];
@@ -170,6 +175,19 @@ try {
 
         if ($variantID <= 0) {
             json_response(['error' => 'No active hairstyle variants available'], 422);
+        }
+
+        if ($barberID > 0) {
+            $barberChannelStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM barbers
+                 WHERE barber_id = :barber_id
+                   AND is_active = TRUE
+                   AND barber_channel = 'walk_in'"
+            );
+            $barberChannelStmt->execute([':barber_id' => $barberID]);
+            if ((int)$barberChannelStmt->fetchColumn() === 0) {
+                json_response(['error' => 'This barber is not available for walk-in service.'], 422);
+            }
         }
 
         $waitMinutes = estimate_barber_wait_minutes($pdo, $barberID > 0 ? $barberID : null);

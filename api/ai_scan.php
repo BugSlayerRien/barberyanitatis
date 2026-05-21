@@ -42,6 +42,16 @@ SELECT
           END
         + CASE
             WHEN :hair_texture <> '' AND LOWER(hv.hair_texture) = LOWER(:hair_texture) THEN 0.55
+            WHEN :hair_texture <> '' AND hv.hair_texture IS NOT NULL AND hv.hair_texture <> '' THEN -0.15
+            ELSE 0.05
+          END
+        + CASE
+            WHEN :face_shape <> ''
+                AND :hair_texture <> ''
+                AND LOWER(hv.face_shape) IN ('oval', 'oblong')
+                AND LOWER(:face_shape) IN ('oval', 'oblong')
+                AND LOWER(hv.face_shape) <> LOWER(:face_shape)
+            THEN 0.12
             ELSE 0
           END
         + CASE
@@ -59,18 +69,6 @@ SELECT
 FROM hairstyle_variants hv
 JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
 WHERE hs.is_active = TRUE
-    AND (
-        :face_shape = ''
-        OR LOWER(hv.face_shape) = LOWER(:face_shape)
-        OR hv.face_shape IS NULL
-        OR hv.face_shape = ''
-    )
-    AND (
-        :hair_texture = ''
-        OR LOWER(hv.hair_texture) = LOWER(:hair_texture)
-        OR hv.hair_texture IS NULL
-        OR hv.hair_texture = ''
-    )
 ORDER BY match_score DESC, hv.confidence_score DESC, hs.style_name
 LIMIT 24
 SQL;
@@ -111,6 +109,24 @@ function categorize_variant_rule(array $row): string
     return 'youthful';
 }
 
+function dedupe_variant_rows(array $rows, array &$usedIds): array
+{
+    $out = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $id = (int)($row['variant_id'] ?? 0);
+        if ($id <= 0 || isset($usedIds[$id])) {
+            continue;
+        }
+        $usedIds[$id] = true;
+        $out[] = $row;
+    }
+
+    return $out;
+}
+
 function apply_category_rules_to_insights(array $insights): array
 {
     $categories = $insights['categories'] ?? [];
@@ -118,53 +134,32 @@ function apply_category_rules_to_insights(array $insights): array
         $categories = [];
     }
 
-    $pools = ['formal' => [], 'alternative' => [], 'youthful' => []];
-    foreach (array_keys($pools) as $cat) {
+    $usedIds = [];
+    $topPicks = dedupe_variant_rows($insights['topPicks'] ?? [], $usedIds);
+    $topPicks = array_map(
+        static function (array $row): array {
+            $copy = $row;
+            $copy['category'] = categorize_variant_rule($row);
+
+            return $copy;
+        },
+        $topPicks
+    );
+    $insights['topPicks'] = $topPicks;
+
+    $normalizedCategories = [];
+    foreach (['formal', 'alternative', 'youthful'] as $cat) {
+        $pool = [];
         foreach (($categories[$cat] ?? []) as $row) {
             if (!is_array($row)) {
                 continue;
             }
-            $target = categorize_variant_rule($row);
-            $pools[$target][] = enrich_variant_copy($row, '', '', $target);
+            $pool[] = enrich_variant_copy($row, '', '', $cat);
         }
-    }
-
-  foreach ($insights['topPicks'] ?? [] as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-        $target = categorize_variant_rule($row);
-        $id = (int)($row['variant_id'] ?? 0);
-        $already = false;
-        foreach ($pools[$target] as $existing) {
-            if ((int)($existing['variant_id'] ?? 0) === $id) {
-                $already = true;
-                break;
-            }
-        }
-        if (!$already && $id > 0) {
-            $pools[$target][] = enrich_variant_copy($row, '', '', $target);
-        }
-    }
-
-    $used = [];
-    $normalizedCategories = [];
-    foreach ($pools as $cat => $pool) {
-        $normalizedCategories[$cat] = pick_unique_variants($pool, $used, 3);
+        $normalizedCategories[$cat] = pick_unique_variants($pool, $usedIds, 3);
     }
 
     $insights['categories'] = $normalizedCategories;
-
-    $topPicks = [];
-    foreach ($insights['topPicks'] ?? [] as $row) {
-        if (!is_array($row)) {
-            continue;
-        }
-        $copy = $row;
-        $copy['category'] = categorize_variant_rule($row);
-        $topPicks[] = $copy;
-    }
-    $insights['topPicks'] = $topPicks;
 
     return $insights;
 }
@@ -217,19 +212,26 @@ function build_rule_based_insights(array $variants, string $faceShape, string $h
         $topRows
     );
 
-    $categories = ['formal' => [], 'alternative' => [], 'youthful' => []];
     $byCategory = ['formal' => [], 'alternative' => [], 'youthful' => []];
     foreach ($variants as $row) {
         $byCategory[categorize_variant_rule($row)][] = $row;
     }
 
+    $categories = ['formal' => [], 'alternative' => [], 'youthful' => []];
     foreach (array_keys($categories) as $cat) {
-        $pool = $byCategory[$cat];
-        $picked = pick_unique_variants($pool, $usedIds, 3);
-        if ($picked === []) {
-            $picked = pick_unique_variants($variants, $usedIds, 3);
-        }
+        $picked = pick_unique_variants($byCategory[$cat], $usedIds, 3);
         foreach ($picked as $row) {
+            $categories[$cat][] = enrich_variant_copy($row, $faceShape, $hairTexture, $cat);
+        }
+    }
+
+    // Fill empty category slots from remaining ranked variants (never duplicate IDs).
+    foreach (array_keys($categories) as $cat) {
+        if ($categories[$cat] !== []) {
+            continue;
+        }
+        $fallback = pick_unique_variants($variants, $usedIds, 1);
+        foreach ($fallback as $row) {
             $categories[$cat][] = enrich_variant_copy($row, $faceShape, $hairTexture, $cat);
         }
     }

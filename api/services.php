@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/service_channel.php';
 
 require_method('POST');
 
@@ -15,16 +16,16 @@ if ($action !== 'list') {
 
 try {
     $pdo = get_db_connection();
+    ensure_service_channel_column($pdo);
 
-    $pdo->exec("UPDATE services SET base_price = 100 WHERE is_active = TRUE AND LOWER(category) = 'haircut'");
+    $channel = normalize_service_channel($input['channel'] ?? $input['serviceChannel'] ?? null);
+    $channelFilter = $channel !== null ? service_channel_filter_sql($channel) : '';
 
     $stmt = $pdo->prepare(
-        'SELECT service_id, service_name, description, base_duration,
-                     CASE WHEN LOWER(category) = \'haircut\' THEN 100 ELSE base_price END AS base_price,
-                category
+        "SELECT service_id, service_name, description, base_duration, base_price, category, service_channel
          FROM services
-            WHERE is_active = TRUE
-         ORDER BY service_name'
+         WHERE is_active = TRUE{$channelFilter}
+         ORDER BY service_name"
     );
     $stmt->execute();
 

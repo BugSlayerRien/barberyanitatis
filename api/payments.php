@@ -3,6 +3,10 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/appointment_payment_notify_trigger.php';
+require_once __DIR__ . '/appointment_notifications.php';
 
 require_method('POST');
 
@@ -70,7 +74,7 @@ function ensure_financial_tables(PDO $pdo): void
 function get_appointment(PDO $pdo, int $appointmentID): array
 {
     $stmt = $pdo->prepare(
-        'SELECT appointment_id, user_id, booking_code, status
+        'SELECT appointment_id, user_id, barber_id, booking_code, status
          FROM appointments
          WHERE appointment_id = :appointment_id
          LIMIT 1'
@@ -174,22 +178,10 @@ function finalize_paid_intent(PDO $pdo, array $intent, array $appointment, strin
     ]);
     $payment = $paymentInsertStmt->fetch();
 
-    $appointmentUpdateStmt = $pdo->prepare(
-        "UPDATE appointments
-         SET status = 'Scheduled', updated_at = CURRENT_TIMESTAMP
-         WHERE appointment_id = :appointment_id"
-    );
-    $appointmentUpdateStmt->execute([':appointment_id' => (int)$intent['appointment_id']]);
-
-    $notifyStmt = $pdo->prepare(
-        "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-         VALUES ('User', :recipient_id, 'Payment', :title, :message, TRUE)"
-    );
-    $notifyStmt->execute([
-        ':recipient_id' => (int)$appointment['user_id'],
-        ':title' => 'Payment received',
-        ':message' => 'Payment for booking ' . (string)$appointment['booking_code'] . ' has been verified. Your appointment is now confirmed.',
-    ]);
+    $promoted = promote_paid_booking_unit($pdo, (int)$intent['appointment_id']);
+    if ($promoted === 'PendingPayment') {
+        throw new RuntimeException('One or more slots are no longer available. Payment captured but booking not confirmed.');
+    }
 
     return $payment;
 }
@@ -197,6 +189,11 @@ function finalize_paid_intent(PDO $pdo, array $intent, array $appointment, strin
 try {
     $pdo = get_db_connection();
     ensure_financial_tables($pdo);
+    try {
+        ensure_appointment_payment_notify_trigger($pdo);
+    } catch (Throwable $e) {
+        // Trigger creation can fail on restricted roles; payment flow still completes.
+    }
 
     if ($action === 'listWallet') {
         $userID = (int)($input['userID'] ?? 0);
@@ -268,9 +265,10 @@ try {
         $amount = (float)($input['amount'] ?? 0);
         $method = trim((string)($input['method'] ?? 'Card'));
         $provider = trim((string)($input['provider'] ?? 'mock'));
-        $expiresMinutes = (int)($input['expiresMinutes'] ?? 10);
-        if ($expiresMinutes < 3 || $expiresMinutes > 30) {
-            $expiresMinutes = 10;
+        $expiresMinutes = (int)($input['expiresMinutes'] ?? shop_reservation_hold_minutes());
+        $holdCap = shop_reservation_hold_minutes();
+        if ($expiresMinutes < 3 || $expiresMinutes > $holdCap) {
+            $expiresMinutes = $holdCap;
         }
 
         if ($appointmentID <= 0 || $amount <= 0) {

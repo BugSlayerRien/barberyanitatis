@@ -3,7 +3,11 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/barber_channel.php';
+require_once __DIR__ . '/payment_recording.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/group_booking.php';
+require_once __DIR__ . '/slot_locking.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -51,6 +55,7 @@ if (!in_array($action, $allowedActions, true)) {
 try {
     $pdo = get_db_connection();
     ensure_walkin_guest_name_column($pdo);
+    ensure_barber_channel_column($pdo);
     ensure_financial_tables($pdo);
     auto_complete_due_appointments($pdo);
 
@@ -71,8 +76,12 @@ try {
         $activeBarbersStmt->execute();
         $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
 
+        ensure_group_booking_schema($pdo);
+        sync_paid_groups_from_payments($pdo);
+
         $appointmentsStmt = $pdo->prepare(
-            'SELECT a.appointment_id, a.barber_id, u.full_name AS name,
+            'SELECT a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
+                    u.full_name AS booker_name,
                     string_agg(s.service_name, \', \' ORDER BY s.service_name) AS service,
                     a.appointment_date,
                     a.start_time AS time,
@@ -80,20 +89,50 @@ try {
                     :slot_duration AS duration,
                     SUM(ad.final_price) AS price,
                     a.status,
-                    b.full_name AS barber
+                    b.full_name AS barber,
+                    pay.status AS payment_status
              FROM appointments a
              JOIN users u ON a.user_id = u.user_id
              JOIN barbers b ON a.barber_id = b.barber_id
              JOIN appointment_details ad ON a.appointment_id = ad.appointment_id
              JOIN services s ON ad.service_id = s.service_id
+             LEFT JOIN LATERAL (
+                 SELECT status
+                 FROM appointment_payments
+                 WHERE appointment_id = a.appointment_id
+                 ORDER BY payment_id DESC
+                 LIMIT 1
+             ) pay ON TRUE
              WHERE a.appointment_date >= CURRENT_DATE - INTERVAL \'7 day\'
                AND a.status NOT IN (\'Cancelled\', \'NoShow\')
-             GROUP BY a.appointment_id, a.barber_id, u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name
+               AND b.barber_channel = \'appointment\'
+             GROUP BY a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
+                      u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name, pay.status
              ORDER BY a.appointment_date ASC, a.start_time ASC'
         );
         $appointmentsStmt->bindValue(':slot_duration', shop_appointment_duration_minutes(), PDO::PARAM_INT);
         $appointmentsStmt->execute();
-        $appointments = $appointmentsStmt->fetchAll();
+        $appointmentRows = $appointmentsStmt->fetchAll();
+        $appointments = collapse_receptionist_appointments(array_map(static function (array $row): array {
+            return [
+                'appointment_id' => (int)$row['appointment_id'],
+                'barber_id' => (int)$row['barber_id'],
+                'booking_group_id' => (int)($row['booking_group_id'] ?? 0),
+                'group_member_name' => (string)($row['group_member_name'] ?? ''),
+                'group_sequence' => (int)($row['group_sequence'] ?? 0),
+                'name' => (string)$row['booker_name'],
+                'booker_name' => (string)$row['booker_name'],
+                'payment_status' => $row['payment_status'] !== null ? (string)$row['payment_status'] : null,
+                'service' => (string)$row['service'],
+                'appointment_date' => (string)$row['appointment_date'],
+                'time' => (string)$row['time'],
+                'end_time' => (string)$row['end_time'],
+                'duration' => shop_appointment_duration_minutes() . ' min',
+                'price' => $row['price'],
+                'status' => (string)$row['status'],
+                'barber' => (string)$row['barber'],
+            ];
+        }, $appointmentRows));
 
         $walkinsStmt = $pdo->prepare(
             'SELECT wq.queue_id, wq.queue_number, wq.barber_id,
@@ -107,6 +146,7 @@ try {
              JOIN services s ON wsd.service_id = s.service_id
              LEFT JOIN barbers b ON wq.barber_id = b.barber_id
              WHERE DATE(wq.created_at) = CURRENT_DATE
+               AND (b.barber_id IS NULL OR b.barber_channel = \'walk_in\')
              GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
              ORDER BY wq.queue_id ASC'
         );
@@ -120,19 +160,24 @@ try {
                 ['title' => 'In Progress', 'value' => (string)$inProgress, 'change' => '', 'changeType' => 'warning'],
                 ['title' => 'Available Barbers', 'value' => (string)$activeBarbers, 'change' => '', 'changeType' => 'success'],
             ],
-            'appointments' => array_map(function ($row) {
+            'appointments' => array_map(static function (array $row): array {
                 return [
                     'appointment_id' => (int)$row['appointment_id'],
                     'barber_id' => (int)$row['barber_id'],
-                    'name' => $row['name'],
-                    'service' => $row['service'],
+                    'is_group' => (bool)($row['is_group'] ?? false),
+                    'people_count' => (int)($row['people_count'] ?? 1),
+                    'name' => (string)$row['name'],
+                    'member_names' => $row['member_names'] ?? [],
+                    'member_label' => (string)($row['member_label'] ?? $row['name']),
+                    'service' => (string)$row['service'],
                     'appointment_date' => (string)$row['appointment_date'],
-                    'time' => $row['time'],
-                    'end_time' => $row['end_time'],
-                    'duration' => ((int)$row['duration']) . ' min',
+                    'time' => (string)$row['time'],
+                    'end_time' => (string)($row['end_time'] ?? ''),
+                    'time_range' => (string)($row['time_range'] ?? ''),
+                    'duration' => (string)($row['duration'] ?? '60 min'),
                     'price' => $row['price'],
-                    'status' => $row['status'],
-                    'barber' => $row['barber'],
+                    'status' => (string)$row['status'],
+                    'barber' => (string)$row['barber'],
                 ];
             }, $appointments),
             'walkins' => array_map(function ($row) {
@@ -221,6 +266,10 @@ try {
             ':message' => 'Booking ' . (string)$appt['booking_code'] . ' is now ' . $status . '.',
         ]);
 
+        if ($status === 'Completed') {
+            record_completion_payment($pdo, $appointmentID, null);
+        }
+
         $pdo->commit();
 
         json_response(['message' => 'Appointment updated']);
@@ -260,6 +309,10 @@ try {
             ':actual_end' => $actualEnd,
             ':queue_id' => $queueID,
         ]);
+
+        if ($status === 'Completed') {
+            record_completion_payment($pdo, null, $queueID);
+        }
 
         json_response(['message' => 'Walk-in updated']);
     }

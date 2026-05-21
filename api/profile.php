@@ -46,15 +46,8 @@ function format_account_age(int $days): string
     if ($days < 1) {
         return 'Less than 1 day';
     }
-    if ($days < 30) {
-        return $days . ' day' . ($days === 1 ? '' : 's');
-    }
-    if ($days < 365) {
-        $months = max(1, (int)floor($days / 30));
-        return $months . ' month' . ($months === 1 ? '' : 's');
-    }
-    $years = max(1, (int)floor($days / 365));
-    return $years . ' year' . ($years === 1 ? '' : 's');
+
+    return $days . ' day' . ($days === 1 ? '' : 's');
 }
 
 function save_profile_image_file(int $userId, string $base64): string
@@ -101,7 +94,7 @@ function fetch_profile_row(PDO $pdo, int $userID): ?array
         ) ac ON ac.user_id = u.user_id
         WHERE u.user_id = ?'
     );
-    $stmt->execute(['completed', $userID]);
+    $stmt->execute(['Completed', $userID]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
     return $row ?: null;

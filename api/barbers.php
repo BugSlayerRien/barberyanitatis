@@ -3,14 +3,40 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/barber_channel.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = $input['action'] ?? 'list';
 
-if (!in_array($action, ['list', 'detail', 'submitFeedback'], true)) {
+if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage'], true)) {
     json_response(['error' => 'Invalid action'], 400);
+}
+
+function save_barber_profile_image(int $barberId, string $base64): string
+{
+    $raw = $base64;
+    if (str_contains($raw, ',')) {
+        $raw = substr($raw, (int)strpos($raw, ',') + 1);
+    }
+    $bytes = base64_decode($raw, true);
+    if ($bytes === false || strlen($bytes) < 32) {
+        throw new InvalidArgumentException('Invalid profile image data');
+    }
+
+    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'barbers';
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not create barber upload directory');
+    }
+
+    $filename = 'barber_' . $barberId . '_' . time() . '.jpg';
+    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
+    if (file_put_contents($fullPath, $bytes) === false) {
+        throw new RuntimeException('Could not save barber profile image');
+    }
+
+    return 'uploads/barbers/' . $filename;
 }
 
 function ensure_barber_feedback_table(PDO $pdo): void
@@ -36,6 +62,7 @@ function ensure_barber_feedback_table(PDO $pdo): void
 try {
     with_pdo_retry(function (PDO $pdo) use ($action, $input): void {
     ensure_barber_feedback_table($pdo);
+    ensure_barber_channel_column($pdo);
 
     if ($action === 'submitFeedback') {
         $appointmentID = (int)($input['appointmentID'] ?? 0);
@@ -102,6 +129,36 @@ try {
         ]);
     }
 
+    if ($action === 'updateProfileImage') {
+        $barberID = (int)($input['barberID'] ?? 0);
+        $imageBase64 = trim((string)($input['profileImageBase64'] ?? $input['profile_image_base64'] ?? ''));
+        if ($barberID <= 0 || $imageBase64 === '') {
+            json_response(['error' => 'Invalid barberID or image data'], 422);
+        }
+
+        $existsStmt = $pdo->prepare(
+            'SELECT barber_id FROM barbers WHERE barber_id = :barber_id AND is_active = TRUE'
+        );
+        $existsStmt->execute([':barber_id' => $barberID]);
+        if (!$existsStmt->fetch()) {
+            json_response(['error' => 'Barber not found'], 404);
+        }
+
+        $path = save_barber_profile_image($barberID, $imageBase64);
+        $updateStmt = $pdo->prepare(
+            'UPDATE barbers SET profile_image = :profile_image WHERE barber_id = :barber_id'
+        );
+        $updateStmt->execute([
+            ':profile_image' => $path,
+            ':barber_id' => $barberID,
+        ]);
+
+        json_response([
+            'message' => 'Profile image updated',
+            'profileImage' => $path,
+        ]);
+    }
+
     if ($action === 'detail') {
         $barberID = (int)($input['barberID'] ?? 0);
         if ($barberID <= 0) {
@@ -125,17 +182,31 @@ try {
         $todayStmt->execute([':barber_id' => $barberID]);
         $todayCount = (int)$todayStmt->fetchColumn();
 
+        $ratingCountStmt = $pdo->prepare(
+            'SELECT COUNT(DISTINCT user_id)::int AS rating_count FROM barber_feedback WHERE barber_id = :barber_id'
+        );
+        $ratingCountStmt->execute([':barber_id' => $barberID]);
+        $ratingCount = (int)($ratingCountStmt->fetchColumn() ?: 0);
+
         json_response([
             'barber' => $barber,
             'appointmentsToday' => $todayCount,
+            'ratingCount' => $ratingCount,
         ]);
     }
 
+    $channelRaw = $input['channel'] ?? $input['barberChannel'] ?? null;
+    $channelSql = '';
+    if ($channelRaw !== null && trim((string)$channelRaw) !== '' && strtolower(trim((string)$channelRaw)) !== 'all') {
+        $channel = normalize_barber_channel((string)$channelRaw) ?? 'appointment';
+        $channelSql = barber_channel_filter_sql($channel);
+    }
+
     $stmt = $pdo->prepare(
-        'SELECT barber_id, full_name, specialty, years_experience, rating, profile_image
+        "SELECT barber_id, full_name, specialty, years_experience, rating, profile_image, barber_channel
          FROM barbers
-         WHERE is_active = TRUE
-         ORDER BY full_name'
+         WHERE is_active = TRUE{$channelSql}
+         ORDER BY full_name"
     );
     $stmt->execute();
 
