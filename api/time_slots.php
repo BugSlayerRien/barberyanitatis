@@ -3,14 +3,17 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/group_booking.php';
+require_once __DIR__ . '/slot_locking.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['listByBarberDate', 'suggestBestSlot', 'availabilityByBarberMonth'], true)) {
+if (!in_array($action, ['listByBarberDate', 'suggestBestSlot', 'availabilityByBarberMonth', 'findGroupSlots'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -60,6 +63,33 @@ function seed_week_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): voi
     }
 
     seed_slots_for_barber_dates($pdo, $barberID, $dates);
+}
+
+/** Avoid re-inserting hundreds of rows on every suggestBestSlot call (slow on remote DB). */
+function ensure_week_seeded_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): void
+{
+    if ($barberID <= 0 || $windowDays <= 0) {
+        return;
+    }
+
+    $today = shop_now()->setTime(0, 0);
+    $start = $today->format('Y-m-d');
+    $end = $today->modify('+' . ($windowDays - 1) . ' day')->format('Y-m-d');
+
+    $check = $pdo->prepare(
+        'SELECT COUNT(*) FROM time_slots
+         WHERE barber_id = :barber_id AND slot_date BETWEEN :start AND :end'
+    );
+    $check->execute([
+        ':barber_id' => $barberID,
+        ':start' => $start,
+        ':end' => $end,
+    ]);
+    if ((int)$check->fetchColumn() > 0) {
+        return;
+    }
+
+    seed_week_for_barber($pdo, $barberID, $windowDays);
 }
 
 /**
@@ -134,72 +164,107 @@ function bookable_slot_sql_clause(): string
     return '(slot_date > :lead_date OR (slot_date = :lead_date AND slot_time >= :lead_time))';
 }
 
+function calendar_bookable_slot_sql_clause(): string
+{
+    return '(slot_date > :min_date OR (slot_date = :min_date AND slot_time >= :min_time))';
+}
+
+function build_suggestion_reason(string $slotDate, string $slotTime, int $barberId, int $availableCount): string
+{
+    $slotDt = shop_slot_start_datetime($slotDate, $slotTime);
+    $now = shop_now();
+    if ($slotDt === null) {
+        return 'This is the next open appointment slot for your selected barber.';
+    }
+
+    $leadHours = shop_booking_lead_hours();
+    $sameDay = $slotDate === shop_today();
+    $timeLabel = format_time_12h($slotTime);
+
+    if ($sameDay) {
+        $hoursUntil = max(0, (int)floor(($slotDt->getTimestamp() - $now->getTimestamp()) / 3600));
+        return "Earliest available slot today at {$timeLabel} (about {$hoursUntil} hour(s) from now). "
+            . "We require at least {$leadHours} hours notice for suggested bookings. "
+            . "Barber #{$barberId} has {$availableCount} open hour(s) this day.";
+    }
+
+    return "No open slots remain today after the {$leadHours}-hour booking window. "
+        . "The next available time is {$slotDate} at {$timeLabel} with {$availableCount} open hour(s) that day.";
+}
+
 try {
     $pdo = get_db_connection();
-    auto_complete_due_appointments($pdo);
+    ensure_barber_channel_column($pdo);
+
+    if ($action === 'listByBarberDate') {
+        auto_complete_due_appointments($pdo);
+        reconcile_pending_payment_slots($pdo);
+    }
 
     if ($action === 'suggestBestSlot') {
-        $activeBarbersStmt = $pdo->prepare('SELECT barber_id FROM barbers WHERE is_active = TRUE');
-        $activeBarbersStmt->execute();
-        $activeBarbers = $activeBarbersStmt->fetchAll();
-
-        if (!$activeBarbers) {
-            json_response(['error' => 'No available slots found'], 404);
-        }
-
-        foreach ($activeBarbers as $barberRow) {
-            $barberID = (int)($barberRow['barber_id'] ?? 0);
-            if ($barberID > 0) {
-                seed_week_for_barber($pdo, $barberID, 7);
-            }
-        }
-
+        $appointmentFilter = barber_channel_filter_sql('appointment', 'b.barber_channel');
         $leadStart = shop_next_bookable_slot_start();
         $leadDate = $leadStart->format('Y-m-d');
         $leadTime = $leadStart->format('H:i:s');
         $shopWindowEnd = shop_window_end_date(7);
 
-        // Pick the barber/day with the most open slots, then the earliest hour on that day
-        // (must be at least shop_booking_lead_hours from now).
-        $bestStmt = $pdo->prepare(
-            "WITH eligible AS (
-                SELECT barber_id, slot_date, slot_time
-                  FROM time_slots
-                 WHERE status = 'Available'
-                   AND slot_date <= :window_end_date
-                   AND " . bookable_slot_sql_clause() . "
-                   AND EXTRACT(MINUTE FROM slot_time) = 0
-                   AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
-             ),
-             day_counts AS (
-                SELECT barber_id, slot_date, COUNT(*) AS available_count
-                  FROM eligible
-                 GROUP BY barber_id, slot_date
-             )
-             SELECT e.barber_id,
-                    e.slot_date,
-                    e.slot_time,
-                    dc.available_count
-               FROM eligible e
-               JOIN day_counts dc
-                 ON dc.barber_id = e.barber_id
-                AND dc.slot_date = e.slot_date
-              ORDER BY dc.available_count DESC, e.slot_date ASC, e.slot_time ASC
-              LIMIT 1"
-        );
-        $bestStmt->execute([
-            ':lead_date' => $leadDate,
-            ':lead_time' => $leadTime,
-            ':window_end_date' => $shopWindowEnd,
-        ]);
-        $best = $bestStmt->fetch();
+        $runBestSlotQuery = static function (PDO $pdo, string $leadDate, string $leadTime, string $shopWindowEnd, string $appointmentFilter): ?array {
+            $bestStmt = $pdo->prepare(
+                "SELECT ts.barber_id, ts.slot_date, ts.slot_time,
+                        (
+                            SELECT COUNT(*)::int
+                              FROM time_slots ts2
+                             WHERE ts2.barber_id = ts.barber_id
+                               AND ts2.slot_date = ts.slot_date
+                               AND ts2.status = 'Available'
+                               AND EXTRACT(MINUTE FROM ts2.slot_time) = 0
+                               AND EXTRACT(HOUR FROM ts2.slot_time) BETWEEN 9 AND 19
+                               AND EXTRACT(HOUR FROM ts2.slot_time) <> 12
+                        ) AS available_count
+                   FROM time_slots ts
+                   JOIN barbers b ON b.barber_id = ts.barber_id
+                  WHERE b.is_active = TRUE{$appointmentFilter}
+                    AND ts.status = 'Available'
+                    AND ts.slot_date <= :window_end_date
+                    AND " . bookable_slot_sql_clause() . "
+                    AND EXTRACT(MINUTE FROM ts.slot_time) = 0
+                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN 9 AND 19
+                    AND EXTRACT(HOUR FROM ts.slot_time) <> 12
+                  ORDER BY ts.slot_date ASC, ts.slot_time ASC
+                  LIMIT 1"
+            );
+            $bestStmt->execute([
+                ':lead_date' => $leadDate,
+                ':lead_time' => $leadTime,
+                ':window_end_date' => $shopWindowEnd,
+            ]);
+
+            $row = $bestStmt->fetch();
+            return $row === false ? null : $row;
+        };
+
+        $best = $runBestSlotQuery($pdo, $leadDate, $leadTime, $shopWindowEnd, $appointmentFilter);
+
+        if (!$best) {
+            $seedStmt = $pdo->prepare(
+                "SELECT barber_id FROM barbers WHERE is_active = TRUE{$appointmentFilter}"
+            );
+            $seedStmt->execute();
+            foreach ($seedStmt->fetchAll() as $barberRow) {
+                $barberID = (int)($barberRow['barber_id'] ?? 0);
+                if ($barberID > 0) {
+                    ensure_week_seeded_for_barber($pdo, $barberID, 7);
+                }
+            }
+            $best = $runBestSlotQuery($pdo, $leadDate, $leadTime, $shopWindowEnd, $appointmentFilter);
+        }
 
         if (!$best) {
             json_response(['error' => 'No available slots found'], 404);
         }
 
         $normalizedSlotTime = shop_normalize_slot_time((string)$best['slot_time']);
-        if ($normalizedSlotTime === null || !shop_is_future_slot((string)$best['slot_date'], $normalizedSlotTime)) {
+        if ($normalizedSlotTime === null || !shop_is_suggestable_slot((string)$best['slot_date'], $normalizedSlotTime)) {
             json_response(['error' => 'No available time for suggested slot'], 404);
         }
 
@@ -207,14 +272,20 @@ try {
         $barberStmt->execute([':barber_id' => $best['barber_id']]);
         $barber = $barberStmt->fetch();
 
+        $barberId = (int)$best['barber_id'];
+        $availableCount = (int)($best['available_count'] ?? 0);
+        $reason = build_suggestion_reason((string)$best['slot_date'], $normalizedSlotTime, $barberId, $availableCount);
+
         json_response([
             'suggestion' => [
-                'barberID' => (int)$best['barber_id'],
+                'barberID' => $barberId,
                 'barberName' => $barber['full_name'] ?? 'Barber',
                 'specialty' => $barber['specialty'] ?? null,
                 'slotDate' => $best['slot_date'],
                 'slotTime' => $normalizedSlotTime,
-                'availableCount' => (int)$best['available_count'],
+                'availableCount' => $availableCount,
+                'suggestionReason' => $reason,
+                'leadHours' => shop_booking_lead_hours(),
                 'isFallback' => false,
             ],
         ]);
@@ -229,13 +300,14 @@ try {
             json_response(['error' => 'Missing or invalid barberID/year/month'], 422);
         }
 
-                seed_week_for_barber($pdo, $barberID, 7);
+        ensure_week_seeded_for_barber($pdo, $barberID, 7);
 
         $startDate = sprintf('%04d-%02d-01', $year, $month);
         $endDate = date('Y-m-d', strtotime($startDate . ' +1 month'));
         $windowEndDate = shop_window_end_date(7);
-        $shopToday = shop_today();
-        $shopNowTime = shop_current_time();
+        $minBookable = shop_earliest_bookable_slot_start();
+        $minDate = $minBookable->format('Y-m-d');
+        $minTime = $minBookable->format('H:i:s');
 
         $stmt = $pdo->prepare(
             "SELECT slot_date, COUNT(*) AS available_count
@@ -245,9 +317,10 @@ try {
                AND slot_date >= :start_date
                AND slot_date < :end_date
                AND slot_date <= :window_end_date
-               AND " . future_slot_sql_clause() . "
+               AND " . calendar_bookable_slot_sql_clause() . "
                AND EXTRACT(MINUTE FROM slot_time) = 0
                AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
+               AND EXTRACT(HOUR FROM slot_time) <> 12
              GROUP BY slot_date"
         );
         $stmt->execute([
@@ -255,8 +328,8 @@ try {
             ':start_date' => $startDate,
             ':end_date' => $endDate,
             ':window_end_date' => $windowEndDate,
-            ':shop_today' => $shopToday,
-            ':shop_now_time' => $shopNowTime,
+            ':min_date' => $minDate,
+            ':min_time' => $minTime,
         ]);
         $rows = $stmt->fetchAll();
 
@@ -269,6 +342,30 @@ try {
         }
 
         json_response(['availability' => $availability]);
+    }
+
+    if ($action === 'findGroupSlots') {
+        $barberID = (int)($input['barberID'] ?? 0);
+        $peopleCount = (int)($input['peopleCount'] ?? $input['groupSize'] ?? 0);
+        $preferredDate = trim((string)($input['slotDate'] ?? $input['appointmentDate'] ?? ''));
+
+        if ($peopleCount < 1 || $peopleCount > 5) {
+            json_response(['error' => 'peopleCount must be between 1 and 5'], 422);
+        }
+
+        if ($preferredDate !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $preferredDate)) {
+            json_response(['error' => 'Invalid slotDate'], 422);
+        }
+
+        ensure_group_booking_schema($pdo);
+        ensure_barber_channel_column($pdo);
+
+        if ($barberID > 0) {
+            ensure_week_seeded_for_barber($pdo, $barberID, 7);
+        }
+
+        $result = find_group_booking_options($pdo, $barberID, $peopleCount, $preferredDate !== '' ? $preferredDate : null);
+        json_response($result);
     }
 
     $barberID = (int)($input['barberID'] ?? 0);
@@ -289,7 +386,7 @@ try {
          LEFT JOIN (
             SELECT barber_id, appointment_date, start_time, COUNT(*) AS booked_count
             FROM appointments
-            WHERE status NOT IN ('Cancelled', 'NoShow')
+            WHERE status IN ('Scheduled', 'CheckedIn', 'InProgress', 'Completed')
             GROUP BY barber_id, appointment_date, start_time
          ) appt
            ON appt.barber_id = ts.barber_id
@@ -303,7 +400,9 @@ try {
         ':slot_date' => $slotDate,
     ]);
 
-    $rows = $stmt->fetchAll();
+    $rows = array_values(array_filter($stmt->fetchAll(), static function (array $row): bool {
+        return !shop_is_break_slot_time((string)($row['slot_time'] ?? ''));
+    }));
 
     if (!$rows) {
         $requestedDate = DateTimeImmutable::createFromFormat('Y-m-d', $slotDate, new DateTimeZone(shop_timezone()));
@@ -321,7 +420,27 @@ try {
         }
     }
 
-    json_response(['slots' => merge_barber_slots_for_date($rows, $capacity)]);
+    $merged = merge_barber_slots_for_date($rows, $capacity);
+    $minBookable = shop_earliest_bookable_slot_start();
+    foreach ($merged as &$slot) {
+        $time = (string)($slot['slot_time'] ?? '');
+        $dt = shop_slot_start_datetime($slotDate, $time);
+        $bookable = $dt !== null
+            && $dt >= $minBookable
+            && (string)($slot['status'] ?? '') === 'Available';
+        $slot['isBookable'] = $bookable;
+        if (!$bookable && (string)($slot['status'] ?? '') === 'Available') {
+            $slot['status'] = 'Unavailable';
+        }
+    }
+    unset($slot);
+
+    json_response(['slots' => $merged]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+} catch (Throwable $e) {
+    json_response([
+        'error' => 'Server error',
+        'details' => $e->getMessage(),
+    ], 500);
 }

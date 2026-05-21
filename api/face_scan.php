@@ -68,6 +68,48 @@ function face_scan_upload_root(): string
     return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'face_scans';
 }
 
+function ensure_scan_session_row(
+    PDO $pdo,
+    string $scanSessionId,
+    ?int $userId = null,
+    ?string $faceShape = null,
+    ?string $hairTexture = null
+): void {
+    $stmt = $pdo->prepare(
+        'INSERT INTO face_scan_sessions (scan_session_id, user_id, face_shape, hair_texture, consent_at)
+         VALUES (:scan_session_id, :user_id, :face_shape, :hair_texture, :consent_at)
+         ON CONFLICT (scan_session_id) DO UPDATE
+         SET user_id = COALESCE(EXCLUDED.user_id, face_scan_sessions.user_id),
+             face_shape = COALESCE(EXCLUDED.face_shape, face_scan_sessions.face_shape),
+             hair_texture = COALESCE(EXCLUDED.hair_texture, face_scan_sessions.hair_texture)'
+    );
+    $stmt->execute([
+        ':scan_session_id' => $scanSessionId,
+        ':user_id' => $userId,
+        ':face_shape' => $faceShape,
+        ':hair_texture' => $hairTexture,
+        ':consent_at' => date('c'),
+    ]);
+}
+
+/** @return array{front:?string,left:?string,right:?string} */
+function capture_paths_for_session(PDO $pdo, string $scanSessionId): array
+{
+    $stmt = $pdo->prepare(
+        'SELECT angle, file_path FROM face_scan_captures WHERE scan_session_id = :scan_session_id'
+    );
+    $stmt->execute([':scan_session_id' => $scanSessionId]);
+    $paths = ['front' => null, 'left' => null, 'right' => null];
+    foreach ($stmt->fetchAll() as $row) {
+        $angle = (string)($row['angle'] ?? '');
+        if (array_key_exists($angle, $paths)) {
+            $paths[$angle] = (string)$row['file_path'];
+        }
+    }
+
+    return $paths;
+}
+
 function is_valid_jpeg_bytes(string $bytes): bool
 {
     if (strlen($bytes) < 4) {
@@ -223,14 +265,49 @@ try {
         $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
         $variantID = (int)($input['variantID'] ?? 0);
         $previews = $input['previews'] ?? [];
+        $userID = isset($input['userID']) ? (int)$input['userID'] : 0;
+        if ($userID <= 0) {
+            $userID = null;
+        }
 
         if ($scanSessionId === '' || $variantID <= 0 || !is_array($previews)) {
             json_response(['error' => 'Invalid preview payload'], 422);
         }
 
-        $front = save_jpeg_preview($scanSessionId, 'front', (string)($previews['front'] ?? ''));
-        $left = save_jpeg_preview($scanSessionId, 'left', (string)($previews['left'] ?? ''));
-        $right = save_jpeg_preview($scanSessionId, 'right', (string)($previews['right'] ?? ''));
+        ensure_scan_session_row(
+            $pdo,
+            $scanSessionId,
+            $userID,
+            trim((string)($input['faceShape'] ?? '')) ?: null,
+            trim((string)($input['hairTexture'] ?? '')) ?: null
+        );
+
+        $front = null;
+        $left = null;
+        $right = null;
+
+        $frontB64 = trim((string)($previews['front'] ?? ''));
+        $leftB64 = trim((string)($previews['left'] ?? ''));
+        $rightB64 = trim((string)($previews['right'] ?? ''));
+
+        if ($frontB64 !== '') {
+            $front = save_jpeg_preview($scanSessionId, 'front', $frontB64);
+        }
+        if ($leftB64 !== '') {
+            $left = save_jpeg_preview($scanSessionId, 'left', $leftB64);
+        }
+        if ($rightB64 !== '') {
+            $right = save_jpeg_preview($scanSessionId, 'right', $rightB64);
+        }
+
+        $captures = capture_paths_for_session($pdo, $scanSessionId);
+        $front ??= $captures['front'];
+        $left ??= $captures['left'];
+        $right ??= $captures['right'];
+
+        if ($front === null && $left === null && $right === null) {
+            json_response(['error' => 'No preview or capture images available for this scan'], 422);
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO face_scan_previews (scan_session_id, variant_id, front_url, left_url, right_url)

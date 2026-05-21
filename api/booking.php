@@ -3,7 +3,12 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/service_channel.php';
+require_once __DIR__ . '/appointment_notifications.php';
+require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/group_booking.php';
+require_once __DIR__ . '/slot_locking.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -56,6 +61,25 @@ function ensure_financial_tables(PDO $pdo): void
                 FOREIGN KEY (appointment_id) REFERENCES appointments(appointment_id) ON DELETE CASCADE
         )"
     );
+
+    $pdo->exec(
+        'ALTER TABLE appointment_payment_intents
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()'
+    );
+    $pdo->exec(
+        'ALTER TABLE appointment_payment_intents
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()'
+    );
+}
+
+function ensure_appointment_detail_image_columns(PDO $pdo): void
+{
+    $pdo->exec(
+        'ALTER TABLE appointment_details
+         ADD COLUMN IF NOT EXISTS customer_front_url TEXT,
+         ADD COLUMN IF NOT EXISTS customer_left_url TEXT,
+         ADD COLUMN IF NOT EXISTS customer_right_url TEXT'
+    );
 }
 
 function derive_payment_state(?string $paymentStatus, ?string $intentStatus): string
@@ -87,15 +111,7 @@ function promote_paid_appointment(PDO $pdo, int $appointmentId, string $currentS
         return $currentStatus;
     }
 
-    $updateStmt = $pdo->prepare(
-        "UPDATE appointments
-         SET status = 'Scheduled'
-         WHERE appointment_id = :appointment_id
-           AND status = 'PendingPayment'"
-    );
-    $updateStmt->execute([':appointment_id' => $appointmentId]);
-
-    return 'Scheduled';
+    return promote_paid_booking_unit($pdo, $appointmentId);
 }
 
 function ensure_appointments_status_constraint(PDO $pdo): void
@@ -177,15 +193,85 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['create', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule'], true)) {
+if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
 try {
     $pdo = get_db_connection();
+    ensure_service_channel_column($pdo);
     ensure_financial_tables($pdo);
     ensure_appointments_status_constraint($pdo);
-    auto_complete_due_appointments($pdo);
+    ensure_barber_channel_column($pdo);
+    ensure_group_booking_schema($pdo);
+    $readOnlyActions = ['listByCustomer', 'listByBarber'];
+    if (!in_array($action, $readOnlyActions, true)) {
+        ensure_appointment_detail_image_columns($pdo);
+    }
+    if (!in_array($action, $readOnlyActions, true)) {
+        auto_complete_due_appointments($pdo);
+    } elseif ($action === 'listByCustomer') {
+        sync_paid_groups_from_payments($pdo);
+    }
+
+    if ($action === 'createGroup') {
+        $userID = (int)($input['userID'] ?? 0);
+        $barberID = (int)($input['barberID'] ?? $input['primaryBarberID'] ?? 0);
+        $slotDate = trim((string)($input['appointmentDate'] ?? $input['slotDate'] ?? ''));
+        $slots = $input['slots'] ?? [];
+        $memberNames = $input['memberNames'] ?? $input['peopleNames'] ?? [];
+        $items = $input['items'] ?? null;
+        $allowPartial = (bool)($input['allowPartial'] ?? $input['confirmPartial'] ?? false);
+        $requestedCount = (int)($input['requestedCount'] ?? $input['peopleCount'] ?? count($slots));
+
+        if ($userID <= 0 || $barberID <= 0 || $slotDate === '' || !is_array($slots) || count($slots) === 0) {
+            json_response(['error' => 'Missing group booking details'], 422);
+        }
+
+        if (!is_array($memberNames)) {
+            $memberNames = [];
+        }
+
+        if (!is_array($items)) {
+            $variantID = (int)($input['variantID'] ?? 0);
+            $serviceIDs = $input['serviceIDs'] ?? [];
+            if ($variantID <= 0) {
+                json_response(['error' => 'Missing variantID'], 422);
+            }
+            if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
+                $defaultServiceId = (int)$pdo->query(
+                    "SELECT service_id FROM services
+                     WHERE category = 'Haircut' AND is_active = TRUE AND service_channel = 'appointment'
+                     ORDER BY service_id LIMIT 1"
+                )->fetchColumn();
+                if ($defaultServiceId <= 0) {
+                    json_response(['error' => 'No haircut service configured'], 422);
+                }
+                $serviceIDs = [$defaultServiceId];
+            }
+            $items = array_map(static fn($id) => ['serviceID' => (int)$id, 'variantID' => $variantID], $serviceIDs);
+        }
+
+        $GLOBALS['group_booking_requested_count'] = $requestedCount;
+        $result = create_group_booking(
+            $pdo,
+            $userID,
+            $barberID,
+            $slotDate,
+            $slots,
+            array_values($memberNames),
+            $items,
+            $allowPartial
+        );
+        unset($GLOBALS['group_booking_requested_count']);
+
+        json_response([
+            'message' => 'Group booking created',
+            'group' => $result,
+            'appointmentID' => $result['appointmentIDs'][0] ?? null,
+            'totalAmount' => $result['totalAmount'],
+        ]);
+    }
 
     if ($action === 'create') {
         $userID = (int)($input['userID'] ?? 0);
@@ -215,6 +301,10 @@ try {
             json_response(['error' => 'Invalid appointment date/time value.'], 422);
         }
 
+        if (shop_is_break_slot_time($startTime)) {
+            json_response(['error' => '12:00 PM is barber lunch break and cannot be booked.'], 422);
+        }
+
         if (!shop_is_time_within_hours($startTime) || !shop_is_allowed_slot_time($startTime)) {
             json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
         }
@@ -226,8 +316,10 @@ try {
             json_response(['error' => 'Invalid appointment time range.'], 422);
         }
 
-        if ($appointmentDateTimeStart < shop_now()) {
-            json_response(['error' => 'Cannot book an appointment in the past.'], 422);
+        if (!shop_is_future_slot($appointmentDate, $startTime)) {
+            json_response([
+                'error' => 'This time is no longer available. Choose a slot at least 1 hour from now.',
+            ], 422);
         }
 
         $userCheck = $pdo->prepare('SELECT COUNT(*) FROM users WHERE user_id = :user_id AND is_active = TRUE');
@@ -236,10 +328,15 @@ try {
             json_response(['error' => 'Invalid or inactive customer account.'], 422);
         }
 
-        $barberCheck = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE barber_id = :barber_id AND is_active = TRUE');
+        $barberCheck = $pdo->prepare(
+            "SELECT COUNT(*) FROM barbers
+             WHERE barber_id = :barber_id
+               AND is_active = TRUE
+               AND barber_channel = 'appointment'"
+        );
         $barberCheck->execute([':barber_id' => $barberID]);
         if ((int)$barberCheck->fetchColumn() === 0) {
-            json_response(['error' => 'Invalid or inactive barber account.'], 422);
+            json_response(['error' => 'This barber is not available for appointments. Please choose another barber.'], 422);
         }
 
         if (!is_array($items)) {
@@ -248,7 +345,11 @@ try {
             }
 
             if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
-                $defaultServiceId = (int)$pdo->query("SELECT service_id FROM services WHERE category = 'Haircut' AND is_active = TRUE ORDER BY service_id LIMIT 1")->fetchColumn();
+                $defaultServiceId = (int)$pdo->query(
+                    "SELECT service_id FROM services
+                     WHERE category = 'Haircut' AND is_active = TRUE AND service_channel = 'appointment'
+                     ORDER BY service_id LIMIT 1"
+                )->fetchColumn();
                 if ($defaultServiceId <= 0) {
                     json_response(['error' => 'No haircut service configured'], 422);
                 }
@@ -310,7 +411,8 @@ try {
         }
 
         $activeStmt = $pdo->prepare(
-            "SELECT COUNT(*) FROM appointments
+            "SELECT COUNT(DISTINCT COALESCE(booking_group_id::text, 'single-' || appointment_id::text))
+             FROM appointments
              WHERE user_id = :user_id
              AND status IN ('PendingPayment', 'Scheduled', 'CheckedIn', 'InProgress')"
         );
@@ -323,7 +425,7 @@ try {
             "SELECT COUNT(*) FROM appointments
              WHERE barber_id = :barber_id
                AND appointment_date = :appointment_date
-                AND status IN ('PendingPayment', 'Scheduled', 'CheckedIn', 'InProgress')
+               AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
                AND (
                     (start_time < :end_time AND end_time > :start_time)
                )"
@@ -338,22 +440,8 @@ try {
             json_response(['error' => 'Selected time overlaps with another appointment for this barber.'], 409);
         }
 
-        $slotAvailableStmt = $pdo->prepare(
-            "SELECT slot_id FROM time_slots
-             WHERE barber_id = :barber_id
-               AND slot_date = :slot_date
-               AND slot_time = :slot_time
-               AND status = 'Available'
-             LIMIT 1"
-        );
-        $slotAvailableStmt->execute([
-            ':barber_id' => $barberID,
-            ':slot_date' => $appointmentDate,
-            ':slot_time' => $startTime,
-        ]);
-        $slotRow = $slotAvailableStmt->fetch();
-        if (!$slotRow) {
-            json_response(['error' => 'Selected time slot is no longer available.'], 409);
+        if (paid_slot_conflict_exists($pdo, $barberID, $appointmentDate, $startTime, [])) {
+            json_response(['error' => 'Selected time slot is already booked (paid). Choose another time.'], 409);
         }
 
         $pdo->beginTransaction();
@@ -405,27 +493,12 @@ try {
             ]);
         }
 
-        $bookSlotStmt = $pdo->prepare(
-            "UPDATE time_slots
-             SET status = 'Booked'
-             WHERE barber_id = :barber_id
-               AND slot_date = :slot_date
-               AND slot_time = :slot_time"
-        );
-        $bookSlotStmt->execute([
-            ':barber_id' => $barberID,
-            ':slot_date' => $appointmentDate,
-            ':slot_time' => $startTime,
-        ]);
-
-        $notifyCreateStmt = $pdo->prepare(
-            "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-             VALUES ('User', :recipient_id, 'Appointment', :title, :message, TRUE)"
-        );
-        $notifyCreateStmt->execute([
-            ':recipient_id' => $userID,
-            ':title' => 'Appointment booked',
-            ':message' => 'Your booking ' . $bookingCode . ' is scheduled on ' . $appointmentDate . ' at ' . $startTime . '.',
+        notify_appointment_created($pdo, [
+            'user_id' => $userID,
+            'barber_id' => $barberID,
+            'booking_code' => $bookingCode,
+            'appointment_date' => $appointmentDate,
+            'start_time' => $startTime,
         ]);
 
         // Log appointment creation to audit trail
@@ -455,13 +528,17 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            "SELECT a.appointment_id, a.booking_code, a.appointment_date, a.start_time, a.end_time, a.status,
+            "SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_member_name, a.group_sequence,
+                    a.appointment_date, a.start_time, a.end_time, a.status,
                     b.barber_id, b.full_name AS barber_name,
+                    u.full_name AS customer_name,
                     ap.status AS payment_status, ap.transaction_ref, ap.created_at AS paid_at,
                     pi.intent_id, pi.status AS intent_status, pi.method AS intent_method, pi.expires_at AS intent_expires_at,
+                    pi.created_at AS intent_created_at,
                     pi.failure_reason, pi.updated_at AS intent_updated_at
              FROM appointments a
              JOIN barbers b ON a.barber_id = b.barber_id
+             JOIN users u ON a.user_id = u.user_id
              LEFT JOIN LATERAL (
                  SELECT payment_id, status, transaction_ref, created_at
                  FROM appointment_payments
@@ -470,7 +547,7 @@ try {
                  LIMIT 1
              ) ap ON TRUE
              LEFT JOIN LATERAL (
-                 SELECT intent_id, status, method, expires_at, failure_reason, updated_at
+                 SELECT intent_id, status, method, expires_at, created_at, failure_reason, updated_at
                  FROM appointment_payment_intents
                  WHERE appointment_id = a.appointment_id
                  ORDER BY intent_id DESC
@@ -534,8 +611,12 @@ try {
             $paymentStatus = $row['payment_status'] !== null ? (string)$row['payment_status'] : null;
             $paymentState = derive_payment_state($paymentStatus, $intentStatus);
             $appointmentStatus = (string)$row['status'];
-            if ($paymentState === 'Paid') {
-                $appointmentStatus = promote_paid_appointment($pdo, $aid, $appointmentStatus);
+            if ($paymentState === 'Paid' && $appointmentStatus === 'PendingPayment') {
+                try {
+                    $appointmentStatus = promote_paid_appointment($pdo, $aid, $appointmentStatus);
+                } catch (Throwable $promoteError) {
+                    // Listing must not fail if slot lock races; payment row still shows Paid.
+                }
             }
             $canRetryPayment = in_array($paymentState, ['Unpaid', 'Failed'], true);
             if ($intentStatus === 'PendingGateway' && $row['intent_expires_at'] !== null) {
@@ -544,6 +625,10 @@ try {
             return [
                 'appointmentID' => $aid,
                 'bookingCode' => $row['booking_code'],
+                'bookingGroupID' => $row['booking_group_id'] !== null ? (int)$row['booking_group_id'] : null,
+                'groupMemberName' => $row['group_member_name'] !== null ? (string)$row['group_member_name'] : null,
+                'customerName' => trim((string)($row['customer_name'] ?? '')),
+                'groupSequence' => $row['group_sequence'] !== null ? (int)$row['group_sequence'] : null,
                 'appointmentDate' => $row['appointment_date'],
                 'startTime' => $row['start_time'],
                 'endTime' => $row['end_time'],
@@ -558,6 +643,10 @@ try {
                 'intentStatus' => $intentStatus,
                 'intentMethod' => $row['intent_method'] !== null ? (string)$row['intent_method'] : null,
                 'intentExpiresAt' => $row['intent_expires_at'] !== null ? (string)$row['intent_expires_at'] : null,
+                'intentCreatedAt' => $row['intent_created_at'] !== null ? (string)$row['intent_created_at'] : null,
+                'holdExpiresAt' => ($row['intent_created_at'] !== null && (string)$row['status'] === 'PendingPayment')
+                    ? date('Y-m-d H:i:s', strtotime((string)$row['intent_created_at']) + (shop_reservation_hold_minutes() * 60))
+                    : null,
                 'intentFailureReason' => $row['failure_reason'] !== null ? (string)$row['failure_reason'] : null,
                 'intentUpdatedAt' => $row['intent_updated_at'] !== null ? (string)$row['intent_updated_at'] : null,
                 'canRetryPayment' => $canRetryPayment,
@@ -569,17 +658,24 @@ try {
             ];
         }, $appointments);
 
-        json_response(['appointments' => $appointments]);
+        json_response([
+            'appointments' => collapse_customer_appointments(
+                propagate_group_payment_states($appointments)
+            ),
+        ]);
     }
 
     if ($action === 'cancel') {
         $appointmentID = (int)($input['appointmentID'] ?? 0);
+        $userID = (int)($input['userID'] ?? 0);
         if ($appointmentID <= 0) {
             json_response(['error' => 'Invalid appointmentID'], 422);
         }
 
+        ensure_group_booking_schema($pdo);
+
         $apptStmt = $pdo->prepare(
-            'SELECT appointment_id, user_id, barber_id, appointment_date, start_time, status
+            'SELECT appointment_id, user_id, barber_id, appointment_date, start_time, status, booking_group_id
              FROM appointments
              WHERE appointment_id = :appointment_id
              LIMIT 1'
@@ -590,31 +686,62 @@ try {
             json_response(['error' => 'Appointment not found'], 404);
         }
 
+        if ($userID > 0 && (int)$appt['user_id'] !== $userID) {
+            json_response(['error' => 'You can only cancel your own appointments'], 403);
+        }
+
         if ((string)$appt['status'] === 'Cancelled') {
             json_response(['message' => 'Appointment already cancelled']);
         }
 
+        $groupId = (int)($appt['booking_group_id'] ?? 0);
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare(
-            "UPDATE appointments
-             SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
-             WHERE appointment_id = :appointment_id"
-        );
-        $stmt->execute([':appointment_id' => $appointmentID]);
+        if ($groupId > 0) {
+            $cancelStmt = $pdo->prepare(
+                "UPDATE appointments
+                 SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+                 WHERE booking_group_id = :group_id
+                   AND status NOT IN ('Cancelled', 'NoShow', 'Completed')"
+            );
+            $cancelStmt->execute([':group_id' => $groupId]);
 
-        $releaseSlotStmt = $pdo->prepare(
-            "UPDATE time_slots
-             SET status = 'Available'
-             WHERE barber_id = :barber_id
-               AND slot_date = :slot_date
-               AND slot_time = :slot_time"
-        );
-        $releaseSlotStmt->execute([
-            ':barber_id' => (int)$appt['barber_id'],
-            ':slot_date' => (string)$appt['appointment_date'],
-            ':slot_time' => (string)$appt['start_time'],
-        ]);
+            $membersStmt = $pdo->prepare(
+                "SELECT appointment_id FROM appointments WHERE booking_group_id = :group_id"
+            );
+            $membersStmt->execute([':group_id' => $groupId]);
+            $memberIds = [];
+            foreach ($membersStmt->fetchAll(PDO::FETCH_ASSOC) as $member) {
+                $memberIds[] = (int)$member['appointment_id'];
+                release_slots_for_appointment($pdo, (int)$member['appointment_id']);
+            }
+            if ($memberIds !== []) {
+                $placeholders = implode(',', array_fill(0, count($memberIds), '?'));
+                $expireIntents = $pdo->prepare(
+                    "UPDATE appointment_payment_intents
+                     SET status = 'Expired', updated_at = NOW()
+                     WHERE appointment_id IN ($placeholders)
+                       AND status IN ('PendingGateway', 'Verifying')"
+                );
+                $expireIntents->execute($memberIds);
+            }
+        } else {
+            $stmt = $pdo->prepare(
+                "UPDATE appointments
+                 SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+                 WHERE appointment_id = :appointment_id"
+            );
+            $stmt->execute([':appointment_id' => $appointmentID]);
+            release_slots_for_appointment($pdo, $appointmentID);
+
+            $expireIntent = $pdo->prepare(
+                "UPDATE appointment_payment_intents
+                 SET status = 'Expired', updated_at = NOW()
+                 WHERE appointment_id = :appointment_id
+                   AND status IN ('PendingGateway', 'Verifying')"
+            );
+            $expireIntent->execute([':appointment_id' => $appointmentID]);
+        }
 
         $notifyCancelStmt = $pdo->prepare(
             "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
@@ -806,7 +933,8 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT a.appointment_id, a.booking_code, a.appointment_date, a.start_time, a.end_time, a.status,
+            'SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_member_name, a.group_sequence,
+                    a.appointment_date, a.start_time, a.end_time, a.status,
                     u.user_id AS customer_id, u.full_name AS customer_name
              FROM appointments a
              JOIN users u ON a.user_id = u.user_id
@@ -823,23 +951,29 @@ try {
         $appointmentIds = array_map(fn($row) => (int)$row['appointment_id'], $appointments);
         $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
 
-        $imageStmt = $pdo->prepare(
+        $detailStmt = $pdo->prepare(
             "SELECT ad.appointment_id,
+                    hs.style_name AS hairstyle_name,
+                    s.service_name,
                     COALESCE(ad.customer_front_url, hv.front_view_url) AS front_view_url,
                     COALESCE(ad.customer_left_url, hv.side_view_url) AS side_view_url,
                     COALESCE(ad.customer_right_url, hv.back_view_url) AS back_view_url
              FROM appointment_details ad
+             JOIN services s ON ad.service_id = s.service_id
              LEFT JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
+             LEFT JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
              WHERE ad.appointment_id IN ($inClause)"
         );
-        $imageStmt->execute($appointmentIds);
-        $imageRows = $imageStmt->fetchAll();
+        $detailStmt->execute($appointmentIds);
+        $detailRows = $detailStmt->fetchAll();
 
-        $imageMap = [];
-        foreach ($imageRows as $row) {
+        $detailMap = [];
+        foreach ($detailRows as $row) {
             $aid = (int)$row['appointment_id'];
-            if (!isset($imageMap[$aid])) {
-                $imageMap[$aid] = [
+            if (!isset($detailMap[$aid])) {
+                $detailMap[$aid] = [
+                    'serviceName' => $row['service_name'],
+                    'hairstyleName' => $row['hairstyle_name'],
                     'frontViewUrl' => $row['front_view_url'],
                     'sideViewUrl' => $row['side_view_url'],
                     'backViewUrl' => $row['back_view_url'],
@@ -847,24 +981,30 @@ try {
             }
         }
 
-        $appointments = array_map(function ($row) use ($imageMap) {
+        $appointments = array_map(function ($row) use ($detailMap) {
             $aid = (int)$row['appointment_id'];
+            $details = $detailMap[$aid] ?? [];
             return [
                 'appointmentID' => $aid,
                 'bookingCode' => $row['booking_code'],
+                'bookingGroupID' => $row['booking_group_id'] !== null ? (int)$row['booking_group_id'] : null,
+                'groupMemberName' => $row['group_member_name'] !== null ? (string)$row['group_member_name'] : null,
+                'groupSequence' => $row['group_sequence'] !== null ? (int)$row['group_sequence'] : null,
                 'appointmentDate' => $row['appointment_date'],
                 'startTime' => $row['start_time'],
                 'endTime' => $row['end_time'],
                 'status' => $row['status'],
                 'customerID' => (int)$row['customer_id'],
                 'customerName' => $row['customer_name'],
-                'frontViewUrl' => ($imageMap[$aid]['frontViewUrl'] ?? null),
-                'sideViewUrl' => ($imageMap[$aid]['sideViewUrl'] ?? null),
-                'backViewUrl' => ($imageMap[$aid]['backViewUrl'] ?? null),
+                'serviceName' => $details['serviceName'] ?? null,
+                'hairstyleName' => $details['hairstyleName'] ?? null,
+                'frontViewUrl' => $details['frontViewUrl'] ?? null,
+                'sideViewUrl' => $details['sideViewUrl'] ?? null,
+                'backViewUrl' => $details['backViewUrl'] ?? null,
             ];
         }, $appointments);
 
-        json_response(['appointments' => $appointments]);
+        json_response(['appointments' => collapse_barber_dashboard_appointments($appointments)]);
     }
 } catch (PDOException $e) {
     if (isset($pdo) && $pdo->inTransaction()) {

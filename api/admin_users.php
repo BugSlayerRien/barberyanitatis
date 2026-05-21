@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/barber_channel.php';
 
 function normalize_bool(mixed $value): bool
 {
@@ -19,7 +20,7 @@ function fetch_account_row(PDO $pdo, string $type, int $id): ?array
             return $row ?: null;
         })(),
         'barber' => (function () use ($pdo, $id) {
-            $stmt = $pdo->prepare("SELECT barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role FROM barbers WHERE barber_id = :id LIMIT 1");
+            $stmt = $pdo->prepare("SELECT barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, barber_channel, 'barber' AS role FROM barbers WHERE barber_id = :id LIMIT 1");
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
             return $row ?: null;
@@ -43,7 +44,7 @@ function fetch_accounts(PDO $pdo): array
     )->fetchAll();
 
     $barbers = $pdo->query(
-        "SELECT barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role
+        "SELECT barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, barber_channel, 'barber' AS role
          FROM barbers
          ORDER BY full_name"
     )->fetchAll();
@@ -208,21 +209,20 @@ function update_account(PDO $pdo, string $type, int $id, array $input): array
     }
 
     if ($type === 'barber') {
+        ensure_barber_channel_column($pdo);
         $specialty = trim((string)($input['specialty'] ?? ''));
         $yearsExperience = (int)($input['yearsExperience'] ?? 0);
         $rating = (float)($input['rating'] ?? 5);
-        $stmt = $pdo->prepare(
-            "UPDATE barbers
+        $channel = normalize_barber_channel($input['barberChannel'] ?? null);
+
+        $sql = "UPDATE barbers
              SET full_name = :full_name,
                  email = :email,
                  specialty = :specialty,
                  years_experience = :years_experience,
                  rating = :rating,
-                 is_active = :is_active
-             WHERE barber_id = :id
-             RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role"
-        );
-        $stmt->execute([
+                 is_active = :is_active";
+        $params = [
             ':full_name' => $fullName,
             ':email' => $email,
             ':specialty' => $specialty !== '' ? $specialty : null,
@@ -230,7 +230,16 @@ function update_account(PDO $pdo, string $type, int $id, array $input): array
             ':rating' => max(0, min(5, $rating)),
             ':is_active' => $isActive,
             ':id' => $id,
-        ]);
+        ];
+        if ($channel !== null) {
+            $sql .= ", barber_channel = :barber_channel";
+            $params[':barber_channel'] = $channel;
+        }
+        $sql .= " WHERE barber_id = :id
+             RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, barber_channel, 'barber' AS role";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
         $updated = $stmt->fetch();
         if (!$updated) {
             json_response(['error' => 'Unable to update barber account'], 500);
@@ -359,6 +368,124 @@ function remove_portal_staff(PDO $pdo, string $email): void
     audit_log($pdo, 'USER_ROLE_REMOVE', 'staff_users', (string)$existing['staff_id'], $existing, $updated, null);
 }
 
+function assert_email_unique_across_tables(PDO $pdo, string $email): void
+{
+    $e = strtolower(trim($email));
+    if ($e === '') {
+        json_response(['error' => 'Email is required'], 422);
+    }
+
+    $checks = [
+        'SELECT 1 FROM users WHERE lower(email) = lower(:e) LIMIT 1',
+        'SELECT 1 FROM barbers WHERE email IS NOT NULL AND lower(email) = lower(:e) LIMIT 1',
+        'SELECT 1 FROM staff_users WHERE lower(email) = lower(:e) LIMIT 1',
+    ];
+    foreach ($checks as $sql) {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':e' => $e]);
+        if ($stmt->fetchColumn()) {
+            json_response(['error' => 'That email is already in use'], 422);
+        }
+    }
+}
+
+function create_account(PDO $pdo, array $input): array
+{
+    $kind = strtolower(trim((string)($input['accountKind'] ?? '')));
+    $fullName = trim((string)($input['fullName'] ?? ''));
+    $email = strtolower(trim((string)($input['email'] ?? '')));
+    $password = (string)($input['password'] ?? '');
+
+    if ($fullName === '' || $email === '' || strlen($password) < 8) {
+        json_response(['error' => 'Full name, email, and password (8+ characters) are required'], 422);
+    }
+
+    assert_email_unique_across_tables($pdo, $email);
+    $hash = password_hash($password, PASSWORD_BCRYPT);
+
+    if ($kind === 'customer') {
+        $phone = trim((string)($input['phone'] ?? ''));
+        $stmt = $pdo->prepare(
+            "INSERT INTO users (email, password_hash, full_name, phone, is_active)
+             VALUES (:email, :password_hash, :full_name, :phone, TRUE)
+             RETURNING user_id, full_name, email, phone, is_active, created_at, 'customer' AS role"
+        );
+        $stmt->execute([
+            ':email' => $email,
+            ':password_hash' => $hash,
+            ':full_name' => $fullName,
+            ':phone' => $phone !== '' ? $phone : null,
+        ]);
+        $created = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$created) {
+            json_response(['error' => 'Unable to create customer'], 500);
+        }
+        audit_log($pdo, 'USER_CREATE', 'users', (string)$created['user_id'], null, $created, null);
+
+        return $created;
+    }
+
+    if ($kind === 'barber') {
+        ensure_barber_channel_column($pdo);
+        $channel = normalize_barber_channel($input['barberChannel'] ?? 'appointment') ?? 'appointment';
+        $specialty = trim((string)($input['specialty'] ?? ''));
+        if ($specialty === '') {
+            $specialty = 'General';
+        }
+        $years = max(0, (int)($input['yearsExperience'] ?? 1));
+        $barberCode = generate_barber_code($pdo, 1);
+        $stmt = $pdo->prepare(
+            "INSERT INTO barbers (barber_code, full_name, email, password_hash, specialty, years_experience, rating, barber_channel, is_active)
+             VALUES (:barber_code, :full_name, :email, :password_hash, :specialty, :years_experience, 5.00, :barber_channel, TRUE)
+             RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, barber_channel, 'barber' AS role"
+        );
+        $stmt->execute([
+            ':barber_code' => $barberCode,
+            ':full_name' => $fullName,
+            ':email' => $email,
+            ':password_hash' => $hash,
+            ':specialty' => $specialty,
+            ':years_experience' => $years,
+            ':barber_channel' => $channel,
+        ]);
+        $created = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$created) {
+            json_response(['error' => 'Unable to create barber'], 500);
+        }
+        audit_log($pdo, 'USER_CREATE', 'barbers', (string)$created['barber_id'], null, $created, null);
+
+        return $created;
+    }
+
+    if ($kind === 'staff') {
+        $role = ucfirst(strtolower(trim((string)($input['role'] ?? 'Receptionist'))));
+        if (!in_array($role, ['Admin', 'Receptionist'], true)) {
+            json_response(['error' => 'Staff role must be Admin or Receptionist'], 422);
+        }
+
+        $stmt = $pdo->prepare(
+            "INSERT INTO staff_users (email, password_hash, full_name, role, is_active)
+             VALUES (:email, :password_hash, :full_name, :role, TRUE)
+             RETURNING staff_id, full_name, email, role, is_active, created_at"
+        );
+        $stmt->execute([
+            ':email' => $email,
+            ':password_hash' => $hash,
+            ':full_name' => $fullName,
+            ':role' => $role,
+        ]);
+        $created = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$created) {
+            json_response(['error' => 'Unable to create staff user'], 500);
+        }
+        audit_log($pdo, 'USER_CREATE', 'staff_users', (string)$created['staff_id'], null, $created, null);
+
+        return $created;
+    }
+
+    json_response(['error' => 'accountKind must be customer, barber, or staff'], 422);
+}
+
 function delete_account(PDO $pdo, string $type, int $id): array
 {
     $existing = fetch_account_row($pdo, $type, $id);
@@ -391,6 +518,7 @@ function delete_account(PDO $pdo, string $type, int $id): array
 
 try {
     $pdo = get_db_connection();
+    ensure_barber_channel_column($pdo);
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     if ($method === 'GET') {
@@ -404,8 +532,13 @@ try {
     $input = get_json_input();
     $action = strtolower(trim((string)($input['action'] ?? '')));
 
-    if (!in_array($action, ['update', 'delete', 'assignPortalRole', 'removePortalRole'], true)) {
+    if (!in_array($action, ['update', 'delete', 'assignPortalRole', 'removePortalRole', 'create'], true)) {
         json_response(['error' => 'Invalid action'], 400);
+    }
+
+    if ($action === 'create') {
+        $record = create_account($pdo, $input);
+        json_response(['message' => 'Account created successfully', 'record' => $record], 201);
     }
 
     if ($action === 'assignPortalRole') {

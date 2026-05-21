@@ -5,6 +5,11 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/http.php';
 
+if (PHP_SAPI !== 'cli') {
+    load_project_env();
+    apply_api_cors_headers();
+}
+
 /**
  * PayMongo / scripts call this name; it is the same as load_project_env().
  */

@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/payment_recording.php';
+
 function shop_timezone(): string
 {
     return 'Asia/Manila';
@@ -43,15 +45,66 @@ function shop_appointment_duration_minutes(): int
     return 60;
 }
 
+/** Reservation/payment hold length for unpaid appointments (minutes). */
+function shop_reservation_hold_minutes(): int
+{
+    return 10;
+}
+
+function format_time_12h(string $time): string
+{
+    $normalized = shop_normalize_slot_time($time);
+    if ($normalized === null) {
+        $parts = explode(':', trim($time));
+        if (count($parts) < 2) {
+            return $time;
+        }
+        $hour = (int)$parts[0];
+        $minute = (int)$parts[1];
+    } else {
+        $hour = (int)substr($normalized, 0, 2);
+        $minute = (int)substr($normalized, 3, 2);
+    }
+
+    $suffix = $hour >= 12 ? 'PM' : 'AM';
+    $hour12 = $hour % 12 === 0 ? 12 : $hour % 12;
+
+    return sprintf('%d:%02d %s', $hour12, $minute, $suffix);
+}
+
+function format_time_range_12h(string $startTime, string $endTime): string
+{
+    return format_time_12h($startTime) . ' – ' . format_time_12h($endTime);
+}
+
 /**
  * Hourly slots from 9:00 AM through 7:00 PM start (each 1-hour block ends by 8:00 PM close).
  *
  * @return string[]
  */
+/** Lunch break — no bookable slots at this hour. */
+function shop_break_hours(): array
+{
+    return [12];
+}
+
+function shop_is_break_slot_time(string $time): bool
+{
+    $normalized = shop_normalize_slot_time($time);
+    if ($normalized === null) {
+        return false;
+    }
+
+    return in_array((int)substr($normalized, 0, 2), shop_break_hours(), true);
+}
+
 function shop_default_slot_times(): array
 {
     $times = [];
     for ($hour = 9; $hour <= 19; $hour++) {
+        if (in_array($hour, shop_break_hours(), true)) {
+            continue;
+        }
         $times[] = sprintf('%02d:00:00', $hour);
     }
 
@@ -82,13 +135,20 @@ function shop_is_allowed_slot_time(string $time): bool
     return shop_normalize_slot_time($time) !== null;
 }
 
+/** Minimum notice before a suggested “best” slot (earliest pick). */
 function shop_booking_lead_hours(): int
 {
-    return 3;
+    return 2;
+}
+
+/** Minimum notice to allow booking a slot in the calendar (1 hour gap). */
+function shop_minimum_booking_lead_minutes(): int
+{
+    return 60;
 }
 
 /**
- * Earliest bookable slot start (on-the-hour, within shop hours, at least N hours from now).
+ * Earliest slot start used for suggestions (at least shop_booking_lead_hours from now).
  */
 function shop_next_bookable_slot_start(): DateTimeImmutable
 {
@@ -110,11 +170,11 @@ function shop_next_bookable_slot_start(): DateTimeImmutable
     return $minimum;
 }
 
-function shop_is_future_slot(string $slotDate, string $slotTime): bool
+function shop_slot_start_datetime(string $slotDate, string $slotTime): ?DateTimeImmutable
 {
     $normalized = shop_normalize_slot_time($slotTime);
-    if ($normalized === null) {
-        return false;
+    if ($normalized === null || shop_is_break_slot_time($normalized)) {
+        return null;
     }
 
     $slotDateTime = DateTimeImmutable::createFromFormat(
@@ -122,7 +182,42 @@ function shop_is_future_slot(string $slotDate, string $slotTime): bool
         $slotDate . ' ' . $normalized,
         new DateTimeZone(shop_timezone())
     );
-    if ($slotDateTime === false) {
+
+    return $slotDateTime === false ? null : $slotDateTime;
+}
+
+function shop_earliest_bookable_slot_start(): DateTimeImmutable
+{
+    $minimum = shop_now()->modify('+' . shop_minimum_booking_lead_minutes() . ' minutes');
+    $minute = (int)$minimum->format('i');
+    $second = (int)$minimum->format('s');
+    if ($minute > 0 || $second > 0) {
+        $minimum = $minimum->setTime((int)$minimum->format('H'), 0)->modify('+1 hour');
+    }
+
+    if ((int)$minimum->format('H') === 12) {
+        $minimum = $minimum->setTime(13, 0);
+    }
+
+    return $minimum;
+}
+
+/** True when the slot is in the future and at least 1 hour from now (calendar booking). */
+function shop_is_future_slot(string $slotDate, string $slotTime): bool
+{
+    $slotDateTime = shop_slot_start_datetime($slotDate, $slotTime);
+    if ($slotDateTime === null) {
+        return false;
+    }
+
+    return $slotDateTime >= shop_earliest_bookable_slot_start();
+}
+
+/** True when the slot meets suggestion lead time (2+ hours from now). */
+function shop_is_suggestable_slot(string $slotDate, string $slotTime): bool
+{
+    $slotDateTime = shop_slot_start_datetime($slotDate, $slotTime);
+    if ($slotDateTime === null) {
         return false;
     }
 
@@ -164,6 +259,17 @@ function shop_is_time_within_hours(string $time): bool
  */
 function auto_complete_due_appointments(PDO $pdo): int
 {
+    static $done = false;
+    if ($done) {
+        return 0;
+    }
+    require_once __DIR__ . '/schema_cache.php';
+    if (!schema_cache_should_run('auto_complete_due_appointments', 120)) {
+        $done = true;
+
+        return 0;
+    }
+
     $duration = shop_appointment_duration_minutes();
 
     $selectStmt = $pdo->prepare(
@@ -179,6 +285,9 @@ function auto_complete_due_appointments(PDO $pdo): int
     $dueRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
 
     if (!$dueRows) {
+        schema_cache_done('auto_complete_due_appointments');
+        $done = true;
+
         return 0;
     }
 
@@ -207,6 +316,9 @@ function auto_complete_due_appointments(PDO $pdo): int
     );
 
     foreach ($dueRows as $row) {
+        $appointmentId = (int)$row['appointment_id'];
+        record_completion_payment($pdo, $appointmentId, null);
+
         $releaseSlotStmt->execute([
             (int)$row['barber_id'],
             (string)$row['appointment_date'],
@@ -218,6 +330,9 @@ function auto_complete_due_appointments(PDO $pdo): int
             'Your appointment ' . (string)$row['booking_code'] . ' has been marked completed.',
         ]);
     }
+
+    schema_cache_done('auto_complete_due_appointments');
+    $done = true;
 
     return count($dueRows);
 }

@@ -1,22 +1,132 @@
 <?php
-// Admin services API
+// Admin services API (list + CRUD)
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/service_channel.php';
 
-require_method('GET');
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
     $pdo = get_db_connection();
+    ensure_service_channel_column($pdo);
 
-    $stmt = $pdo->prepare(
-        'SELECT service_id, service_name, description, base_duration, base_price, category, is_active, created_at
-         FROM services
-         ORDER BY service_name'
-    );
-    $stmt->execute();
+    if ($method === 'GET') {
+        $stmt = $pdo->prepare(
+            'SELECT service_id, service_code, service_name, description,
+                    base_duration, base_price, category, service_channel, is_active, created_at
+             FROM services
+             ORDER BY service_channel, service_name'
+        );
+        $stmt->execute();
+        json_response(['services' => $stmt->fetchAll()]);
+    }
 
-    json_response(['services' => $stmt->fetchAll()]);
+    if ($method !== 'POST') {
+        json_response(['error' => 'Method not allowed'], 405);
+    }
+
+    $input = get_json_input();
+    $action = trim((string)($input['action'] ?? ''));
+
+    if ($action === 'create') {
+        $serviceName = trim((string)($input['serviceName'] ?? ''));
+        $description = trim((string)($input['description'] ?? ''));
+        $baseDuration = (int)($input['baseDuration'] ?? 30);
+        $basePrice = (float)($input['basePrice'] ?? 0);
+        $category = trim((string)($input['category'] ?? 'Haircut'));
+        $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? 'appointment') ?? 'appointment';
+        $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
+
+        if ($serviceName === '' || $baseDuration <= 0) {
+            json_response(['error' => 'Service name and duration are required'], 422);
+        }
+
+        $codeBase = strtoupper(preg_replace('/[^A-Z0-9]+/', '_', $serviceName) ?? 'SVC');
+        $codeBase = substr($codeBase, 0, 12) ?: 'SVC';
+        $serviceCode = $codeBase . '_' . substr((string)time(), -4);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO services (
+                service_code, service_name, description, base_duration, base_price,
+                category, service_channel, is_active
+             ) VALUES (
+                :service_code, :service_name, :description, :base_duration, :base_price,
+                :category, :service_channel, :is_active
+             )
+             RETURNING service_id'
+        );
+        $stmt->execute([
+            ':service_code' => $serviceCode,
+            ':service_name' => $serviceName,
+            ':description' => $description !== '' ? $description : null,
+            ':base_duration' => $baseDuration,
+            ':base_price' => $basePrice,
+            ':category' => $category !== '' ? $category : 'Haircut',
+            ':service_channel' => $channel,
+            ':is_active' => $isActive,
+        ]);
+
+        json_response([
+            'message' => 'Service created',
+            'serviceID' => (int)$stmt->fetchColumn(),
+        ]);
+    }
+
+    if ($action === 'update') {
+        $serviceID = (int)($input['serviceID'] ?? $input['service_id'] ?? 0);
+        $serviceName = trim((string)($input['serviceName'] ?? ''));
+        $description = trim((string)($input['description'] ?? ''));
+        $baseDuration = (int)($input['baseDuration'] ?? 30);
+        $basePrice = (float)($input['basePrice'] ?? 0);
+        $category = trim((string)($input['category'] ?? 'Haircut'));
+        $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? null);
+        $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
+
+        if ($serviceID <= 0 || $serviceName === '' || $baseDuration <= 0) {
+            json_response(['error' => 'Invalid service payload'], 422);
+        }
+
+        $sql = 'UPDATE services
+                SET service_name = :service_name,
+                    description = :description,
+                    base_duration = :base_duration,
+                    base_price = :base_price,
+                    category = :category,
+                    is_active = :is_active';
+        $params = [
+            ':service_name' => $serviceName,
+            ':description' => $description !== '' ? $description : null,
+            ':base_duration' => $baseDuration,
+            ':base_price' => $basePrice,
+            ':category' => $category !== '' ? $category : 'Haircut',
+            ':is_active' => $isActive,
+            ':service_id' => $serviceID,
+        ];
+
+        if ($channel !== null) {
+            $sql .= ', service_channel = :service_channel';
+            $params[':service_channel'] = $channel;
+        }
+        $sql .= ' WHERE service_id = :service_id';
+
+        $pdo->prepare($sql)->execute($params);
+        json_response(['message' => 'Service updated']);
+    }
+
+    if ($action === 'delete') {
+        $serviceID = (int)($input['serviceID'] ?? $input['service_id'] ?? 0);
+        if ($serviceID <= 0) {
+            json_response(['error' => 'Invalid serviceID'], 422);
+        }
+
+        $pdo->prepare('UPDATE services SET is_active = FALSE WHERE service_id = :service_id')
+            ->execute([':service_id' => $serviceID]);
+
+        json_response(['message' => 'Service deactivated']);
+    }
+
+    json_response(['error' => 'Invalid action'], 400);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
 }
