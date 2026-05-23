@@ -4,7 +4,10 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
-require_method('GET');
+$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+if (!in_array($method, ['GET', 'POST'], true)) {
+    json_response(['error' => 'Method not allowed'], 405);
+}
 
 function gemini_summary(string $prompt, string $apiKey): ?string
 {
@@ -43,6 +46,32 @@ function gemini_summary(string $prompt, string $apiKey): ?string
 try {
     $pdo = get_db_connection();
 
+    $periodInput = $_GET['period'] ?? null;
+    if ($method === 'POST') {
+        $body = get_json_input();
+        $periodInput = $periodInput ?? ($body['period'] ?? null);
+    }
+    $period = strtolower(trim((string)($periodInput ?? 'month')));
+    if (!in_array($period, ['today', 'week', 'month'], true)) {
+        $period = 'month';
+    }
+
+    $paymentRangeSql = match ($period) {
+        'today' => "created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'",
+        'week' => "created_at >= date_trunc('week', CURRENT_DATE) AND created_at < date_trunc('week', CURRENT_DATE) + INTERVAL '1 week'",
+        default => "created_at >= date_trunc('month', CURRENT_DATE) AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'",
+    };
+    $appointmentRangeSql = match ($period) {
+        'today' => 'appointment_date = CURRENT_DATE',
+        'week' => "appointment_date >= date_trunc('week', CURRENT_DATE)::date AND appointment_date < (date_trunc('week', CURRENT_DATE) + INTERVAL '1 week')::date",
+        default => "appointment_date >= date_trunc('month', CURRENT_DATE)::date AND appointment_date < (date_trunc('month', CURRENT_DATE) + INTERVAL '1 month')::date",
+    };
+    $eventRangeSql = match ($period) {
+        'today' => "created_at >= CURRENT_DATE AND created_at < CURRENT_DATE + INTERVAL '1 day'",
+        'week' => "created_at >= date_trunc('week', CURRENT_DATE) AND created_at < date_trunc('week', CURRENT_DATE) + INTERVAL '1 week'",
+        default => "created_at >= date_trunc('month', CURRENT_DATE) AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'",
+    };
+
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
     $totalBarbers = (int)$pdo->query('SELECT COUNT(*) FROM barbers')->fetchColumn();
     $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_active = TRUE')->fetchColumn();
@@ -50,27 +79,32 @@ try {
     $statusCounts = $pdo->query(
         "SELECT status, COUNT(*) AS count
          FROM appointments
+         WHERE {$appointmentRangeSql}
          GROUP BY status"
     )->fetchAll();
 
-    $monthlyRevenueStmt = $pdo->prepare(
+    $revenueStmt = $pdo->query(
         "SELECT COALESCE(SUM(total_amount), 0)
          FROM payments
          WHERE payment_status = 'Paid'
-            AND created_at >= date_trunc('month', CURRENT_DATE)
-            AND created_at < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'"
+           AND {$paymentRangeSql}"
     );
-    $monthlyRevenueStmt->execute();
-    $monthlyRevenue = (float)$monthlyRevenueStmt->fetchColumn();
+    $periodRevenue = (float)$revenueStmt->fetchColumn();
 
     $topServices = $pdo->query(
         "SELECT s.service_name, COUNT(*) AS count
          FROM appointment_details ad
          JOIN services s ON ad.service_id = s.service_id
+         JOIN appointments a ON a.appointment_id = ad.appointment_id
+         WHERE {$appointmentRangeSql}
          GROUP BY s.service_name
          ORDER BY count DESC
          LIMIT 5"
     )->fetchAll();
+
+    $appointmentsInPeriod = (int)$pdo->query(
+        "SELECT COUNT(*) FROM appointments WHERE {$appointmentRangeSql}"
+    )->fetchColumn();
 
     $funnelMetrics = [
         'scanCount' => 0,
@@ -95,7 +129,8 @@ try {
              FROM ai_recommendation_events
              WHERE event_type = 'scan_completed'
                AND scan_session_id IS NOT NULL
-               AND scan_session_id <> ''"
+               AND scan_session_id <> ''
+               AND {$eventRangeSql}"
         )->fetchColumn();
 
         $selectionCount = (int)$pdo->query(
@@ -103,7 +138,8 @@ try {
              FROM ai_recommendation_events
              WHERE event_type = 'style_selected'
                AND scan_session_id IS NOT NULL
-               AND scan_session_id <> ''"
+               AND scan_session_id <> ''
+               AND {$eventRangeSql}"
         )->fetchColumn();
 
         $bookingCount = (int)$pdo->query(
@@ -111,7 +147,8 @@ try {
              FROM ai_recommendation_events
              WHERE event_type = 'booking_created'
                AND scan_session_id IS NOT NULL
-               AND scan_session_id <> ''"
+               AND scan_session_id <> ''
+               AND {$eventRangeSql}"
         )->fetchColumn();
 
         $repeatUsers = (int)$pdo->query(
@@ -121,6 +158,7 @@ try {
                 WHERE event_type = 'booking_created'
                   AND user_id IS NOT NULL
                   AND variant_id IS NOT NULL
+                  AND {$eventRangeSql}
                 GROUP BY user_id, variant_id
             )
             SELECT COUNT(DISTINCT user_id)
@@ -132,7 +170,8 @@ try {
             "SELECT COUNT(DISTINCT user_id)
              FROM ai_recommendation_events
              WHERE event_type = 'booking_created'
-               AND user_id IS NOT NULL"
+               AND user_id IS NOT NULL
+               AND {$eventRangeSql}"
         )->fetchColumn();
 
         $funnelMetrics = [
@@ -146,10 +185,13 @@ try {
     }
 
     $metrics = [
+        'period' => $period,
         'totalUsers' => $totalUsers,
         'totalBarbers' => $totalBarbers,
         'activeServices' => $activeServices,
-        'monthlyRevenue' => $monthlyRevenue,
+        'periodRevenue' => $periodRevenue,
+        'monthlyRevenue' => $periodRevenue,
+        'appointmentsInPeriod' => $appointmentsInPeriod,
         'appointmentStatusCounts' => $statusCounts,
         'topServices' => $topServices,
         'aiFunnel' => $funnelMetrics,
@@ -162,8 +204,8 @@ try {
         $statusText = implode(', ', array_map(fn($row) => $row['status'] . ':' . $row['count'], $statusCounts));
         $servicesText = implode(', ', array_map(fn($row) => $row['service_name'] . ' (' . $row['count'] . ')', $topServices));
         $prompt = "You are a business analyst for a barbershop. Summarize performance in 3-5 short sentences. "
-            . "Metrics: users=$totalUsers, barbers=$totalBarbers, active_services=$activeServices, "
-            . "monthly_revenue=₱" . number_format($monthlyRevenue, 2) . ". "
+            . "Time period: $period. Metrics: users=$totalUsers, barbers=$totalBarbers, active_services=$activeServices, "
+            . "revenue_in_period=₱" . number_format($periodRevenue, 2) . ", appointments_in_period=$appointmentsInPeriod. "
             . "Appointment status counts: $statusText. Top services: $servicesText. "
             . "Give a concise overview and one actionable suggestion.";
         $summary = gemini_summary($prompt, $apiKey);

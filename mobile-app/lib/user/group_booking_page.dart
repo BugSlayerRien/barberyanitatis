@@ -7,6 +7,7 @@ import 'api_config.dart';
 import 'payment_page.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
+import 'services/booking_draft_service.dart';
 
 class GroupBookingPage extends StatefulWidget {
   final int barberId;
@@ -195,6 +196,8 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
       if (appointmentId == null || !mounted) {
         throw Exception('Missing appointment reference');
       }
+
+      await BookingDraftService.clear();
 
       final firstSlot = slots.first['slotTime']?.toString() ?? '';
       final total = (data['totalAmount'] as num?)?.toDouble() ?? _totalAmount;

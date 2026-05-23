@@ -7,6 +7,7 @@ import '../user_session.dart';
 
 class AppTopBar extends StatefulWidget implements PreferredSizeWidget {
   final bool showBack;
+  final bool showCustomerActions;
   final VoidCallback? onBack;
   final VoidCallback? onProfileTap;
   final VoidCallback? onNotificationsTap;
@@ -14,6 +15,7 @@ class AppTopBar extends StatefulWidget implements PreferredSizeWidget {
   const AppTopBar({
     super.key,
     this.showBack = false,
+    this.showCustomerActions = true,
     this.onBack,
     this.onProfileTap,
     this.onNotificationsTap,
@@ -316,7 +318,7 @@ class _AppTopBarState extends State<AppTopBar> {
       backgroundColor: Colors.transparent,
       elevation: 0,
       titleSpacing: 0,
-      leadingWidth: widget.showBack ? 180 : 140,
+      leadingWidth: widget.showBack ? 300 : 260,
       leading: Row(
         children: [
           if (widget.showBack)
@@ -324,45 +326,62 @@ class _AppTopBarState extends State<AppTopBar> {
               icon: const Icon(Icons.arrow_back, color: Colors.white),
               onPressed: widget.onBack ?? () => Navigator.of(context).pop(),
             ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 8),
           Image.asset(
             'assets/images/TATIS.png',
             height: 42,
           ),
+          const SizedBox(width: 8),
+          const Flexible(
+            child: Text(
+              'Barberya ni Tatis',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontFamily: 'CenturyGothic',
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
         ],
       ),
-      actions: [
-        IconButton(
-          onPressed: () => _showNotifications(context),
-          icon: Stack(
-            clipBehavior: Clip.none,
-            children: [
-              Icon(
-                _unreadCount > 0 ? Icons.notifications : Icons.notifications_none,
-                color: Colors.white,
-              ),
-              if (_unreadCount > 0)
-                Positioned(
-                  right: -2,
-                  top: -2,
-                  child: Container(
-                    width: 10,
-                    height: 10,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE74C3C),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: const Color(0xFF111111), width: 1.5),
+      actions: widget.showCustomerActions
+          ? [
+              IconButton(
+                onPressed: () => _showNotifications(context),
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Icon(
+                      _unreadCount > 0 ? Icons.notifications : Icons.notifications_none,
+                      color: Colors.white,
                     ),
-                  ),
+                    if (_unreadCount > 0)
+                      Positioned(
+                        right: -2,
+                        top: -2,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE74C3C),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFF111111), width: 1.5),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
-          ),
-        ),
-        IconButton(
-          icon: const Icon(Icons.person_outline, color: Colors.white),
-          onPressed: widget.onProfileTap,
-        ),
-      ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.person_outline, color: Colors.white),
+                onPressed: widget.onProfileTap,
+              ),
+            ]
+          : null,
     );
   }
 

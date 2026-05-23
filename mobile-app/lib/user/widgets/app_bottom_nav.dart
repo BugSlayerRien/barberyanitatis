@@ -18,16 +18,18 @@ class AppBottomNavBar extends StatelessWidget {
       unselectedItemColor: Colors.white54,
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
-      showSelectedLabels: false,
-      showUnselectedLabels: false,
+      showSelectedLabels: true,
+      showUnselectedLabels: true,
+      selectedFontSize: 11,
+      unselectedFontSize: 10,
       onTap: onTap,
       items: [
-        const BottomNavigationBarItem(icon: Icon(Icons.home), label: ''),
-        const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: ''),
+        const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
+        const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Appointments'),
         BottomNavigationBarItem(
           icon: Container(
-            width: 52,
-            height: 52,
+            width: 48,
+            height: 48,
             decoration: BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
@@ -39,12 +41,12 @@ class AppBottomNavBar extends StatelessWidget {
                 ),
               ],
             ),
-            child: const Icon(Icons.center_focus_strong, color: Colors.black, size: 28),
+            child: const Icon(Icons.center_focus_strong, color: Colors.black, size: 26),
           ),
-          label: '',
+          label: 'AI Scan',
         ),
-        const BottomNavigationBarItem(icon: Icon(Icons.bookmark_border), label: ''),
-        const BottomNavigationBarItem(icon: Icon(Icons.menu), label: ''),
+        const BottomNavigationBarItem(icon: Icon(Icons.bookmark_border), label: 'Saved'),
+        const BottomNavigationBarItem(icon: Icon(Icons.menu), label: 'Menu'),
       ],
     );
   }

@@ -15,6 +15,7 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
+import 'services/booking_draft_service.dart';
 import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
 import 'scanner/overlay_preview_image.dart';
@@ -29,13 +30,17 @@ class HaircutsListPage extends StatefulWidget {
 
 class _HaircutsListPageState extends State<HaircutsListPage> {
   final Map<String, Future<Uint8List>> _webImageCache = {};
+  final TextEditingController _searchController = TextEditingController();
   static const String _librarySampleHairFront =
       'assets/images/overlays/blowout_taper/blowout_taper_front.png';
 
   List<Map<String, dynamic>> _allStyles = [];
+  List<Map<String, dynamic>> _searchResults = [];
   List<String> _categories = const ['All'];
   String _selectedCategory = 'All';
+  String _searchQuery = '';
   bool _loading = true;
+  bool _searchLoading = false;
   String? _error;
 
   @override
@@ -43,6 +48,59 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     super.initState();
     _initCategory();
     _loadStyles();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _runSearch(String query) async {
+    final trimmed = query.trim();
+    setState(() {
+      _searchQuery = trimmed;
+      _searchLoading = true;
+      _error = null;
+    });
+
+    if (trimmed.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _searchLoading = false;
+      });
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/haircuts.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'searchLibrary', 'query': trimmed}),
+      );
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      if (response.statusCode != 200) {
+        throw Exception(data['error']?.toString() ?? 'Search failed');
+      }
+      final variants = (data['hairstyles'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+      final mapped = _dedupeStyles(
+        variants.map(_mapVariant).where(_hasDisplayableAssets).toList(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _searchResults = mapped;
+        _searchLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searchResults = [];
+        _searchLoading = false;
+        _error = 'Search failed: $e';
+      });
+    }
   }
 
   Future<void> _initCategory() async {
@@ -103,9 +161,10 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final styles = _allStyles
-        .where((item) => item['hairTexture'] == _selectedCategory)
-        .toList();
+    final inSearch = _searchQuery.isNotEmpty;
+    final styles = inSearch
+        ? _searchResults
+        : _allStyles.where((item) => item['hairTexture'] == _selectedCategory).toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -134,6 +193,53 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             ),
             const SizedBox(height: 16),
 
+            TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Search haircuts by name...',
+                hintStyle: const TextStyle(color: Colors.white38),
+                prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white54),
+                        onPressed: () {
+                          _searchController.clear();
+                          _runSearch('');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: const Color(0xFF1A1A1A),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Colors.white24),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: Colors.white24),
+                ),
+              ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: _runSearch,
+              onChanged: (v) {
+                if (v.trim().isEmpty && _searchQuery.isNotEmpty) {
+                  _runSearch('');
+                }
+              },
+            ),
+            if (_searchController.text.trim().isNotEmpty && !_searchLoading)
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _runSearch(_searchController.text),
+                  icon: const Icon(Icons.search, size: 18),
+                  label: const Text('Search library'),
+                ),
+              ),
+            const SizedBox(height: 12),
+
+            if (!inSearch)
             SizedBox(
               height: 64,
               child: ListView.separated(
@@ -149,10 +255,21 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             ),
             const SizedBox(height: 20),
 
-            if (_loading)
+            if (_loading || _searchLoading)
               const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Colors.white)))
             else if (_error != null)
               Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
+            else if (inSearch && styles.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Text(
+                    'No results for "$_searchQuery". This haircut is not in the library yet.',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white70, height: 1.4),
+                  ),
+                ),
+              )
             else if (styles.isEmpty)
               const Center(child: Text('No hairstyles available.', style: TextStyle(color: Colors.white70)))
             else
@@ -563,12 +680,14 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No available slots found. Please choose manually.')),
       );
+      await BookingDraftService.saveFromSession(step: 'barber');
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
       );
       return;
     }
 
+    await BookingDraftService.saveFromSession(step: 'barber');
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),

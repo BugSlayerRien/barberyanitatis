@@ -24,15 +24,28 @@ class KioskStylePickPage extends StatefulWidget {
 }
 
 class _KioskStylePickPageState extends State<KioskStylePickPage> {
+  final _searchController = TextEditingController();
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _styles = [];
+  List<Map<String, dynamic>> _searchResults = [];
+  String _searchQuery = '';
+  bool _searchLoading = false;
 
   @override
   void initState() {
     super.initState();
     _load();
   }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Map<String, dynamic>> get _visibleStyles =>
+      _searchQuery.isNotEmpty ? _searchResults : _styles;
 
   Future<void> _load() async {
     setState(() {
@@ -52,28 +65,78 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
       final raw = (data['hairstyles'] as List<dynamic>? ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))
           .toList();
-      final seen = <String>{};
-      final mapped = <Map<String, dynamic>>[];
-      for (final row in raw) {
-        final name = row['style_name']?.toString() ?? 'Style';
-        final key = name.toLowerCase();
-        if (!seen.add(key)) continue;
-        final overlay = OverlayRegistry.resolve(name);
-        mapped.add({
-          'name': name,
-          'description': row['description']?.toString() ?? '',
-          'variant_id': row['variant_id'],
-          'image': overlay.front,
-        });
-      }
       setState(() {
-        _styles = mapped;
+        _styles = _mapLibraryRows(raw);
         _loading = false;
       });
     } catch (e) {
       setState(() {
         _error = '$e';
         _loading = false;
+      });
+    }
+  }
+
+  List<Map<String, dynamic>> _mapLibraryRows(List<Map<String, dynamic>> raw) {
+    final seen = <String>{};
+    final mapped = <Map<String, dynamic>>[];
+    for (final row in raw) {
+      final name = row['style_name']?.toString() ?? 'Style';
+      final key = name.toLowerCase();
+      if (!seen.add(key)) continue;
+      final overlay = OverlayRegistry.resolve(name);
+      final frontUrl = row['front_view_url']?.toString() ?? '';
+      final image = overlay.front.isNotEmpty
+          ? overlay.front
+          : (frontUrl.isNotEmpty ? frontUrl : '');
+      mapped.add({
+        'name': name,
+        'description': row['description']?.toString() ?? '',
+        'variant_id': row['variant_id'],
+        'image': image,
+      });
+    }
+    return mapped;
+  }
+
+  Future<void> _runSearch(String query) async {
+    final trimmed = query.trim();
+    setState(() {
+      _searchQuery = trimmed;
+      _searchLoading = true;
+      _error = null;
+    });
+
+    if (trimmed.isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _searchLoading = false;
+      });
+      return;
+    }
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/haircuts.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'searchLibrary', 'query': trimmed}),
+      );
+      final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
+      if (response.statusCode != 200) {
+        throw Exception(data['error']?.toString() ?? 'Search failed');
+      }
+      final raw = (data['hairstyles'] as List<dynamic>? ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      setState(() {
+        _searchResults = _mapLibraryRows(raw);
+        _searchLoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _searchResults = [];
+        _searchLoading = false;
+        _error = 'Search failed: $e';
       });
     }
   }
@@ -115,64 +178,144 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
     }
   }
 
+  Widget _styleImage(String image) {
+    if (image.startsWith('assets/')) {
+      return OverlayPreviewImage(assetPath: image, fit: BoxFit.contain);
+    }
+    if (image.startsWith('http')) {
+      return Image.network(image, fit: BoxFit.cover, errorBuilder: (_, __, ___) {
+        return const Icon(Icons.image_not_supported_outlined, color: Colors.black38);
+      });
+    }
+    return const Icon(Icons.image_not_supported_outlined, color: Colors.black38);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final styles = _visibleStyles;
+
     return KioskScaffold(
       title: widget.livePreviewNext ? 'Pick a style to preview' : 'Pick your haircut',
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
-          : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
-              : GridView.builder(
-                  padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.82,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                  ),
-                  itemCount: _styles.length,
-                  itemBuilder: (context, index) {
-                    final style = _styles[index];
-                    final image = style['image']?.toString() ?? '';
-                    return InkWell(
-                      onTap: () => _onStyleTap(style),
-                      borderRadius: BorderRadius.circular(12),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: KioskColors.panel,
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: KioskColors.border),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            Expanded(
-                              child: ClipRRect(
-                                borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
-                                child: ColoredBox(
-                                  color: Colors.white,
-                                  child: image.startsWith('assets/')
-                                      ? OverlayPreviewImage(assetPath: image, fit: BoxFit.contain)
-                                      : const Icon(Icons.image_not_supported_outlined, color: Colors.black38),
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(10),
-                              child: Text(
-                                style['name']?.toString() ?? 'Style',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: TextField(
+              controller: _searchController,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Search hairstyles',
+                hintStyle: const TextStyle(color: Colors.white38),
+                prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, color: Colors.white54),
+                        onPressed: () {
+                          _searchController.clear();
+                          _runSearch('');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: KioskColors.panel,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KioskColors.border),
                 ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: KioskColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.white),
+                ),
+              ),
+              textInputAction: TextInputAction.search,
+              onSubmitted: _runSearch,
+              onChanged: (v) {
+                if (v.trim().isEmpty && _searchQuery.isNotEmpty) {
+                  _runSearch('');
+                }
+              },
+            ),
+          ),
+          if (_searchLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: LinearProgressIndicator(color: Colors.white, minHeight: 2),
+            ),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                : _error != null && styles.isEmpty
+                    ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
+                    : styles.isEmpty
+                        ? Center(
+                            child: Text(
+                              _searchQuery.isNotEmpty
+                                  ? 'No styles match "$_searchQuery".'
+                                  : 'No hairstyles available.',
+                              style: const TextStyle(color: KioskColors.textMuted),
+                            ),
+                          )
+                        : GridView.builder(
+                            padding: const EdgeInsets.all(16),
+                            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: 2,
+                              childAspectRatio: 0.82,
+                              crossAxisSpacing: 12,
+                              mainAxisSpacing: 12,
+                            ),
+                            itemCount: styles.length,
+                            itemBuilder: (context, index) {
+                              final style = styles[index];
+                              final image = style['image']?.toString() ?? '';
+                              return InkWell(
+                                onTap: () => _onStyleTap(style),
+                                borderRadius: BorderRadius.circular(12),
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: KioskColors.panel,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: KioskColors.border),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      Expanded(
+                                        child: ClipRRect(
+                                          borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
+                                          child: ColoredBox(
+                                            color: Colors.white,
+                                            child: image.isNotEmpty
+                                                ? _styleImage(image)
+                                                : const Icon(Icons.image_not_supported_outlined, color: Colors.black38),
+                                          ),
+                                        ),
+                                      ),
+                                      Padding(
+                                        padding: const EdgeInsets.all(10),
+                                        child: Text(
+                                          style['name']?.toString() ?? 'Style',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.w600,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+          ),
+        ],
+      ),
     );
   }
 }

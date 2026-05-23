@@ -19,7 +19,6 @@ const state = {
   analytics: null,
   statusChart: null,
   servicesChart: null,
-  autoRefreshTimer: null,
   pagination: {},
 };
 
@@ -53,14 +52,14 @@ const ACTION_CATALOG = [
   },
 ];
 
-const DEFAULT_PAGE_SIZE = 8;
+const DEFAULT_PAGE_SIZE = 5;
 const PAGE_SIZE_BY_KEY = {
-  "activity-list": 6,
-  "customers-table": 6,
-  "barbers-table": 6,
-  "receptionists-table": 6,
-  "admins-table": 6,
-  "services-table": 6,
+  "activity-list": 5,
+  "customers-table": 5,
+  "barbers-table": 5,
+  "receptionists-table": 5,
+  "admins-table": 5,
+  "services-table": 5,
   "audit-list": 5,
 };
 
@@ -109,8 +108,25 @@ function requireAdmin() {
   return true;
 }
 
-function toast(message) {
-  window.alert(message);
+function toast(message, type = "info") {
+  if (window.PortalUi?.toast) {
+    window.PortalUi.toast(message, type);
+    return;
+  }
+  console.log(message);
+}
+
+async function confirmAction(message, options = {}) {
+  if (window.PortalUi?.confirmDialog) {
+    return window.PortalUi.confirmDialog({
+      title: options.title || "Confirm",
+      message,
+      confirmLabel: options.confirmLabel || "Confirm",
+      cancelLabel: options.cancelLabel || "Cancel",
+      danger: Boolean(options.danger),
+    });
+  }
+  return false;
 }
 
 function getStoredUser() {
@@ -229,9 +245,9 @@ async function saveProfileEdits() {
     renderProfileChip();
     state.profileEditMode = false;
     renderProfileDialogContent();
-    toast("Profile updated.");
+    toast("Profile updated.", "success");
   } catch (error) {
-    toast(error.message || "Profile update failed");
+    toast(error.message || "Profile update failed", "error");
   }
 }
 
@@ -1002,7 +1018,12 @@ async function saveAccountEditor() {
 
 async function deleteAccount(type, id) {
   const label = type === "customer" ? "customer" : type === "barber" ? "barber" : "staff account";
-  if (!window.confirm(`Delete this ${label}? This will deactivate the account.`)) {
+  const ok = await confirmAction(`Delete this ${label}? This will deactivate the account.`, {
+    title: "Deactivate account",
+    confirmLabel: "Deactivate",
+    danger: true,
+  });
+  if (!ok) {
     return;
   }
 
@@ -1547,6 +1568,7 @@ async function loadSettings() {
 }
 
 async function refreshAll() {
+  window.PortalUi?.resetLoading?.();
   await Promise.all([
     loadDashboard(),
     loadUsers(),
@@ -1597,7 +1619,12 @@ document.addEventListener("click", async (event) => {
   if (target.classList.contains("btn-service-delete")) {
     const id = target.dataset.id;
     if (!id) return;
-    if (!confirm("Deactivate this service?")) return;
+    const ok = await confirmAction("Deactivate this service?", {
+      title: "Deactivate service",
+      confirmLabel: "Deactivate",
+      danger: true,
+    });
+    if (!ok) return;
     try {
       await saveService("delete", { serviceID: Number(id) });
       toast("Service deactivated.");
@@ -1824,19 +1851,6 @@ document.getElementById("settings-download-backup")?.addEventListener("click", a
 });
 
 document.getElementById("refresh-all")?.addEventListener("click", refreshAll);
-
-document.getElementById("auto-refresh-toggle")?.addEventListener("change", (event) => {
-  const enabled = Boolean(event.target.checked);
-  if (state.autoRefreshTimer) {
-    clearInterval(state.autoRefreshTimer);
-    state.autoRefreshTimer = null;
-  }
-  if (enabled) {
-    state.autoRefreshTimer = window.setInterval(() => {
-      refreshAll();
-    }, 30000);
-  }
-});
 
 document.getElementById("global-search")?.addEventListener("input", (event) => {
   const value = String(event.target.value || "");

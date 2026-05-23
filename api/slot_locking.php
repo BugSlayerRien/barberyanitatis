@@ -347,6 +347,47 @@ function sync_paid_groups_from_payments(PDO $pdo): void
     $done = true;
 }
 
+/** Promote solo appointments that have a Paid row in `payments` but are still PendingPayment. */
+function sync_paid_appointments_from_payments(PDO $pdo, bool $force = false): void
+{
+    static $done = false;
+    if ($done && !$force) {
+        return;
+    }
+
+    if (!$force) {
+        require_once __DIR__ . '/schema_cache.php';
+        if (!schema_cache_should_run('sync_paid_appointments_from_payments', 60)) {
+            $done = true;
+
+            return;
+        }
+    }
+
+    $stmt = $pdo->query(
+        "SELECT DISTINCT a.appointment_id
+         FROM appointments a
+         INNER JOIN payments p ON p.appointment_id = a.appointment_id
+         WHERE a.status = 'PendingPayment'
+           AND p.payment_status = 'Paid'"
+    );
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $appointmentId = (int)($row['appointment_id'] ?? 0);
+        if ($appointmentId > 0) {
+            try {
+                promote_paid_booking_unit($pdo, $appointmentId);
+            } catch (Throwable $e) {
+                // Continue with other rows.
+            }
+        }
+    }
+
+    if (!$force) {
+        schema_cache_done('sync_paid_appointments_from_payments');
+    }
+    $done = true;
+}
+
 function propagate_group_payment_states(array $appointments): array
 {
     $paidLeadByGroup = [];
@@ -538,70 +579,142 @@ function collapse_customer_appointments(array $rows): array
 }
 
 /**
- * @param list<array<string, mixed>> $rows
  * @return list<array<string, mixed>>
  */
-function collapse_barber_dashboard_appointments(array $rows): array
+function fetch_appointments_for_booking_group(PDO $pdo, int $groupId): array
 {
-    $byGroup = [];
+    $stmt = $pdo->prepare(
+        "SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_sequence,
+                a.appointment_date, a.start_time, a.end_time, a.status, a.barber_id,
+                u.user_id AS customer_id, u.full_name AS customer_name
+         FROM appointments a
+         JOIN users u ON a.user_id = u.user_id
+         WHERE a.booking_group_id = :group_id
+         ORDER BY a.group_sequence ASC NULLS LAST, a.start_time ASC"
+    );
+    $stmt->execute([':group_id' => $groupId]);
+
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function barber_dashboard_card_fingerprint(array $row): string
+{
+    if (!empty($row['isGroup'])) {
+        return implode('|', [
+            'g',
+            (int)($row['customerID'] ?? 0),
+            (string)($row['appointmentDate'] ?? ''),
+            (string)($row['timeRange'] ?? ''),
+            (string)($row['status'] ?? ''),
+            (int)($row['peopleCount'] ?? 0),
+        ]);
+    }
+
+    return 'a:' . (int)($row['appointmentID'] ?? 0);
+}
+
+/**
+ * @param list<array<string, mixed>> $rows Barber-scoped appointment rows
+ * @return list<array<string, mixed>>
+ */
+function collapse_barber_dashboard_appointments(PDO $pdo, array $rows, int $barberId): array
+{
     $singles = [];
+    $groupIdsForBarber = [];
 
     foreach ($rows as $row) {
         $groupId = (int)($row['bookingGroupID'] ?? 0);
         if ($groupId > 0) {
-            $byGroup[$groupId][] = $row;
+            $groupIdsForBarber[$groupId] = true;
         } else {
             $singles[] = $row;
         }
     }
 
     $collapsed = $singles;
+    $seenGroupIds = [];
 
-    foreach ($byGroup as $groupId => $members) {
-        usort($members, static function (array $a, array $b): int {
-            $seqA = (int)($a['groupSequence'] ?? 0);
-            $seqB = (int)($b['groupSequence'] ?? 0);
-            if ($seqA !== $seqB) {
-                return $seqA <=> $seqB;
-            }
+    foreach (array_keys($groupIdsForBarber) as $groupId) {
+        if (isset($seenGroupIds[$groupId])) {
+            continue;
+        }
+        $seenGroupIds[$groupId] = true;
 
-            return strcmp((string)($a['startTime'] ?? ''), (string)($b['startTime'] ?? ''));
-        });
+        $allMembers = fetch_appointments_for_booking_group($pdo, $groupId);
+        if ($allMembers === []) {
+            continue;
+        }
 
-        $primary = $members[0];
-        $last = $members[count($members) - 1];
-        $customerName = trim((string)($primary['customerName'] ?? 'Customer'));
-        $peopleCount = count($members);
+        $barberMemberRows = array_values(array_filter(
+            $allMembers,
+            static fn(array $member): bool => (int)($member['barber_id'] ?? 0) === $barberId
+        ));
+        if ($barberMemberRows === []) {
+            continue;
+        }
+
+        $primary = $allMembers[0];
+        $last = $allMembers[count($allMembers) - 1];
+        $customerName = trim((string)($primary['customer_name'] ?? 'Customer'));
+        $peopleCount = count($allMembers);
         $others = max(0, $peopleCount - 1);
         $displayTitle = $others > 0
             ? $customerName . ' + ' . $others . ' other' . ($others === 1 ? '' : 's')
             : $customerName;
 
         $status = 'Scheduled';
-        foreach ($members as $member) {
+        foreach ($allMembers as $member) {
             if ((string)($member['status'] ?? '') === 'PendingPayment') {
                 $status = 'PendingPayment';
                 break;
             }
         }
 
-        $collapsed[] = array_merge($primary, [
-            'isGroup' => true,
+        $primaryBarberRow = $barberMemberRows[0];
+        $detailExtras = [];
+        foreach ($rows as $sourceRow) {
+            if ((int)($sourceRow['bookingGroupID'] ?? 0) === $groupId) {
+                $detailExtras = $sourceRow;
+                break;
+            }
+        }
+
+        $collapsed[] = array_merge($detailExtras, [
+            'appointmentID' => (int)($primaryBarberRow['appointment_id'] ?? $primary['appointment_id']),
+            'bookingCode' => (string)($primary['booking_code'] ?? ''),
             'bookingGroupID' => $groupId,
+            'appointmentDate' => (string)($primary['appointment_date'] ?? ''),
+            'startTime' => (string)($primary['start_time'] ?? ''),
+            'endTime' => (string)($last['end_time'] ?? ''),
+            'status' => $status,
+            'customerID' => (int)($primary['customer_id'] ?? 0),
+            'customerName' => $displayTitle,
+            'isGroup' => true,
             'peopleCount' => $peopleCount,
             'displayTitle' => $displayTitle,
-            'customerName' => $displayTitle,
             'timeRange' => format_time_range_label(
-                (string)($primary['startTime'] ?? ''),
-                (string)($last['endTime'] ?? '')
+                (string)($primary['start_time'] ?? ''),
+                (string)($last['end_time'] ?? '')
             ),
-            'endTime' => (string)($last['endTime'] ?? ''),
-            'status' => $status,
-            'appointmentIDs' => array_map(static fn(array $m): int => (int)($m['appointmentID'] ?? 0), $members),
+            'appointmentIDs' => array_map(
+                static fn(array $m): int => (int)($m['appointment_id'] ?? 0),
+                $allMembers
+            ),
         ]);
     }
 
-    usort($collapsed, static function (array $a, array $b): int {
+    $deduped = [];
+    $fingerprints = [];
+    foreach ($collapsed as $row) {
+        $key = barber_dashboard_card_fingerprint($row);
+        if (isset($fingerprints[$key])) {
+            continue;
+        }
+        $fingerprints[$key] = true;
+        $deduped[] = $row;
+    }
+
+    usort($deduped, static function (array $a, array $b): int {
         $dateCmp = strcmp((string)($b['appointmentDate'] ?? ''), (string)($a['appointmentDate'] ?? ''));
         if ($dateCmp !== 0) {
             return $dateCmp;
@@ -610,7 +723,7 @@ function collapse_barber_dashboard_appointments(array $rows): array
         return strcmp((string)($b['startTime'] ?? ''), (string)($a['startTime'] ?? ''));
     });
 
-    return $collapsed;
+    return $deduped;
 }
 
 /**

@@ -111,14 +111,23 @@ class FaceScanService {
         .map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
 
-    final seen = <String>{};
+    final seenIds = <String>{};
+    final seenNames = <String>{};
     final unique = <Map<String, dynamic>>[];
     for (final row in rows) {
       final id = '${row['variant_id'] ?? row['variantId'] ?? ''}'.trim();
-      if (id.isEmpty || seen.contains(id)) {
+      final nameKey =
+          (row['style_name'] ?? row['styleName'] ?? '').toString().trim().toLowerCase();
+      if (id.isEmpty || seenIds.contains(id)) {
         continue;
       }
-      seen.add(id);
+      if (nameKey.isNotEmpty && seenNames.contains(nameKey)) {
+        continue;
+      }
+      seenIds.add(id);
+      if (nameKey.isNotEmpty) {
+        seenNames.add(nameKey);
+      }
       unique.add(row);
       if (unique.length >= 12) {
         break;
@@ -275,6 +284,87 @@ class FaceScanService {
       'frontViewUrl': '$base/front.jpg',
       'sideViewUrl': '$base/left.jpg',
       'backViewUrl': '$base/right.jpg',
+    };
+  }
+
+  /// Python sidecar: MediaPipe face shape + hair length from stored captures.
+  static Future<Map<String, dynamic>> analyzeCaptures({
+    required String scanSessionId,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'analyzeCaptures',
+            'scanSessionId': scanSessionId,
+          }),
+        )
+        .timeout(const Duration(seconds: 90));
+
+    final data = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
+
+    if (response.statusCode != 200) {
+      throw Exception(data['error']?.toString() ?? 'Face analysis failed');
+    }
+    return data;
+  }
+
+  /// Replicate Flux try-on for all 3 capture angles (server-side; may take several minutes).
+  static Future<Map<String, dynamic>> generateStylePreviews({
+    required String scanSessionId,
+    required int variantId,
+    required String styleName,
+    String? styleCode,
+    int? userId,
+    String? faceShape,
+    String? hairTexture,
+    int hairLengthLevel = 1,
+    bool forceRegenerate = false,
+  }) async {
+    final response = await http
+        .post(
+          Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'generateStylePreviews',
+            'scanSessionId': scanSessionId,
+            'variantID': variantId,
+            'styleName': styleName,
+            if (styleCode != null && styleCode.isNotEmpty) 'styleCode': styleCode,
+            if (userId != null) 'userID': userId,
+            if (faceShape != null) 'faceShape': faceShape,
+            if (hairTexture != null) 'hairTexture': hairTexture,
+            'hairLengthLevel': hairLengthLevel,
+            'forceRegenerate': forceRegenerate,
+          }),
+        )
+        .timeout(const Duration(minutes: 15));
+
+    final data = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
+
+    if (response.statusCode != 200) {
+      final err = data['error']?.toString() ?? 'Failed to generate style previews';
+      final lower = err.toLowerCase();
+      if (lower.contains('402') || lower.contains('credit') || lower.contains('billing')) {
+        throw Exception(
+          'Replicate credits may be exhausted. Add credits at replicate.com/account/billing, then try again.\n$err',
+        );
+      }
+      throw Exception(err);
+    }
+    return data;
+  }
+
+  static Map<String, String> previewUrlsFromResponse(Map<String, dynamic> data) {
+    return {
+      'frontViewUrl': data['frontViewUrl']?.toString() ?? '',
+      'sideViewUrl': data['sideViewUrl']?.toString() ?? '',
+      'backViewUrl': data['backViewUrl']?.toString() ?? '',
     };
   }
 

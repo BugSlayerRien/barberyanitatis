@@ -12,6 +12,7 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
+import 'services/booking_draft_service.dart';
 
 class BarberSelectionPage extends StatefulWidget {
   const BarberSelectionPage({super.key});
@@ -128,6 +129,11 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
     }
 
     setState(() => _openingCalendarBarberId = barberId);
+    await BookingDraftService.saveFromSession(
+      step: 'calendar',
+      barberId: barberId,
+      barberName: barberName,
+    );
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => GroupSizePage(

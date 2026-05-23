@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/replicate_helper.php';
+require_once __DIR__ . '/ai_service_client.php';
 
 require_method('POST');
 
@@ -61,6 +62,9 @@ function ensure_face_scan_tables(PDO $pdo): void
         'ALTER TABLE appointments
          ADD COLUMN IF NOT EXISTS scan_session_id VARCHAR(80)'
     );
+
+    $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_length_level INT');
+    $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_length_label TEXT');
 }
 
 function face_scan_upload_root(): string
@@ -150,6 +154,39 @@ function save_jpeg_capture(string $scanSessionId, string $angle, string $base64)
     }
 
     return 'uploads/face_scans/' . basename($dir) . '/' . $filename;
+}
+
+function save_preview_bytes(string $scanSessionId, string $angle, string $bytes): string
+{
+    if ($bytes === '') {
+        throw new InvalidArgumentException("Empty preview bytes for {$angle}");
+    }
+
+    if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+        $image = @imagecreatefromstring($bytes);
+        if ($image !== false) {
+            ob_start();
+            imagejpeg($image, null, 92);
+            $jpeg = ob_get_clean();
+            imagedestroy($image);
+            if (is_string($jpeg) && $jpeg !== '') {
+                $bytes = $jpeg;
+            }
+        }
+    }
+
+    $dir = face_scan_upload_root() . DIRECTORY_SEPARATOR . preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId) . DIRECTORY_SEPARATOR . 'previews';
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        throw new RuntimeException('Unable to create preview directory');
+    }
+
+    $filename = $angle . '.jpg';
+    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
+    if (file_put_contents($fullPath, $bytes) === false) {
+        throw new RuntimeException("Unable to write preview {$filename}");
+    }
+
+    return 'uploads/face_scans/' . basename(dirname($dir)) . '/previews/' . $filename;
 }
 
 function save_jpeg_preview(string $scanSessionId, string $angle, string $base64): string
@@ -387,6 +424,262 @@ try {
             'frontViewUrl' => $front,
             'sideViewUrl' => $left,
             'backViewUrl' => $right,
+        ]);
+    }
+
+    if ($action === 'analyzeCaptures') {
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+        if ($scanSessionId === '') {
+            json_response(['error' => 'scanSessionId required'], 422);
+        }
+
+        $captures = capture_paths_for_session($pdo, $scanSessionId);
+        if ($captures['front'] === null || $captures['left'] === null || $captures['right'] === null) {
+            json_response(['error' => 'Upload all three captures before analysis'], 422);
+        }
+
+        if (!ai_service_is_available()) {
+            $base = ai_service_base_url();
+            json_response([
+                'error' => 'AI analysis service is not running',
+                'hint' => 'On the shop PC run: cd ai-service && uvicorn api:app --host 127.0.0.1 --port 8000. Set AI_SERVICE_URL in .env (current: ' . ($base !== '' ? $base : 'not set') . ').',
+                'aiServiceUrl' => $base,
+            ], 503);
+        }
+
+        $absolute = ai_service_absolute_capture_paths([
+            'front' => (string)$captures['front'],
+            'left' => (string)$captures['left'],
+            'right' => (string)$captures['right'],
+        ]);
+
+        $analysis = ai_service_analyze_face($absolute);
+        if (!$analysis['ok']) {
+            json_response([
+                'error' => $analysis['error'] !== '' ? $analysis['error'] : 'Face analysis failed',
+                'hint' => 'Check the ai-service terminal for errors. Ensure uvicorn is running on the URL in AI_SERVICE_URL.',
+            ], 502);
+        }
+
+        $data = $analysis['data'];
+        $faceShape = (string)($data['face_shape'] ?? 'oval');
+        $hairTexture = (string)($data['hair_texture'] ?? 'Wavy');
+        $allowedTextures = ['Straight', 'Wavy', 'Curly', 'Coily'];
+        if (!in_array($hairTexture, $allowedTextures, true)) {
+            $hairTexture = 'Wavy';
+        }
+        $hairLengthLevel = (int)($data['hair_length_level'] ?? 1);
+        $hairLengthLabel = (string)($data['hair_length'] ?? 'short');
+
+        $updateStmt = $pdo->prepare(
+            'UPDATE face_scan_sessions
+             SET face_shape = :face_shape,
+                 hair_texture = :hair_texture,
+                 hair_length_level = :hair_length_level,
+                 hair_length_label = :hair_length_label
+             WHERE scan_session_id = :scan_session_id'
+        );
+        $updateStmt->execute([
+            ':face_shape' => $faceShape,
+            ':hair_texture' => $hairTexture,
+            ':hair_length_level' => $hairLengthLevel,
+            ':hair_length_label' => $hairLengthLabel,
+            ':scan_session_id' => $scanSessionId,
+        ]);
+
+        json_response([
+            'message' => 'Analysis complete',
+            'faceShape' => $faceShape,
+            'hairTexture' => $hairTexture,
+            'hairLength' => $hairLengthLabel,
+            'hairLengthLevel' => $hairLengthLevel,
+            'hairLengthScore' => $data['hair_length_score'] ?? null,
+            'hairTextureScore' => $data['hair_texture_score'] ?? null,
+            'topStyles' => $data['top_styles'] ?? [],
+            'achievableStyles' => $data['achievable_styles'] ?? [],
+            'provider' => 'ai-service',
+        ]);
+    }
+
+    if ($action === 'generateStylePreviews') {
+        set_time_limit(600);
+
+        if (!ai_service_is_available() && !replicate_is_configured()) {
+            json_response([
+                'error' => 'AI generation is not configured',
+                'hint' => 'Start ai-service (AI_SERVICE_URL) or set REPLICATE_API_TOKEN in .env.',
+            ], 503);
+        }
+
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+        $variantID = (int)($input['variantID'] ?? 0);
+        $force = (bool)($input['forceRegenerate'] ?? false);
+        $userID = isset($input['userID']) ? (int)$input['userID'] : 0;
+        if ($userID <= 0) {
+            $userID = null;
+        }
+
+        if ($scanSessionId === '' || $variantID <= 0) {
+            json_response(['error' => 'scanSessionId and variantID required'], 422);
+        }
+
+        if (!$force) {
+            $cachedStmt = $pdo->prepare(
+                'SELECT front_url, left_url, right_url
+                 FROM face_scan_previews
+                 WHERE scan_session_id = :scan_session_id AND variant_id = :variant_id
+                 ORDER BY preview_id DESC
+                 LIMIT 1'
+            );
+            $cachedStmt->execute([
+                ':scan_session_id' => $scanSessionId,
+                ':variant_id' => $variantID,
+            ]);
+            $cached = $cachedStmt->fetch(PDO::FETCH_ASSOC);
+            if ($cached && !empty($cached['front_url'])) {
+                json_response([
+                    'message' => 'Previews loaded from cache',
+                    'frontViewUrl' => $cached['front_url'],
+                    'sideViewUrl' => $cached['left_url'],
+                    'backViewUrl' => $cached['right_url'],
+                    'provider' => 'replicate',
+                    'cached' => true,
+                ]);
+            }
+        }
+
+        $variantStmt = $pdo->prepare(
+            'SELECT hs.style_name, hs.style_code
+             FROM hairstyle_variants hv
+             JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
+             WHERE hv.variant_id = :variant_id
+             LIMIT 1'
+        );
+        $variantStmt->execute([':variant_id' => $variantID]);
+        $variant = $variantStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$variant) {
+            json_response(['error' => 'Hairstyle variant not found'], 404);
+        }
+
+        $styleName = trim((string)($input['styleName'] ?? $variant['style_name'] ?? 'Selected haircut'));
+        $styleCode = trim((string)($input['styleCode'] ?? $variant['style_code'] ?? ''));
+
+        $captures = capture_paths_for_session($pdo, $scanSessionId);
+        if ($captures['front'] === null || $captures['left'] === null || $captures['right'] === null) {
+            json_response(['error' => 'Upload all three captures before generating previews'], 422);
+        }
+
+        $sessionMetaStmt = $pdo->prepare(
+            'SELECT face_shape, hair_length_level, hair_length_label
+             FROM face_scan_sessions
+             WHERE scan_session_id = :scan_session_id
+             LIMIT 1'
+        );
+        $sessionMetaStmt->execute([':scan_session_id' => $scanSessionId]);
+        $sessionMeta = $sessionMetaStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $hairLengthLevel = (int)($input['hairLengthLevel'] ?? $sessionMeta['hair_length_level'] ?? 1);
+        $hairLengthLevel = max(0, min(3, $hairLengthLevel));
+
+        $absolute = ai_service_absolute_capture_paths([
+            'front' => (string)$captures['front'],
+            'left' => (string)$captures['left'],
+            'right' => (string)$captures['right'],
+        ]);
+
+        $feasibleToday = true;
+        $lengthNote = null;
+        $provider = 'php-replicate';
+        $images = [];
+
+        if (ai_service_is_available()) {
+            $generated = ai_service_generate_style(
+                $absolute,
+                $styleName,
+                $styleCode !== '' ? $styleCode : null,
+                $hairLengthLevel
+            );
+            if (!$generated['ok']) {
+                $err = (string)$generated['error'];
+                $isBilling = stripos($err, '402') !== false
+                    || stripos($err, 'insufficient credit') !== false
+                    || stripos($err, 'billing') !== false;
+                json_response([
+                    'error' => $isBilling
+                        ? 'Replicate account has no credits left for AI haircut generation.'
+                        : $err,
+                    'hint' => $isBilling
+                        ? 'Add credits at https://replicate.com/account/billing — wait a few minutes, then tap Regenerate preview.'
+                        : 'Check the ai-service terminal (uvicorn) for the full error.',
+                ], $isBilling ? 402 : 502);
+            }
+            $images = $generated['images'];
+            $feasibleToday = $generated['feasibleToday'];
+            $lengthNote = $generated['lengthNote'];
+            $provider = 'ai-service';
+        } else {
+            $generated = replicate_generate_three_view_previews(
+                [
+                    'front' => (string)$captures['front'],
+                    'left' => (string)$captures['left'],
+                    'right' => (string)$captures['right'],
+                ],
+                $styleName,
+                $styleCode !== '' ? $styleCode : null,
+                $hairLengthLevel
+            );
+            if (!$generated['ok']) {
+                $err = (string)$generated['error'];
+                $isBilling = stripos($err, '402') !== false
+                    || stripos($err, 'insufficient credit') !== false
+                    || stripos($err, 'billing') !== false;
+                json_response([
+                    'error' => $isBilling
+                        ? 'Replicate account has no credits left for AI haircut generation.'
+                        : $err,
+                    'hint' => $isBilling
+                        ? 'Add credits at https://replicate.com/account/billing — wait a few minutes, then try again.'
+                        : 'Check server logs for details.',
+                ], $isBilling ? 402 : 502);
+            }
+            $images = $generated['images'];
+            $feasibleToday = $generated['feasibleToday'];
+            $lengthNote = $generated['lengthNote'];
+        }
+
+        ensure_scan_session_row(
+            $pdo,
+            $scanSessionId,
+            $userID,
+            trim((string)($input['faceShape'] ?? $sessionMeta['face_shape'] ?? '')) ?: null,
+            trim((string)($input['hairTexture'] ?? '')) ?: null
+        );
+
+        $front = save_preview_bytes($scanSessionId, 'front', $images['front']);
+        $left = save_preview_bytes($scanSessionId, 'left', $images['left']);
+        $right = save_preview_bytes($scanSessionId, 'right', $images['right']);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO face_scan_previews (scan_session_id, variant_id, front_url, left_url, right_url)
+             VALUES (:scan_session_id, :variant_id, :front_url, :left_url, :right_url)'
+        );
+        $stmt->execute([
+            ':scan_session_id' => $scanSessionId,
+            ':variant_id' => $variantID,
+            ':front_url' => $front,
+            ':left_url' => $left,
+            ':right_url' => $right,
+        ]);
+
+        json_response([
+            'message' => 'Style previews generated',
+            'frontViewUrl' => $front,
+            'sideViewUrl' => $left,
+            'backViewUrl' => $right,
+            'provider' => $provider,
+            'feasibleToday' => $feasibleToday,
+            'lengthNote' => $lengthNote,
+            'cached' => false,
         ]);
     }
 

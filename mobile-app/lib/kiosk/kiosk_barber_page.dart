@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'kiosk_api.dart';
@@ -20,28 +22,50 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
   List<Map<String, dynamic>> _barbers = [];
   Map<String, dynamic>? _firstAvailable;
   int? _selectedBarberId;
-  int _serviceId = 1;
+  int? _serviceId;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _load();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (!_loading && !_submitting) {
+        _load(silent: true);
+      }
+    });
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final services = await KioskApi.loadServices();
       if (services.isNotEmpty) {
-        final haircut = services.firstWhere(
-          (s) => (s['category']?.toString().toLowerCase() ?? '') == 'haircut',
-          orElse: () => services.first,
-        );
-        _serviceId = int.tryParse('${haircut['service_id']}') ?? 1;
-        KioskSession.selectedServiceId = _serviceId;
+        Map<String, dynamic>? walkInService;
+        for (final row in services) {
+          final map = Map<String, dynamic>.from(row as Map);
+          final channel = (map['service_channel']?.toString().toLowerCase() ?? '');
+          if (channel == 'walk_in') {
+            walkInService = map;
+            break;
+          }
+        }
+        walkInService ??= Map<String, dynamic>.from(services.first as Map);
+        _serviceId = int.tryParse('${walkInService['service_id']}');
+        if (_serviceId != null && _serviceId! > 0) {
+          KioskSession.selectedServiceId = _serviceId;
+        }
       }
 
       final data = await KioskApi.loadBarberQueue();
@@ -51,12 +75,15 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
             .toList();
         _firstAvailable = data['firstAvailable'] as Map<String, dynamic>?;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
+      if (!silent) {
+        setState(() {
+          _error = '$e';
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -78,11 +105,19 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
 
     final variantId = KioskSession.selectedVariantId ?? 0;
 
+    final serviceId = KioskSession.selectedServiceId ?? _serviceId;
+    if (serviceId == null || serviceId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Walk-in service is not configured. Contact staff.')),
+      );
+      return;
+    }
+
     setState(() => _submitting = true);
     try {
       final result = await KioskApi.createWalkin(
         guestName: guestName,
-        serviceIds: [KioskSession.selectedServiceId ?? _serviceId],
+        serviceIds: [serviceId],
         barberId: _selectedBarberId!,
         variantId: variantId > 0 ? variantId : 0,
         styleName: KioskSession.selectedStyleName ??
@@ -127,6 +162,12 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
               : ListView(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                   children: [
+                    const Text(
+                      'Estimated wait uses 35 minutes per regular haircut. Updates every few seconds.',
+                      style: TextStyle(color: KioskColors.textDim, fontSize: 12),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 12),
                     if (KioskSession.selectedStyleName != null) ...[
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -237,7 +278,14 @@ class _BarberTile extends StatelessWidget {
                     if (specialty.isNotEmpty)
                       Text(specialty, style: const TextStyle(color: KioskColors.textDim, fontSize: 11)),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        color: KioskColors.gold,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     if (queueCount > 0)
                       Text(
                         '$queueCount in queue',

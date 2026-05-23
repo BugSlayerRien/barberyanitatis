@@ -10,12 +10,14 @@ const Color kCardShadow = Color(0x22000000);
 class ReceptionistTrackingPage extends StatefulWidget {
   final List<Map<String, dynamic>> appointments;
   final List<Map<String, dynamic>> walkIns;
+  final List<Map<String, dynamic>> automationEvents;
   final VoidCallback onChanged;
 
   const ReceptionistTrackingPage({
     super.key,
     required this.appointments,
     required this.walkIns,
+    this.automationEvents = const [],
     required this.onChanged,
   });
 
@@ -25,14 +27,40 @@ class ReceptionistTrackingPage extends StatefulWidget {
 
 class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
   Timer? _progressTimer;
+  Timer? _fastRefreshTimer;
   bool _processing = false;
+
+  List<Map<String, dynamic>> get _trackingData =>
+      ReceptionistApi.buildTrackingData(widget.appointments, widget.walkIns);
+
+  bool get _hasCompleting =>
+      _trackingData.any((item) => item['status']?.toString() == 'COMPLETING');
 
   @override
   void initState() {
     super.initState();
-    _progressTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+    _progressTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
         setState(() {});
+      }
+    });
+    _syncFastRefresh();
+  }
+
+  @override
+  void didUpdateWidget(covariant ReceptionistTrackingPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncFastRefresh();
+  }
+
+  void _syncFastRefresh() {
+    _fastRefreshTimer?.cancel();
+    if (!_hasCompleting) {
+      return;
+    }
+    _fastRefreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (mounted) {
+        widget.onChanged();
       }
     });
   }
@@ -40,11 +68,9 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
   @override
   void dispose() {
     _progressTimer?.cancel();
+    _fastRefreshTimer?.cancel();
     super.dispose();
   }
-
-  List<Map<String, dynamic>> get _trackingData =>
-      ReceptionistApi.buildTrackingData(widget.appointments, widget.walkIns);
 
   @override
   Widget build(BuildContext context) {
@@ -65,10 +91,30 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
         children: [
           const Center(
             child: Text(
-              'Track live progress of all clients',
+              'Queue updates automatically — you can still complete or cancel manually',
               style: TextStyle(color: Colors.white70, fontSize: 12),
+              textAlign: TextAlign.center,
             ),
           ),
+          if (widget.automationEvents.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ...widget.automationEvents.map(
+              (event) => Container(
+                width: double.infinity,
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF152515),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF4CAF50).withValues(alpha: 0.5)),
+                ),
+                child: Text(
+                  event['label']?.toString() ?? 'Queue updated',
+                  style: const TextStyle(color: Color(0xFF9AD49A), fontSize: 12),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           ...trackingData.map(_buildTrackingCard),
         ],
@@ -79,8 +125,9 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
   Widget _buildTrackingCard(Map<String, dynamic> data) {
     final live = _liveProgressFor(data);
     final statusColor = _getStatusColor(live['status'] as String);
-    final canComplete = live['status'] != 'COMPLETED';
     final canCancel = live['status'] != 'COMPLETED';
+    final canComplete =
+        live['status'] != 'COMPLETED' && live['status'] != 'PENDING PAYMENT';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
@@ -196,6 +243,13 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
               style: const TextStyle(color: Colors.white54, fontSize: 10),
             ),
           ],
+          if (live['status'] == 'COMPLETING') ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Auto-completing shortly — use Complete or Cancel if needed',
+              style: TextStyle(color: Colors.white54, fontSize: 10),
+            ),
+          ],
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
@@ -221,7 +275,7 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
 
   Map<String, dynamic> _liveProgressFor(Map<String, dynamic> data) {
     final status = data['status']?.toString() ?? 'WAITING';
-    if (status != 'IN PROGRESS') {
+    if (status != 'IN PROGRESS' && status != 'COMPLETING') {
       return {
         'status': status,
         'progress': (data['progress'] as num?)?.toDouble() ?? 0.0,
@@ -229,13 +283,32 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
       };
     }
 
-    final schedule = data['schedule']?.toString() ?? '';
-    if (!schedule.contains('•')) {
-      return {
-        'status': status,
-        'progress': (data['progress'] as num?)?.toDouble() ?? 0.0,
-        'timeRemaining': data['timeRemaining']?.toString() ?? 'In service',
-      };
+    if (data['kind']?.toString() == 'walkin') {
+      final actualStartRaw = data['actual_start']?.toString() ?? '';
+      if (actualStartRaw.isNotEmpty) {
+        final serviceStart = DateTime.tryParse(actualStartRaw.replaceFirst(' ', 'T'));
+        if (serviceStart != null) {
+          const duration = Duration(minutes: 35);
+          final end = serviceStart.add(duration);
+          final now = DateTime.now();
+          if (!now.isBefore(end)) {
+            return {
+              'status': 'COMPLETING',
+              'progress': 1.0,
+              'timeRemaining': 'Auto-completing',
+            };
+          }
+          final total = duration.inMinutes;
+          final elapsed = now.difference(serviceStart).inMinutes.clamp(0, total);
+          final progress = (elapsed / total).clamp(0.0, 0.95);
+          final mins = end.difference(now).inMinutes;
+          return {
+            'status': 'IN PROGRESS',
+            'progress': progress,
+            'timeRemaining': mins > 0 ? '$mins min remaining' : 'Finishing',
+          };
+        }
+      }
     }
 
     return {

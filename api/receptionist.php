@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/barber_channel.php';
+require_once __DIR__ . '/service_channel.php';
 require_once __DIR__ . '/payment_recording.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
@@ -42,6 +43,16 @@ function ensure_financial_tables(PDO $pdo): void
     );
 }
 
+// Browsers open the .php URL with GET (shows "Method not allowed"); the desk uses POST JSON.
+if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET') {
+    require_once __DIR__ . '/http.php';
+    apply_api_cors_headers();
+    json_response([
+        'error' => 'Use POST from the receptionist dashboard',
+        'hint' => 'Open web-admin/receptionist/ and sign in. This endpoint expects JSON POST with an action field.',
+    ], 405);
+}
+
 require_method('POST');
 
 $input = get_json_input();
@@ -55,9 +66,10 @@ if (!in_array($action, $allowedActions, true)) {
 try {
     $pdo = get_db_connection();
     ensure_walkin_guest_name_column($pdo);
+    ensure_walkin_queue_timestamp_columns($pdo);
     ensure_barber_channel_column($pdo);
     ensure_financial_tables($pdo);
-    auto_complete_due_appointments($pdo);
+    $trackingAutomation = run_tracking_automation($pdo, true);
 
     if ($action === 'dashboard') {
         $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE');
@@ -78,6 +90,7 @@ try {
 
         ensure_group_booking_schema($pdo);
         sync_paid_groups_from_payments($pdo);
+        sync_paid_appointments_from_payments($pdo, true);
 
         $appointmentsStmt = $pdo->prepare(
             'SELECT a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
@@ -86,7 +99,7 @@ try {
                     a.appointment_date,
                     a.start_time AS time,
                     a.end_time,
-                    :slot_duration AS duration,
+                    :slot_duration_select AS duration,
                     SUM(ad.final_price) AS price,
                     a.status,
                     b.full_name AS barber,
@@ -103,14 +116,19 @@ try {
                  ORDER BY payment_id DESC
                  LIMIT 1
              ) pay ON TRUE
-             WHERE a.appointment_date >= CURRENT_DATE - INTERVAL \'7 day\'
-               AND a.status NOT IN (\'Cancelled\', \'NoShow\')
+             WHERE a.status NOT IN (\'Cancelled\', \'NoShow\', \'Completed\')
+               AND (
+                    a.status = \'PendingPayment\'
+                    OR a.appointment_date::timestamp + a.start_time + make_interval(mins => :slot_duration_filter) > NOW()
+               )
                AND b.barber_channel = \'appointment\'
              GROUP BY a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
                       u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name, pay.status
              ORDER BY a.appointment_date ASC, a.start_time ASC'
         );
-        $appointmentsStmt->bindValue(':slot_duration', shop_appointment_duration_minutes(), PDO::PARAM_INT);
+        $slotDuration = shop_appointment_duration_minutes();
+        $appointmentsStmt->bindValue(':slot_duration_select', $slotDuration, PDO::PARAM_INT);
+        $appointmentsStmt->bindValue(':slot_duration_filter', $slotDuration, PDO::PARAM_INT);
         $appointmentsStmt->execute();
         $appointmentRows = $appointmentsStmt->fetchAll();
         $appointments = collapse_receptionist_appointments(array_map(static function (array $row): array {
@@ -135,19 +153,19 @@ try {
         }, $appointmentRows));
 
         $walkinsStmt = $pdo->prepare(
-            'SELECT wq.queue_id, wq.queue_number, wq.barber_id,
+            'SELECT wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start,
                     COALESCE(NULLIF(TRIM(wq.guest_name), \'\'), \'Walk-in #\' || RIGHT(wq.queue_number, 3)) AS name,
-                    string_agg(s.service_name, \', \' ORDER BY s.service_name) AS service,
+                    COALESCE(NULLIF(string_agg(DISTINCT s.service_name, \', \' ORDER BY s.service_name), \'\'), \'Walk-in\') AS service,
                     wq.wait_time_minutes,
                     wq.status,
                     b.full_name AS barber
              FROM walkin_queue wq
-             JOIN walkin_service_details wsd ON wq.queue_id = wsd.queue_id
-             JOIN services s ON wsd.service_id = s.service_id
+             LEFT JOIN walkin_service_details wsd ON wq.queue_id = wsd.queue_id
+             LEFT JOIN services s ON wsd.service_id = s.service_id
              LEFT JOIN barbers b ON wq.barber_id = b.barber_id
              WHERE DATE(wq.created_at) = CURRENT_DATE
                AND (b.barber_id IS NULL OR b.barber_channel = \'walk_in\')
-             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
+             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
              ORDER BY wq.queue_id ASC'
         );
         $walkinsStmt->execute();
@@ -190,8 +208,10 @@ try {
                     'waitTime' => $row['wait_time_minutes'] !== null ? $row['wait_time_minutes'] . ' min' : '',
                     'status' => $row['status'],
                     'barber' => $row['barber'],
+                    'actual_start' => $row['actual_start'] ?? null,
                 ];
             }, $walkins),
+            'automation' => $trackingAutomation,
         ]);
     }
 
@@ -241,7 +261,7 @@ try {
             ':appointment_id' => $appointmentID,
         ]);
 
-        $slotStatus = in_array($status, ['Cancelled', 'NoShow'], true) ? 'Available' : 'Booked';
+        $slotStatus = in_array($status, ['Cancelled', 'NoShow', 'Completed'], true) ? 'Available' : 'Booked';
         $slotStmt = $pdo->prepare(
             "UPDATE time_slots
              SET status = :status
@@ -294,24 +314,39 @@ try {
             $actualEnd = date('Y-m-d H:i:s');
         }
 
-        $stmt = $pdo->prepare(
-            'UPDATE walkin_queue
-             SET status = :status,
-                 barber_id = CASE WHEN :barber_id > 0 THEN :barber_id ELSE barber_id END,
-                 actual_start = COALESCE(:actual_start, actual_start),
-                 actual_end = COALESCE(:actual_end, actual_end)
-             WHERE queue_id = :queue_id'
-        );
-        $stmt->execute([
+        $setParts = ['status = :status'];
+        $params = [
             ':status' => $status,
-            ':barber_id' => $barberID,
-            ':actual_start' => $actualStart,
-            ':actual_end' => $actualEnd,
             ':queue_id' => $queueID,
-        ]);
+        ];
+
+        if ($barberID > 0) {
+            $setParts[] = 'barber_id = :assign_barber_id';
+            $params[':assign_barber_id'] = $barberID;
+        }
+        if ($actualStart !== null) {
+            $setParts[] = 'actual_start = COALESCE(actual_start, :actual_start)';
+            $params[':actual_start'] = $actualStart;
+        }
+        if ($actualEnd !== null) {
+            $setParts[] = 'actual_end = :actual_end';
+            $params[':actual_end'] = $actualEnd;
+        }
+
+        $sql = 'UPDATE walkin_queue SET ' . implode(', ', $setParts) . ' WHERE queue_id = :queue_id';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        if ($stmt->rowCount() === 0) {
+            json_response(['error' => 'Walk-in not found'], 404);
+        }
 
         if ($status === 'Completed') {
-            record_completion_payment($pdo, null, $queueID);
+            try {
+                record_completion_payment($pdo, null, $queueID);
+            } catch (Throwable $paymentError) {
+                error_log('Walk-in payment record skipped: ' . $paymentError->getMessage());
+            }
         }
 
         json_response(['message' => 'Walk-in updated']);
@@ -323,6 +358,32 @@ try {
 
         if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
             json_response(['error' => 'Missing serviceIDs'], 422);
+        }
+
+        ensure_service_channel_column($pdo);
+        $validServiceIds = filter_walk_in_service_ids($pdo, $serviceIDs);
+        if ($validServiceIds === []) {
+            $fallbackId = default_walk_in_service_id($pdo);
+            if ($fallbackId === null) {
+                json_response(['error' => 'No walk-in service configured. Use a service with channel walk_in.'], 422);
+            }
+            $validServiceIds = [$fallbackId];
+        }
+
+        if ($barberID > 0) {
+            $barberChannelStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM barbers
+                 WHERE barber_id = :barber_id AND is_active = TRUE AND barber_channel = 'walk_in'"
+            );
+            $barberChannelStmt->execute([':barber_id' => $barberID]);
+            if ((int)$barberChannelStmt->fetchColumn() === 0) {
+                json_response(['error' => 'Selected barber is not on the walk-in (regular) channel.'], 422);
+            }
+        } else {
+            $pickedBarber = shop_pick_least_busy_walkin_barber_id($pdo);
+            if ($pickedBarber !== null) {
+                $barberID = $pickedBarber;
+            }
         }
 
         $variantStmt = $pdo->prepare(
@@ -364,18 +425,14 @@ try {
         $serviceStmt = $pdo->prepare(
             'SELECT service_id, base_price
              FROM services
-             WHERE service_id = :service_id AND is_active = TRUE'
+             WHERE service_id = :service_id AND is_active = TRUE AND service_channel = \'walk_in\''
         );
         $detailStmt = $pdo->prepare(
             'INSERT INTO walkin_service_details (queue_id, service_id, variant_id, selected_view, final_price)
              VALUES (:queue_id, :service_id, :variant_id, :selected_view, :final_price)'
         );
 
-        foreach ($serviceIDs as $serviceID) {
-            $serviceID = (int)$serviceID;
-            if ($serviceID <= 0) {
-                continue;
-            }
+        foreach ($validServiceIds as $serviceID) {
             $serviceStmt->execute([':service_id' => $serviceID]);
             $service = $serviceStmt->fetch();
             if (!$service) {
@@ -402,5 +459,12 @@ try {
     if (isset($pdo) && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
+    error_log('receptionist.php PDO: ' . $e->getMessage());
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+} catch (Throwable $e) {
+    if (isset($pdo) && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    error_log('receptionist.php: ' . $e->getMessage());
+    json_response(['error' => 'Server error', 'details' => $e->getMessage()], 500);
 }

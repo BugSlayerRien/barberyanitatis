@@ -107,7 +107,27 @@ class ReceptionistApi {
 
     for (final appt in appointments) {
       final status = appt['status']?.toString() ?? 'Scheduled';
-      if (['Cancelled', 'NoShow', 'Completed', 'PendingPayment'].contains(status)) {
+      if (['Cancelled', 'NoShow', 'Completed'].contains(status)) {
+        continue;
+      }
+
+      if (status == 'PendingPayment') {
+        final dateLabel = appt['appointment_date']?.toString() ?? '';
+        final timeLabel = appt['time']?.toString() ?? '';
+        items.add({
+          'kind': 'appointment',
+          'appointment_id': appt['appointment_id'],
+          'initials': appt['initials'],
+          'name': appt['name'],
+          'service': appt['service'],
+          'barber': appt['barber']?.toString() ?? '',
+          'schedule': '${_formatDateLabel(dateLabel)} • ${_formatTimeLabel(timeLabel)}',
+          'status': 'PENDING PAYMENT',
+          'rawStatus': status,
+          'progress': 0.12,
+          'timeRemaining': 'Awaiting payment',
+          'color': const Color(0xFFFF9800),
+        });
         continue;
       }
 
@@ -173,17 +193,52 @@ class ReceptionistApi {
       });
     }
 
+    const walkinDuration = Duration(minutes: 35);
+
     for (final walkIn in walkIns) {
       final status = walkIn['status']?.toString() ?? 'Waiting';
       var displayStatus = 'WAITING';
-      var progress = 0.0;
+      var progress = 0.12;
+      var timeRemaining = walkIn['waitTime']?.toString() ?? 'Waiting';
+
+      final actualStartRaw = walkIn['actual_start']?.toString() ?? '';
+      DateTime? serviceStart;
+      if (actualStartRaw.isNotEmpty) {
+        serviceStart = DateTime.tryParse(actualStartRaw.replaceFirst(' ', 'T'));
+      }
+
       if (status == 'InProgress') {
         displayStatus = 'IN PROGRESS';
-        progress = 0.65;
+        if (serviceStart != null) {
+          final end = serviceStart.add(walkinDuration);
+          if (!now.isBefore(end)) {
+            displayStatus = 'COMPLETING';
+            progress = 1.0;
+            timeRemaining = 'Auto-completing';
+          } else {
+            final total = walkinDuration.inMinutes;
+            final elapsed = now.difference(serviceStart).inMinutes.clamp(0, total);
+            progress = (elapsed / total).clamp(0.0, 0.95);
+            final mins = end.difference(now).inMinutes;
+            timeRemaining = mins > 0 ? '$mins min remaining' : 'Finishing';
+          }
+        } else {
+          progress = 0.35;
+          timeRemaining = 'In service';
+        }
+      } else if (status == 'Assigned') {
+        displayStatus = 'READY';
+        progress = 0.25;
+        timeRemaining = 'Ready — starts automatically';
       } else if (status == 'Completed') {
         displayStatus = 'COMPLETED';
         progress = 1.0;
       }
+
+      final queueNumber = walkIn['queue_number']?.toString() ?? '';
+      final schedule = queueNumber.isNotEmpty
+          ? 'Queue $queueNumber • ${walkIn['waitTime']?.toString() ?? 'Today'}'
+          : 'Walk-in • ${walkIn['waitTime']?.toString() ?? 'Today'}';
 
       items.add({
         'kind': 'walkin',
@@ -192,11 +247,12 @@ class ReceptionistApi {
         'name': walkIn['name'],
         'service': walkIn['service'],
         'barber': walkIn['barber']?.toString() ?? '',
-        'schedule': 'Walk-in • ${walkIn['waitTime']?.toString() ?? 'Today'}',
+        'schedule': schedule,
         'status': displayStatus,
         'rawStatus': status,
+        'actual_start': actualStartRaw,
         'progress': progress,
-        'timeRemaining': walkIn['waitTime']?.toString() ?? 'Waiting',
+        'timeRemaining': timeRemaining,
         'color': displayStatus == 'IN PROGRESS'
             ? const Color(0xFF4CAF50)
             : const Color(0xFF2196F3),

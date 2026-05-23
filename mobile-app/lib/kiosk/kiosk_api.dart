@@ -17,6 +17,18 @@ class KioskApi {
         .toList();
   }
 
+  static Future<List<Map<String, dynamic>>> loadTodayQueue() async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'todayQueue'}),
+    );
+    final data = _decode(response);
+    return (data['queue'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
   static Future<Map<String, dynamic>> loadBarberQueue() async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),

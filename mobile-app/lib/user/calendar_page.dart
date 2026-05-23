@@ -179,9 +179,10 @@ class _CalendarPageState extends State<CalendarPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Select your preferred appointment date',
-              style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.4),
+            Text(
+              'Book from today through ${_formatWindowEnd(bookingWindowEnd)} (7 days). '
+              'White days have open times with ${_barberNameLabel()}; gray days are past, outside the window, or fully booked.',
+              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
             ),
             const SizedBox(height: 24),
             Container(
@@ -280,10 +281,11 @@ class _CalendarPageState extends State<CalendarPage> {
                                 final isPast = date.isBefore(todayDate);
                                 final isBeyondWindow = date.isAfter(bookingWindowEnd);
                                 final availableForDate = _availableByDate[dateKey] ?? 0;
-                                final isEligible = !isPast && !isBeyondWindow && availableForDate > 0;
+                                final inBookingWindow = !isPast && !isBeyondWindow;
+                                final hasOpenSlots = availableForDate > 0;
 
                                 return GestureDetector(
-                                  onTap: isEligible
+                                  onTap: inBookingWindow
                                       ? () {
                                           setState(() => _selectedDate = date);
                                           _fetchSlotCount();
@@ -291,23 +293,21 @@ class _CalendarPageState extends State<CalendarPage> {
                                       : (isPast
                                           ? null
                                           : () {
-                                              if (isBeyondWindow) {
-                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                  const SnackBar(content: Text('You can book up to 7 days in advance.')),
-                                                );
-                                                return;
-                                              }
                                               ScaffoldMessenger.of(context).showSnackBar(
-                                                const SnackBar(content: Text('No open times left on this date.')),
+                                                const SnackBar(
+                                                  content: Text('You can book up to 7 days in advance.'),
+                                                ),
                                               );
                                             }),
                                   child: Container(
                                     decoration: BoxDecoration(
                                       color: isSelected
                                           ? const Color(0xFFA99941)
-                                          : (isEligible ? Colors.white : Colors.white12),
+                                          : (inBookingWindow
+                                              ? (hasOpenSlots ? Colors.white : const Color(0xFF2A2A2A))
+                                              : Colors.white12),
                                       borderRadius: BorderRadius.circular(8),
-                                      border: !isEligible ? Border.all(color: Colors.white12) : null,
+                                      border: !inBookingWindow ? Border.all(color: Colors.white12) : null,
                                     ),
                                     child: Center(
                                       child: Text(
@@ -315,7 +315,9 @@ class _CalendarPageState extends State<CalendarPage> {
                                         style: TextStyle(
                                           color: isSelected
                                               ? Colors.white
-                                              : (isEligible ? Colors.black : Colors.white38),
+                                              : (inBookingWindow
+                                                  ? (hasOpenSlots ? Colors.black : Colors.white70)
+                                                  : Colors.white38),
                                           fontWeight: FontWeight.bold,
                                           fontSize: width < 360 ? 12 : 14,
                                         ),
@@ -490,6 +492,16 @@ class _CalendarPageState extends State<CalendarPage> {
       'December',
     ];
     return '${months[date.month - 1]} ${date.year}';
+  }
+
+  String _formatWindowEnd(DateTime end) {
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return '${months[end.month - 1]} ${end.day}';
+  }
+
+  String _barberNameLabel() {
+    final name = widget.barberName.trim();
+    return name.isEmpty ? 'this barber' : name;
   }
 
   Widget _buildCalendarSkeleton() {

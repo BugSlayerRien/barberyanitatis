@@ -96,7 +96,7 @@ try {
                 'customerName' => (string)$row['customer_name'],
             ];
         }, $rawAppointments);
-        $collapsed = collapse_barber_dashboard_appointments($mapped);
+        $collapsed = collapse_barber_dashboard_appointments($pdo, $mapped, $barberID);
         $appointments = array_map(static function (array $row): array {
             return [
                 'appointment_id' => (int)($row['appointmentID'] ?? 0),
@@ -143,6 +143,10 @@ try {
 
         if ($barberID <= 0 || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $requestDate)) {
             json_response(['error' => 'Invalid barberID or requestDate'], 422);
+        }
+
+        if ($requestDate < shop_today()) {
+            json_response(['error' => 'Cannot request unavailability for past dates'], 422);
         }
 
         $stmt = $pdo->prepare(

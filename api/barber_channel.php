@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/schema_helpers.php';
+
 /**
  * @return 'walk_in'|'appointment'|null
  */
@@ -21,6 +23,11 @@ function normalize_barber_channel(?string $raw): ?string
 
 function ensure_barber_channel_column(PDO $pdo): void
 {
+    static $initialized = false;
+    if ($initialized) {
+        return;
+    }
+
     $pdo->exec(
         "ALTER TABLE barbers
          ADD COLUMN IF NOT EXISTS barber_channel TEXT NOT NULL DEFAULT 'appointment'"
@@ -33,11 +40,14 @@ function ensure_barber_channel_column(PDO $pdo): void
             OR TRIM(barber_channel) = ''"
     );
 
-    $pdo->exec('ALTER TABLE barbers DROP CONSTRAINT IF EXISTS barbers_barber_channel_check');
-    $pdo->exec(
-        "ALTER TABLE barbers ADD CONSTRAINT barbers_barber_channel_check
-         CHECK (barber_channel IN ('walk_in', 'appointment'))"
+    ensure_check_constraint(
+        $pdo,
+        'barbers',
+        'barbers_barber_channel_check',
+        "barber_channel IN ('walk_in', 'appointment')"
     );
+
+    $initialized = true;
 }
 
 function barber_channel_filter_sql(string $channel, string $column = 'barber_channel'): string

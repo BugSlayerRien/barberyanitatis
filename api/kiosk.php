@@ -6,77 +6,54 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/barber_channel.php';
+require_once __DIR__ . '/service_channel.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-$allowedActions = ['barberQueue', 'createWalkin', 'services'];
+$allowedActions = ['barberQueue', 'createWalkin', 'services', 'todayQueue'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
 function kiosk_service_duration_minutes(PDO $pdo): int
 {
-    $stmt = $pdo->query(
-        "SELECT COALESCE(MAX(base_duration), 0) AS max_duration
-         FROM services
-         WHERE is_active = TRUE"
-    );
-    $maxDuration = (int)($stmt->fetchColumn() ?: 0);
-    if ($maxDuration > 0) {
-        return max(30, min(120, $maxDuration));
-    }
-
-    return shop_slot_duration_minutes();
+    return shop_walkin_duration_minutes();
 }
 
 function estimate_barber_wait_minutes(PDO $pdo, ?int $barberId): int
 {
-    $serviceMinutes = kiosk_service_duration_minutes($pdo);
-
-    if ($barberId !== null && $barberId > 0) {
-        $walkinStmt = $pdo->prepare(
-            "SELECT COUNT(*)::int
-             FROM walkin_queue
-             WHERE DATE(created_at) = CURRENT_DATE
-               AND barber_id = :barber_id
-               AND status IN ('Waiting', 'Assigned', 'InProgress')"
-        );
-        $walkinStmt->execute([':barber_id' => $barberId]);
-        $walkinAhead = (int)$walkinStmt->fetchColumn();
-
-        $apptStmt = $pdo->prepare(
-            "SELECT COUNT(*)::int
-             FROM appointments
-             WHERE appointment_date = CURRENT_DATE
-               AND barber_id = :barber_id
-               AND status IN ('Scheduled', 'CheckedIn', 'InProgress')"
-        );
-        $apptStmt->execute([':barber_id' => $barberId]);
-        $apptAhead = (int)$apptStmt->fetchColumn();
-
-        return ($walkinAhead + $apptAhead) * $serviceMinutes;
-    }
-
-    $stmt = $pdo->query(
-        "SELECT COUNT(*)::int
-         FROM walkin_queue
-         WHERE DATE(created_at) = CURRENT_DATE
-           AND status IN ('Waiting', 'Assigned')"
-    );
-
-    return (int)$stmt->fetchColumn() * $serviceMinutes;
+    return shop_estimate_walkin_barber_wait_minutes($pdo, $barberId);
 }
 
 try {
     // Read-heavy actions: retry whole handler on TLS / "connection reset" (kiosk tablet Wi‑Fi).
-    if ($action === 'services' || $action === 'barberQueue') {
+    if ($action === 'services' || $action === 'barberQueue' || $action === 'todayQueue') {
         with_pdo_retry(function (PDO $pdo) use ($action): void {
             ensure_walkin_guest_name_column($pdo);
             ensure_barber_channel_column($pdo);
-            auto_complete_due_appointments($pdo);
+            run_tracking_automation($pdo, true);
+
+            if ($action === 'todayQueue') {
+                $queueStmt = $pdo->query(
+                    "SELECT wq.queue_number,
+                            COALESCE(NULLIF(TRIM(wq.guest_name), ''), 'Guest') AS guest_name,
+                            wq.status,
+                            wq.wait_time_minutes,
+                            b.full_name AS barber_name
+                     FROM walkin_queue wq
+                     LEFT JOIN barbers b ON b.barber_id = wq.barber_id
+                     WHERE DATE(wq.created_at) = CURRENT_DATE
+                       AND wq.status IN ('Waiting', 'Assigned', 'InProgress')
+                     ORDER BY wq.queue_id ASC"
+                );
+                json_response([
+                    'queue' => $queueStmt->fetchAll(),
+                    'serviceMinutes' => shop_walkin_duration_minutes(),
+                ]);
+            }
 
             if ($action === 'services') {
                 require_once __DIR__ . '/service_channel.php';
@@ -143,7 +120,7 @@ try {
         $pdo = get_db_connection();
         ensure_walkin_guest_name_column($pdo);
         ensure_barber_channel_column($pdo);
-        auto_complete_due_appointments($pdo);
+        run_tracking_automation($pdo, true);
 
         $serviceIDs = $input['serviceIDs'] ?? [];
         $barberID = (int)($input['barberID'] ?? 0);
@@ -188,9 +165,14 @@ try {
             if ((int)$barberChannelStmt->fetchColumn() === 0) {
                 json_response(['error' => 'This barber is not available for walk-in service.'], 422);
             }
+        } else {
+            $pickedBarber = shop_pick_least_busy_walkin_barber_id($pdo);
+            if ($pickedBarber !== null) {
+                $barberID = $pickedBarber;
+            }
         }
 
-        $waitMinutes = estimate_barber_wait_minutes($pdo, $barberID > 0 ? $barberID : null);
+        $waitMinutes = shop_estimate_walkin_barber_wait_minutes($pdo, $barberID > 0 ? $barberID : null);
 
         $pdo->beginTransaction();
 
@@ -216,10 +198,20 @@ try {
 
         $queueID = (int)$insertQueue->fetchColumn();
 
+        $validServiceIds = filter_walk_in_service_ids($pdo, $serviceIDs);
+        if ($validServiceIds === []) {
+            $fallbackId = default_walk_in_service_id($pdo);
+            if ($fallbackId === null) {
+                $pdo->rollBack();
+                json_response(['error' => 'No walk-in (regular) service is configured. Add an active service with channel walk_in.'], 422);
+            }
+            $validServiceIds = [$fallbackId];
+        }
+
         $serviceStmt = $pdo->prepare(
-            'SELECT service_id, base_price
+            'SELECT service_id, service_name, base_price
              FROM services
-             WHERE service_id = :service_id AND is_active = TRUE'
+             WHERE service_id = :service_id AND is_active = TRUE AND service_channel = \'walk_in\''
         );
         $detailStmt = $pdo->prepare(
             'INSERT INTO walkin_service_details (queue_id, service_id, variant_id, selected_view, special_instructions, final_price)
@@ -234,11 +226,7 @@ try {
             . ($scanMode !== '' ? " | Scan: {$scanMode}" : '')
         );
 
-        foreach ($serviceIDs as $serviceID) {
-            $serviceID = (int)$serviceID;
-            if ($serviceID <= 0) {
-                continue;
-            }
+        foreach ($validServiceIds as $serviceID) {
             $serviceStmt->execute([':service_id' => $serviceID]);
             $service = $serviceStmt->fetch();
             if (!$service) {

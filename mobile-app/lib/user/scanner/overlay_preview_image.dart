@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'overlay_asset_cache.dart';
+import 'overlay_asset_resolver.dart';
 
 /// Renders overlay PNGs on mobile and web (Flutter web often fails [Image.asset] for nested assets).
 class OverlayPreviewImage extends StatelessWidget {
@@ -32,12 +33,19 @@ class OverlayPreviewImage extends StatelessWidget {
       try {
         return await _loadBytes(path);
       } catch (_) {
-        final fetchUrl = '/assets/${path.replaceFirst('assets/', '')}';
-        final response = await http.get(Uri.parse(fetchUrl));
-        if (response.statusCode != 200) {
-          throw Exception('Overlay load failed ($fetchUrl): ${response.statusCode}');
+        Object? lastError;
+        for (final fetchUrl in OverlayAssetResolver.webUrls(path)) {
+          try {
+            final response = await http.get(Uri.parse(fetchUrl));
+            if (response.statusCode == 200) {
+              return response.bodyBytes;
+            }
+            lastError = 'HTTP ${response.statusCode}';
+          } catch (e) {
+            lastError = e;
+          }
         }
-        return response.bodyBytes;
+        throw Exception('Overlay load failed for $path ($lastError)');
       }
     });
   }
