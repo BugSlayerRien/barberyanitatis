@@ -9,18 +9,17 @@ const state = {
   walkins: [],
   currentUser: null,
   profileEditMode: false,
-  autoRefreshTimer: null,
   pagination: {},
 };
 
-const DEFAULT_PAGE_SIZE = 8;
+const DEFAULT_PAGE_SIZE = 5;
 const PAGE_SIZE_BY_KEY = {
-  "appointments-table": 8,
-  "walkins-table": 8,
-  "tracking-regular-list": 6,
-  "tracking-exclusive-list": 6,
-  "barbers-regular-list": 6,
-  "barbers-exclusive-list": 6,
+  "appointments-table": 5,
+  "walkins-table": 5,
+  "tracking-regular-list": 5,
+  "tracking-exclusive-list": 5,
+  "barbers-regular-list": 5,
+  "barbers-exclusive-list": 5,
 };
 
 const navButtons = document.querySelectorAll(".nav button");
@@ -35,7 +34,17 @@ const walkinBarber = document.getElementById("walkin-barber");
 const appointmentsSearch = document.getElementById("appointments-search");
 const appointmentsStatusFilter = document.getElementById("appointments-status-filter");
 const walkinsSearch = document.getElementById("walkins-search");
-const autoRefreshToggle = document.getElementById("auto-refresh-toggle");
+
+const ui = () => window.PortalUi;
+const toast = (message, type = "info") => ui()?.toast(message, type);
+const confirmAction = (message, options = {}) =>
+  ui()?.confirmDialog({
+    title: options.title || "Confirm",
+    message,
+    confirmLabel: options.confirmLabel || "Confirm",
+    cancelLabel: options.cancelLabel || "Cancel",
+    danger: Boolean(options.danger),
+  }) ?? Promise.resolve(false);
 
 function showView(view) {
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
@@ -55,6 +64,9 @@ navButtons.forEach((button) => {
     }
 
     showView(view);
+    if (view === "barbers") {
+      loadBarberUnavailabilityRequests();
+    }
   });
 });
 
@@ -63,15 +75,28 @@ function formatCurrency(value) {
   return `PHP ${Number(value).toFixed(2)}`;
 }
 
-async function postJson(url, payload) {
+function localTodayYmd() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+async function postJson(url, payload, loadingMessage = false) {
+  if (ui()?.fetchJson) {
+    return ui().fetchJson(url, payload, loadingMessage);
+  }
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await response.json();
+  const raw = await response.text();
+  const data = raw ? JSON.parse(raw) : {};
   if (!response.ok) {
-    throw new Error(data.error || "Request failed");
+    const detail = data.details ? ` (${data.details})` : "";
+    throw new Error((data.error || "Request failed") + detail);
   }
   return data;
 }
@@ -175,7 +200,7 @@ async function saveProfileEdits() {
   const fullName = nameInput.value.trim();
   const email = emailInput.value.trim();
   if (!fullName || !email) {
-    alert("Name and email are required.");
+    toast("Name and email are required.", "error");
     return;
   }
 
@@ -199,9 +224,9 @@ async function saveProfileEdits() {
     renderProfileChip();
     state.profileEditMode = false;
     renderProfileDialogContent();
-    alert("Profile updated.");
+    toast("Profile updated.", "success");
   } catch (error) {
-    alert(error.message || "Profile update failed");
+    toast(error.message || "Profile update failed", "error");
   }
 }
 
@@ -358,6 +383,9 @@ function normalizeBarberChannel(channel) {
   if (value === "walk_in" || value === "walkin" || value === "regular") {
     return "walk_in";
   }
+  if (value === "appointment" || value === "appointments" || value === "exclusive") {
+    return "appointment";
+  }
   return "appointment";
 }
 
@@ -379,6 +407,16 @@ function parseAppointmentDateTime(item) {
   if (!date || !time) return null;
   const normalized = time.length === 5 ? `${time}:00` : time;
   const parsed = new Date(`${date}T${normalized}`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+const WALKIN_SERVICE_MS = 35 * 60 * 1000;
+
+function parseWalkinStart(item) {
+  const raw = item.actual_start;
+  if (!raw) return null;
+  const normalized = String(raw).trim().replace(" ", "T");
+  const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -407,6 +445,7 @@ function buildTracking(appointments, walkins) {
         barber: item.barber || "",
         schedule: displaySchedule,
         status: "PENDING PAYMENT",
+        rawStatus: status,
         progress: 0.12,
         timeRemaining: "Awaiting payment",
         color: "#FF9800",
@@ -459,26 +498,60 @@ function buildTracking(appointments, walkins) {
 
   (walkins || []).forEach((item) => {
     const status = String(item.status || "Waiting");
+    if (status === "Cancelled" || status === "Completed") {
+      return;
+    }
+
     let displayStatus = "WAITING";
-    let progress = 0;
+    let progress = 0.12;
+    let timeRemaining = item.waitTime || "Waiting";
+    const serviceStart = parseWalkinStart(item);
+
     if (status === "InProgress") {
       displayStatus = "IN PROGRESS";
-      progress = 0.65;
+      if (serviceStart) {
+        const end = new Date(serviceStart.getTime() + WALKIN_SERVICE_MS);
+        if (now >= serviceStart && now < end) {
+          progress = Math.min(0.95, (now - serviceStart) / WALKIN_SERVICE_MS);
+          const mins = Math.max(0, Math.ceil((end - now) / 60000));
+          timeRemaining = `${mins} min remaining`;
+        } else if (now >= end) {
+          displayStatus = "COMPLETING";
+          progress = 1;
+          timeRemaining = "Auto-completing";
+        } else {
+          timeRemaining = "In service";
+        }
+      } else {
+        progress = 0.35;
+        timeRemaining = "In service";
+      }
+    } else if (status === "Assigned") {
+      displayStatus = "READY";
+      progress = 0.25;
+      timeRemaining = "Ready — starts automatically";
     } else if (status === "Completed") {
       displayStatus = "COMPLETED";
       progress = 1;
     }
 
+    const queueLabel = item.queue_number ? String(item.queue_number) : "";
+    const waitLabel = item.waitTime || "Waiting";
+
     items.push({
       kind: "walkin",
       queueId: item.queue_id,
+      queueNumber: queueLabel,
+      rawStatus: status,
       name: item.name,
       service: item.service || "Walk-in",
       barber: item.barber || "",
-      schedule: `Walk-in • ${item.waitTime || "Today"}`,
+      schedule: queueLabel
+        ? `Queue ${queueLabel} • ${waitLabel}`
+        : `Walk-in • ${waitLabel}`,
       status: displayStatus,
       progress,
-      timeRemaining: status === "Completed" ? "Completed" : item.waitTime || "Waiting",
+      timeRemaining,
       color: displayStatus === "IN PROGRESS" ? "#4CAF50" : "#2196F3",
     });
   });
@@ -514,16 +587,15 @@ function formatTime12(timeValue) {
   return `${hour12}:${String(minute).padStart(2, "0")} ${suffix}`;
 }
 
-async function confirmAction(message) {
-  return window.confirm(message);
-}
-
 function renderAppointments(appointments) {
   const table = document.getElementById("appointments-table");
   if (!table) return;
   const q = (appointmentsSearch?.value || "").trim().toLowerCase();
   const statusFilter = appointmentsStatusFilter?.value || "all";
+  const today = localTodayYmd();
   const filtered = (appointments || []).filter((item) => {
+    const dateStr = String(item.appointment_date || "").slice(0, 10);
+    if (dateStr !== today) return false;
     const textMatch = !q
       || String(item.name).toLowerCase().includes(q)
       || String(item.service).toLowerCase().includes(q)
@@ -533,7 +605,7 @@ function renderAppointments(appointments) {
   });
 
   if (!filtered.length) {
-    table.innerHTML = "<tr><td>No appointments today.</td></tr>";
+    table.innerHTML = "<tr><td colspan=\"7\">No appointments for today.</td></tr>";
     return;
   }
 
@@ -596,6 +668,7 @@ function renderWalkins(walkins) {
   table.innerHTML = `
     <thead>
       <tr>
+        <th>Queue</th>
         <th>Client</th>
         <th>Service</th>
         <th>Wait Time</th>
@@ -607,6 +680,7 @@ function renderWalkins(walkins) {
         .map(
           (item) => `
             <tr>
+              <td>${item.queue_number || "—"}</td>
               <td>${item.name}</td>
               <td>${item.service}</td>
               <td>${item.waitTime}</td>
@@ -634,11 +708,16 @@ function renderTracking(items, listId) {
     const card = document.createElement("div");
     card.className = "card";
     const pct = Math.round((item.progress || 0) * 100);
-    const canAct = item.status !== "COMPLETED";
+    const canCancel = item.status !== "COMPLETED";
+    const canComplete = item.status !== "COMPLETED" && item.status !== "PENDING PAYMENT";
+    const canStartWalkin =
+      item.kind === "walkin" &&
+      item.queueId > 0 &&
+      (item.rawStatus === "Waiting" || item.rawStatus === "Assigned");
     card.innerHTML = `
       <div class="row-wrap" style="justify-content: space-between; align-items: flex-start;">
         <div>
-          <h4 style="margin: 0 0 4px;">${item.name}${item.isGroup ? ` <span class="tag info" style="margin-left:6px;">Group · ${item.peopleCount}</span>` : ""}</h4>
+          <h4 style="margin: 0 0 4px;">${item.name}${item.isGroup ? ` <span class="tag info" style="margin-left:6px;">Group · ${item.peopleCount}</span>` : ""}${item.queueNumber ? ` <span class="tag info" style="margin-left:6px;">${item.queueNumber}</span>` : ""}</h4>
           <p style="margin: 0 0 4px;">${item.service}</p>
           <p class="meta" style="margin: 0 0 4px; color: #c9b46a;">${item.schedule || ""}</p>
           ${item.barber ? `<p class="meta" style="margin: 0;">Barber: ${item.barber}</p>` : ""}
@@ -657,13 +736,15 @@ function renderTracking(items, listId) {
         <span style="width: ${pct}%; background: ${item.color};"></span>
       </div>
       <div class="row-wrap" style="margin-top: 6px; justify-content: space-between; align-items: center;">
-        <span class="meta">${item.timeRemaining}${item.status === "IN PROGRESS" && pct > 0 ? ` • ${pct}%` : ""}</span>
-        ${canAct ? `
+        <span class="meta">${item.timeRemaining}${item.status === "IN PROGRESS" && pct > 0 ? ` • ${pct}%` : ""}${item.status === "COMPLETING" ? " • Auto-completing shortly — use Complete or Cancel if needed" : ""}</span>
+        ${canCancel || canComplete ? `
           <div class="row-wrap" style="gap: 6px;">
-            <button type="button" class="btn secondary tracking-complete" title="Mark completed"
-              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✓ Complete</button>
-            <button type="button" class="btn secondary tracking-cancel" title="Cancel / remove"
-              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✕ Cancel</button>
+            ${canStartWalkin ? `<button type="button" class="btn primary tracking-start" title="Start service"
+              data-kind="${item.kind}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">▶ Start</button>` : ""}
+            ${canComplete ? `<button type="button" class="btn secondary tracking-complete" title="Mark completed"
+              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✓ Complete</button>` : ""}
+            ${canCancel ? `<button type="button" class="btn secondary tracking-cancel" title="Cancel / remove"
+              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✕ Cancel</button>` : ""}
           </div>
         ` : ""}
       </div>
@@ -675,6 +756,30 @@ function renderTracking(items, listId) {
   if (pager) {
     list.insertAdjacentHTML("beforeend", pager);
   }
+}
+
+function renderAutomationFeed(automation) {
+  const wrap = document.getElementById("tracking-automation-feed");
+  const list = document.getElementById("tracking-automation-list");
+  if (!wrap || !list) return;
+
+  const events = automation?.events ?? [];
+  if (!events.length) {
+    wrap.style.display = "none";
+    list.innerHTML = "";
+    return;
+  }
+
+  wrap.style.display = "block";
+  list.innerHTML = events
+    .map(
+      (event) => `
+        <div class="card" style="padding: 10px 12px; margin-bottom: 8px; border-color: #4CAF50;">
+          <span class="meta" style="color: #9ad49a;">${event.action === "started" ? "▶" : "✓"} ${event.label || "Queue updated"}</span>
+        </div>
+      `,
+    )
+    .join("");
 }
 
 function renderSplitTracking(appointments, walkins) {
@@ -719,13 +824,15 @@ function renderSplitBarbers(barbers) {
 
 async function loadOptions() {
   try {
-    const [servicesResponse, barbersResponse] = await Promise.all([
+    const [servicesResponse, walkInBarbersResponse, allBarbersResponse] = await Promise.all([
       postJson(apiUrl("services.php"), { action: "list", channel: "walk_in" }),
+      postJson(apiUrl("barbers.php"), { action: "list", channel: "walk_in" }),
       postJson(apiUrl("barbers.php"), { action: "list", channel: "all" }),
     ]);
 
     const services = servicesResponse.services ?? [];
-    const barbers = barbersResponse.barbers ?? [];
+    const walkInBarbers = walkInBarbersResponse.barbers ?? [];
+    const barbers = allBarbersResponse.barbers ?? [];
 
     if (walkinServices) {
       walkinServices.innerHTML = services
@@ -736,7 +843,7 @@ async function loadOptions() {
     if (walkinBarber) {
       const currentValue = walkinBarber.value;
       walkinBarber.innerHTML = '<option value="">Unassigned</option>';
-      walkinBarber.innerHTML += barbers
+      walkinBarber.innerHTML += walkInBarbers
         .map((barber) => `<option value="${barber.barber_id}">${barber.full_name}</option>`)
         .join("");
       if (currentValue) {
@@ -746,7 +853,6 @@ async function loadOptions() {
 
     window.__barbersCache = barbers;
     renderSplitBarbers(barbers);
-    await loadBarberUnavailabilityRequests();
   } catch (error) {
     window.__barbersCache = [];
     renderSplitBarbers([]);
@@ -800,17 +906,27 @@ async function loadBarberUnavailabilityRequests() {
   }
 }
 
-async function loadDashboard() {
+async function loadDashboard(showOverlay = false) {
   if (!requireReceptionist()) return;
   try {
-    const data = await postJson(apiUrl("receptionist.php"), { action: "dashboard" });
+    const data = await postJson(
+      apiUrl("receptionist.php"),
+      { action: "dashboard" },
+      showOverlay ? "Loading dashboard…" : false,
+    );
     state.appointments = data.appointments ?? [];
     state.walkins = data.walkins ?? [];
+    state.automation = data.automation ?? { events: [], counts: {} };
     renderStats(data.stats ?? []);
     renderAppointments(state.appointments);
     renderWalkins(state.walkins);
+    renderAutomationFeed(state.automation);
     renderSplitTracking(state.appointments, state.walkins);
     renderSummary(data.stats ?? [], state.appointments, state.walkins);
+    if (state.automation?.events?.length) {
+      const labels = state.automation.events.map((e) => e.label).join(" · ");
+      toast(labels, "success");
+    }
   } catch (error) {
     state.appointments = [];
     state.walkins = [];
@@ -818,10 +934,16 @@ async function loadDashboard() {
     renderAppointments([]);
     renderWalkins([]);
     renderSplitTracking([], []);
-    renderSplitBarbers([]);
+    toast(error.message || "Failed to load dashboard", "error");
   }
 
   document.getElementById("last-updated").textContent = new Date().toLocaleString();
+  adjustTrackingRefreshInterval();
+}
+
+function trackingHasCompleting() {
+  const tracking = buildTracking(state.appointments ?? [], state.walkins ?? []);
+  return tracking.some((item) => item.status === "COMPLETING");
 }
 
 function toCsv(rows) {
@@ -859,7 +981,9 @@ function exportAppointmentsCsv() {
 }
 
 async function refreshAll() {
-  await loadDashboard();
+  const updated = document.getElementById("last-updated");
+  if (updated) updated.textContent = "Updating…";
+  await loadDashboard(false);
 }
 
 document.addEventListener("click", async (event) => {
@@ -893,30 +1017,52 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (target.classList.contains("tracking-start")) {
+    const name = target.dataset.name || "this client";
+    const queueId = Number(target.dataset.queueId || "0");
+    const ok = await confirmAction(`Start service for ${name}?`, { confirmLabel: "Start" });
+    if (!ok) return;
+    try {
+      if (queueId > 0) {
+        await postJson(
+          apiUrl("receptionist.php"),
+          { action: "updateWalkinStatus", queueID: queueId, status: "InProgress" },
+          "Starting service…",
+        );
+      }
+      toast("Walk-in started.", "success");
+      loadDashboard();
+    } catch (error) {
+      toast(error.message || "Unable to start walk-in", "error");
+    }
+    return;
+  }
+
   if (target.classList.contains("tracking-complete")) {
     const name = target.dataset.name || "this client";
     const kind = target.dataset.kind || "appointment";
     const appointmentId = Number(target.dataset.appointmentId || "0");
     const queueId = Number(target.dataset.queueId || "0");
-    const ok = await confirmAction(`Mark ${name} as completed?`);
+    const ok = await confirmAction(`Mark ${name} as completed?`, { confirmLabel: "Complete" });
     if (!ok) return;
     try {
       if (kind === "walkin" && queueId > 0) {
-        await postJson(apiUrl("receptionist.php"), {
-          action: "updateWalkinStatus",
-          queueID: queueId,
-          status: "Completed",
-        });
+        await postJson(
+          apiUrl("receptionist.php"),
+          { action: "updateWalkinStatus", queueID: queueId, status: "Completed" },
+          "Completing…",
+        );
       } else if (appointmentId > 0) {
-        await postJson(apiUrl("receptionist.php"), {
-          action: "updateAppointmentStatus",
-          appointmentID: appointmentId,
-          status: "Completed",
-        });
+        await postJson(
+          apiUrl("receptionist.php"),
+          { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Completed" },
+          "Completing…",
+        );
       }
+      toast("Marked as completed.", "success");
       loadDashboard();
     } catch (error) {
-      alert(error.message || "Unable to complete");
+      toast(error.message || "Unable to complete", "error");
     }
     return;
   }
@@ -926,25 +1072,29 @@ document.addEventListener("click", async (event) => {
     const kind = target.dataset.kind || "appointment";
     const appointmentId = Number(target.dataset.appointmentId || "0");
     const queueId = Number(target.dataset.queueId || "0");
-    const ok = await confirmAction(`Cancel ${name} and remove from tracking?`);
+    const ok = await confirmAction(`Cancel ${name} and remove from tracking?`, {
+      confirmLabel: "Cancel entry",
+      danger: true,
+    });
     if (!ok) return;
     try {
       if (kind === "walkin" && queueId > 0) {
-        await postJson(apiUrl("receptionist.php"), {
-          action: "updateWalkinStatus",
-          queueID: queueId,
-          status: "Cancelled",
-        });
+        await postJson(
+          apiUrl("receptionist.php"),
+          { action: "updateWalkinStatus", queueID: queueId, status: "Cancelled" },
+          "Cancelling…",
+        );
       } else if (appointmentId > 0) {
-        await postJson(apiUrl("receptionist.php"), {
-          action: "updateAppointmentStatus",
-          appointmentID: appointmentId,
-          status: "Cancelled",
-        });
+        await postJson(
+          apiUrl("receptionist.php"),
+          { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Cancelled" },
+          "Cancelling…",
+        );
       }
+      toast("Removed from tracking.", "success");
       loadDashboard();
     } catch (error) {
-      alert(error.message || "Unable to cancel");
+      toast(error.message || "Unable to cancel", "error");
     }
     return;
   }
@@ -960,7 +1110,7 @@ document.addEventListener("click", async (event) => {
       });
       loadDashboard();
     } catch (error) {
-      alert(error.message || "Unable to update appointment");
+      toast(error.message || "Unable to update appointment", "error");
     }
     return;
   }
@@ -986,7 +1136,7 @@ document.addEventListener("click", async (event) => {
       });
       loadDashboard();
     } catch (error) {
-      alert(error.message || "Unable to update walk-in");
+      toast(error.message || "Unable to update walk-in", "error");
     }
   }
 });
@@ -999,12 +1149,13 @@ walkinForm?.addEventListener("submit", async (event) => {
   const barberID = walkinBarber.value ? Number(walkinBarber.value) : 0;
 
   try {
-    await postJson(apiUrl("receptionist.php"), {
-      action: "createWalkin",
-      serviceIDs,
-      barberID,
-    });
+    await postJson(
+      apiUrl("receptionist.php"),
+      { action: "createWalkin", serviceIDs, barberID },
+      "Adding walk-in…",
+    );
     walkinForm.reset();
+    toast("Walk-in added.", "success");
     loadDashboard();
   } catch (error) {
     walkinError.textContent = error.message || "Unable to add walk-in.";
@@ -1033,23 +1184,60 @@ document.getElementById("profile-dialog-close")?.addEventListener("click", () =>
   if (dialog instanceof HTMLDialogElement) dialog.close();
 });
 
-autoRefreshToggle?.addEventListener("change", (event) => {
-  const enabled = Boolean(event.target.checked);
-  if (state.autoRefreshTimer) {
-    clearInterval(state.autoRefreshTimer);
-    state.autoRefreshTimer = null;
+let trackingRefreshTimer = null;
+let trackingProgressTimer = null;
+const TRACKING_REFRESH_MS_DEFAULT = 45000;
+const TRACKING_REFRESH_MS_COMPLETING = 10000;
+const TRACKING_PROGRESS_TICK_MS = 1500;
+
+function refreshTrackingProgressUi() {
+  const trackingView = document.getElementById("tracking-view");
+  if (!trackingView || trackingView.hidden) {
+    return;
   }
-  if (enabled) {
-    state.autoRefreshTimer = window.setInterval(refreshAll, 30000);
+  const hasQueue = (state.walkins?.length ?? 0) > 0 || (state.appointments?.length ?? 0) > 0;
+  if (!hasQueue) {
+    return;
   }
-});
+  renderSplitTracking(state.appointments ?? [], state.walkins ?? []);
+}
+
+function startTrackingProgressTicker() {
+  if (trackingProgressTimer) {
+    clearInterval(trackingProgressTimer);
+  }
+  trackingProgressTimer = setInterval(refreshTrackingProgressUi, TRACKING_PROGRESS_TICK_MS);
+}
+
+function adjustTrackingRefreshInterval() {
+  if (trackingRefreshTimer) {
+    clearInterval(trackingRefreshTimer);
+    trackingRefreshTimer = null;
+  }
+  const ms = trackingHasCompleting()
+    ? TRACKING_REFRESH_MS_COMPLETING
+    : TRACKING_REFRESH_MS_DEFAULT;
+  trackingRefreshTimer = setInterval(() => {
+    const trackingView = document.getElementById("tracking-view");
+    if (trackingView && !trackingView.hidden) {
+      loadDashboard(false);
+    }
+  }, ms);
+}
+
+function startTrackingAutoRefresh() {
+  adjustTrackingRefreshInterval();
+}
 
 async function init() {
   if (!requireReceptionist()) return;
+  ui()?.resetLoading?.();
   showView("dashboard");
   renderProfileChip();
   await loadOptions();
-  await refreshAll();
+  await loadDashboard(false);
+  startTrackingAutoRefresh();
+  startTrackingProgressTicker();
 }
 
 init();

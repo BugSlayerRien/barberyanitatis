@@ -88,6 +88,9 @@ function derive_payment_state(?string $paymentStatus, ?string $intentStatus): st
     if ($payment !== '' && in_array(strtolower($payment), ['captured', 'paid', 'succeeded'], true)) {
         return 'Paid';
     }
+    if ($payment !== '' && strcasecmp($payment, 'Paid') === 0) {
+        return 'Paid';
+    }
 
     $intent = $intentStatus !== null ? trim((string)$intentStatus) : '';
     if ($intent !== '') {
@@ -210,8 +213,16 @@ try {
     }
     if (!in_array($action, $readOnlyActions, true)) {
         auto_complete_due_appointments($pdo);
-    } elseif ($action === 'listByCustomer') {
-        sync_paid_groups_from_payments($pdo);
+    }
+    $trackingAutomation = null;
+    if (in_array($action, ['listByCustomer', 'listByBarber'], true)) {
+        try {
+            $trackingAutomation = run_tracking_automation($pdo, true);
+            sync_paid_groups_from_payments($pdo);
+            sync_paid_appointments_from_payments($pdo, true);
+        } catch (Throwable $automationError) {
+            error_log('Booking list automation skipped: ' . $automationError->getMessage());
+        }
     }
 
     if ($action === 'createGroup') {
@@ -527,12 +538,40 @@ try {
             json_response(['error' => 'Invalid userID'], 422);
         }
 
+        $paymentsTableExists = (int)$pdo->query(
+            "SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema = current_schema() AND table_name = 'payments'"
+        )->fetchColumn() > 0;
+
+        $legacyPayJoin = $paymentsTableExists
+            ? "LEFT JOIN LATERAL (
+                 SELECT payment_id, payment_status AS status, payment_ref AS transaction_ref, paid_at AS created_at
+                 FROM payments
+                 WHERE appointment_id = a.appointment_id
+                   AND payment_status = 'Paid'
+                 ORDER BY payment_id DESC
+                 LIMIT 1
+             ) legacy_pay ON TRUE"
+            : '';
+
+        $paymentStatusExpr = $paymentsTableExists
+            ? 'COALESCE(ap.status, legacy_pay.status)'
+            : 'ap.status';
+        $transactionRefExpr = $paymentsTableExists
+            ? 'COALESCE(ap.transaction_ref, legacy_pay.transaction_ref)'
+            : 'ap.transaction_ref';
+        $paidAtExpr = $paymentsTableExists
+            ? 'COALESCE(ap.created_at, legacy_pay.created_at)'
+            : 'ap.created_at';
+
         $stmt = $pdo->prepare(
             "SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_member_name, a.group_sequence,
                     a.appointment_date, a.start_time, a.end_time, a.status,
                     b.barber_id, b.full_name AS barber_name,
                     u.full_name AS customer_name,
-                    ap.status AS payment_status, ap.transaction_ref, ap.created_at AS paid_at,
+                    {$paymentStatusExpr} AS payment_status,
+                    {$transactionRefExpr} AS transaction_ref,
+                    {$paidAtExpr} AS paid_at,
                     pi.intent_id, pi.status AS intent_status, pi.method AS intent_method, pi.expires_at AS intent_expires_at,
                     pi.created_at AS intent_created_at,
                     pi.failure_reason, pi.updated_at AS intent_updated_at
@@ -546,6 +585,7 @@ try {
                  ORDER BY payment_id DESC
                  LIMIT 1
              ) ap ON TRUE
+             {$legacyPayJoin}
              LEFT JOIN LATERAL (
                  SELECT intent_id, status, method, expires_at, created_at, failure_reason, updated_at
                  FROM appointment_payment_intents
@@ -560,7 +600,11 @@ try {
         $appointments = $stmt->fetchAll();
 
         if (count($appointments) === 0) {
-            json_response(['appointments' => []]);
+            $emptyResponse = ['appointments' => []];
+            if ($trackingAutomation !== null) {
+                $emptyResponse['trackingAutomation'] = $trackingAutomation;
+            }
+            json_response($emptyResponse);
         }
 
         $appointmentIds = array_map(fn($row) => (int)$row['appointment_id'], $appointments);
@@ -658,11 +702,15 @@ try {
             ];
         }, $appointments);
 
-        json_response([
+        $listResponse = [
             'appointments' => collapse_customer_appointments(
                 propagate_group_payment_states($appointments)
             ),
-        ]);
+        ];
+        if ($trackingAutomation !== null) {
+            $listResponse['trackingAutomation'] = $trackingAutomation;
+        }
+        json_response($listResponse);
     }
 
     if ($action === 'cancel') {
@@ -1004,7 +1052,7 @@ try {
             ];
         }, $appointments);
 
-        json_response(['appointments' => collapse_barber_dashboard_appointments($appointments)]);
+        json_response(['appointments' => collapse_barber_dashboard_appointments($pdo, $appointments, $barberID)]);
     }
 } catch (PDOException $e) {
     if (isset($pdo) && $pdo->inTransaction()) {

@@ -63,10 +63,16 @@ class UserSession {
       case 'wavy':
         return 'Wavy';
       case 'curly':
+      case 'coily':
         return 'Curly';
       default:
         return null;
     }
+  }
+
+  /// Normalizes API/profile texture labels to Straight, Wavy, or Curly.
+  static String normalizeHairTextureLabel(String? raw, {String fallback = 'Wavy'}) {
+    return _normalizeHairTexture(raw ?? '') ?? fallback;
   }
 
   static Future<UserCalibration?> loadUserCalibration() async {

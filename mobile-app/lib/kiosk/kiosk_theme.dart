@@ -11,6 +11,7 @@ class KioskColors {
   static const textPrimary = Colors.white;
   static const textMuted = Colors.white70;
   static const textDim = Colors.white54;
+  static const gold = Color(0xFFA99941);
 }
 
 class KioskPrimaryButton extends StatelessWidget {

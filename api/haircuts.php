@@ -10,7 +10,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'create'], true)) {
+if (!in_array($action, ['list', 'listByFaceShape', 'listLibrary', 'searchLibrary', 'create'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -114,6 +114,43 @@ SQL
         $stmt->execute();
         $hairstyles = array_map($normalizeHaircutRow, $stmt->fetchAll());
         json_response(['hairstyles' => $hairstyles]);
+    }
+
+    if ($action === 'searchLibrary') {
+        $query = trim((string)($input['query'] ?? $input['q'] ?? ''));
+        if ($query === '') {
+            json_response(['hairstyles' => [], 'query' => '', 'message' => 'Enter a search term']);
+        }
+
+        $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $query) . '%';
+        $stmt = $pdo->prepare(
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active,
+                    hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
+                    hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
+             FROM hairstyles hs
+             LEFT JOIN hairstyle_variants hv ON hv.variant_id = (
+                SELECT hv2.variant_id
+                FROM hairstyle_variants hv2
+                WHERE hv2.hairstyle_id = hs.hairstyle_id
+                ORDER BY hv2.confidence_score DESC, hv2.variant_id ASC
+                LIMIT 1
+             )
+             WHERE hs.is_active = TRUE
+               AND (
+                    LOWER(hs.style_name) LIKE LOWER(:q)
+                    OR LOWER(COALESCE(hs.style_code, \'\')) LIKE LOWER(:q)
+                    OR LOWER(COALESCE(hs.description, \'\')) LIKE LOWER(:q)
+               )
+             ORDER BY hs.style_name
+             LIMIT 40'
+        );
+        $stmt->execute([':q' => $like]);
+        $hairstyles = array_map($normalizeHaircutRow, $stmt->fetchAll());
+        json_response([
+            'hairstyles' => $hairstyles,
+            'query' => $query,
+            'count' => count($hairstyles),
+        ]);
     }
 
     if ($action === 'create') {

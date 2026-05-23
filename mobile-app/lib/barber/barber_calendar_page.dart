@@ -7,6 +7,8 @@ import '../user/api_config.dart';
 import '../user/time_format_utils.dart';
 import '../user/user_session.dart';
 
+const Color _kGold = Color(0xFFA99941);
+
 class BarberCalendarPage extends StatefulWidget {
   const BarberCalendarPage({super.key});
 
@@ -15,19 +17,33 @@ class BarberCalendarPage extends StatefulWidget {
 }
 
 class _BarberCalendarPageState extends State<BarberCalendarPage> {
-  late DateTime _month;
+  late DateTime _currentMonth;
+  late DateTime _selectedDate;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _appointments = [];
-  List<Map<String, dynamic>> _requests = [];
   Map<String, int> _bookedByDate = {};
+  Map<String, String> _requestStatusByDate = {};
 
   @override
   void initState() {
     super.initState();
     final now = DateTime.now();
-    _month = DateTime(now.year, now.month);
+    _currentMonth = DateTime(now.year, now.month);
+    _selectedDate = DateTime(now.year, now.month, now.day);
     _load();
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _monthLabel(DateTime month) {
+    const months = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December',
+    ];
+    return '${months[month.month - 1]} ${month.year}';
   }
 
   Future<void> _load() async {
@@ -46,8 +62,8 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         body: jsonEncode({
           'action': 'listMonth',
           'barberID': barberId,
-          'year': _month.year,
-          'month': _month.month,
+          'year': _currentMonth.year,
+          'month': _currentMonth.month,
         }),
       );
       final data = response.body.isNotEmpty
@@ -76,10 +92,17 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         booked[key] = (booked[key] ?? 0) + 1;
       }
 
+      final requestMap = <String, String>{};
+      for (final req in requests) {
+        final key = req['request_date']?.toString() ?? '';
+        if (key.isEmpty) continue;
+        requestMap[key] = req['status']?.toString() ?? 'Pending';
+      }
+
       setState(() {
         _appointments = appointments;
-        _requests = requests;
         _bookedByDate = booked;
+        _requestStatusByDate = requestMap;
         _loading = false;
       });
     } catch (e) {
@@ -90,16 +113,51 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
     }
   }
 
+  List<Map<String, dynamic>> _appointmentsForSelectedDay() {
+    final key = _formatDate(_selectedDate);
+    return _appointments
+        .where((a) => a['appointment_date']?.toString() == key)
+        .toList();
+  }
+
   Future<void> _requestDayOff(DateTime day) async {
     final barberId = UserSession.userId;
     if (barberId == null) return;
+
+    final today = DateTime.now();
+    final dayOnly = DateTime(day.year, day.month, day.day);
+    final todayOnly = DateTime(today.year, today.month, today.day);
+    if (dayOnly.isBefore(todayOnly)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You cannot request time off for past dates.')),
+      );
+      return;
+    }
+
+    final dateKey = _formatDate(day);
+    final existing = _requestStatusByDate[dateKey];
+    if (existing == 'Pending') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have a pending request for this date.')),
+      );
+      return;
+    }
+    if (existing == 'Approved') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This date is already approved as unavailable.')),
+      );
+      return;
+    }
 
     final noteController = TextEditingController();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('Request day off', style: TextStyle(color: Colors.white)),
+        title: Text(
+          'Request day off · ${day.month}/${day.day}',
+          style: const TextStyle(color: Colors.white),
+        ),
         content: TextField(
           controller: noteController,
           style: const TextStyle(color: Colors.white),
@@ -114,10 +172,10 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         ],
       ),
     );
-    if (confirmed != true) return;
-
-    final dateStr =
-        '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    if (confirmed != true) {
+      noteController.dispose();
+      return;
+    }
 
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/barber_schedule.php'),
@@ -125,13 +183,16 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
       body: jsonEncode({
         'action': 'submitUnavailability',
         'barberID': barberId,
-        'requestDate': dateStr,
+        'requestDate': dateKey,
         'note': noteController.text.trim(),
       }),
     );
-
     noteController.dispose();
     if (!mounted) return;
+
+    final data = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
 
     if (response.statusCode == 200) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -140,128 +201,352 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
       _load();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not submit request.')),
+        SnackBar(content: Text(data['error']?.toString() ?? 'Could not submit request.')),
       );
     }
   }
 
+  void _onDayTap(DateTime date, {required bool isPast}) {
+    setState(() => _selectedDate = date);
+    if (isPast) return;
+
+    final dateKey = _formatDate(date);
+    final status = _requestStatusByDate[dateKey];
+    if (status == 'Approved') {
+      return;
+    }
+
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: const Color(0xFF1A1A1A),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        final count = _bookedByDate[dateKey] ?? 0;
+        return Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${date.month}/${date.day}/${date.year}',
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                count > 0 ? '$count appointment(s) scheduled' : 'No appointments',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              if (status != null) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Time-off request: $status',
+                  style: TextStyle(
+                    color: status == 'Approved'
+                        ? Colors.redAccent
+                        : status == 'Rejected'
+                            ? Colors.orange
+                            : _kGold,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              if (status != 'Pending')
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _requestDayOff(date);
+                    },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white38),
+                    ),
+                    child: const Text('Request day off'),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFF0A0A0A),
+        body: Center(child: CircularProgressIndicator(color: Colors.white)),
+      );
+    }
+
+    if (_error != null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0A0A),
+        body: Center(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
+      );
+    }
+
+    final daysInMonth = DateTime(_currentMonth.year, _currentMonth.month + 1, 0).day;
+    final firstDayWeekday = DateTime(_currentMonth.year, _currentMonth.month, 1).weekday;
+    final weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final currentMonthKey = DateTime(today.year, today.month);
+    final canGoPrev = _currentMonth.isAfter(currentMonthKey);
+    final dayAppointments = _appointmentsForSelectedDay();
+
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0A0A0A),
-        title: const Text('My schedule', style: TextStyle(color: Colors.white)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text('My schedule', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         iconTheme: const IconThemeData(color: Colors.white),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left, color: Colors.white),
-            onPressed: () {
-              setState(() => _month = DateTime(_month.year, _month.month - 1));
-              _load();
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right, color: Colors.white),
-            onPressed: () {
-              setState(() => _month = DateTime(_month.year, _month.month + 1));
-              _load();
-            },
-          ),
-        ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
-          : _error != null
-              ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    Text(
-                      '${_month.month}/${_month.year}',
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 12),
-                    ..._appointments.map((appt) {
-                      final isGroup = appt['is_group'] == true;
-                      final label = appt['display_title']?.toString() ??
-                          appt['group_member_name']?.toString() ??
-                          'Customer';
-                      final timeLabel = (appt['time_range']?.toString().isNotEmpty ?? false)
-                          ? appt['time_range']!.toString()
-                          : formatTo12Hour(appt['start_time']?.toString() ?? '');
-                      final peopleCount = (appt['people_count'] as num?)?.toInt() ?? 1;
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 8),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF121212),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white12),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Tap a date to view bookings or request time off (receptionist must approve).',
+              style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _monthLabel(_currentMonth),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
                         ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                '$label · ${appt['appointment_date']} · $timeLabel · ${appt['status']}',
-                                style: const TextStyle(color: Colors.white),
-                              ),
+                      ),
+                      Row(
+                        children: [
+                          IconButton(
+                            onPressed: canGoPrev
+                                ? () {
+                                    setState(() {
+                                      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month - 1);
+                                    });
+                                    _load();
+                                  }
+                                : null,
+                            icon: Icon(Icons.chevron_left, color: canGoPrev ? Colors.white : Colors.white24),
+                          ),
+                          IconButton(
+                            onPressed: () {
+                              setState(() {
+                                _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
+                              });
+                              _load();
+                            },
+                            icon: const Icon(Icons.chevron_right, color: Colors.white),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  GridView.count(
+                    crossAxisCount: 7,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 2.2,
+                    children: weekdays
+                        .map(
+                          (d) => Center(
+                            child: Text(
+                              d,
+                              style: const TextStyle(color: Colors.white70, fontWeight: FontWeight.bold, fontSize: 11),
                             ),
-                            if (isGroup)
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFFA99941).withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFFA99941)),
-                                ),
-                                child: Text(
-                                  'Group · $peopleCount',
-                                  style: const TextStyle(
-                                    color: Color(0xFFA99941),
-                                    fontSize: 11,
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 8),
+                  GridView.count(
+                    crossAxisCount: 7,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    childAspectRatio: 1.0,
+                    mainAxisSpacing: 6,
+                    crossAxisSpacing: 6,
+                    children: [
+                      ...List.generate(firstDayWeekday % 7, (_) => const SizedBox.shrink()),
+                      ...List.generate(daysInMonth, (index) {
+                        final day = index + 1;
+                        final date = DateTime(_currentMonth.year, _currentMonth.month, day);
+                        final dateKey = _formatDate(date);
+                        final isSelected = _selectedDate.year == date.year &&
+                            _selectedDate.month == date.month &&
+                            _selectedDate.day == date.day;
+                        final isPast = date.isBefore(todayDate);
+                        final booked = _bookedByDate[dateKey] ?? 0;
+                        final reqStatus = _requestStatusByDate[dateKey];
+                        final isApprovedOff = reqStatus == 'Approved';
+                        final isPending = reqStatus == 'Pending';
+
+                        Color bg;
+                        Color fg;
+                        if (isApprovedOff) {
+                          bg = Colors.white12;
+                          fg = Colors.white38;
+                        } else if (isSelected) {
+                          bg = _kGold;
+                          fg = Colors.white;
+                        } else if (booked > 0) {
+                          bg = Colors.white;
+                          fg = Colors.black;
+                        } else if (isPast) {
+                          bg = Colors.white10;
+                          fg = Colors.white38;
+                        } else {
+                          bg = const Color(0xFF2A2A2A);
+                          fg = Colors.white;
+                        }
+
+                        return GestureDetector(
+                          onTap: () => _onDayTap(date, isPast: isPast),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: bg,
+                              borderRadius: BorderRadius.circular(8),
+                              border: isPending
+                                  ? Border.all(color: _kGold, width: 2)
+                                  : (reqStatus == 'Rejected'
+                                      ? Border.all(color: Colors.orange, width: 1)
+                                      : null),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  '$day',
+                                  style: TextStyle(
+                                    color: fg,
                                     fontWeight: FontWeight.bold,
+                                    fontSize: 13,
                                   ),
                                 ),
-                              ),
-                          ],
-                        ),
-                      );
-                    }),
-                    if (_appointments.isEmpty)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 12),
-                        child: Text('No appointments this month.', style: TextStyle(color: Colors.white54)),
-                      ),
-                    const SizedBox(height: 16),
-                    const Text('Request unavailability', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: List.generate(7, (index) {
-                        final day = DateTime(_month.year, _month.month, index + 1);
-                        if (day.month != _month.month) return const SizedBox.shrink();
-                        final key =
-                            '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
-                        final pending = _requests.any(
-                          (r) =>
-                              r['request_date']?.toString() == key &&
-                              (r['status']?.toString() ?? '') == 'Pending',
-                        );
-                        return OutlinedButton(
-                          onPressed: () => _requestDayOff(day),
-                          child: Text('${day.day}${pending ? '*' : ''}'),
+                                if (booked > 0 && !isApprovedOff)
+                                  Text(
+                                    '$booked',
+                                    style: TextStyle(color: fg.withValues(alpha: 0.8), fontSize: 9),
+                                  ),
+                                if (isPending)
+                                  const Text('*', style: TextStyle(color: _kGold, fontSize: 10)),
+                              ],
+                            ),
+                          ),
                         );
                       }),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Tap a day to request time off. Receptionist must approve before slots are blocked.',
-                      style: TextStyle(color: Colors.white38, fontSize: 12),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 6,
+                    children: const [
+                      _LegendDot(color: Colors.white, label: 'Has bookings'),
+                      _LegendDot(color: _kGold, label: 'Pending off'),
+                      _LegendDot(color: Colors.white38, label: 'Approved off'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Appointments · ${_formatDate(_selectedDate)}',
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            if (dayAppointments.isEmpty)
+              const Text('No appointments on this date.', style: TextStyle(color: Colors.white54))
+            else
+              ...dayAppointments.map((appt) {
+                final isGroup = appt['is_group'] == true;
+                final label = appt['display_title']?.toString() ?? 'Customer';
+                final timeLabel = (appt['time_range']?.toString().isNotEmpty ?? false)
+                    ? appt['time_range']!.toString()
+                    : formatTo12Hour(appt['start_time']?.toString() ?? '');
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF121212),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '$label · $timeLabel · ${appt['status']}',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ),
+                      if (isGroup)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: _kGold.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: _kGold),
+                          ),
+                          child: Text(
+                            'Group',
+                            style: const TextStyle(color: _kGold, fontSize: 11, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                    ],
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+
+  const _LegendDot({required this.color, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+      ],
     );
   }
 }

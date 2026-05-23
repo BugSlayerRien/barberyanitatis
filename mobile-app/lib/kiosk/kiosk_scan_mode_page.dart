@@ -64,7 +64,8 @@ class _KioskScanModePageState extends State<KioskScanModePage> {
             const SizedBox(height: 20),
             _ModeCard(
               title: '3-angle capture',
-              subtitle: 'We capture front, left, and right photos for AI recommendations.',
+              subtitle:
+                  'Capture front, left, and right photos. AI analyzes your face, recommends matching styles, and can generate previews when you pick a cut.',
               icon: Icons.photo_camera_outlined,
               selected: _selected == KioskScanMode.threeAngle,
               onTap: () => _select(KioskScanMode.threeAngle),

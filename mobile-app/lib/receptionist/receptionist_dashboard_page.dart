@@ -30,6 +30,7 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
   List<Map<String, dynamic>> _todayAppointments = [];
   List<Map<String, dynamic>> _walkIns = [];
   List<Map<String, dynamic>> _trackingData = [];
+  List<Map<String, dynamic>> _automationEvents = [];
 
   final List<Map<String, dynamic>> _barbers = [
     {'initials': 'MC', 'name': 'Mike Chen', 'specialty': 'Precision Cuts', 'rating': 4.9, 'experience': '8 years'},
@@ -84,6 +85,10 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
         _todayAppointments = appointments;
         _walkIns = walkIns;
         _trackingData = ReceptionistApi.buildTrackingData(appointments, walkIns);
+        final automation = data['automation'] as Map<String, dynamic>? ?? {};
+        _automationEvents = (automation['events'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
         _initialLoading = false;
         _error = null;
       });
@@ -190,6 +195,7 @@ class _ReceptionistDashboardPageState extends State<ReceptionistDashboardPage> {
                     ? ReceptionistTrackingPage(
                         appointments: _todayAppointments,
                         walkIns: _walkIns,
+                        automationEvents: _automationEvents,
                         onChanged: () => _loadDashboard(silent: true),
                       )
                     : _selectedIndex == 4

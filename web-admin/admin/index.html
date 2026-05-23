@@ -66,11 +66,9 @@
           </div>
           <div class="toolbar">
             <span class="badge" id="ai-health-badge">AI: Checking...</span>
-            <label class="switch">
-              <input type="checkbox" id="auto-refresh-toggle" />
-              Auto-refresh
-            </label>
-            <button class="btn" id="refresh-all">Refresh</button>
+            <button class="icon-btn refresh-btn" id="refresh-all" type="button" title="Refresh dashboard" aria-label="Refresh dashboard">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>
+            </button>
             <button class="profile-chip" id="profile-avatar-btn" type="button" title="View profile">
               <span class="profile-chip-avatar" id="profile-avatar-initial">A</span>
               <span class="profile-chip-name" id="profile-avatar-name">Admin</span>
@@ -233,6 +231,27 @@
       </main>
     </div>
 
+    <dialog id="confirm-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner">
+        <h3 id="confirm-dialog-title" style="margin: 0 0 8px;">Confirm</h3>
+        <p id="confirm-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
+        <div class="row-wrap" style="justify-content: flex-end;">
+          <button class="btn secondary" id="confirm-dialog-cancel" type="button">Cancel</button>
+          <button class="btn" id="confirm-dialog-confirm" type="button">Confirm</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="message-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner">
+        <h3 id="message-dialog-title" style="margin: 0 0 8px;">Notice</h3>
+        <p id="message-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
+        <div class="row-wrap" style="justify-content: flex-end;">
+          <button class="btn" id="message-dialog-ok" type="button">OK</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="profile-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
         <div class="row-wrap" style="justify-content: space-between; align-items: center;">
@@ -271,6 +290,7 @@
     </dialog>
 
     <script src="../assets/api-config.js"></script>
+    <script src="../assets/ui.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

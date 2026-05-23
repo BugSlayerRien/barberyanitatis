@@ -16,7 +16,7 @@ import '../services/calibration_api.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'suggested_appointment_page.dart';
-import 'ai_chatbot_page.dart';
+import 'widgets/ai_chatbot_fab.dart';
 import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'booking_guard.dart';
@@ -265,6 +265,22 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _loadConsentAndStaging() async {
+    if (widget.kioskMode && !widget.livePreviewOnly) {
+      UserSession.resetScanState();
+      if (!mounted) return;
+      setState(() {
+        _consentAccepted = true;
+        _consentLoading = false;
+        _needsStaging = true;
+        _stagingComplete = false;
+        _stageIndex = 0;
+        _capturedImages = {};
+        _capturedFaceRects.clear();
+        _hairTexture = 'Wavy';
+      });
+      return;
+    }
+
     final consented = await FaceScanService.hasConsent();
     if (!mounted) return;
 
@@ -279,27 +295,34 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    final needsStaging = UserSession.capturedFaceImages == null ||
-        UserSession.capturedFaceImages!.isEmpty;
+    // Full 3-angle scan: never reuse a previous guest's captures or recommendations.
+    UserSession.resetScanState();
+    await _primeHairTextureHint();
 
+    if (!mounted) return;
     setState(() {
       _consentAccepted = consented;
       _consentLoading = false;
-      _needsStaging = needsStaging;
-    });
-
-    if (_needsStaging) {
-      // Load existing images if any (from a previous session)
-      _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
+      _needsStaging = true;
       _stagingComplete = false;
       _stageIndex = 0;
-    } else {
-      _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
-      _stagingComplete = true;
-      if (!widget.livePreviewOnly) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _openResultsPage());
-      }
-    }
+      _capturedImages = {};
+      _capturedFaceRects.clear();
+    });
+  }
+
+  Future<void> _primeHairTextureHint() async {
+    final preferred = await UserSession.loadPreferredHairTexture();
+    if (!mounted) return;
+    final hint = UserSession.normalizeHairTextureLabel(preferred, fallback: 'Wavy');
+    setState(() => _hairTexture = hint);
+  }
+
+  String _hairTextureFromAnalysis(Map<String, dynamic> analysis) {
+    return UserSession.normalizeHairTextureLabel(
+      analysis['hairTexture']?.toString() ?? analysis['hair_texture']?.toString(),
+      fallback: _hairTexture,
+    );
   }
 
   Future<void> _openResultsPage() async {
@@ -313,8 +336,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _capturedImages = {};
         UserSession.capturedFaceImages = null;
       });
+      _resumeScannerResources();
       return;
     }
+    await _releaseScannerResources();
+    if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => FaceScanResultsPage(
@@ -796,7 +822,16 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _maybeSyncServerCalibration();
   }
 
+  /// Live overlay try-on only — no PHP ranking on this screen.
+  bool get _overlayOnlyMode => widget.livePreviewOnly || widget.previewOnly;
+
   bool _shouldAutoFetchRecommendations() {
+    if (_overlayOnlyMode) {
+      return false;
+    }
+    if (!widget.livePreviewOnly && !widget.previewOnly) {
+      return false;
+    }
     if (widget.previewOnly) {
       return false;
     }
@@ -984,6 +1019,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _fetchRecommendations({bool autoTriggered = false}) async {
+    if (_overlayOnlyMode || (!widget.livePreviewOnly && !widget.previewOnly)) {
+      return;
+    }
+
     if (autoTriggered) {
       _autoProcessingStarted = true;
     }
@@ -1053,26 +1092,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _status = 'Suggestions are ready. Pick one to preview.';
       });
 
-      UserSession.lastScan = {
-        'faceShape': _faceShape,
-        'hairTexture': _hairTexture,
-        'headYaw': _headYaw,
-      };
-      UserSession.lastRecommendations = _recommendations;
-      UserSession.hasRecentRecommendations = true;
-
-      UserSession.activeScanSessionId = null;
-
-      await AiFunnelService.trackScan(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: UserSession.userId,
-        faceShape: _faceShape,
-        hairTexture: _hairTexture,
-        hairDensity: null,
-        hairLength: null,
-        recommendationCount: _recommendations.length,
-      );
-
       _lastRecommendationFetchAt = DateTime.now();
     } catch (e) {
       if (autoTriggered) {
@@ -1091,6 +1110,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   Future<void> _fetchRecommendationsWeb(
       {bool showToastOnError = true, bool autoTriggered = false}) async {
+    if (_overlayOnlyMode || (!widget.livePreviewOnly && !widget.previewOnly)) {
+      return;
+    }
+
     if (autoTriggered) {
       _autoProcessingStarted = true;
     }
@@ -1181,25 +1204,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _status =
           'Suggestions are ready. Hair preview now uses your selected style.';
       });
-
-      UserSession.lastScan = {
-        'faceShape': _faceShape,
-        'hairTexture': _hairTexture,
-      };
-      UserSession.lastRecommendations = _recommendations;
-      UserSession.hasRecentRecommendations = true;
-
-      UserSession.activeScanSessionId = null;
-
-      await AiFunnelService.trackScan(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: UserSession.userId,
-        faceShape: _faceShape,
-        hairTexture: _hairTexture,
-        hairDensity: null,
-        hairLength: null,
-        recommendationCount: _recommendations.length,
-      );
 
       _lastRecommendationFetchAt = DateTime.now();
     } catch (e) {
@@ -1456,13 +1460,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _selectedIndex = 0;
       _status = 'Deterministic mode: default haircut applied for testing.';
     });
-
-    UserSession.lastScan = {
-      'faceShape': _faceShape,
-      'hairTexture': _hairTexture,
-      'headYaw': _headYaw,
-    };
-    UserSession.lastRecommendations = [defaultStyle];
   }
 
   void _seedRecommendationsForLivePreview() {
@@ -1484,25 +1481,14 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    _loadingRecommendations = true;
-    _status = 'Loading personalized suggestions...';
-
+    _loadingRecommendations = false;
+    _status =
+        'Complete the 3-angle capture to open your personalized recommendations.';
     if (preset != null) {
       _overlayPresetOnly = _normalizePresetRecommendation(preset);
     } else {
       _overlayPresetOnly = null;
     }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_loadingRecommendations) {
-        return;
-      }
-      if (kIsWeb) {
-        _fetchRecommendationsWeb(showToastOnError: false, autoTriggered: true);
-      } else {
-        _fetchRecommendations(autoTriggered: true);
-      }
-    });
   }
 
   Map<String, dynamic> _normalizePresetRecommendation(Map<String, dynamic> preset) {
@@ -1728,6 +1714,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     if (_finishingStaging) return;
     _finishingStaging = true;
 
+    // Stop camera immediately — staging is done; avoid stream running on results route.
+    await _releaseScannerResources();
+
     final validation = FaceScanService.validateCaptures(_capturedImages);
     if (!validation.ok) {
       _finishingStaging = false;
@@ -1735,6 +1724,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(validation.error ?? 'Invalid captures')),
         );
+        _resumeScannerResources();
       }
       return;
     }
@@ -1747,9 +1737,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       setState(() => _stagingComplete = true);
     }
 
+    final scanSessionId = UserSession.ensureScanSessionId();
     try {
       await FaceScanService.uploadCaptures(
-        scanSessionId: UserSession.ensureScanSessionId(),
+        scanSessionId: scanSessionId,
         userId: UserSession.userId,
         captures: _capturedImages,
         faceShape: _faceShape,
@@ -1763,18 +1754,54 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           SnackBar(content: Text('Upload failed: $e')),
         );
         setState(() => _stagingComplete = false);
+        _resumeScannerResources();
       }
       return;
     }
 
+    var analyzedFaceShape = _faceShape;
+    var analyzedHairTexture = _hairTexture;
+    var hairLengthLevel = 1;
+    var hairLengthLabel = 'short';
+    try {
+      final analysis = await FaceScanService.analyzeCaptures(scanSessionId: scanSessionId);
+      analyzedFaceShape = analysis['faceShape']?.toString() ?? _faceShape;
+      analyzedHairTexture = _hairTextureFromAnalysis(analysis);
+      hairLengthLevel = int.tryParse('${analysis['hairLengthLevel']}') ?? 1;
+      hairLengthLabel = analysis['hairLength']?.toString() ?? 'short';
+      if (mounted) {
+        setState(() => _hairTexture = analyzedHairTexture);
+      }
+      UserSession.lastScan = {
+        'faceShape': analyzedFaceShape,
+        'hairTexture': analyzedHairTexture,
+        'hairLength': hairLengthLabel,
+        'hairLengthLevel': hairLengthLevel,
+      };
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'AI analysis unavailable (${e.toString()}). Using on-device estimate.',
+            ),
+          ),
+        );
+      }
+    }
+
     _finishingStaging = false;
+    if (!mounted) return;
+    await _releaseScannerResources();
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => FaceScanResultsPage(
           captures: Map.from(_capturedImages),
-          faceShape: _faceShape,
-          hairTexture: _hairTexture,
+          faceShape: analyzedFaceShape,
+          hairTexture: analyzedHairTexture,
+          hairLengthLevel: hairLengthLevel,
+          hairLengthLabel: hairLengthLabel,
           presetRecommendation: widget.presetRecommendation,
           kioskMode: widget.kioskMode,
         ),
@@ -1803,21 +1830,41 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _isFaceWellPositioned(Rect face, double? yaw, double requiredYaw, double tolerance) {
     final faceCenterX = face.left + (face.width / 2);
     final faceCenterY = face.top + (face.height / 2);
-    
-    final xCentered = faceCenterX >= 0.3 && faceCenterX <= 0.7;
-    final yCentered = faceCenterY >= 0.2 && faceCenterY <= 0.7;
-    
+
+    final xCentered = faceCenterX >= 0.28 && faceCenterX <= 0.72;
+    final yCentered = faceCenterY >= 0.18 && faceCenterY <= 0.75;
+
     final faceArea = face.width * face.height;
-    const double minArea = 0.08;
-    const double maxArea = 0.4;
+    final minArea = widget.kioskMode ? 0.05 : 0.08;
+    const double maxArea = 0.45;
     final bool goodSize = faceArea >= minArea && faceArea <= maxArea;
-    
-    final yawMatch = yaw != null && (yaw - requiredYaw).abs() <= tolerance;
-    
+
+    bool yawMatch;
+    if (yaw != null) {
+      yawMatch = (yaw - requiredYaw).abs() <= tolerance;
+    } else if (requiredYaw.abs() <= 5) {
+      yawMatch = true;
+    } else if (requiredYaw < 0) {
+      yawMatch = faceCenterX <= 0.58;
+    } else {
+      yawMatch = faceCenterX >= 0.42;
+    }
+
     return xCentered && yCentered && goodSize && yawMatch;
   }
 
+  Future<void> _leaveScannerScreen() async {
+    UserSession.resetScanState();
+    await _releaseScannerResources();
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<bool> _confirmExitScanner() async {
+    if (widget.kioskMode) {
+      return true;
+    }
     final leave = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -1875,17 +1922,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final capturedCount = _capturedImages.length;
 
     return PopScope(
-      canPop: false,
+      canPop: widget.kioskMode,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
-          unawaited(_exitScannerFlow());
+          unawaited(_leaveScannerScreen());
         }
       },
       child: Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
-        onBack: () => unawaited(_exitScannerFlow()),
+        showCustomerActions: !widget.kioskMode,
+        onBack: () => unawaited(_leaveScannerScreen()),
       ),
       body: SafeArea(
         child: Padding(
@@ -1910,6 +1958,30 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               ),
               const SizedBox(height: 14),
               _stageStatusRow(capturedCount),
+              if (widget.kioskMode || kIsWeb) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: _currentFaceRect == null || _finishingStaging
+                        ? null
+                        : () async {
+                            if (kIsWeb) {
+                              await _captureCurrentWeb();
+                            } else if (_camera != null && _camera!.value.isStreamingImages) {
+                              // Manual capture uses last good frame from stream state.
+                              await _captureStagingFromManual();
+                            }
+                          },
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white54),
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    child: const Text('Capture this angle now'),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -1922,6 +1994,46 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             ),
       ),
     );
+  }
+
+  Future<void> _captureStagingFromManual() async {
+    if (_finishingStaging || _camera == null || !_camera!.value.isInitialized) {
+      return;
+    }
+    try {
+      await _camera!.stopImageStream();
+      final file = await _camera!.takePicture();
+      final bytes = await file.readAsBytes();
+      if (!FaceScanService.isValidJpeg(bytes)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Invalid capture. Try again.')),
+          );
+        }
+        await _restartStagingStream();
+        return;
+      }
+      final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
+      final base64Image = base64Encode(bytes);
+      if (_currentFaceRect != null) {
+        _capturedFaceRects[stage.keyName] = _currentFaceRect!;
+      }
+      setState(() {
+        _capturedImages[stage.keyName] = base64Image;
+        _goodPositionFrames = 0;
+      });
+      if (_stageIndex < _stages.length - 1) {
+        setState(() => _stageIndex++);
+        await _restartStagingStream();
+      } else {
+        UserSession.capturedFaceImages = Map.from(_capturedImages);
+        UserSession.captureFaceRects = Map.from(_capturedFaceRects);
+        await _finishStagingCapture();
+      }
+    } catch (e) {
+      debugPrint('[AiFaceScan] Manual capture error: $e');
+      await _restartStagingStream();
+    }
   }
 
   Widget? _kioskLivePreviewBottomBar() {
@@ -2226,17 +2338,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return StatefulBuilder(
       builder: (context, setLocal) {
         return PopScope(
-          canPop: false,
+          canPop: widget.kioskMode,
           onPopInvokedWithResult: (didPop, _) {
             if (!didPop) {
-              unawaited(_exitScannerFlow());
+              unawaited(_leaveScannerScreen());
             }
           },
           child: Scaffold(
           backgroundColor: const Color(0xFF0A0A0A),
           appBar: AppTopBar(
             showBack: true,
-            onBack: () => unawaited(_exitScannerFlow()),
+            showCustomerActions: !widget.kioskMode,
+            onBack: () => unawaited(_leaveScannerScreen()),
           ),
           body: SafeArea(
             child: Padding(
@@ -2357,6 +2470,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppTopBar(
         showBack: true,
+        showCustomerActions: !widget.kioskMode,
         onBack: () {
           if (widget.kioskMode || widget.previewOnly) {
             Navigator.of(context).pop();
@@ -2371,23 +2485,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               currentIndex: 2,
               onTap: _onScannerBottomNav,
             ),
-      floatingActionButton: widget.kioskMode
-          ? null
-          : Padding(
-        padding: const EdgeInsets.only(bottom: 70),
-        child: FloatingActionButton(
-          heroTag: 'scanner_ai_chat_fab',
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-          tooltip: 'Open AI Barber Chat',
-          onPressed: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AiChatbotPage()),
-            );
-          },
-          child: const Icon(Icons.support_agent_rounded),
-        ),
-      ),
+      floatingActionButton:
+          widget.kioskMode ? null : const AiChatbotFab(heroTag: 'scanner_ai_chat_fab'),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       body: !_initialized
           ? const Center(child: CircularProgressIndicator(color: Colors.white))
@@ -2404,9 +2503,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                         child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Live Hair Preview',
-                          style: TextStyle(
+                        Text(
+                          widget.livePreviewOnly
+                              ? 'Live style preview'
+                              : 'Live Hair Preview',
+                          style: const TextStyle(
                               color: Colors.white,
                               fontSize: 22,
                               fontWeight: FontWeight.w700),
@@ -2421,27 +2522,36 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 12),
                         ),
-                        const SizedBox(height: 12),
-                        _buildStatusIndicators(),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: _chip(
-                                label: 'Detected face: $_faceShape',
-                                icon: Icons.face_retouching_natural,
+                        if (!_overlayOnlyMode) ...[
+                          const SizedBox(height: 12),
+                          _buildStatusIndicators(),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _chip(
+                                  label: 'Detected face: $_faceShape',
+                                  icon: Icons.face_retouching_natural,
+                                ),
                               ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: _chip(
-                                label:
-                                    'Head turn: ${(_headYaw ?? 0).toStringAsFixed(1)} deg',
-                                icon: Icons.threed_rotation,
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _chip(
+                                  label:
+                                      'Head turn: ${(_headYaw ?? 0).toStringAsFixed(1)} deg',
+                                  icon: Icons.threed_rotation,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                            ],
+                          ),
+                        ] else ...[
+                          const SizedBox(height: 10),
+                          const Text(
+                            'Move your head to see how the selected cut looks. '
+                            'Go back for your full AI recommendations.',
+                            style: TextStyle(color: Colors.white60, fontSize: 12, height: 1.4),
+                          ),
+                        ],
                         const SizedBox(height: 12),
                         _buildScannerCard(),
                         const SizedBox(height: 10),
@@ -2494,6 +2604,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                             ),
                           ),
                           const SizedBox(height: 10),
+                        ] else if (widget.livePreviewOnly) ...[
+                          const SizedBox(height: 8),
                         ] else ...[
                           SizedBox(
                             width: double.infinity,
@@ -2519,7 +2631,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                                   : const Text('Proceed to Booking'),
                             ),
                           ),
-                          if (!widget.livePreviewOnly) ...[
                           const SizedBox(height: 14),
                           if (_loadingRecommendations)
                             const Padding(
@@ -2542,7 +2653,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                           const SizedBox(height: 8),
                           _buildTopThreePanel(),
                           const SizedBox(height: 10),
-                          ],
                           Align(
                             alignment: Alignment.centerLeft,
                             child: OutlinedButton.icon(
@@ -2576,8 +2686,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                     ),
                   ),
                 ),
-                    _buildSlidingControlsSheet(constraints),
-                if (_showCalibrationMode) _buildCalibrationOverlay(),
+                    if (!_overlayOnlyMode) _buildSlidingControlsSheet(constraints),
+                if (_showCalibrationMode && !_overlayOnlyMode) _buildCalibrationOverlay(),
               ],
             );
               },

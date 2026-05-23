@@ -10,15 +10,14 @@ import 'booking_guard.dart';
 import 'dashboard_page.dart';
 import 'haircuts_list_page.dart';
 import 'saved_haircuts_page.dart';
-import 'scanner/face_scan_compositor.dart';
-import 'scanner/overlay_asset_cache.dart';
-import 'scanner/overlay_registry.dart';
+import 'api_config.dart';
 import 'scanner/scanner_layout.dart';
-import 'scanner/static_face_preview.dart';
 import 'services/booking_slots_service.dart';
+import 'services/booking_draft_service.dart';
 import 'services/face_scan_service.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
+import 'widgets/ai_chatbot_fab.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
@@ -29,6 +28,8 @@ class FaceScanResultsPage extends StatefulWidget {
   final Map<String, String> captures;
   final String faceShape;
   final String hairTexture;
+  final int hairLengthLevel;
+  final String hairLengthLabel;
   final Map<String, dynamic>? presetRecommendation;
   final bool kioskMode;
 
@@ -37,6 +38,8 @@ class FaceScanResultsPage extends StatefulWidget {
     required this.captures,
     required this.faceShape,
     required this.hairTexture,
+    this.hairLengthLevel = 1,
+    this.hairLengthLabel = 'short',
     this.presetRecommendation,
     this.kioskMode = false,
   });
@@ -60,6 +63,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   Map<String, dynamic>? _selected;
   int _previewAngleIndex = 0;
   bool _bookingInFlight = false;
+  bool _previewGenerating = false;
+  String? _previewError;
+  String? _lengthNote;
+  final Map<String, Map<String, String>> _replicatePreviewsByVariant = {};
   static const _angleKeys = ['front', 'left', 'right'];
   static const _angleLabels = ['Front', 'Left', 'Right'];
 
@@ -70,8 +77,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   void initState() {
     super.initState();
     _selected = widget.presetRecommendation;
-    unawaited(OverlayAssetCache.preload());
+    UserSession.lastRecommendations = [];
+    UserSession.hasRecentRecommendations = false;
     _loadRecommendations();
+  }
+
+  void _leaveResults() {
+    UserSession.resetScanState();
+    Navigator.of(context).pop();
   }
 
   Future<void> _loadRecommendations({bool preserveSelection = false}) async {
@@ -85,7 +98,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       final quick = await FaceScanService.fetchQuickRankings(
         faceShape: widget.faceShape,
         hairTexture: widget.hairTexture,
-        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
         userId: UserSession.userId,
       );
 
@@ -126,7 +138,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       final data = await FaceScanService.fetchRecommendations(
         faceShape: widget.faceShape,
         hairTexture: widget.hairTexture,
-        hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
         userId: UserSession.userId,
       );
 
@@ -234,6 +245,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     UserSession.lastScan = {
       'faceShape': widget.faceShape,
       'hairTexture': widget.hairTexture,
+      'hairLength': widget.hairLengthLabel,
+      'hairLengthLevel': widget.hairLengthLevel,
     };
     UserSession.lastRecommendations = List<Map<String, dynamic>>.from(topPicks);
     UserSession.hasRecentRecommendations = topPicks.isNotEmpty;
@@ -259,8 +272,182 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     await _loadRecommendations(preserveSelection: true);
   }
 
-  void _selectStyle(Map<String, dynamic> style) {
-    setState(() => _selected = style);
+  Future<void> _selectStyle(Map<String, dynamic> style) async {
+    final variantId = int.tryParse(
+          '${style['variant_id'] ?? style['variantId'] ?? 0}',
+        ) ??
+        0;
+
+    final alreadyCached =
+        variantId > 0 && _previewUrlsForVariant(variantId) != null;
+
+    if (!alreadyCached) {
+      final styleName = style['style_name']?.toString() ??
+          style['styleName']?.toString() ??
+          'this style';
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text(
+            'Generate AI preview?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: Text(
+            'Generate a preview for "$styleName"? This uses Replicate credits and can take several minutes.',
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Generate'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) {
+        return;
+      }
+    }
+
+    setState(() {
+      _selected = style;
+      _previewError = null;
+    });
+    unawaited(_loadReplicatePreviewsForSelected());
+  }
+
+  int? get _selectedVariantId {
+    final raw = _selected?['variant_id'] ?? _selected?['variantId'];
+    return int.tryParse('$raw');
+  }
+
+  Map<String, String>? _previewUrlsForVariant(int variantId) {
+    return _replicatePreviewsByVariant['$variantId'];
+  }
+
+  Map<String, String> _catalogPreviewUrls(Map<String, dynamic> style) {
+    String pick(List<String> keys) {
+      for (final key in keys) {
+        final value = style[key]?.toString().trim() ?? '';
+        if (value.isNotEmpty) {
+          return value;
+        }
+      }
+      return '';
+    }
+
+    return {
+      'frontViewUrl': pick(['front_view_url', 'frontViewUrl', 'image']),
+      'sideViewUrl': pick(['side_view_url', 'sideViewUrl', 'sideView']),
+      'backViewUrl': pick(['back_view_url', 'backViewUrl', 'backView']),
+    };
+  }
+
+  Future<bool> _confirmBookWithoutAiPreview(String styleName) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Book without AI preview?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'You have not generated a personalized try-on for "$styleName". '
+          'You can still book using the catalog style reference. '
+          'Your barber will see the standard style photos, not an AI composite.',
+          style: const TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Go back'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Continue booking'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  String? _previewUrlForAngle(int variantId, String angleKey) {
+    final urls = _previewUrlsForVariant(variantId);
+    if (urls == null) return null;
+    switch (angleKey) {
+      case 'front':
+        return urls['frontViewUrl'];
+      case 'left':
+        return urls['sideViewUrl'];
+      case 'right':
+        return urls['backViewUrl'];
+      default:
+        return null;
+    }
+  }
+
+  Future<void> _loadReplicatePreviewsForSelected({bool forceRegenerate = false}) async {
+    final variantId = _selectedVariantId;
+    if (variantId == null || variantId <= 0) return;
+    if (!forceRegenerate && _replicatePreviewsByVariant.containsKey('$variantId')) {
+      return;
+    }
+
+    setState(() {
+      _previewGenerating = true;
+      _previewError = null;
+      if (forceRegenerate) {
+        _replicatePreviewsByVariant.remove('$variantId');
+      }
+    });
+
+    try {
+      final data = await FaceScanService.generateStylePreviews(
+        scanSessionId: UserSession.ensureScanSessionId(),
+        variantId: variantId,
+        styleName: _selectedStyleName,
+        styleCode: _selected?['style_code']?.toString() ?? _selected?['styleCode']?.toString(),
+        userId: UserSession.userId,
+        faceShape: widget.faceShape,
+        hairTexture: widget.hairTexture,
+        hairLengthLevel: widget.hairLengthLevel,
+        forceRegenerate: forceRegenerate,
+      );
+      if (!mounted) return;
+      final urls = FaceScanService.previewUrlsFromResponse(data);
+      final fromCache = data['cached'] == true;
+      setState(() {
+        _replicatePreviewsByVariant['$variantId'] = urls;
+        _lengthNote = data['lengthNote']?.toString();
+        _previewGenerating = false;
+      });
+      UserSession.selectedPreviewImages = urls;
+      UserSession.customerPreviewImages = urls;
+      if (fromCache) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Loaded saved preview (no new Replicate credits used).'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _previewError = e.toString();
+        _previewGenerating = false;
+      });
+    }
   }
 
   String get _selectedStyleName =>
@@ -333,26 +520,31 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         hairTexture: widget.hairTexture,
       );
 
-      final previewUrls = FaceScanService.captureFileUrls(scanSessionId);
-
       UserSession.selectedVariantId = variantId;
       UserSession.selectedStyleName = _selectedStyleName;
-      UserSession.selectedPreviewImages = previewUrls.isNotEmpty
-          ? previewUrls
-          : {
-              'frontViewUrl': selected['front_view_url']?.toString() ?? '',
-              'sideViewUrl': selected['side_view_url']?.toString() ?? '',
-              'backViewUrl': selected['back_view_url']?.toString() ?? '',
-            };
-      UserSession.customerPreviewImages = UserSession.selectedPreviewImages;
 
-      unawaited(
-        _saveCompositedPreviewsInBackground(
-          scanSessionId: scanSessionId,
-          variantId: variantId,
-          userId: userId,
-        ),
-      );
+      var previewUrls = _previewUrlsForVariant(variantId);
+      if (previewUrls == null || (previewUrls['frontViewUrl'] ?? '').isEmpty) {
+        final catalog = _catalogPreviewUrls(selected);
+        if ((catalog['frontViewUrl'] ?? '').isEmpty) {
+          if (!mounted) return;
+          setState(() => _bookingInFlight = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('This style has no bookable images yet.')),
+          );
+          return;
+        }
+        if (!mounted) return;
+        final proceed = await _confirmBookWithoutAiPreview(_selectedStyleName);
+        if (!mounted) return;
+        if (!proceed) {
+          setState(() => _bookingInFlight = false);
+          return;
+        }
+        previewUrls = catalog;
+      }
+      UserSession.selectedPreviewImages = previewUrls;
+      UserSession.customerPreviewImages = previewUrls;
 
       unawaited(
         AiFunnelService.saveSelection(
@@ -390,12 +582,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             content: Text('No available slots found. Please choose manually.'),
           ),
         );
+        await BookingDraftService.saveFromSession(step: 'barber');
+        if (!mounted) return;
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
         );
         return;
       }
 
+      await BookingDraftService.saveFromSession(step: 'barber');
+      if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
@@ -410,47 +606,34 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
   }
 
-  Future<void> _saveCompositedPreviewsInBackground({
-    required String scanSessionId,
-    required int variantId,
-    required int userId,
-  }) async {
-    try {
-      final composited = await FaceScanCompositor.compositeAllAngles(
-        capturesBase64: widget.captures,
-        styleName: _selectedStyleName,
-        faceRectsByAngle: _faceRects,
-      );
-      if (composited.isEmpty) {
-        return;
-      }
-      final saved = await FaceScanService.saveCompositedPreviews(
-        scanSessionId: scanSessionId,
-        variantId: variantId,
-        previewsBase64: composited,
-        userId: userId,
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
-      );
-      UserSession.selectedPreviewImages = saved;
-      UserSession.customerPreviewImages = saved;
-    } catch (_) {
-      // Raw capture URLs are already stored for booking.
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) {
+          UserSession.resetScanState();
+        }
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      appBar: const AppTopBar(showBack: true),
+      appBar: AppTopBar(
+        showBack: true,
+        showCustomerActions: !widget.kioskMode,
+        onBack: _leaveResults,
+      ),
       body: _error != null ? _errorView() : _content(),
+      floatingActionButton: widget.kioskMode
+          ? null
+          : const AiChatbotFab(heroTag: 'results_ai_chat_fab'),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: widget.kioskMode
           ? null
           : AppBottomNavBar(
               currentIndex: 2,
               onTap: (index) {
                 if (index == 0) {
+                  UserSession.resetScanState();
                   Navigator.of(context).pushReplacement(
                     MaterialPageRoute(builder: (_) => const DashboardPage()),
                   );
@@ -471,6 +654,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 }
               },
             ),
+    ),
     );
   }
 
@@ -490,11 +674,25 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  Widget _captureFallback(String? captureB64) {
+    if (captureB64 != null && captureB64.isNotEmpty) {
+      return Image.memory(
+        base64Decode(captureB64),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        gaplessPlayback: true,
+      );
+    }
+    return const Center(
+      child: Icon(Icons.face, color: Colors.white38, size: 48),
+    );
+  }
+
   Widget _content() {
     final angleKey = _angleKeys[_previewAngleIndex];
     final captureB64 = widget.captures[angleKey];
-    final styleName = _selectedStyleName;
-    final yaw = OverlayRegistry.yawForCaptureAngle(angleKey);
+    final variantId = _selectedVariantId ?? 0;
+    final previewUrl = variantId > 0 ? _previewUrlForAngle(variantId, angleKey) : null;
 
     return Stack(
       children: [
@@ -511,6 +709,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 _chip('Face: ${widget.faceShape}'),
                 const SizedBox(width: 8),
                 _chip('Hair: ${widget.hairTexture}'),
+                const SizedBox(width: 8),
+                _chip('Length: ${widget.hairLengthLabel}'),
                 if (_aiPowered) ...[
                   const SizedBox(width: 8),
                   _chip('AI', highlight: true),
@@ -522,31 +722,84 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               Text(_aiSummary, style: const TextStyle(color: Colors.white70, fontSize: 13)),
             ],
             const SizedBox(height: 14),
+            if (_selected != null &&
+                !_previewGenerating &&
+                _previewUrlsForVariant(_selectedVariantId ?? 0) == null)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  'Tap a style below to generate an AI preview (uses Replicate credits once per style).',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+              ),
             _buildCaptureThumbnails(),
             const SizedBox(height: 10),
+            if (_lengthNote != null && _lengthNote!.isNotEmpty) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A2208),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFC9B46A)),
+                ),
+                child: Text(
+                  _lengthNote!,
+                  style: const TextStyle(color: Color(0xFFC9B46A), fontSize: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+            ],
             ScannerLayout.previewFrame(
               context: context,
-              child: captureB64 != null && _selected != null
-                  ? StaticFacePreview(
-                      key: ValueKey('$styleName-$angleKey'),
-                      captureBase64: captureB64,
-                      angleKey: angleKey,
-                      styleName: styleName,
-                      normalizedFaceRect: _faceRects[angleKey],
-                      headYaw: yaw,
+              child: _previewGenerating
+                  ? const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          CircularProgressIndicator(color: Colors.white),
+                          SizedBox(height: 12),
+                          Text(
+                            'Generating AI preview…\nThis can take a few minutes.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                        ],
+                      ),
                     )
-                  : captureB64 != null
-                      ? Image.memory(
-                          base64Decode(captureB64),
+                  : previewUrl != null && previewUrl.isNotEmpty
+                      ? Image.network(
+                          ApiConfig.resolveImageUrl(previewUrl),
+                          key: ValueKey('replicate-$variantId-$angleKey'),
                           fit: BoxFit.cover,
                           width: double.infinity,
                           gaplessPlayback: true,
+                          errorBuilder: (_, __, ___) => _captureFallback(captureB64),
                         )
-                      : const Center(
-                          child: Icon(Icons.face, color: Colors.white38, size: 48),
-                        ),
+                      : _captureFallback(captureB64),
             ),
+            if (_previewError != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'AI preview unavailable — showing your photo.',
+                style: TextStyle(color: Colors.orange.shade200, fontSize: 12),
+              ),
+            ],
             const SizedBox(height: 8),
+            if (_selected != null && !_previewGenerating) ...[
+              Center(
+                child: TextButton.icon(
+                  onPressed: _previewUrlsForVariant(variantId) != null
+                      ? () => _loadReplicatePreviewsForSelected(forceRegenerate: true)
+                      : null,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text('Regenerate preview'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                ),
+              ),
+              const SizedBox(height: 4),
+            ],
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(_angleLabels.length, (i) {

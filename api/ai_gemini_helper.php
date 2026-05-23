@@ -81,6 +81,64 @@ function ai_gemini_generate_text(string $prompt, float $temperature = 0.4, int $
     return trim($text) !== '' ? trim($text) : null;
 }
 
+/** Plain-text replies (chatbot) — no JSON response mode. */
+function ai_gemini_generate_plain_text(string $prompt, float $temperature = 0.65, int $maxTokens = 1024): ?string
+{
+    if (!ai_gemini_enabled()) {
+        return null;
+    }
+
+    $model = ai_gemini_model();
+    $url = 'https://generativelanguage.googleapis.com/v1beta/models/'
+        . rawurlencode($model)
+        . ':generateContent?key=' . urlencode(ai_gemini_api_key());
+
+    $payload = json_encode([
+        'contents' => [
+            ['parts' => [['text' => $prompt]]],
+        ],
+        'generationConfig' => [
+            'temperature' => $temperature,
+            'maxOutputTokens' => $maxTokens,
+        ],
+    ]);
+
+    $ch = curl_init($url);
+    $opts = [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_TIMEOUT => 45,
+    ];
+    if (function_exists('api_curl_ssl_options')) {
+        $opts += api_curl_ssl_options();
+    }
+    curl_setopt_array($ch, $opts);
+    $result = curl_exec($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($result === false || $status < 200 || $status >= 300) {
+        return null;
+    }
+
+    $data = json_decode($result, true);
+    if (!is_array($data)) {
+        return null;
+    }
+
+    $parts = $data['candidates'][0]['content']['parts'] ?? [];
+    $text = '';
+    foreach ($parts as $part) {
+        if (isset($part['text'])) {
+            $text .= (string)$part['text'];
+        }
+    }
+
+    return trim($text) !== '' ? trim($text) : null;
+}
+
 function ai_gemini_parse_json(?string $raw): ?array
 {
     if ($raw === null || trim($raw) === '') {

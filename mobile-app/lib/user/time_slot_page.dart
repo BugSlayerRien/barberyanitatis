@@ -11,6 +11,7 @@ import 'api_config.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/face_scan_service.dart';
+import 'services/booking_draft_service.dart';
 
 class TimeSlotPage extends StatefulWidget {
   final int barberId;
@@ -800,6 +801,7 @@ Keep the total response under 24 words.
 
                       final bookingData = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
                       final appointmentId = int.tryParse(bookingData['appointmentID']?.toString() ?? '') ?? 0;
+                      await BookingDraftService.clear();
                       if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null) {
                         await AiFunnelService.trackBookingCreated(
                           scanSessionId: UserSession.ensureScanSessionId(),

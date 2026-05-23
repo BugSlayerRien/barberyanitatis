@@ -23,9 +23,9 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
 
   void _continue() {
     final name = _nameController.text.trim();
-    if (name.length < 2) {
+    if (name.length < 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your name')),
+        const SnackBar(content: Text('Please enter at least 4 letters for your name')),
       );
       return;
     }
@@ -54,7 +54,7 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
               textCapitalization: TextCapitalization.words,
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: 'Your first name',
+                hintText: 'Your name (at least 4 letters)',
                 hintStyle: const TextStyle(color: Colors.white38),
                 filled: true,
                 fillColor: KioskColors.panel,

@@ -23,6 +23,7 @@ class KioskScaffold extends StatelessWidget {
       backgroundColor: KioskColors.background,
       appBar: AppTopBar(
         showBack: showBack,
+        showCustomerActions: false,
         onBack: showBack ? () => Navigator.of(context).maybePop() : null,
       ),
       body: Column(

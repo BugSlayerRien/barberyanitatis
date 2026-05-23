@@ -2,6 +2,30 @@
 
 declare(strict_types=1);
 
+function api_curl_insecure_ssl(): bool
+{
+    $raw = trim((string)(getenv('API_INSECURE_SSL') ?: ($_ENV['API_INSECURE_SSL'] ?? '')));
+    return in_array(strtolower($raw), ['1', 'true', 'yes'], true);
+}
+
+/**
+ * Extra cURL options for HTTPS on Windows dev machines with broken CA stores.
+ * Set API_INSECURE_SSL=true in .env (local only — never in production).
+ *
+ * @return array<int, mixed>
+ */
+function api_curl_ssl_options(): array
+{
+    if (!api_curl_insecure_ssl()) {
+        return [];
+    }
+
+    return [
+        CURLOPT_SSL_VERIFYPEER => false,
+        CURLOPT_SSL_VERIFYHOST => 0,
+    ];
+}
+
 function load_project_env(): void
 {
     static $loaded = false;

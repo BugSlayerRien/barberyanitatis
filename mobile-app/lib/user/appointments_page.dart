@@ -18,6 +18,7 @@ import 'suggested_appointment_page.dart';
 import 'barber_selection_page.dart';
 import 'payment_page.dart';
 import '../shared/pagination_controls.dart';
+import '../main.dart';
 
 class AppointmentsPage extends StatefulWidget {
   final int? highlightAppointmentId;
@@ -35,7 +36,8 @@ class AppointmentsPage extends StatefulWidget {
   State<AppointmentsPage> createState() => _AppointmentsPageState();
 }
 
-class _AppointmentsPageState extends State<AppointmentsPage> {
+class _AppointmentsPageState extends State<AppointmentsPage>
+    with WidgetsBindingObserver, RouteAware {
   int _selectedTab = 0;
   int _upcomingPage = 1;
   int _completedPage = 1;
@@ -44,12 +46,47 @@ class _AppointmentsPageState extends State<AppointmentsPage> {
   bool _loading = true;
   String? _error;
   final Set<int> _processingAppointmentIds = <int>{};
+  bool _isRouteSubscribed = false;
 
   static const int _itemsPerPage = 4;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _loadAppointments();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    if (_isRouteSubscribed) {
+      routeObserver.unsubscribe(this);
+      _isRouteSubscribed = false;
+    }
+    super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_isRouteSubscribed) return;
+    final route = ModalRoute.of(context);
+    if (route is PageRoute) {
+      routeObserver.subscribe(this, route);
+      _isRouteSubscribed = true;
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _loadAppointments();
+    }
+  }
+
+  @override
+  void didPopNext() {
     _loadAppointments();
   }
 

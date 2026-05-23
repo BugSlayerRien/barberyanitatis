@@ -151,6 +151,22 @@ function ensure_walkin_guest_name_column(PDO $pdo): void
     $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS guest_name VARCHAR(120)');
 }
 
+function ensure_walkin_queue_timestamp_columns(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    if ((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'pgsql') {
+        return;
+    }
+
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS actual_start TIMESTAMPTZ');
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS actual_end TIMESTAMPTZ');
+}
+
 function audit_log(PDO $pdo, string $action_type, ?string $table_name, ?string $record_id, ?array $old_values, ?array $new_values, ?int $user_id = null): bool
 {
     try {

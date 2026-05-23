@@ -16,6 +16,83 @@ $faceShape = trim((string)($input['faceShape'] ?? ($_POST['faceShape'] ?? '')));
 $hairTexture = trim((string)($input['hairTexture'] ?? ($_POST['hairTexture'] ?? '')));
 $hairDensity = trim((string)($input['hairDensity'] ?? ($_POST['hairDensity'] ?? '')));
 
+function variant_matches_customer_texture(array $row, string $hairTexture): bool
+{
+    $user = strtolower(trim($hairTexture));
+    if ($user === '') {
+        return true;
+    }
+
+    $variantTex = strtolower(trim((string)($row['hair_texture'] ?? '')));
+    if ($variantTex !== '' && $variantTex !== $user) {
+        return false;
+    }
+
+    $name = strtolower((string)($row['style_name'] ?? ''));
+    $code = strtolower((string)($row['style_code'] ?? ''));
+
+    $hasCurlyMarker = preg_match('/\b(curly|coily|afro|dread|twist|perm)\b/', $name) === 1
+        || preg_match('/\b(curly|coily)\b/', $code) === 1;
+    $hasWavyMarker = preg_match('/\bwavy\b/', $name) === 1
+        || preg_match('/\bwavy\b/', $code) === 1;
+
+    if ($user === 'straight') {
+        if ($hasCurlyMarker) {
+            return false;
+        }
+        if ($hasWavyMarker) {
+            return false;
+        }
+    }
+
+    if ($user === 'wavy' && $hasCurlyMarker && !$hasWavyMarker) {
+        return false;
+    }
+
+    return true;
+}
+
+function dedupe_recommendations_by_style_name(array $rows): array
+{
+    $bestByName = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $nameKey = strtolower(trim((string)($row['style_name'] ?? '')));
+        if ($nameKey === '') {
+            continue;
+        }
+        $score = (float)($row['match_score'] ?? 0);
+        if (!isset($bestByName[$nameKey]) || $score > (float)($bestByName[$nameKey]['match_score'] ?? 0)) {
+            $bestByName[$nameKey] = $row;
+        }
+    }
+
+    $out = array_values($bestByName);
+    usort(
+        $out,
+        static fn(array $a, array $b): int => ((float)($b['match_score'] ?? 0)) <=> ((float)($a['match_score'] ?? 0))
+    );
+
+    return $out;
+}
+
+function filter_recommendations_for_customer(array $rows, string $hairTexture): array
+{
+    $filtered = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (variant_matches_customer_texture($row, $hairTexture)) {
+            $filtered[] = $row;
+        }
+    }
+
+    return dedupe_recommendations_by_style_name($filtered);
+}
+
 function fetch_live_recommendations(PDO $pdo, string $faceShape, string $hairTexture): array
 {
     $query = <<<'SQL'
@@ -80,7 +157,9 @@ SQL;
     ]);
 
     $rows = $stmt->fetchAll();
-    return array_map('apply_hairstyle_overlay_paths', $rows);
+    $mapped = array_map('apply_hairstyle_overlay_paths', $rows);
+
+    return array_slice(filter_recommendations_for_customer($mapped, $hairTexture), 0, 24);
 }
 
 function variant_catalog_line(array $row): string
@@ -346,14 +425,16 @@ try {
     $recommendations = fetch_live_recommendations($pdo, $faceShape, $hairTexture);
 
     if ($action === 'rankByFeatures') {
+        $usedIds = [];
+        $deduped = dedupe_variant_rows($recommendations, $usedIds);
         json_response([
             'message' => 'Live recommendations ready',
             'userID' => $userID,
             'faceShape' => $faceShape,
             'hairTexture' => $hairTexture,
             'hairDensity' => $hairDensity,
-            'recommendations' => $recommendations,
-            'variants' => $recommendations,
+            'recommendations' => $deduped,
+            'variants' => $deduped,
         ]);
     }
 

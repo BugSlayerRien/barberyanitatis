@@ -1,7 +1,6 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+
+import 'services/ai_chatbot_service.dart';
 
 class AiChatbotPage extends StatefulWidget {
   const AiChatbotPage({super.key});
@@ -11,15 +10,14 @@ class AiChatbotPage extends StatefulWidget {
 }
 
 class _AiChatbotPageState extends State<AiChatbotPage> {
-  static const String _apiKey =
-      'AQ.Ab8RN6KlvnR-121WQ5uxMLL8cMZN7yWFg8-319S1KXo169ZEBQ';
-  static const String _modelName = 'gemini-2.5-flash';
+  static const Color _bg = Color(0xFF0A0A0A);
+  static const Color _panel = Color(0xFF111111);
+  static const Color _inputFill = Color(0xFF1B1B1B);
 
   final TextEditingController _inputController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<_ChatMessage> _messages = [];
   bool _sending = false;
-  String? _startupHint;
 
   @override
   void initState() {
@@ -27,21 +25,10 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
     _messages.add(
       const _ChatMessage(
         text:
-            'Yo, I am AI Assitant! Ask me for haircut ideas, maintenance tips, or what style fits your face shape.',
+            'Hi! I\'m Tati AI Barber. Ask about booking, walk-ins, face scan previews, or haircut care.',
         isUser: false,
       ),
     );
-
-    if (!_apiKey.startsWith('AIza')) {
-      _startupHint =
-          'Warning: this key format may be invalid for Gemini API. Typical Gemini API keys start with AIza.';
-      _messages.add(
-        _ChatMessage(
-          text: _startupHint!,
-          isUser: false,
-        ),
-      );
-    }
   }
 
   @override
@@ -67,105 +54,41 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
     try {
       final history = _messages
           .where((m) => m.text.trim().isNotEmpty)
-          .take(_messages.length - 1)
-          .map((m) => '${m.isUser ? 'Customer' : 'Barber AI'}: ${m.text}')
-          .join('\n');
+          .take(_messages.length)
+          .map((m) => {'text': m.text, 'isUser': m.isUser})
+          .toList();
 
-      final prompt = '''
-You are Tati AI Barber, a friendly and skilled barber assistant.
-Use a confident barber tone, practical advice, and concise responses.
-Focus on haircut fit, maintenance, styling, and booking prep.
-If needed, ask one short follow-up question.
-
-Conversation so far:
-$history
-
-Customer: $text
-Barber AI:
-''';
-
-      final response = await http.post(
-        Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/$_modelName:generateContent?key=$_apiKey',
-        ),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'temperature': 0.7,
-            'topP': 0.9,
-            'maxOutputTokens': 512,
-          }
-        }),
+      final data = await AiChatbotService.sendMessage(
+        message: text,
+        history: history,
       );
 
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('HTTP ${response.statusCode}: ${response.body}');
-      }
-
-      final candidates = data['candidates'] as List<dynamic>? ?? const [];
-      final first = candidates.isNotEmpty
-          ? (candidates.first as Map<String, dynamic>)
-          : <String, dynamic>{};
-      final content = first['content'] as Map<String, dynamic>? ?? const {};
-      final parts = content['parts'] as List<dynamic>? ?? const [];
-      final reply = parts.isNotEmpty
-          ? (parts.first as Map<String, dynamic>)['text']?.toString().trim() ?? ''
-          : '';
+      final reply = data['reply']?.toString().trim() ?? '';
+      final source = data['source']?.toString() ?? '';
 
       setState(() {
         _messages.add(
           _ChatMessage(
-            text: reply.isEmpty
-                ? 'I could not generate a response right now. Try again in a bit.'
-                : reply,
+            text: reply.isNotEmpty
+                ? reply
+                : 'I could not generate a response. Please try again.',
             isUser: false,
+            sourceLabel: source == 'faq' ? 'FAQ' : null,
           ),
         );
       });
     } catch (e) {
-        final details = e.toString();
-      final looksLikePermissionIssue = details.contains('403') ||
-          details.toLowerCase().contains('permission') ||
-          details.toLowerCase().contains('forbidden');
-      final looksLikeBadKey = details.contains('400') ||
-          details.toLowerCase().contains('api key') ||
-          details.toLowerCase().contains('invalid');
-        final looksLikeModelIssue = details.contains('404') ||
-          details.toLowerCase().contains('not found') ||
-          details.toLowerCase().contains('model');
-
-      final message = looksLikePermissionIssue
-          ? 'Gemini denied access (403). Check API restrictions, allowed origins, and if Generative Language API is enabled.\n$details'
-          : looksLikeBadKey
-              ? 'Gemini rejected the key/request (400). Verify key type and value.\n$details'
-            : looksLikeModelIssue
-              ? 'Model endpoint issue. Check model name and API version.\n$details'
-              : 'Connection issue with Gemini.\n$details';
-
       setState(() {
         _messages.add(
           _ChatMessage(
-            text: message,
+            text: 'Something went wrong. Check your connection and try again.\n$e',
             isUser: false,
           ),
         );
       });
     } finally {
       if (mounted) {
-        setState(() {
-          _sending = false;
-        });
+        setState(() => _sending = false);
       }
       _scrollToBottom();
     }
@@ -187,11 +110,13 @@ Barber AI:
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: _bg,
       appBar: AppBar(
-        backgroundColor: const Color(0xFF111111),
+        backgroundColor: _panel,
+        foregroundColor: Colors.white,
         title: const Text('AI Barber Chat', style: TextStyle(color: Colors.white)),
       ),
+      floatingActionButton: null,
       body: Column(
         children: [
           Expanded(
@@ -203,10 +128,8 @@ Barber AI:
                 final message = _messages[index];
                 final align =
                     message.isUser ? Alignment.centerRight : Alignment.centerLeft;
-                final bg = message.isUser
-                    ? const Color(0xFFA99941)
-                    : const Color(0xFF1A1A1A);
-                final fg = message.isUser ? Colors.black : Colors.white;
+                final bg = message.isUser ? _inputFill : Colors.white;
+                final fg = message.isUser ? Colors.white : Colors.black;
 
                 return Align(
                   alignment: align,
@@ -217,10 +140,29 @@ Barber AI:
                     decoration: BoxDecoration(
                       color: bg,
                       borderRadius: BorderRadius.circular(12),
+                      border: message.isUser
+                          ? Border.all(color: Colors.white24)
+                          : null,
                     ),
-                    child: Text(
-                      message.text,
-                      style: TextStyle(color: fg, fontSize: 13, height: 1.35),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (message.sourceLabel != null) ...[
+                          Text(
+                            message.sourceLabel!,
+                            style: TextStyle(
+                              color: Colors.black.withValues(alpha: 0.45),
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                        ],
+                        Text(
+                          message.text,
+                          style: TextStyle(color: fg, fontSize: 13, height: 1.35),
+                        ),
+                      ],
                     ),
                   ),
                 );
@@ -232,7 +174,7 @@ Barber AI:
             child: Container(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               decoration: const BoxDecoration(
-                color: Color(0xFF111111),
+                color: _panel,
                 border: Border(top: BorderSide(color: Colors.white12)),
               ),
               child: Row(
@@ -243,10 +185,10 @@ Barber AI:
                       style: const TextStyle(color: Colors.white),
                       onSubmitted: (_) => _send(),
                       decoration: InputDecoration(
-                        hintText: 'Ask your barber AI... ',
+                        hintText: 'Ask your barber AI...',
                         hintStyle: const TextStyle(color: Colors.white54),
                         filled: true,
-                        fillColor: const Color(0xFF1B1B1B),
+                        fillColor: _inputFill,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -262,7 +204,7 @@ Barber AI:
                       onPressed: _sending ? null : _send,
                       style: ElevatedButton.styleFrom(
                         padding: EdgeInsets.zero,
-                        backgroundColor: const Color(0xFFA99941),
+                        backgroundColor: Colors.white,
                         foregroundColor: Colors.black,
                       ),
                       child: _sending
@@ -290,6 +232,11 @@ Barber AI:
 class _ChatMessage {
   final String text;
   final bool isUser;
+  final String? sourceLabel;
 
-  const _ChatMessage({required this.text, required this.isUser});
+  const _ChatMessage({
+    required this.text,
+    required this.isUser,
+    this.sourceLabel,
+  });
 }
