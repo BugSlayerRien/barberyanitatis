@@ -64,7 +64,14 @@ try {
             ':start_date' => $startDate,
             ':end_date' => $endDate,
         ]);
-        $slots = $slotStmt->fetchAll();
+        $slots = array_map(static function (array $slot): array {
+            $status = (string)($slot['status'] ?? 'Available');
+            if ($status === 'Cancelled') {
+                $slot['status'] = 'Unavailable';
+            }
+
+            return $slot;
+        }, $slotStmt->fetchAll());
 
         $apptStmt = $pdo->prepare(
             "SELECT a.appointment_id, a.booking_group_id, a.group_sequence, a.appointment_date,
@@ -210,15 +217,19 @@ try {
             $barberId = (int)$row['barber_id'];
             $date = (string)$row['request_date'];
             foreach (shop_default_slot_times() as $slotTime) {
+                $normalized = shop_normalize_slot_time($slotTime);
+                if ($normalized === null) {
+                    continue;
+                }
                 $pdo->prepare(
                     "INSERT INTO time_slots (barber_id, slot_date, slot_time, status)
-                     VALUES (:barber_id, :slot_date, :slot_time, 'Unavailable')
+                     VALUES (:barber_id, :slot_date, :slot_time, 'Cancelled')
                      ON CONFLICT (barber_id, slot_date, slot_time)
-                     DO UPDATE SET status = 'Unavailable'"
+                     DO UPDATE SET status = 'Cancelled', appointment_id = NULL"
                 )->execute([
                     ':barber_id' => $barberId,
                     ':slot_date' => $date,
-                    ':slot_time' => $slotTime,
+                    ':slot_time' => $normalized,
                 ]);
             }
         }

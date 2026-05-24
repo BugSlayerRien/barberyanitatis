@@ -452,16 +452,64 @@ function shop_assign_unassigned_walkins(PDO $pdo): int
 }
 
 /**
+ * Start grouped bookings when the first slot time begins (whole unit moves together).
+ */
+function auto_start_due_booking_groups(PDO $pdo): int
+{
+    require_once __DIR__ . '/group_booking.php';
+    ensure_group_booking_schema($pdo);
+
+    $selectStmt = $pdo->query(
+        "SELECT booking_group_id
+         FROM appointments
+         WHERE booking_group_id IS NOT NULL
+           AND status IN ('Scheduled', 'CheckedIn')
+           AND (
+                appointment_date < CURRENT_DATE
+                OR (appointment_date = CURRENT_DATE AND start_time <= CURRENT_TIME)
+           )
+         GROUP BY booking_group_id"
+    );
+    $groupIds = array_map(
+        static fn(array $row): int => (int)$row['booking_group_id'],
+        $selectStmt->fetchAll(PDO::FETCH_ASSOC)
+    );
+    if ($groupIds === []) {
+        return 0;
+    }
+
+    $started = 0;
+    $updateStmt = $pdo->prepare(
+        "UPDATE appointments
+         SET status = 'InProgress',
+             checkin_time = COALESCE(checkin_time, NOW()),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE booking_group_id = :group_id
+           AND status IN ('Scheduled', 'CheckedIn')"
+    );
+    foreach ($groupIds as $groupId) {
+        $updateStmt->execute([':group_id' => $groupId]);
+        if ($updateStmt->rowCount() > 0) {
+            $started++;
+        }
+    }
+
+    return $started;
+}
+
+/**
  * Start exclusive appointments when their slot time begins.
  */
 function auto_start_due_appointments(PDO $pdo): int
 {
     $duration = shop_appointment_duration_minutes();
+    $startedGroups = auto_start_due_booking_groups($pdo);
 
     $selectStmt = $pdo->prepare(
         "SELECT appointment_id, booking_code, user_id
          FROM appointments
-         WHERE status IN ('Scheduled', 'CheckedIn')
+         WHERE booking_group_id IS NULL
+           AND status IN ('Scheduled', 'CheckedIn')
            AND (
                 appointment_date < CURRENT_DATE
                 OR (appointment_date = CURRENT_DATE AND start_time <= CURRENT_TIME)
@@ -473,7 +521,7 @@ function auto_start_due_appointments(PDO $pdo): int
     $selectStmt->execute([':duration' => $duration]);
     $rows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
     if (!$rows) {
-        return 0;
+        return $startedGroups;
     }
 
     $ids = array_map(static fn(array $row): int => (int)$row['appointment_id'], $rows);
@@ -486,7 +534,7 @@ function auto_start_due_appointments(PDO $pdo): int
          WHERE appointment_id IN ($placeholders)"
     )->execute($ids);
 
-    return count($rows);
+    return $startedGroups + count($rows);
 }
 
 /**
@@ -649,14 +697,64 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
         }
     }
 
+    require_once __DIR__ . '/group_booking.php';
+    require_once __DIR__ . '/slot_locking.php';
+    ensure_group_booking_schema($pdo);
     $duration = shop_appointment_duration_minutes();
+    $completedUnits = 0;
 
-    // Use start + service duration as primary end (matches receptionist UI). Only use end_time
-    // when it is a real window after start_time (not 00:00:00 or missing).
-    $selectStmt = $pdo->prepare(
-        "SELECT appointment_id, user_id, barber_id, booking_code, appointment_date, start_time, end_time, status
+    $groupStmt = $pdo->prepare(
+        "SELECT booking_group_id, MIN(appointment_id) AS lead_appointment_id,
+                MAX(user_id) AS user_id, MAX(booking_code) AS booking_code
          FROM appointments
-         WHERE status IN ('Scheduled', 'CheckedIn', 'InProgress')
+         WHERE booking_group_id IS NOT NULL
+           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
+         GROUP BY booking_group_id
+         HAVING MAX(
+                appointment_date::timestamp + start_time + make_interval(mins => :duration)
+            ) <= NOW()
+            OR MAX(
+                CASE
+                    WHEN end_time IS NOT NULL
+                         AND end_time <> '00:00:00'::time
+                         AND end_time > start_time
+                    THEN appointment_date::timestamp + end_time
+                    ELSE NULL::timestamp
+                END
+            ) <= NOW()"
+    );
+    $groupStmt->execute([':duration' => $duration]);
+    $dueGroups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $notifyStmt = $pdo->prepare(
+        "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
+         VALUES ('User', ?, 'Appointment', 'Appointment completed', ?, TRUE)"
+    );
+
+    foreach ($dueGroups as $groupRow) {
+        $leadId = (int)($groupRow['lead_appointment_id'] ?? 0);
+        if ($leadId <= 0) {
+            continue;
+        }
+
+        try {
+            if (complete_booking_unit($pdo, $leadId) > 0) {
+                $completedUnits++;
+                $notifyStmt->execute([
+                    (int)$groupRow['user_id'],
+                    'Your group booking ' . (string)$groupRow['booking_code'] . ' has been marked completed.',
+                ]);
+            }
+        } catch (Throwable $e) {
+            error_log('Group auto-complete skipped for #' . $leadId . ': ' . $e->getMessage());
+        }
+    }
+
+    $selectStmt = $pdo->prepare(
+        "SELECT appointment_id, user_id, barber_id, booking_code
+         FROM appointments
+         WHERE booking_group_id IS NULL
+           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
            AND (
                 appointment_date::timestamp + start_time + make_interval(mins => :duration) <= NOW()
                 OR (
@@ -670,60 +768,18 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
     $selectStmt->execute([':duration' => $duration]);
     $dueRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    if (!$dueRows) {
-        if (!$force) {
-            schema_cache_done('auto_complete_due_appointments');
-            $done = true;
-        }
-
-        return 0;
-    }
-
-    $ids = array_map(static fn(array $row): int => (int)$row['appointment_id'], $dueRows);
-    $placeholders = implode(',', array_fill(0, count($ids), '?'));
-
-    $pdo->prepare(
-        "UPDATE appointments
-         SET status = 'Completed',
-             completion_time = COALESCE(completion_time, NOW()),
-             updated_at = CURRENT_TIMESTAMP
-         WHERE appointment_id IN ($placeholders)"
-    )->execute($ids);
-
-    $releaseSlotStmt = $pdo->prepare(
-        "UPDATE time_slots
-         SET status = 'Available'
-         WHERE barber_id = ?
-           AND slot_date = ?
-           AND slot_time = ?"
-    );
-
-    $notifyStmt = $pdo->prepare(
-        "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-         VALUES ('User', ?, 'Appointment', 'Appointment completed', ?, TRUE)"
-    );
-
     foreach ($dueRows as $row) {
         $appointmentId = (int)$row['appointment_id'];
         try {
-            record_completion_payment($pdo, $appointmentId, null);
+            if (complete_booking_unit($pdo, $appointmentId) > 0) {
+                $completedUnits++;
+                $notifyStmt->execute([
+                    (int)$row['user_id'],
+                    'Your appointment ' . (string)$row['booking_code'] . ' has been marked completed.',
+                ]);
+            }
         } catch (Throwable $paymentError) {
-            error_log('Appointment auto-complete payment skipped for #' . $appointmentId . ': ' . $paymentError->getMessage());
-        }
-
-        $releaseSlotStmt->execute([
-            (int)$row['barber_id'],
-            (string)$row['appointment_date'],
-            (string)$row['start_time'],
-        ]);
-
-        try {
-            $notifyStmt->execute([
-                (int)$row['user_id'],
-                'Your appointment ' . (string)$row['booking_code'] . ' has been marked completed.',
-            ]);
-        } catch (Throwable $notifyError) {
-            error_log('Appointment auto-complete notification skipped for #' . $appointmentId . ': ' . $notifyError->getMessage());
+            error_log('Appointment auto-complete skipped for #' . $appointmentId . ': ' . $paymentError->getMessage());
         }
     }
 
@@ -732,5 +788,67 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
         $done = true;
     }
 
-    return count($dueRows);
+    return $completedUnits;
+}
+
+/**
+ * @return array{walkInsToday: int, appointmentsToday: int, inProgress: int, availableBarbers: int}
+ */
+function fetch_receptionist_front_desk_stats(PDO $pdo): array
+{
+    $walkInsTodayStmt = $pdo->prepare(
+        'SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE'
+    );
+    $walkInsTodayStmt->execute();
+    $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
+
+    $appointmentsTodayStmt = $pdo->prepare(
+        "SELECT COUNT(*) FROM (
+            SELECT DISTINCT COALESCE(booking_group_id::text, 'a' || appointment_id::text) AS unit_key
+            FROM appointments
+            WHERE appointment_date = CURRENT_DATE
+              AND status NOT IN ('Cancelled', 'NoShow')
+         ) units"
+    );
+    $appointmentsTodayStmt->execute();
+    $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
+
+    $inProgressStmt = $pdo->prepare(
+        "SELECT
+            (SELECT COUNT(*) FROM walkin_queue
+              WHERE status = 'InProgress' AND DATE(created_at) = CURRENT_DATE)
+          + (SELECT COUNT(*) FROM (
+                SELECT DISTINCT COALESCE(booking_group_id::text, 'a' || appointment_id::text) AS unit_key
+                FROM appointments
+                WHERE appointment_date = CURRENT_DATE AND status = 'InProgress'
+             ) appt_units)"
+    );
+    $inProgressStmt->execute();
+    $inProgress = (int)$inProgressStmt->fetchColumn();
+
+    $availableBarbersStmt = $pdo->prepare(
+        "SELECT COUNT(*)
+         FROM barbers b
+         WHERE b.is_active = TRUE
+           AND NOT EXISTS (
+                SELECT 1 FROM appointments a
+                 WHERE a.barber_id = b.barber_id
+                   AND a.appointment_date = CURRENT_DATE
+                   AND a.status = 'InProgress'
+           )
+           AND NOT EXISTS (
+                SELECT 1 FROM walkin_queue wq
+                 WHERE wq.barber_id = b.barber_id
+                   AND wq.status = 'InProgress'
+           )"
+    );
+    $availableBarbersStmt->execute();
+    $availableBarbers = (int)$availableBarbersStmt->fetchColumn();
+
+    return [
+        'walkInsToday' => $walkInsToday,
+        'appointmentsToday' => $appointmentsToday,
+        'inProgress' => $inProgress,
+        'availableBarbers' => $availableBarbers,
+    ];
 }

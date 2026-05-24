@@ -82,9 +82,15 @@ function ai_gemini_generate_text(string $prompt, float $temperature = 0.4, int $
 }
 
 /** Plain-text replies (chatbot) — no JSON response mode. */
-function ai_gemini_generate_plain_text(string $prompt, float $temperature = 0.65, int $maxTokens = 1024): ?string
-{
+function ai_gemini_generate_plain_text(
+    string $prompt,
+    float $temperature = 0.65,
+    int $maxTokens = 1024,
+    ?string &$error = null
+): ?string {
+    $error = null;
     if (!ai_gemini_enabled()) {
+        $error = 'Gemini API key is not configured';
         return null;
     }
 
@@ -116,15 +122,26 @@ function ai_gemini_generate_plain_text(string $prompt, float $temperature = 0.65
     }
     curl_setopt_array($ch, $opts);
     $result = curl_exec($ch);
+    $curlErr = curl_error($ch);
     $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
-    if ($result === false || $status < 200 || $status >= 300) {
+    if ($result === false) {
+        $error = $curlErr !== '' ? $curlErr : 'Gemini request failed';
+        error_log('Gemini plain_text: ' . $error);
+        return null;
+    }
+
+    if ($status < 200 || $status >= 300) {
+        $error = 'Gemini HTTP ' . $status;
+        error_log('Gemini plain_text HTTP ' . $status . ': ' . substr((string)$result, 0, 400));
         return null;
     }
 
     $data = json_decode($result, true);
     if (!is_array($data)) {
+        $error = 'Gemini returned invalid JSON';
+        error_log('Gemini plain_text: invalid JSON response');
         return null;
     }
 
@@ -136,7 +153,14 @@ function ai_gemini_generate_plain_text(string $prompt, float $temperature = 0.65
         }
     }
 
-    return trim($text) !== '' ? trim($text) : null;
+    $trimmed = trim($text);
+    if ($trimmed === '') {
+        $error = 'Gemini returned an empty reply';
+        error_log('Gemini plain_text: empty candidates text');
+        return null;
+    }
+
+    return $trimmed;
 }
 
 function ai_gemini_parse_json(?string $raw): ?array

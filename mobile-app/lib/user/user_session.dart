@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserSession {
   static const String _userCalibrationKey = 'user_hair_calibration';
   static const String _preferredHairTextureKey = 'preferred_hair_texture';
+  static const String _lastRecommendedVariantsKey = 'last_recommended_variant_ids';
 
   static int? userId;
   /// Straight, Wavy, or Curly — set during onboarding and editable in profile.
@@ -149,6 +150,23 @@ class UserSession {
   }
 
   /// Clears scan/booking selection state without signing out.
+  static Future<List<int>> loadLastRecommendedVariantIds({int? userId}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '${_lastRecommendedVariantsKey}_${userId ?? UserSession.userId ?? 0}';
+    final raw = prefs.getStringList(key) ?? [];
+    return raw.map((e) => int.tryParse(e) ?? 0).where((id) => id > 0).toList();
+  }
+
+  static Future<void> saveLastRecommendedVariantIds(
+    List<int> variantIds, {
+    int? userId,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = '${_lastRecommendedVariantsKey}_${userId ?? UserSession.userId ?? 0}';
+    final unique = variantIds.where((id) => id > 0).take(12).map((id) => '$id').toList();
+    await prefs.setStringList(key, unique);
+  }
+
   static void resetScanState() {
     selectedStyleName = null;
     selectedVariantId = null;

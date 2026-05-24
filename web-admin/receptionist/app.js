@@ -249,19 +249,6 @@ function renderStats(stats) {
   });
 }
 
-function renderSummary(stats, appointments, walkins) {
-  const summaryEl = document.getElementById("summary-text");
-  if (!summaryEl) return;
-  if (!stats || stats.length === 0) {
-    summaryEl.textContent = "No summary available.";
-    return;
-  }
-  const statMap = Object.fromEntries(stats.map((item) => [item.title, item.value]));
-  const totalAppointments = appointments?.length ?? 0;
-  const totalWalkins = walkins?.length ?? 0;
-  summaryEl.textContent = `Walk-ins: ${statMap["Walk-ins"] ?? totalWalkins} • Appointments: ${statMap["Appointments"] ?? totalAppointments} • In Progress: ${statMap["In Progress"] ?? 0} • Available Barbers: ${statMap["Available Barbers"] ?? 0}`;
-}
-
 function statusTag(status) {
   const lower = String(status).toLowerCase();
   if (["completed"].includes(lower)) return "success";
@@ -922,7 +909,6 @@ async function loadDashboard(showOverlay = false) {
     renderWalkins(state.walkins);
     renderAutomationFeed(state.automation);
     renderSplitTracking(state.appointments, state.walkins);
-    renderSummary(data.stats ?? [], state.appointments, state.walkins);
     if (state.automation?.events?.length) {
       const labels = state.automation.events.map((e) => e.label).join(" · ");
       toast(labels, "success");

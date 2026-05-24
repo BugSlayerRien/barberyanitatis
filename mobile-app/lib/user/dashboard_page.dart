@@ -347,6 +347,10 @@ class _DashboardPageState extends State<DashboardPage>
               'Straight',
           hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
           hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
+          analysisProvider: scan['analysisProvider']?.toString(),
+          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
+          noHairDetected: scan['noHairDetected'] == true,
+          hairColorLabel: scan['hairColor']?.toString(),
         ),
       ),
     );

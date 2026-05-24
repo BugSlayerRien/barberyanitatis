@@ -387,10 +387,11 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                       final statusText =
                           (appointment['status']?.toString() ?? 'Scheduled')
                               .trim();
-                      final isPendingPayment = statusText == 'PendingPayment';
                       final paymentState =
                           appointment['paymentState']?.toString() ??
-                              (isPendingPayment ? 'Unpaid' : 'Unpaid');
+                              (statusText == 'PendingPayment' ? 'Unpaid' : 'Unpaid');
+                      final isPendingPayment =
+                          statusText == 'PendingPayment' && paymentState != 'Paid';
                       final paymentChip = _buildPaymentChip(paymentState);
                       final appointmentId =
                           int.tryParse('${appointment['appointmentId'] ?? ''}') ??

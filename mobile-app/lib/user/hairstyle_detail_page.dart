@@ -349,11 +349,17 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     final hasCaptures = UserSession.capturedFaceImages != null &&
         UserSession.capturedFaceImages!.isNotEmpty;
 
-    if (hasCaptures) {
+    if (!hasCaptures) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Complete a 3-angle face scan first, then use Try Haircut for live preview.',
+          ),
+        ),
+      );
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => AiFaceScanPage(
-            livePreviewOnly: true,
             presetRecommendation: widget.style,
           ),
         ),
@@ -364,6 +370,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => AiFaceScanPage(
+          livePreviewOnly: true,
           presetRecommendation: widget.style,
         ),
       ),

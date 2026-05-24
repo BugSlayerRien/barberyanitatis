@@ -124,22 +124,30 @@ function replicate_resolve_style_key(string $styleName, ?string $styleCode = nul
     return 'barbers_cut';
 }
 
-function replicate_build_hair_only_prompt(string $styleDescription, int $hairLengthLevel = 1): string
-{
+function replicate_build_hair_only_prompt(
+    string $styleDescription,
+    int $hairLengthLevel = 1,
+    string $hairColorLabel = ''
+): string {
     $hints = replicate_length_style_hints();
     $labels = replicate_hair_length_labels();
     $lengthHint = $hints[$hairLengthLevel] ?? $hints[1];
     $currentLabel = $labels[$hairLengthLevel] ?? 'short';
+    $colorClause = '';
+    if (trim($hairColorLabel) !== '') {
+        $colorClause = ' Preserve the person\'s natural ' . trim($hairColorLabel)
+            . ' hair color exactly. Do not lighten, redden, or recolor the hair.';
+    }
 
-    return "Change ONLY the hair to: {$styleDescription}. "
-        . "The person's current hair length is {$currentLabel}. {$lengthHint} "
-        . 'Keep the exact same person, face, facial features, skin, expression, '
-        . 'eyes, eyebrows shape position, nose, mouth, ears, neck, clothing, pose, '
-        . 'background, room, lighting, shadows, and camera angle. '
-        . 'Do not change or replace the background. Do not retouch the face or body. '
-        . 'Do not add extra hair volume, height, or bulk above the natural hairline or crown. '
-        . 'Keep the hairline position realistic, not a flat block on top of the head. '
-        . 'Hair modification only, everything else pixel-identical.';
+    return 'HAIR-ONLY EDIT. Replace only the hair on this person\'s head with: '
+        . "{$styleDescription}. "
+        . "Current hair length is {$currentLabel}. {$lengthHint} "
+        . 'FORBIDDEN CHANGES: do not alter the face, skin, eyes, eyebrows, nose, lips, '
+        . 'mouth, ears, jaw, neck, clothing, or background. '
+        . 'The background, lighting, shadows, and camera framing must stay identical to the input. '
+        . 'Do not blur or replace the background. Do not retouch or reshape the face. '
+        . 'Identity must remain unchanged. Only change hairstyle above the forehead.'
+        . $colorClause;
 }
 
 /** @return array<string, string> */
@@ -299,6 +307,7 @@ function replicate_generate_view_image(string $absolutePath, string $basePrompt,
             'aspect_ratio' => 'match_input_image',
             'prompt_upsampling' => false,
             'output_format' => 'png',
+            'safety_tolerance' => 2,
         ],
     ]);
     if ($payload === false) {
@@ -375,7 +384,8 @@ function replicate_generate_three_view_previews(
     array $capturePaths,
     string $styleName,
     ?string $styleCode = null,
-    int $hairLengthLevel = 1
+    int $hairLengthLevel = 1,
+    string $hairColorLabel = ''
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
@@ -397,13 +407,11 @@ function replicate_generate_three_view_previews(
         . "that photo's original head turn and camera angle — do not make every frame face the camera.";
 
     if ($feasibleToday) {
-        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel) . $profileNote;
+        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
     } else {
-        $basePrompt = "Change ONLY the hair to an aspirational preview of: {$styleDesc}. "
-            . 'Show how this person could look with enough hair length for this style. '
-            . 'Keep the exact same face, expression, skin, eyes, clothing, pose, '
-            . 'background, and lighting. Do not change the background or face. '
-            . "Hair-only edit.{$profileNote}";
+        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
+            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
+            . "Identity and background must match the input.{$profileNote}";
     }
 
     $resultImages = [];

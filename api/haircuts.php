@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
+require_once __DIR__ . '/variant_ranking.php';
 
 require_method('POST');
 
@@ -41,61 +42,27 @@ try {
         $faceShape = trim((string)($input['faceShape'] ?? ''));
         $hairTexture = trim((string)($input['hairTexture'] ?? ''));
 
-                $stmt = $pdo->prepare(<<<'SQL'
-SELECT hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
-             hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes,
-             hs.style_name, hs.style_code, hs.description, hs.maintenance, hs.difficulty,
-             (
-                 hv.confidence_score
-                 + CASE
-                         WHEN :face_shape <> '' AND LOWER(hv.face_shape) = LOWER(:face_shape) THEN 0.45
-                         ELSE 0
-                     END
-                 + CASE
-                         WHEN :hair_texture <> '' AND LOWER(hv.hair_texture) = LOWER(:hair_texture) THEN 0.55
-                         ELSE 0
-                     END
-                 + CASE
-                         WHEN :hair_texture <> ''
-                             AND LOWER(:hair_texture) <> 'coily'
-                             AND (
-                                 LOWER(hs.style_name) LIKE '%afro%'
-                                 OR LOWER(hs.style_name) LIKE '%dread%'
-                                 OR LOWER(hs.style_name) LIKE '%twist%'
-                             )
-                         THEN -0.85
-                         ELSE 0
-                     END
-             ) AS match_score
-FROM hairstyle_variants hv
-JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
-WHERE hs.is_active = TRUE
-    AND (
-             :face_shape = ''
-             OR LOWER(hv.face_shape) = LOWER(:face_shape)
-             OR hv.face_shape IS NULL
-             OR hv.face_shape = ''
-    )
-    AND (
-             :hair_texture = ''
-             OR LOWER(hv.hair_texture) = LOWER(:hair_texture)
-             OR hv.hair_texture IS NULL
-             OR hv.hair_texture = ''
-    )
-ORDER BY match_score DESC, hv.confidence_score DESC, hs.style_name
-LIMIT 24
-SQL
-                );
-                $stmt->execute([
-                        ':face_shape' => $faceShape,
-                        ':hair_texture' => $hairTexture,
-                ]);
-
-        $variants = array_map($normalizeHaircutRow, $stmt->fetchAll());
+        $variants = array_map(
+            $normalizeHaircutRow,
+            fetch_ranked_variants($pdo, $faceShape, $hairTexture, [
+                'limit' => 24,
+                'libraryFaceFilter' => true,
+            ])
+        );
         json_response(['variants' => $variants]);
     }
 
     if ($action === 'listLibrary') {
+        $codes = overlay_library_style_codes();
+        $inParts = [];
+        $params = [];
+        foreach ($codes as $index => $code) {
+            $param = ':lib_code_' . $index;
+            $inParts[] = $param;
+            $params[$param] = $code;
+        }
+        $libraryIn = $inParts !== [] ? ' AND hs.style_code IN (' . implode(', ', $inParts) . ') ' : '';
+
         $stmt = $pdo->prepare(
             'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active,
                     hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
@@ -109,11 +76,21 @@ SQL
                 LIMIT 1
              )
                  WHERE hs.is_active = TRUE
+                 ' . $libraryIn . '
              ORDER BY hs.style_name'
         );
-        $stmt->execute();
-        $hairstyles = array_map($normalizeHaircutRow, $stmt->fetchAll());
-        json_response(['hairstyles' => $hairstyles]);
+        $stmt->execute($params);
+        $hairstyles = array_map(
+            $normalizeHaircutRow,
+            array_values(array_filter(
+                $stmt->fetchAll(),
+                static fn(array $row): bool => is_overlay_library_row($row)
+            ))
+        );
+        json_response([
+            'hairstyles' => $hairstyles,
+            'libraryCatalogSize' => overlay_library_catalog_size(),
+        ]);
     }
 
     if ($action === 'searchLibrary') {

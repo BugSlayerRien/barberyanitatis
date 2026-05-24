@@ -73,7 +73,9 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
                 ? reply
                 : 'I could not generate a response. Please try again.',
             isUser: false,
-            sourceLabel: source == 'faq' ? 'FAQ' : null,
+            sourceLabel: source == 'faq'
+                ? 'FAQ'
+                : (source == 'gemini' ? 'AI' : null),
           ),
         );
       });

@@ -9,6 +9,7 @@ require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/face_scan_attach.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -504,6 +505,23 @@ try {
             ]);
         }
 
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+        $previewVariantId = $variantID > 0 ? $variantID : (int)($validatedItems[0]['variantID'] ?? 0);
+        $previewAttach = null;
+        if ($scanSessionId !== '' && $previewVariantId > 0) {
+            $previewAttach = attach_scan_previews_to_appointment(
+                $pdo,
+                $appointmentID,
+                $scanSessionId,
+                $previewVariantId,
+                [
+                    'frontViewUrl' => (string)($input['frontViewUrl'] ?? ''),
+                    'sideViewUrl' => (string)($input['sideViewUrl'] ?? ''),
+                    'backViewUrl' => (string)($input['backViewUrl'] ?? ''),
+                ]
+            );
+        }
+
         notify_appointment_created($pdo, [
             'user_id' => $userID,
             'barber_id' => $barberID,
@@ -524,12 +542,20 @@ try {
 
         $pdo->commit();
 
-        json_response([
+        $responsePayload = [
             'message' => 'Appointment created',
             'appointmentID' => $appointmentID,
             'bookingCode' => $bookingCode,
             'status' => 'PendingPayment',
-        ], 201);
+        ];
+        if (is_array($previewAttach) && ($previewAttach['attached'] ?? false)) {
+            $responsePayload['frontViewUrl'] = $previewAttach['front'];
+            $responsePayload['sideViewUrl'] = $previewAttach['left'];
+            $responsePayload['backViewUrl'] = $previewAttach['right'];
+            $responsePayload['previewsAttached'] = true;
+        }
+
+        json_response($responsePayload, 201);
     }
 
     if ($action === 'listByCustomer') {
@@ -704,6 +730,7 @@ try {
 
         $listResponse = [
             'appointments' => collapse_customer_appointments(
+                $pdo,
                 propagate_group_payment_states($appointments)
             ),
         ];

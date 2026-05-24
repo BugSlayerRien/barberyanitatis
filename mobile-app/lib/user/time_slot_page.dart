@@ -778,6 +778,7 @@ Keep the total response under 24 words.
                           'endTime': endTime,
                           'serviceIDs': [serviceId],
                           'variantID': UserSession.selectedVariantId,
+                          ...FaceScanService.bookingPreviewPayload(),
                         }),
                       );
 
@@ -814,14 +815,25 @@ Keep the total response under 24 words.
                           sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
                           backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
                         );
-                        try {
-                          await FaceScanService.attachPreviewsToAppointment(
-                            appointmentId: appointmentId,
-                            scanSessionId: UserSession.ensureScanSessionId(),
-                            variantId: UserSession.selectedVariantId!,
-                          );
-                        } catch (_) {
-                          // Catalog images still apply if attach fails.
+                        if (bookingData['previewsAttached'] != true) {
+                          try {
+                            await FaceScanService.attachPreviewsToAppointment(
+                              appointmentId: appointmentId,
+                              scanSessionId: UserSession.ensureScanSessionId(),
+                              variantId: UserSession.selectedVariantId!,
+                            );
+                          } catch (e) {
+                            debugPrint('Preview attach failed: $e');
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Booking saved, but preview photos could not be linked.',
+                                  ),
+                                ),
+                              );
+                            }
+                          }
                         }
                       }
 

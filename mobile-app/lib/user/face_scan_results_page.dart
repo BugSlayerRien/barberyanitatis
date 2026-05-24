@@ -18,11 +18,14 @@ import 'services/face_scan_service.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 import 'widgets/ai_chatbot_fab.dart';
+import 'recommendation_match_display.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
 import '../kiosk/kiosk_barber_page.dart';
 import '../kiosk/kiosk_session.dart';
+
+enum _PreviewPromptChoice { cancel, loadSaved, generateNew }
 
 class FaceScanResultsPage extends StatefulWidget {
   final Map<String, String> captures;
@@ -30,6 +33,10 @@ class FaceScanResultsPage extends StatefulWidget {
   final String hairTexture;
   final int hairLengthLevel;
   final String hairLengthLabel;
+  final String? analysisProvider;
+  final double? hairTextureScore;
+  final bool noHairDetected;
+  final String? hairColorLabel;
   final Map<String, dynamic>? presetRecommendation;
   final bool kioskMode;
 
@@ -40,6 +47,10 @@ class FaceScanResultsPage extends StatefulWidget {
     required this.hairTexture,
     this.hairLengthLevel = 1,
     this.hairLengthLabel = 'short',
+    this.analysisProvider,
+    this.hairTextureScore,
+    this.noHairDetected = false,
+    this.hairColorLabel,
     this.presetRecommendation,
     this.kioskMode = false,
   });
@@ -58,17 +69,26 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   Map<String, List<Map<String, dynamic>>> _categories = {
     'formal': [],
     'alternative': [],
-    'youthful': [],
   };
   Map<String, dynamic>? _selected;
+  String? _expandedVariantId;
   int _previewAngleIndex = 0;
   bool _bookingInFlight = false;
   bool _previewGenerating = false;
   String? _previewError;
   String? _lengthNote;
+  late String _faceShape;
+  late String _hairTexture;
+  late bool _noHairDetected;
+  String? _analysisProvider;
+  double? _hairTextureScore;
+  String? _hairColorLabel;
   final Map<String, Map<String, String>> _replicatePreviewsByVariant = {};
+  Map<String, Map<String, dynamic>> _previewDiagnostics = {};
+  int _previewImageCacheBuster = 0;
   static const _angleKeys = ['front', 'left', 'right'];
   static const _angleLabels = ['Front', 'Left', 'Right'];
+  static const _textureOptions = ['Straight', 'Wavy', 'Curly'];
 
   Map<String, Rect> get _faceRects =>
       UserSession.captureFaceRects ?? {};
@@ -76,13 +96,69 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   @override
   void initState() {
     super.initState();
+    final scan = UserSession.lastScan;
+    _faceShape = widget.faceShape;
+    _hairTexture = widget.hairTexture;
+    _analysisProvider =
+        widget.analysisProvider ?? scan?['analysisProvider']?.toString();
+    _noHairDetected = _analysisProvider == 'ai-service' &&
+        (widget.analysisProvider != null
+            ? widget.noHairDetected
+            : scan?['noHairDetected'] == true);
+    _hairTextureScore = widget.hairTextureScore ??
+        (scan?['hairTextureScore'] as num?)?.toDouble();
+    _hairColorLabel =
+        widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
     UserSession.lastRecommendations = [];
     UserSession.hasRecentRecommendations = false;
     _loadRecommendations();
   }
 
-  void _leaveResults() {
+  Future<void> _applyHairTextureOverride(String texture) async {
+    final normalized = UserSession.normalizeHairTextureLabel(texture);
+    setState(() => _hairTexture = normalized);
+    UserSession.lastScan = {
+      ...?UserSession.lastScan,
+      'hairTexture': normalized,
+      'analysisProvider': 'manual',
+    };
+    await _loadRecommendations(preserveSelection: true);
+  }
+
+  Future<bool> _confirmLeaveResults() async {
+    if (widget.kioskMode) {
+      return true;
+    }
+    final leave = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF141414),
+        title: const Text('Leave scan?', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Your current capture session will be discarded. You will need to scan again for fresh recommendations.',
+          style: TextStyle(color: Colors.white70, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Stay'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Leave', style: TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      ),
+    );
+    return leave ?? false;
+  }
+
+  Future<void> _leaveResults() async {
+    final leave = await _confirmLeaveResults();
+    if (!leave || !mounted) {
+      return;
+    }
     UserSession.resetScanState();
     Navigator.of(context).pop();
   }
@@ -96,9 +172,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     try {
       final quick = await FaceScanService.fetchQuickRankings(
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
         userId: UserSession.userId,
+        boostStyleKeys: FaceScanService.boostStyleKeysFromLastScan(),
       );
 
       if (!mounted) return;
@@ -106,8 +183,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       if (quick.isNotEmpty) {
         final local = FaceScanService.buildLocalInsightsFromRankings(
           rankings: quick,
-          faceShape: widget.faceShape,
-          hairTexture: widget.hairTexture,
+          faceShape: _faceShape,
+          hairTexture: _hairTexture,
         );
         final localCats = local['categories'] as Map<String, dynamic>? ?? {};
         setState(() {
@@ -120,7 +197,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           _categories = {
             'formal': _mapList(localCats['formal']),
             'alternative': _mapList(localCats['alternative']),
-            'youthful': _mapList(localCats['youthful']),
           };
           _aiSummary = local['aiSummary']?.toString() ?? '';
           _recommendationsLoading = false;
@@ -136,9 +212,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     try {
       final data = await FaceScanService.fetchRecommendations(
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
         userId: UserSession.userId,
+        boostStyleKeys: FaceScanService.boostStyleKeysFromLastScan(),
       );
 
       if (!mounted) return;
@@ -153,18 +230,32 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         categories: {
           'formal': _mapList(cats['formal']),
           'alternative': _mapList(cats['alternative']),
-          'youthful': _mapList(cats['youthful']),
         },
         aiSummary: data['aiSummary']?.toString() ?? '',
         aiPowered: data['aiPowered'] == true,
         preserveSelection: preserveSelection,
       );
 
+      final variantIds = <int>[];
+      for (final row in top) {
+        final id = int.tryParse('${row['variant_id'] ?? row['variantId']}') ?? 0;
+        if (id > 0) variantIds.add(id);
+      }
+      for (final key in ['formal', 'alternative']) {
+        for (final row in _mapList(cats[key])) {
+          final id = int.tryParse('${row['variant_id'] ?? row['variantId']}') ?? 0;
+          if (id > 0) variantIds.add(id);
+        }
+      }
+      if (variantIds.isNotEmpty) {
+        await UserSession.saveLastRecommendedVariantIds(variantIds);
+      }
+
       await AiFunnelService.trackScan(
         scanSessionId: UserSession.ensureScanSessionId(),
         userId: UserSession.userId,
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
         hairDensity: null,
         hairLength: null,
         recommendationCount: top.length,
@@ -180,8 +271,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       } else if (_topPicks.isNotEmpty) {
         final local = FaceScanService.buildLocalInsightsFromRankings(
           rankings: _topPicks,
-          faceShape: widget.faceShape,
-          hairTexture: widget.hairTexture,
+          faceShape: _faceShape,
+          hairTexture: _hairTexture,
         );
         final localCats = local['categories'] as Map<String, dynamic>? ?? {};
         _applyRecommendationPayload(
@@ -189,7 +280,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           categories: {
             'formal': _mapList(localCats['formal']),
             'alternative': _mapList(localCats['alternative']),
-            'youthful': _mapList(localCats['youthful']),
           },
           aiSummary: local['aiSummary']?.toString() ?? '',
           aiPowered: false,
@@ -243,10 +333,15 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     });
 
     UserSession.lastScan = {
-      'faceShape': widget.faceShape,
-      'hairTexture': widget.hairTexture,
+      ...?UserSession.lastScan,
+      'faceShape': _faceShape,
+      'hairTexture': _hairTexture,
       'hairLength': widget.hairLengthLabel,
       'hairLengthLevel': widget.hairLengthLevel,
+      'noHairDetected': _noHairDetected,
+      'hairColor': _hairColorLabel,
+      'analysisProvider': _analysisProvider,
+      'hairTextureScore': _hairTextureScore,
     };
     UserSession.lastRecommendations = List<Map<String, dynamic>>.from(topPicks);
     UserSession.hasRecentRecommendations = topPicks.isNotEmpty;
@@ -272,20 +367,55 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     await _loadRecommendations(preserveSelection: true);
   }
 
-  Future<void> _selectStyle(Map<String, dynamic> style) async {
-    final variantId = int.tryParse(
-          '${style['variant_id'] ?? style['variantId'] ?? 0}',
-        ) ??
-        0;
+  String _variantKey(Map<String, dynamic> item) =>
+      '${item['variant_id'] ?? item['variantId'] ?? ''}'.trim();
 
-    final alreadyCached =
-        variantId > 0 && _previewUrlsForVariant(variantId) != null;
+  void _toggleExpanded(Map<String, dynamic> style) {
+    final id = _variantKey(style);
+    if (id.isEmpty) return;
+    setState(() {
+      _expandedVariantId = _expandedVariantId == id ? null : id;
+      _selected = style;
+      _previewError = null;
+    });
+  }
 
-    if (!alreadyCached) {
-      final styleName = style['style_name']?.toString() ??
-          style['styleName']?.toString() ??
-          'this style';
-      final confirmed = await showDialog<bool>(
+  Future<_PreviewPromptChoice> _promptPreviewAction({
+    required String styleName,
+    required bool hasSavedPreview,
+    bool regenerate = false,
+  }) async {
+    if (regenerate) {
+      final choice = await showDialog<_PreviewPromptChoice>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text(
+            'Generate a new preview?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: Text(
+            'Create a fresh AI try-on for "$styleName"? '
+            'This uses Replicate credits again and can take several minutes.',
+            style: const TextStyle(color: Colors.white70, height: 1.4),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.cancel),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
+              child: const Text('Generate new'),
+            ),
+          ],
+        ),
+      );
+      return choice ?? _PreviewPromptChoice.cancel;
+    }
+
+    if (!hasSavedPreview) {
+      final choice = await showDialog<_PreviewPromptChoice>(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: const Color(0xFF1A1A1A),
@@ -294,31 +424,94 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
           ),
           content: Text(
-            'Generate a preview for "$styleName"? This uses Replicate credits and can take several minutes.',
+            'Generate a preview for "$styleName"? '
+            'This uses Replicate credits and can take several minutes.',
             style: const TextStyle(color: Colors.white70, height: 1.4),
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
+              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.cancel),
               child: const Text('Cancel'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
+              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
               child: const Text('Generate'),
             ),
           ],
         ),
       );
-      if (confirmed != true || !mounted) {
-        return;
-      }
+      return choice ?? _PreviewPromptChoice.cancel;
     }
+
+    final choice = await showDialog<_PreviewPromptChoice>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Try another cut?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'You already have a saved preview for "$styleName". '
+          'Load it without using credits, or generate a new one.',
+          style: const TextStyle(color: Colors.white70, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.cancel),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.loadSaved),
+            child: const Text('View saved'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
+            child: const Text('Generate new'),
+          ),
+        ],
+      ),
+    );
+    return choice ?? _PreviewPromptChoice.cancel;
+  }
+
+  Future<void> _onGeneratePreviewPressed(Map<String, dynamic> style) async {
+    final variantId = int.tryParse(_variantKey(style)) ?? 0;
+    if (variantId <= 0) return;
+
+    final styleName = style['style_name']?.toString() ??
+        style['styleName']?.toString() ??
+        'this style';
+
+    final hasSavedPreview = _previewUrlsForVariant(variantId) != null;
+    final choice = await _promptPreviewAction(
+      styleName: styleName,
+      hasSavedPreview: hasSavedPreview,
+    );
+    if (!mounted || choice == _PreviewPromptChoice.cancel) return;
 
     setState(() {
       _selected = style;
       _previewError = null;
     });
-    unawaited(_loadReplicatePreviewsForSelected());
+
+    final forceRegenerate =
+        choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
+    unawaited(_loadReplicatePreviewsForSelected(forceRegenerate: forceRegenerate));
+  }
+
+  Future<void> _onRegeneratePreviewPressed() async {
+    final variantId = _selectedVariantId;
+    if (variantId == null || variantId <= 0) return;
+
+    final choice = await _promptPreviewAction(
+      styleName: _selectedStyleName,
+      hasSavedPreview: true,
+      regenerate: true,
+    );
+    if (!mounted || choice != _PreviewPromptChoice.generateNew) return;
+
+    unawaited(_loadReplicatePreviewsForSelected(forceRegenerate: true));
   }
 
   int? get _selectedVariantId {
@@ -397,10 +590,116 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
   }
 
+  String _displaySummary() {
+    if (!_aiPowered || _aiSummary.trim().isEmpty) {
+      return 'Based on your $_faceShape face and $_hairTexture hair, we grouped styles into formal and alternative options.';
+    }
+    final trimmed = _aiSummary.trim();
+    final dot = trimmed.indexOf('.');
+    final first = dot > 0 ? trimmed.substring(0, dot + 1) : trimmed;
+    if (first.length > 140) {
+      return '${first.substring(0, 137)}...';
+    }
+    return first;
+  }
+
+  String _resolvedPreviewNetworkUrl(String path) {
+    if (path.isEmpty) return path;
+    final base = ApiConfig.resolveImageUrl(path);
+    if (_previewImageCacheBuster <= 0) return base;
+    final sep = base.contains('?') ? '&' : '?';
+    return '$base${sep}t=$_previewImageCacheBuster';
+  }
+
+  Map<String, dynamic>? _diagnosticsForAngle(String angleKey) {
+    return _previewDiagnostics[angleKey];
+  }
+
+  String? _previewDiagnosticWarning(String angleKey) {
+    final diag = _diagnosticsForAngle(angleKey);
+    if (diag == null) return null;
+    final diff = (diag['compositeDiff'] as num?)?.toDouble();
+    final maskMax = (diag['maskMax'] as num?)?.toDouble();
+    final faceDrift = (diag['faceDrift'] as num?)?.toDouble();
+    final usedRaw = diag['usedRawOutput'] == true;
+    if (faceDrift != null && faceDrift > 28) {
+      return 'Face region shifted in this view. Tap Regenerate preview for a cleaner hair-only result.';
+    }
+    if (maskMax != null && maskMax < 0.12) {
+      return 'Hair region was hard to detect. Retake with hair visible or tap Regenerate.';
+    }
+    if (diff != null && diff >= 0 && diff < 5.0) {
+      return 'Hair change is subtle on this angle (score ${diff.toStringAsFixed(1)}). Tap Regenerate if you want a stronger style.';
+    }
+    if (usedRaw) {
+      return 'Preview used a fallback blend. Tap Regenerate for a hair-only composite.';
+    }
+    return null;
+  }
+
+  Widget _previewStatusBadge({required bool hasAiPreview}) {
+    return Positioned(
+      top: 10,
+      left: 10,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white38,
+          ),
+        ),
+        child: Text(
+          hasAiPreview ? 'AI try-on' : 'Your scan photo',
+          style: TextStyle(
+            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white70,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _ensureCapturesUploaded() async {
+    final sessionId = UserSession.ensureScanSessionId();
+    final payload = <String, String>{};
+    for (final angle in ['front', 'left', 'right']) {
+      final raw = widget.captures[angle]?.trim() ?? '';
+      if (raw.isNotEmpty) {
+        payload[angle] = raw;
+      }
+    }
+    if (payload.length < 3) return;
+    await FaceScanService.uploadCaptures(
+      scanSessionId: sessionId,
+      userId: UserSession.userId,
+      captures: payload,
+      faceShape: _faceShape,
+      hairTexture: _hairTexture,
+    );
+  }
+
   Future<void> _loadReplicatePreviewsForSelected({bool forceRegenerate = false}) async {
     final variantId = _selectedVariantId;
     if (variantId == null || variantId <= 0) return;
+
     if (!forceRegenerate && _replicatePreviewsByVariant.containsKey('$variantId')) {
+      final urls = _previewUrlsForVariant(variantId);
+      if (urls != null) {
+        setState(() {
+          _previewError = null;
+          _previewGenerating = false;
+        });
+        UserSession.selectedPreviewImages = urls;
+        UserSession.customerPreviewImages = urls;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Showing saved preview for this style.'),
+          ),
+        );
+      }
       return;
     }
 
@@ -413,24 +712,37 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     });
 
     try {
+      await _ensureCapturesUploaded();
       final data = await FaceScanService.generateStylePreviews(
         scanSessionId: UserSession.ensureScanSessionId(),
         variantId: variantId,
         styleName: _selectedStyleName,
         styleCode: _selected?['style_code']?.toString() ?? _selected?['styleCode']?.toString(),
         userId: UserSession.userId,
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
         hairLengthLevel: widget.hairLengthLevel,
         forceRegenerate: forceRegenerate,
       );
       if (!mounted) return;
       final urls = FaceScanService.previewUrlsFromResponse(data);
       final fromCache = data['cached'] == true;
+      final rawDiag = data['previewDiagnostics'];
+      final diagnostics = <String, Map<String, dynamic>>{};
+      if (rawDiag is Map) {
+        rawDiag.forEach((key, value) {
+          if (value is Map) {
+            diagnostics['$key'] = Map<String, dynamic>.from(value);
+          }
+        });
+      }
       setState(() {
         _replicatePreviewsByVariant['$variantId'] = urls;
+        _previewDiagnostics = diagnostics;
+        _previewImageCacheBuster = DateTime.now().millisecondsSinceEpoch;
         _lengthNote = data['lengthNote']?.toString();
         _previewGenerating = false;
+        _previewError = null;
       });
       UserSession.selectedPreviewImages = urls;
       UserSession.customerPreviewImages = urls;
@@ -439,6 +751,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           const SnackBar(
             content: Text('Loaded saved preview (no new Replicate credits used).'),
           ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('AI preview ready — swipe angles to compare.')),
         );
       }
     } catch (e) {
@@ -516,8 +832,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         scanSessionId: scanSessionId,
         userId: userId,
         captures: widget.captures,
-        faceShape: widget.faceShape,
-        hairTexture: widget.hairTexture,
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
       );
 
       UserSession.selectedVariantId = variantId;
@@ -552,8 +868,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           userId: userId,
           variantId: variantId,
           styleName: UserSession.selectedStyleName ?? 'Style',
-          faceShape: widget.faceShape,
-          hairTexture: widget.hairTexture,
+          faceShape: _faceShape,
+          hairTexture: _hairTexture,
           hairDensity: null,
           hairLength: null,
           estimatedMinutes: int.tryParse(
@@ -609,10 +925,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: true,
+      canPop: widget.kioskMode,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) {
-          UserSession.resetScanState();
+        if (!didPop) {
+          unawaited(_leaveResults());
         }
       },
       child: Scaffold(
@@ -620,7 +936,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       appBar: AppTopBar(
         showBack: true,
         showCustomerActions: !widget.kioskMode,
-        onBack: _leaveResults,
+        onBack: () => unawaited(_leaveResults()),
       ),
       body: _error != null ? _errorView() : _content(),
       floatingActionButton: widget.kioskMode
@@ -703,38 +1019,36 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               'Your AI Hair Recommendations',
               style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
             ),
-            const SizedBox(height: 6),
-            Row(
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                _chip('Face: ${widget.faceShape}'),
-                const SizedBox(width: 8),
-                _chip('Hair: ${widget.hairTexture}'),
-                const SizedBox(width: 8),
+                _chip('Face: $_faceShape'),
+                _chip('Hair: $_hairTexture'),
                 _chip('Length: ${widget.hairLengthLabel}'),
-                if (_aiPowered) ...[
-                  const SizedBox(width: 8),
-                  _chip('AI', highlight: true),
-                ],
+                if ((_hairColorLabel ?? '').trim().isNotEmpty)
+                  _chip('Color: ${_hairColorLabel!.trim()}'),
               ],
             ),
-            if (_aiSummary.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Text(_aiSummary, style: const TextStyle(color: Colors.white70, fontSize: 13)),
-            ],
-            const SizedBox(height: 14),
-            if (_selected != null &&
-                !_previewGenerating &&
-                _previewUrlsForVariant(_selectedVariantId ?? 0) == null)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 8),
-                child: Text(
-                  'Tap a style below to generate an AI preview (uses Replicate credits once per style).',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-              ),
-            _buildCaptureThumbnails(),
             const SizedBox(height: 10),
+            Text(
+              _displaySummary(),
+              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 8),
+            _buildHairTypeAdjustment(),
+            if (_noHairDetected && _analysisProvider == 'ai-service') ...[
+              const SizedBox(height: 10),
+              _buildLowHairNotice(),
+            ],
+            const SizedBox(height: 8),
+            const Text(
+              'Pick a style below → Generate preview',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white38, fontSize: 12),
+            ),
+            const SizedBox(height: 12),
             if (_lengthNote != null && _lengthNote!.isNotEmpty) ...[
               Container(
                 width: double.infinity,
@@ -753,37 +1067,82 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ],
             ScannerLayout.previewFrame(
               context: context,
-              child: _previewGenerating
-                  ? const Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          CircularProgressIndicator(color: Colors.white),
-                          SizedBox(height: 12),
-                          Text(
-                            'Generating AI preview…\nThis can take a few minutes.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.white54, fontSize: 12),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  _previewGenerating
+                      ? const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(color: Colors.white),
+                              SizedBox(height: 12),
+                              Text(
+                                'Generating AI preview…\nThis can take a few minutes.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white54, fontSize: 12),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                    )
-                  : previewUrl != null && previewUrl.isNotEmpty
-                      ? Image.network(
-                          ApiConfig.resolveImageUrl(previewUrl),
-                          key: ValueKey('replicate-$variantId-$angleKey'),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          gaplessPlayback: true,
-                          errorBuilder: (_, __, ___) => _captureFallback(captureB64),
                         )
-                      : _captureFallback(captureB64),
+                      : previewUrl != null && previewUrl.isNotEmpty
+                          ? Image.network(
+                              _resolvedPreviewNetworkUrl(previewUrl),
+                              key: ValueKey(
+                                'replicate-$variantId-$angleKey-$_previewImageCacheBuster',
+                              ),
+                              fit: BoxFit.cover,
+                              width: double.infinity,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, error, ___) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (!mounted) return;
+                                  final msg =
+                                      'Preview image failed to load. Check that Apache can serve uploads/face_scans.';
+                                  if (_previewError != msg) {
+                                    setState(() => _previewError = msg);
+                                  }
+                                });
+                                return _captureFallback(captureB64);
+                              },
+                            )
+                          : _captureFallback(captureB64),
+                  if (!_previewGenerating)
+                    _previewStatusBadge(
+                      hasAiPreview: previewUrl != null && previewUrl.isNotEmpty,
+                    ),
+                ],
+              ),
             ),
             if (_previewError != null) ...[
               const SizedBox(height: 8),
-              Text(
-                'AI preview unavailable — showing your photo.',
-                style: TextStyle(color: Colors.orange.shade200, fontSize: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3A1A10),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Text(
+                  _previewError!,
+                  style: TextStyle(color: Colors.orange.shade200, fontSize: 12, height: 1.35),
+                ),
+              ),
+            ] else if (_previewDiagnosticWarning(angleKey) != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2A2208),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFC9B46A)),
+                ),
+                child: Text(
+                  _previewDiagnosticWarning(angleKey)!,
+                  style: const TextStyle(color: Color(0xFFC9B46A), fontSize: 12, height: 1.35),
+                ),
               ),
             ],
             const SizedBox(height: 8),
@@ -791,7 +1150,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               Center(
                 child: TextButton.icon(
                   onPressed: _previewUrlsForVariant(variantId) != null
-                      ? () => _loadReplicatePreviewsForSelected(forceRegenerate: true)
+                      ? _onRegeneratePreviewPressed
                       : null,
                   icon: const Icon(Icons.refresh, size: 18),
                   label: const Text('Regenerate preview'),
@@ -819,10 +1178,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               }),
             ),
             const SizedBox(height: 8),
-            Text(
-              _selected?['fit_reason']?.toString() ?? 'Select a style to see why it fits you.',
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-            ),
+            if (_selected != null) ...[
+              Text(
+                'Preview: $_selectedStyleName',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+            ] else
+              const Text(
+                'Select a style below, expand for details, then tap Generate preview.',
+                style: TextStyle(color: Colors.white70, fontSize: 13),
+              ),
             if (_recommendationsLoading) ...[
               const SizedBox(height: 20),
               const Center(
@@ -858,7 +1223,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                       ),
                       SizedBox(width: 10),
                       Text(
-                        'Grouping formal, alternative, and youthful picks...',
+                        'Grouping formal and alternative picks...',
                         style: TextStyle(color: Colors.white54, fontSize: 12),
                       ),
                     ],
@@ -874,11 +1239,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                   const SizedBox(height: 12),
                   _sectionTitle('Alternative'),
                   ..._categories['alternative']!.map(_styleTile),
-                ],
-                if (_categories['youthful']!.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  _sectionTitle('Youthful'),
-                  ..._categories['youthful']!.map(_styleTile),
                 ],
               ],
             ],
@@ -928,63 +1288,39 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
-  Widget _buildCaptureThumbnails() {
-    return SizedBox(
-      height: 88,
-      child: Row(
-        children: List.generate(_angleKeys.length, (index) {
-          final key = _angleKeys[index];
-          final b64 = widget.captures[key];
-          final selected = index == _previewAngleIndex;
-          return Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(left: index == 0 ? 0 : 6),
-              child: GestureDetector(
-                onTap: () => setState(() => _previewAngleIndex = index),
-                child: Container(
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: selected ? Colors.white : Colors.white24,
-                      width: selected ? 2 : 1,
-                    ),
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: b64 != null && b64.isNotEmpty
-                      ? Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Image.memory(
-                              base64Decode(b64),
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                            ),
-                            Container(
-                              alignment: Alignment.bottomCenter,
-                              padding: const EdgeInsets.symmetric(vertical: 4),
-                              color: Colors.black54,
-                              child: Text(
-                                _angleLabels[index],
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Center(
-                          child: Text(
-                            _angleLabels[index],
-                            style: const TextStyle(color: Colors.white38, fontSize: 11),
-                          ),
-                        ),
+  Widget _buildHairTypeAdjustment() {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.white12),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: const Text(
+          'Adjust hair type',
+          style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600),
+        ),
+        iconColor: Colors.white54,
+        collapsedIconColor: Colors.white38,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _textureOptions.map((texture) {
+              final selected = _hairTexture == texture;
+              return ChoiceChip(
+                label: Text(texture, style: const TextStyle(fontSize: 11)),
+                selected: selected,
+                onSelected: (_) => _applyHairTextureOverride(texture),
+                selectedColor: Colors.white,
+                labelStyle: TextStyle(
+                  color: selected ? Colors.black : Colors.white70,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
                 ),
-              ),
-            ),
-          );
-        }),
+                backgroundColor: const Color(0xFF1E1E1E),
+                side: const BorderSide(color: Colors.white24),
+              );
+            }).toList(),
+          ),
+        ],
       ),
     );
   }
@@ -993,6 +1329,23 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+    );
+  }
+
+  Widget _buildLowHairNotice() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: const Text(
+        'Little or no visible hair was detected. You can still browse and try styles — '
+        'previews may look more aspirational until hair grows in.',
+        style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
+      ),
     );
   }
 
@@ -1016,35 +1369,126 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   }
 
   Widget _styleTile(Map<String, dynamic> item) {
+    final variantId = _variantKey(item);
     final name = item['style_name']?.toString() ?? item['styleName']?.toString() ?? 'Style';
     final reason = item['fit_reason']?.toString() ?? '';
-    final selected = _selected != null &&
-        '${_selected!['variant_id'] ?? _selected!['variantId']}' ==
-            '${item['variant_id'] ?? item['variantId']}';
+    final catalogDesc = item['description']?.toString().trim() ?? '';
+    final rankLabel = RecommendationMatchDisplay.rankLabel(item);
+    final selected = _selected != null && _variantKey(_selected!) == variantId;
+    final expanded = _expandedVariantId == variantId && variantId.isNotEmpty;
+    final variantIdInt = int.tryParse(variantId) ?? 0;
+    final previewReady =
+        variantIdInt > 0 && _previewUrlsForVariant(variantIdInt) != null;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: InkWell(
-        onTap: () => _selectStyle(item),
-        borderRadius: BorderRadius.circular(10),
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1F1F1F) : const Color(0xFF141414),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? Colors.white : Colors.white10, width: selected ? 1.5 : 1),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-              if (reason.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4),
-                  child: Text(reason, style: const TextStyle(color: Colors.white60, fontSize: 12)),
+      child: Container(
+        decoration: BoxDecoration(
+          color: selected ? const Color(0xFF1F1F1F) : const Color(0xFF141414),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? Colors.white : Colors.white10, width: selected ? 1.5 : 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: () => _toggleExpanded(item),
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.white54,
+                      size: 22,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          ),
+                          if (rankLabel != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              rankLabel,
+                              style: const TextStyle(color: Colors.white38, fontSize: 11),
+                            ),
+                          ],
+                          if (!expanded) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              RecommendationMatchDisplay.fitReasonTeaser(item),
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
+              ),
+            ),
+            if (expanded) ...[
+              const Divider(height: 1, color: Colors.white12),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (reason.isNotEmpty)
+                      Text(
+                        reason,
+                        style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                      ),
+                    if (catalogDesc.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        catalogDesc,
+                        style: const TextStyle(color: Colors.white54, fontSize: 12, height: 1.35),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: _previewGenerating
+                            ? null
+                            : () => _onGeneratePreviewPressed(item),
+                        icon: Icon(
+                          previewReady ? Icons.check_circle_outline : Icons.auto_awesome,
+                          size: 18,
+                          color: previewReady ? const Color(0xFF8BC34A) : Colors.white,
+                        ),
+                        label: Text(
+                          previewReady ? 'View / regenerate preview' : 'Generate preview',
+                          style: TextStyle(
+                            color: previewReady ? const Color(0xFF8BC34A) : Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(
+                            color: previewReady ? const Color(0xFF8BC34A) : Colors.white38,
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );

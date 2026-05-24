@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/replicate_helper.php';
 require_once __DIR__ . '/ai_service_client.php';
+require_once __DIR__ . '/face_scan_attach.php';
 
 require_method('POST');
 
@@ -65,11 +66,24 @@ function ensure_face_scan_tables(PDO $pdo): void
 
     $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_length_level INT');
     $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_length_label TEXT');
+    $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_color_label TEXT');
+    $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS no_hair_detected BOOLEAN DEFAULT FALSE');
 }
 
 function face_scan_upload_root(): string
 {
     return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'face_scans';
+}
+
+function face_scan_preview_file_exists(string $relativeUrl): bool
+{
+    $relativeUrl = trim($relativeUrl);
+    if ($relativeUrl === '') {
+        return false;
+    }
+    $root = dirname(__DIR__);
+    $fullPath = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativeUrl, '/'));
+    return is_file($fullPath) && filesize($fullPath) > 0;
 }
 
 function ensure_scan_session_row(
@@ -156,7 +170,7 @@ function save_jpeg_capture(string $scanSessionId, string $angle, string $base64)
     return 'uploads/face_scans/' . basename($dir) . '/' . $filename;
 }
 
-function save_preview_bytes(string $scanSessionId, string $angle, string $bytes): string
+function save_preview_bytes(string $scanSessionId, int $variantId, string $angle, string $bytes): string
 {
     if ($bytes === '') {
         throw new InvalidArgumentException("Empty preview bytes for {$angle}");
@@ -180,7 +194,8 @@ function save_preview_bytes(string $scanSessionId, string $angle, string $bytes)
         throw new RuntimeException('Unable to create preview directory');
     }
 
-    $filename = $angle . '.jpg';
+    $variantPart = $variantId > 0 ? ('v' . $variantId . '_') : '';
+    $filename = $variantPart . $angle . '.jpg';
     $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
     if (file_put_contents($fullPath, $bytes) === false) {
         throw new RuntimeException("Unable to write preview {$filename}");
@@ -375,55 +390,27 @@ try {
             json_response(['error' => 'Invalid attach payload'], 422);
         }
 
-        $previewStmt = $pdo->prepare(
-            'SELECT front_url, left_url, right_url
-             FROM face_scan_previews
-             WHERE scan_session_id = :scan_session_id
-               AND (:variant_id <= 0 OR variant_id = :variant_id)
-             ORDER BY preview_id DESC
-             LIMIT 1'
+        $result = attach_scan_previews_to_appointment(
+            $pdo,
+            $appointmentID,
+            $scanSessionId,
+            $variantID,
+            [
+                'frontViewUrl' => (string)($input['frontViewUrl'] ?? ''),
+                'sideViewUrl' => (string)($input['sideViewUrl'] ?? ''),
+                'backViewUrl' => (string)($input['backViewUrl'] ?? ''),
+            ]
         );
-        $previewStmt->execute([
-            ':scan_session_id' => $scanSessionId,
-            ':variant_id' => $variantID,
-        ]);
-        $preview = $previewStmt->fetch();
 
-        $front = $preview['front_url'] ?? ($input['frontViewUrl'] ?? null);
-        $left = $preview['left_url'] ?? ($input['sideViewUrl'] ?? null);
-        $right = $preview['right_url'] ?? ($input['backViewUrl'] ?? null);
-
-        $pdo->beginTransaction();
-
-        $apptStmt = $pdo->prepare(
-            'UPDATE appointments SET scan_session_id = :scan_session_id WHERE appointment_id = :appointment_id'
-        );
-        $apptStmt->execute([
-            ':scan_session_id' => $scanSessionId,
-            ':appointment_id' => $appointmentID,
-        ]);
-
-        $detailStmt = $pdo->prepare(
-            'UPDATE appointment_details
-             SET customer_front_url = COALESCE(:front_url, customer_front_url),
-                 customer_left_url = COALESCE(:left_url, customer_left_url),
-                 customer_right_url = COALESCE(:right_url, customer_right_url)
-             WHERE appointment_id = :appointment_id'
-        );
-        $detailStmt->execute([
-            ':appointment_id' => $appointmentID,
-            ':front_url' => $front,
-            ':left_url' => $left,
-            ':right_url' => $right,
-        ]);
-
-        $pdo->commit();
+        if (!$result['attached']) {
+            json_response(['error' => 'No preview images found for this scan session'], 422);
+        }
 
         json_response([
             'message' => 'Appointment previews attached',
-            'frontViewUrl' => $front,
-            'sideViewUrl' => $left,
-            'backViewUrl' => $right,
+            'frontViewUrl' => $result['front'],
+            'sideViewUrl' => $result['left'],
+            'backViewUrl' => $result['right'],
         ]);
     }
 
@@ -464,19 +451,23 @@ try {
         $data = $analysis['data'];
         $faceShape = (string)($data['face_shape'] ?? 'oval');
         $hairTexture = (string)($data['hair_texture'] ?? 'Wavy');
-        $allowedTextures = ['Straight', 'Wavy', 'Curly', 'Coily'];
+        $allowedTextures = ['Straight', 'Wavy', 'Curly'];
         if (!in_array($hairTexture, $allowedTextures, true)) {
             $hairTexture = 'Wavy';
         }
         $hairLengthLevel = (int)($data['hair_length_level'] ?? 1);
         $hairLengthLabel = (string)($data['hair_length'] ?? 'short');
+        $hairColorLabel = trim((string)($data['hair_color'] ?? ''));
+        $noHairDetected = (bool)($data['no_hair_detected'] ?? false);
 
         $updateStmt = $pdo->prepare(
             'UPDATE face_scan_sessions
              SET face_shape = :face_shape,
                  hair_texture = :hair_texture,
                  hair_length_level = :hair_length_level,
-                 hair_length_label = :hair_length_label
+                 hair_length_label = :hair_length_label,
+                 hair_color_label = :hair_color_label,
+                 no_hair_detected = :no_hair_detected
              WHERE scan_session_id = :scan_session_id'
         );
         $updateStmt->execute([
@@ -484,6 +475,8 @@ try {
             ':hair_texture' => $hairTexture,
             ':hair_length_level' => $hairLengthLevel,
             ':hair_length_label' => $hairLengthLabel,
+            ':hair_color_label' => $hairColorLabel !== '' ? $hairColorLabel : null,
+            ':no_hair_detected' => $noHairDetected ? 1 : 0,
             ':scan_session_id' => $scanSessionId,
         ]);
 
@@ -495,6 +488,10 @@ try {
             'hairLengthLevel' => $hairLengthLevel,
             'hairLengthScore' => $data['hair_length_score'] ?? null,
             'hairTextureScore' => $data['hair_texture_score'] ?? null,
+            'hairMaskCoverage' => $data['hair_mask_coverage'] ?? null,
+            'noHairDetected' => (bool)($data['no_hair_detected'] ?? false),
+            'hairColor' => (string)($data['hair_color'] ?? ''),
+            'hairColorRgb' => $data['hair_color_rgb'] ?? null,
             'topStyles' => $data['top_styles'] ?? [],
             'achievableStyles' => $data['achievable_styles'] ?? [],
             'provider' => 'ai-service',
@@ -537,14 +534,19 @@ try {
             ]);
             $cached = $cachedStmt->fetch(PDO::FETCH_ASSOC);
             if ($cached && !empty($cached['front_url'])) {
-                json_response([
-                    'message' => 'Previews loaded from cache',
-                    'frontViewUrl' => $cached['front_url'],
-                    'sideViewUrl' => $cached['left_url'],
-                    'backViewUrl' => $cached['right_url'],
-                    'provider' => 'replicate',
-                    'cached' => true,
-                ]);
+                $cacheValid = face_scan_preview_file_exists((string)$cached['front_url'])
+                    && face_scan_preview_file_exists((string)($cached['left_url'] ?? ''))
+                    && face_scan_preview_file_exists((string)($cached['right_url'] ?? ''));
+                if ($cacheValid) {
+                    json_response([
+                        'message' => 'Previews loaded from cache',
+                        'frontViewUrl' => $cached['front_url'],
+                        'sideViewUrl' => $cached['left_url'],
+                        'backViewUrl' => $cached['right_url'],
+                        'provider' => 'replicate',
+                        'cached' => true,
+                    ]);
+                }
             }
         }
 
@@ -570,7 +572,7 @@ try {
         }
 
         $sessionMetaStmt = $pdo->prepare(
-            'SELECT face_shape, hair_length_level, hair_length_label
+            'SELECT face_shape, hair_length_level, hair_length_label, hair_color_label
              FROM face_scan_sessions
              WHERE scan_session_id = :scan_session_id
              LIMIT 1'
@@ -591,13 +593,17 @@ try {
         $lengthNote = null;
         $provider = 'php-replicate';
         $images = [];
+        $previewDiagnostics = [];
+
+        $hairColorLabel = trim((string)($sessionMeta['hair_color_label'] ?? ''));
 
         if (ai_service_is_available()) {
             $generated = ai_service_generate_style(
                 $absolute,
                 $styleName,
                 $styleCode !== '' ? $styleCode : null,
-                $hairLengthLevel
+                $hairLengthLevel,
+                $hairColorLabel
             );
             if (!$generated['ok']) {
                 $err = (string)$generated['error'];
@@ -616,6 +622,7 @@ try {
             $images = $generated['images'];
             $feasibleToday = $generated['feasibleToday'];
             $lengthNote = $generated['lengthNote'];
+            $previewDiagnostics = $generated['previewDiagnostics'] ?? [];
             $provider = 'ai-service';
         } else {
             $generated = replicate_generate_three_view_previews(
@@ -626,7 +633,8 @@ try {
                 ],
                 $styleName,
                 $styleCode !== '' ? $styleCode : null,
-                $hairLengthLevel
+                $hairLengthLevel,
+                $hairColorLabel
             );
             if (!$generated['ok']) {
                 $err = (string)$generated['error'];
@@ -655,9 +663,17 @@ try {
             trim((string)($input['hairTexture'] ?? '')) ?: null
         );
 
-        $front = save_preview_bytes($scanSessionId, 'front', $images['front']);
-        $left = save_preview_bytes($scanSessionId, 'left', $images['left']);
-        $right = save_preview_bytes($scanSessionId, 'right', $images['right']);
+        $front = save_preview_bytes($scanSessionId, $variantID, 'front', $images['front']);
+        $left = save_preview_bytes($scanSessionId, $variantID, 'left', $images['left']);
+        $right = save_preview_bytes($scanSessionId, $variantID, 'right', $images['right']);
+
+        error_log(sprintf(
+            'face_scan preview saved session=%s variant=%d front=%s (%d bytes)',
+            $scanSessionId,
+            $variantID,
+            $front,
+            strlen($images['front'])
+        ));
 
         $stmt = $pdo->prepare(
             'INSERT INTO face_scan_previews (scan_session_id, variant_id, front_url, left_url, right_url)
@@ -680,6 +696,7 @@ try {
             'feasibleToday' => $feasibleToday,
             'lengthNote' => $lengthNote,
             'cached' => false,
+            'previewDiagnostics' => $previewDiagnostics,
         ]);
     }
 

@@ -17,31 +17,6 @@ flutter:
 
   assets:
     - assets/images/
-    - packages/tatis_barbershop/assets/images/overlays/barbers/
-    - packages/tatis_barbershop/assets/images/overlays/blowout_taper/
-    - packages/tatis_barbershop/assets/images/overlays/buzz_cut/
-    - packages/tatis_barbershop/assets/images/overlays/caesar_cut/
-    - packages/tatis_barbershop/assets/images/overlays/crew_cut/
-    - packages/tatis_barbershop/assets/images/overlays/curly_burst_fade/
-    - packages/tatis_barbershop/assets/images/overlays/curly_crew_cut/
-    - packages/tatis_barbershop/assets/images/overlays/curly_drop_fade/
-    - packages/tatis_barbershop/assets/images/overlays/curly_mid_fade/
-    - packages/tatis_barbershop/assets/images/overlays/curly_modern_mullet/
-    - packages/tatis_barbershop/assets/images/overlays/curly_taper/
-    - packages/tatis_barbershop/assets/images/overlays/edgar_cut/
-    - packages/tatis_barbershop/assets/images/overlays/french_crop/
-    - packages/tatis_barbershop/assets/images/overlays/low_fade/
-    - packages/tatis_barbershop/assets/images/overlays/messy_quiff/
-    - packages/tatis_barbershop/assets/images/overlays/modern_curtains/
-    - packages/tatis_barbershop/assets/images/overlays/modern_mullet/
-    - packages/tatis_barbershop/assets/images/overlays/pompadour/
-    - packages/tatis_barbershop/assets/images/overlays/textured_crop/
-    - packages/tatis_barbershop/assets/images/overlays/two_block/
-    - packages/tatis_barbershop/assets/images/overlays/wavy_burst_fade/
-    - packages/tatis_barbershop/assets/images/overlays/wavy_fringe/
-    - packages/tatis_barbershop/assets/images/overlays/wavy_messy_top/
-    - packages/tatis_barbershop/assets/images/overlays/wavy_mod_cut/
-    - packages/tatis_barbershop/assets/images/overlays/wavy_side_sweep/
 
   fonts:
     - family: CenturyGothic

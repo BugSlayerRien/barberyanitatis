@@ -1,6 +1,6 @@
 # AI try-on sidecar (Python)
 
-MediaPipe face/hair analysis + Replicate Flux Kontext generation with hair-mask compositing.
+MediaPipe face/hair analysis + Replicate Flux Kontext generation with **hair-only compositing** (face and background pixels are restored from the original capture after each edit).
 
 ## Setup
 
@@ -33,16 +33,27 @@ In project root `.env`:
 AI_SERVICE_URL=http://127.0.0.1:8000
 ```
 
-`face_scan.php` calls this service for `analyzeCaptures` and `generateStylePreviews` when the URL is reachable.
+`face_scan.php` calls this service for `analyzeCaptures` and `generateStylePreviews` when the URL is reachable. **Always run this sidecar for previews** — the PHP-only Replicate fallback does not composite and may change the face/background.
 
 ### `analyzeCaptures` outputs (used by PHP recommendations)
 
 | Field | Description |
 |-------|-------------|
-| `face_shape` | oval, round, square, heart, oblong |
+| `face_shape` | oval, round, square |
 | `hair_texture` | Straight, Wavy, or Curly (from `detect_hair_texture()` on captures) |
 | `hair_length` / `hair_length_level` | very short → long |
 
 Flutter passes `faceShape` and `hairTexture` from this response into `ai_scan.php` (`recommendWithInsights`). **Ranking stays in PHP**; Python only supplies vision attributes.
 
 See also: `docs/SCAN_PIPELINE.md`.
+
+## Preview compositing
+
+| Env | Default | Description |
+|-----|---------|-------------|
+| `HAIR_COMPOSITE_MODE` | `face_lock` | `face_lock` blends AI hair only; `full` allows more color transfer; `off` is dev-only |
+| `REPLICATE_FLUX_MODEL` | `black-forest-labs/flux-kontext-pro` | Replicate model id |
+
+`/generate` accepts `style_code`, `style_name`, and legacy `style`. Prefer sending the DB `style_code` (e.g. `wavy_mod_cut`) so prompts map to the correct haircut.
+
+Response includes `preview_diagnostics` per view (`compositeDiff`, `maskMax`, `faceDrift`, `usedRawOutput`).
