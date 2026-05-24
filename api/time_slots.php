@@ -50,8 +50,9 @@ function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): voi
     }
 }
 
-function seed_week_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): void
+function seed_week_for_barber(PDO $pdo, int $barberID, ?int $windowDays = null): void
 {
+    $windowDays = $windowDays ?? shop_booking_window_days();
     if ($barberID <= 0 || $windowDays <= 0) {
         return;
     }
@@ -66,8 +67,9 @@ function seed_week_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): voi
 }
 
 /** Avoid re-inserting hundreds of rows on every suggestBestSlot call (slow on remote DB). */
-function ensure_week_seeded_for_barber(PDO $pdo, int $barberID, int $windowDays = 7): void
+function ensure_week_seeded_for_barber(PDO $pdo, int $barberID, ?int $windowDays = null): void
 {
+    $windowDays = $windowDays ?? shop_booking_window_days();
     if ($barberID <= 0 || $windowDays <= 0) {
         return;
     }
@@ -206,7 +208,8 @@ try {
         $leadStart = shop_next_bookable_slot_start();
         $leadDate = $leadStart->format('Y-m-d');
         $leadTime = $leadStart->format('H:i:s');
-        $shopWindowEnd = shop_window_end_date(7);
+        $bookingWindowDays = shop_booking_window_days();
+        $shopWindowEnd = shop_window_end_date($bookingWindowDays);
 
         $runBestSlotQuery = static function (PDO $pdo, string $leadDate, string $leadTime, string $shopWindowEnd, string $appointmentFilter): ?array {
             $bestStmt = $pdo->prepare(
@@ -253,7 +256,7 @@ try {
             foreach ($seedStmt->fetchAll() as $barberRow) {
                 $barberID = (int)($barberRow['barber_id'] ?? 0);
                 if ($barberID > 0) {
-                    ensure_week_seeded_for_barber($pdo, $barberID, 7);
+                    ensure_week_seeded_for_barber($pdo, $barberID, $bookingWindowDays);
                 }
             }
             $best = $runBestSlotQuery($pdo, $leadDate, $leadTime, $shopWindowEnd, $appointmentFilter);
@@ -300,11 +303,12 @@ try {
             json_response(['error' => 'Missing or invalid barberID/year/month'], 422);
         }
 
-        ensure_week_seeded_for_barber($pdo, $barberID, 7);
+        $bookingWindowDays = shop_booking_window_days();
+        ensure_week_seeded_for_barber($pdo, $barberID, $bookingWindowDays);
 
         $startDate = sprintf('%04d-%02d-01', $year, $month);
         $endDate = date('Y-m-d', strtotime($startDate . ' +1 month'));
-        $windowEndDate = shop_window_end_date(7);
+        $windowEndDate = shop_window_end_date($bookingWindowDays);
         $minBookable = shop_earliest_bookable_slot_start();
         $minDate = $minBookable->format('Y-m-d');
         $minTime = $minBookable->format('H:i:s');
@@ -361,7 +365,7 @@ try {
         ensure_barber_channel_column($pdo);
 
         if ($barberID > 0) {
-            ensure_week_seeded_for_barber($pdo, $barberID, 7);
+            ensure_week_seeded_for_barber($pdo, $barberID, shop_booking_window_days());
         }
 
         $result = find_group_booking_options($pdo, $barberID, $peopleCount, $preferredDate !== '' ? $preferredDate : null);
@@ -407,7 +411,7 @@ try {
     if (!$rows) {
         $requestedDate = DateTimeImmutable::createFromFormat('Y-m-d', $slotDate, new DateTimeZone(shop_timezone()));
         $today = shop_now()->setTime(0, 0);
-        $windowEndDate = shop_window_end_date(7);
+        $windowEndDate = shop_window_end_date();
 
         if ($requestedDate !== false && $requestedDate >= $today && $requestedDate->format('Y-m-d') <= $windowEndDate) {
             seed_slots_for_barber_dates($pdo, $barberID, [$slotDate]);

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../user/ai_face_scan_page.dart';
+import '../user/feature_flags.dart';
 import '../user/user_session.dart';
 import 'kiosk_session.dart';
 import 'kiosk_style_pick_page.dart';
@@ -18,6 +19,14 @@ class KioskScanModePage extends StatefulWidget {
 class _KioskScanModePageState extends State<KioskScanModePage> {
   KioskScanMode? _selected;
 
+  @override
+  void initState() {
+    super.initState();
+    if (!kEnableLiveScanner) {
+      _selected = KioskScanMode.threeAngle;
+    }
+  }
+
   void _select(KioskScanMode mode) {
     setState(() => _selected = mode);
   }
@@ -30,10 +39,11 @@ class _KioskScanModePageState extends State<KioskScanModePage> {
       return;
     }
 
-    KioskSession.scanMode = _selected;
+    final mode = kEnableLiveScanner ? _selected! : KioskScanMode.threeAngle;
+    KioskSession.scanMode = mode;
     UserSession.resetScanState();
 
-    if (_selected == KioskScanMode.threeAngle) {
+    if (mode == KioskScanMode.threeAngle) {
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => const AiFaceScanPage(kioskMode: true),
@@ -70,14 +80,16 @@ class _KioskScanModePageState extends State<KioskScanModePage> {
               selected: _selected == KioskScanMode.threeAngle,
               onTap: () => _select(KioskScanMode.threeAngle),
             ),
-            const SizedBox(height: 12),
-            _ModeCard(
-              title: 'Live preview',
-              subtitle: 'Pick a style first, then try it on camera in real time.',
-              icon: Icons.videocam_outlined,
-              selected: _selected == KioskScanMode.liveOnly,
-              onTap: () => _select(KioskScanMode.liveOnly),
-            ),
+            if (kEnableLiveScanner) ...[
+              const SizedBox(height: 12),
+              _ModeCard(
+                title: 'Live preview',
+                subtitle: 'Pick a style first, then try it on camera in real time.',
+                icon: Icons.videocam_outlined,
+                selected: _selected == KioskScanMode.liveOnly,
+                onTap: () => _select(KioskScanMode.liveOnly),
+              ),
+            ],
           ],
         ),
       ),

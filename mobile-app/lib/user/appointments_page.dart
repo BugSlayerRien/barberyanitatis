@@ -17,6 +17,7 @@ import 'user_session.dart';
 import 'suggested_appointment_page.dart';
 import 'barber_selection_page.dart';
 import 'payment_page.dart';
+import 'calendar_page.dart';
 import '../shared/pagination_controls.dart';
 import '../main.dart';
 
@@ -216,6 +217,9 @@ class _AppointmentsPageState extends State<AppointmentsPage>
           'canReschedule': isPaymentOverride && forcedState == 'Paid'
               ? true
               : appt['canReschedule'] == true,
+          'rescheduleCount': appt['rescheduleCount'] ?? 0,
+          'reschedulesRemaining': appt['reschedulesRemaining'] ?? 0,
+          'rescheduleBlockedReason': appt['rescheduleBlockedReason']?.toString(),
           'intentFailureReason': appt['intentFailureReason']?.toString(),
           'service': displayTitle,
           'serviceID': firstService['serviceID'],
@@ -647,15 +651,20 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                               ),
                                             ),
                                           OutlinedButton(
-                                            onPressed: isProcessing
+                                            onPressed: isProcessing ||
+                                                    appointment['canReschedule'] != true
                                                 ? null
                                                 : () => _rescheduleAppointment(
                                                     appointment),
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor:
-                                                  const Color(0xFFA99941),
-                                              side: const BorderSide(
-                                                  color: Color(0xFFA99941),
+                                                  appointment['canReschedule'] == true
+                                                      ? const Color(0xFFA99941)
+                                                      : Colors.white38,
+                                              side: BorderSide(
+                                                  color: appointment['canReschedule'] == true
+                                                      ? const Color(0xFFA99941)
+                                                      : Colors.white24,
                                                   width: 1),
                                               padding:
                                                   const EdgeInsets.symmetric(
@@ -1026,66 +1035,46 @@ class _AppointmentsPageState extends State<AppointmentsPage>
 
     final canReschedule = appointment['canReschedule'] == true;
     if (!canReschedule) {
+      final reason = appointment['rescheduleBlockedReason']?.toString() ??
+          'Reschedule is not available for this appointment.';
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'Reschedule is available only after payment confirmation.')),
+        SnackBar(content: Text(reason)),
       );
       return;
     }
 
-    final suggestion = await _fetchSuggestedSlot();
-    if (!mounted) {
-      return;
-    }
-    if (suggestion == null) {
+    final barberId = int.tryParse('${appointment['barberID'] ?? ''}') ?? 0;
+    final barberName = (appointment['barber']?.toString() ?? '')
+        .replaceFirst(RegExp(r'^with\s+', caseSensitive: false), '')
+        .trim();
+    if (barberId <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text(
-                'No suggested slot available right now. Try again later.')),
+        const SnackBar(content: Text('Barber information is missing.')),
       );
       return;
     }
 
-    final newDate = suggestion['slotDate']?.toString() ?? '';
-    final newStart = suggestion['slotTime']?.toString() ?? '';
-    const duration = 60;
-    final newEnd = _addMinutes(newStart, duration);
+    final remaining =
+        int.tryParse('${appointment['reschedulesRemaining'] ?? ''}') ?? 0;
 
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'reschedule',
-        'appointmentID': appointmentId,
-        'appointmentDate': newDate,
-        'startTime': newStart,
-        'endTime': newEnd,
-      }),
+    final completed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CalendarPage(
+          barberId: barberId,
+          barberName: barberName.isNotEmpty ? barberName : 'Barber',
+          rescheduleAppointmentId: appointmentId,
+          reschedulesRemaining: remaining > 0 ? remaining : null,
+        ),
+      ),
     );
 
     if (!mounted) {
       return;
     }
-
-    final data = response.body.isNotEmpty
-        ? jsonDecode(response.body) as Map<String, dynamic>
-        : <String, dynamic>{};
-
-    if (response.statusCode != 200) {
+    if (completed == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(data['error']?.toString() ?? 'Reschedule failed.')),
+        const SnackBar(content: Text('Appointment rescheduled.')),
       );
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content:
-              Text(data['message']?.toString() ?? 'Appointment rescheduled.')),
-    );
-    if (mounted) {
       _loadAppointments();
     }
   }

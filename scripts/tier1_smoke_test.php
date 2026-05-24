@@ -80,9 +80,10 @@ check('listByCustomer query', static function () use ($userId): void {
     $stmt->fetchAll();
 });
 
-check('availability window (7 days)', static function () use ($barberId): void {
+check('availability window (booking window days)', static function () use ($barberId): void {
     $today = shop_today();
-    $end = shop_window_end_date(7);
+    $days = shop_booking_window_days();
+    $end = shop_window_end_date($days);
     echo "    bookable window: {$today} → {$end}\n";
     $pdo = get_db_connection();
     $stmt = $pdo->prepare(

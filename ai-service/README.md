@@ -1,6 +1,8 @@
 # AI try-on sidecar (Python)
 
-MediaPipe face/hair analysis + Replicate Flux Kontext generation with **hair-only compositing** (face and background pixels are restored from the original capture after each edit).
+MediaPipe face/hair analysis + Replicate Flux Kontext generation with **hair-only compositing** (face and background pixels are restored from the original capture; the AI haircut shape is kept in the hair mask region).
+
+Previews aim for a full **haircut replacement** (same person, face, and background — only hair changes). If a preview looks too subtle, the service retries Replicate with a stronger prompt and blends more of the AI output in the hair region.
 
 ## Setup
 
@@ -51,7 +53,7 @@ See also: `docs/SCAN_PIPELINE.md`.
 
 | Env | Default | Description |
 |-----|---------|-------------|
-| `HAIR_COMPOSITE_MODE` | `face_lock` | `face_lock` blends AI hair only; `full` allows more color transfer; `off` is dev-only |
+| `HAIR_COMPOSITE_MODE` | `full` | `full` replaces whole-head hair from AI; `face_lock` is softer; `off` is dev-only |
 | `REPLICATE_FLUX_MODEL` | `black-forest-labs/flux-kontext-pro` | Replicate model id |
 
 `/generate` accepts `style_code`, `style_name`, and legacy `style`. Prefer sending the DB `style_code` (e.g. `wavy_mod_cut`) so prompts map to the correct haircut.

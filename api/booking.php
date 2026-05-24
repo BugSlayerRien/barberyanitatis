@@ -83,6 +83,14 @@ function ensure_appointment_detail_image_columns(PDO $pdo): void
     );
 }
 
+function ensure_reschedule_count_column(PDO $pdo): void
+{
+    $pdo->exec(
+        'ALTER TABLE appointments
+         ADD COLUMN IF NOT EXISTS reschedule_count INT NOT NULL DEFAULT 0'
+    );
+}
+
 function derive_payment_state(?string $paymentStatus, ?string $intentStatus): string
 {
     $payment = $paymentStatus !== null ? trim((string)$paymentStatus) : '';
@@ -211,6 +219,7 @@ try {
     $readOnlyActions = ['listByCustomer', 'listByBarber'];
     if (!in_array($action, $readOnlyActions, true)) {
         ensure_appointment_detail_image_columns($pdo);
+        ensure_reschedule_count_column($pdo);
     }
     if (!in_array($action, $readOnlyActions, true)) {
         auto_complete_due_appointments($pdo);
@@ -593,6 +602,7 @@ try {
         $stmt = $pdo->prepare(
             "SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_member_name, a.group_sequence,
                     a.appointment_date, a.start_time, a.end_time, a.status,
+                    COALESCE(a.reschedule_count, 0) AS reschedule_count,
                     b.barber_id, b.full_name AS barber_name,
                     u.full_name AS customer_name,
                     {$paymentStatusExpr} AS payment_status,
@@ -692,6 +702,10 @@ try {
             if ($intentStatus === 'PendingGateway' && $row['intent_expires_at'] !== null) {
                 $canRetryPayment = strtotime((string)$row['intent_expires_at']) < time();
             }
+            $rowForPolicy = $row;
+            $rowForPolicy['status'] = $appointmentStatus;
+            $reschedulePolicy = can_customer_reschedule_appointment($rowForPolicy, $paymentState);
+            $rescheduleCount = (int)($row['reschedule_count'] ?? 0);
             return [
                 'appointmentID' => $aid,
                 'bookingCode' => $row['booking_code'],
@@ -720,7 +734,12 @@ try {
                 'intentFailureReason' => $row['failure_reason'] !== null ? (string)$row['failure_reason'] : null,
                 'intentUpdatedAt' => $row['intent_updated_at'] !== null ? (string)$row['intent_updated_at'] : null,
                 'canRetryPayment' => $canRetryPayment,
-                'canReschedule' => $paymentState === 'Paid' && in_array((string)$row['status'], ['Scheduled', 'PendingPayment'], true),
+                'canReschedule' => $reschedulePolicy['allowed'],
+                'rescheduleCount' => $rescheduleCount,
+                'reschedulesRemaining' => $reschedulePolicy['remaining'],
+                'rescheduleBlockedReason' => $reschedulePolicy['reason'] !== ''
+                    ? $reschedulePolicy['reason']
+                    : null,
                 'services' => $serviceMap[$aid] ?? [],
                 'frontViewUrl' => ($imageMap[$aid]['frontViewUrl'] ?? null),
                 'sideViewUrl' => ($imageMap[$aid]['sideViewUrl'] ?? null),
@@ -841,15 +860,16 @@ try {
     }
 
     if ($action === 'reschedule') {
+        ensure_reschedule_count_column($pdo);
+
         $appointmentID = (int)($input['appointmentID'] ?? 0);
+        $userID = (int)($input['userID'] ?? 0);
         $newDate = trim((string)($input['appointmentDate'] ?? ''));
         $newStartTimeRaw = trim((string)($input['startTime'] ?? ''));
-        $newEndTimeRaw = trim((string)($input['endTime'] ?? ''));
 
         $newStartTime = normalize_time_string($newStartTimeRaw);
-        $newEndTime = normalize_time_string($newEndTimeRaw);
 
-        if ($appointmentID <= 0 || $newDate === '' || $newStartTime === null || $newEndTime === null) {
+        if ($appointmentID <= 0 || $newDate === '' || $newStartTime === null) {
             json_response(['error' => 'Missing or invalid reschedule details'], 422);
         }
 
@@ -857,21 +877,31 @@ try {
             json_response(['error' => 'Invalid appointmentDate format (expected YYYY-MM-DD).'], 422);
         }
 
-        $shopTz = new DateTimeZone(shop_timezone());
-        $newStartDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newStartTime, $shopTz);
-        $newEndDt = DateTimeImmutable::createFromFormat('Y-m-d H:i:s', $newDate . ' ' . $newEndTime, $shopTz);
-        if ($newStartDt === false || $newEndDt === false || $newEndDt <= $newStartDt) {
-            json_response(['error' => 'Invalid reschedule time range.'], 422);
+        if (shop_is_break_slot_time($newStartTime)) {
+            json_response(['error' => '12:00 PM is barber lunch break and cannot be booked.'], 422);
         }
+
         if (!shop_is_allowed_slot_time($newStartTime)) {
             json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
         }
-        if ($newStartDt < shop_now()) {
-            json_response(['error' => 'Cannot reschedule to a past timeslot.'], 422);
+
+        if (!shop_is_future_slot($newDate, $newStartTime)) {
+            json_response(['error' => 'Selected time must be at least 1 hour from now.'], 422);
         }
 
+        if ($newDate > shop_window_end_date()) {
+            json_response([
+                'error' => 'Selected date is outside the booking window ('
+                    . shop_booking_window_days() . ' days).',
+            ], 422);
+        }
+
+        $durationMinutes = shop_appointment_duration_minutes();
+        $newEndTime = shop_add_minutes_to_time($newStartTime, $durationMinutes);
+
         $apptStmt = $pdo->prepare(
-            'SELECT appointment_id, booking_code, user_id, barber_id, appointment_date, start_time, end_time, status
+            'SELECT appointment_id, booking_code, user_id, barber_id, appointment_date, start_time, end_time,
+                    status, COALESCE(reschedule_count, 0) AS reschedule_count
              FROM appointments
              WHERE appointment_id = :appointment_id
              LIMIT 1'
@@ -882,8 +912,8 @@ try {
             json_response(['error' => 'Appointment not found'], 404);
         }
 
-        if (!in_array((string)$appt['status'], ['Scheduled', 'PendingPayment'], true)) {
-            json_response(['error' => 'Only upcoming appointments can be rescheduled.'], 409);
+        if ($userID > 0 && (int)$appt['user_id'] !== $userID) {
+            json_response(['error' => 'You can only reschedule your own appointments'], 403);
         }
 
         $paidCheckStmt = $pdo->prepare(
@@ -893,8 +923,21 @@ try {
                AND status = 'Captured'"
         );
         $paidCheckStmt->execute([':appointment_id' => $appointmentID]);
-        if ((int)$paidCheckStmt->fetchColumn() === 0) {
-            json_response(['error' => 'Reschedule is allowed only after payment is confirmed.'], 409);
+        $paymentState = (int)$paidCheckStmt->fetchColumn() > 0 ? 'Paid' : 'Unpaid';
+
+        $reschedulePolicy = can_customer_reschedule_appointment($appt, $paymentState);
+        if (!$reschedulePolicy['allowed']) {
+            json_response(['error' => $reschedulePolicy['reason']], 409);
+        }
+
+        $oldDate = (string)$appt['appointment_date'];
+        $oldStart = (string)$appt['start_time'];
+        if ($oldDate === $newDate && $oldStart === $newStartTime) {
+            json_response(['error' => 'Please choose a different date or time.'], 422);
+        }
+
+        if (paid_slot_conflict_exists($pdo, (int)$appt['barber_id'], $newDate, $newStartTime, [$appointmentID])) {
+            json_response(['error' => 'Selected time slot is already booked. Choose another time.'], 409);
         }
 
         $overlapStmt = $pdo->prepare(
@@ -946,8 +989,8 @@ try {
         );
         $releaseOldSlotStmt->execute([
             ':barber_id' => (int)$appt['barber_id'],
-            ':slot_date' => (string)$appt['appointment_date'],
-            ':slot_time' => (string)$appt['start_time'],
+            ':slot_date' => $oldDate,
+            ':slot_time' => $oldStart,
         ]);
 
         $bookNewSlotStmt = $pdo->prepare(
@@ -969,6 +1012,7 @@ try {
                  start_time = :start_time,
                  end_time = :end_time,
                  status = 'Scheduled',
+                 reschedule_count = COALESCE(reschedule_count, 0) + 1,
                  updated_at = CURRENT_TIMESTAMP
              WHERE appointment_id = :appointment_id"
         );
@@ -991,6 +1035,8 @@ try {
 
         $pdo->commit();
 
+        $remaining = max(0, shop_max_reschedules_per_appointment() - ((int)$appt['reschedule_count'] + 1));
+
         json_response([
             'message' => 'Appointment rescheduled successfully.',
             'appointmentID' => $appointmentID,
@@ -998,6 +1044,8 @@ try {
             'startTime' => $newStartTime,
             'endTime' => $newEndTime,
             'status' => 'Scheduled',
+            'rescheduleCount' => (int)$appt['reschedule_count'] + 1,
+            'reschedulesRemaining' => $remaining,
         ]);
     }
 

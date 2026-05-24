@@ -30,6 +30,7 @@ import 'scanner/attachment_engine.dart';
 import 'scanner/face_detector_service_stub.dart'
     if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
 import 'face_scan_results_page.dart';
+import 'feature_flags.dart';
 import 'services/booking_slots_service.dart';
 import 'services/face_scan_service.dart';
 import 'user_session.dart';
@@ -258,11 +259,44 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _attachmentEngine = createAttachmentEngine(AttachmentEngineMode.auto);
-    
+    if (widget.livePreviewOnly && !kEnableLiveScanner) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_exitBlockedLivePreview());
+      });
+      return;
+    }
+
     _loadConsentAndStaging();
     _seedRecommendationsForLivePreview();
     _loadCalibration();
     _setup();
+  }
+
+  Future<void> _exitBlockedLivePreview() async {
+    if (!mounted) return;
+    final captures = UserSession.capturedFaceImages;
+    if (captures != null && captures.isNotEmpty) {
+      final scan = UserSession.lastScan;
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => FaceScanResultsPage(
+            captures: Map.from(captures),
+            faceShape: scan?['faceShape']?.toString() ?? 'oval',
+            hairTexture: scan?['hairTexture']?.toString() ?? 'Wavy',
+            hairLengthLevel: int.tryParse('${scan?['hairLengthLevel']}') ?? 1,
+            hairLengthLabel: scan?['hairLength']?.toString() ?? 'short',
+            analysisProvider: scan?['analysisProvider']?.toString(),
+            hairTextureScore: (scan?['hairTextureScore'] as num?)?.toDouble(),
+            noHairDetected: scan?['noHairDetected'] == true,
+            hairColorLabel: scan?['hairColor']?.toString(),
+            presetRecommendation: widget.presetRecommendation,
+            kioskMode: widget.kioskMode,
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).pop();
   }
 
   Future<void> _loadConsentAndStaging() async {

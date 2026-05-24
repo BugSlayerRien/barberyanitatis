@@ -75,17 +75,6 @@ function face_scan_upload_root(): string
     return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'face_scans';
 }
 
-function face_scan_preview_file_exists(string $relativeUrl): bool
-{
-    $relativeUrl = trim($relativeUrl);
-    if ($relativeUrl === '') {
-        return false;
-    }
-    $root = dirname(__DIR__);
-    $fullPath = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativeUrl, '/'));
-    return is_file($fullPath) && filesize($fullPath) > 0;
-}
-
 function ensure_scan_session_row(
     PDO $pdo,
     string $scanSessionId,

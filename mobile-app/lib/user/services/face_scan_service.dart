@@ -69,14 +69,34 @@ class FaceScanService {
       }),
     );
 
-    final data = response.body.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-        : <String, dynamic>{};
+    final data = _decodeJsonMap(response.body);
 
     if (response.statusCode != 200) {
       throw Exception(data['error']?.toString() ?? 'Failed to upload face captures');
     }
     return data;
+  }
+
+  static Map<String, dynamic> _decodeJsonMap(String body) {
+    if (body.trim().isEmpty) {
+      return {};
+    }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      final snippet = body.length > 120 ? '${body.substring(0, 120)}...' : body;
+      throw Exception(
+        'Server returned an invalid response (not JSON). '
+        'Check PHP error logs on the API host. Snippet: $snippet',
+      );
+    }
+    return {};
   }
 
   static Map<String, dynamic> _rankingRequestBody({

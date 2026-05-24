@@ -9,14 +9,27 @@ import 'time_format_utils.dart';
 class CalendarPage extends StatefulWidget {
   final int barberId;
   final String barberName;
+  final int? rescheduleAppointmentId;
+  final int? reschedulesRemaining;
 
-  const CalendarPage({required this.barberId, required this.barberName, super.key});
+  const CalendarPage({
+    required this.barberId,
+    required this.barberName,
+    this.rescheduleAppointmentId,
+    this.reschedulesRemaining,
+    super.key,
+  });
 
   @override
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
 class _CalendarPageState extends State<CalendarPage> {
+  static const int _bookingWindowDays = 30;
+
+  String get _pageTitle =>
+      widget.rescheduleAppointmentId != null ? 'Reschedule' : 'Select Date';
+
   late DateTime _selectedDate;
   late DateTime _currentMonth;
   int _availableSlots = 0;
@@ -145,7 +158,7 @@ class _CalendarPageState extends State<CalendarPage> {
             icon: const Icon(Icons.close, color: Colors.white, size: 28),
             onPressed: () => Navigator.of(context).pop(),
           ),
-          title: const Text('Select Date', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          title: Text(_pageTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         ),
         body: _buildCalendarSkeleton(),
       );
@@ -156,7 +169,7 @@ class _CalendarPageState extends State<CalendarPage> {
     final weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
-    final bookingWindowEnd = todayDate.add(const Duration(days: 6));
+    final bookingWindowEnd = todayDate.add(Duration(days: _bookingWindowDays - 1));
     final currentMonthKey = DateTime(today.year, today.month);
     final canGoPrev = _currentMonth.isAfter(currentMonthKey);
     final slotsTaken = _bookedSlots.clamp(0, _totalSlots);
@@ -172,7 +185,7 @@ class _CalendarPageState extends State<CalendarPage> {
           icon: const Icon(Icons.close, color: Colors.white, size: 28),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text('Select Date', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(_pageTitle, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -180,7 +193,9 @@ class _CalendarPageState extends State<CalendarPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Book from today through ${_formatWindowEnd(bookingWindowEnd)} (7 days). '
+              widget.rescheduleAppointmentId != null && widget.reschedulesRemaining != null
+                  ? 'Pick a new date. ${widget.reschedulesRemaining} reschedule(s) left. '
+                  : 'Book from today through ${_formatWindowEnd(bookingWindowEnd)} ($_bookingWindowDays days). '
               'White days have open times with ${_barberNameLabel()}; gray days are past, outside the window, or fully booked.',
               style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
             ),
@@ -295,7 +310,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                           : () {
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 const SnackBar(
-                                                  content: Text('You can book up to 7 days in advance.'),
+                                                  content: Text('You can book up to $_bookingWindowDays days in advance.'),
                                                 ),
                                               );
                                             }),
@@ -401,7 +416,7 @@ class _CalendarPageState extends State<CalendarPage> {
                       setState(() => _continuing = true);
                 final today = DateTime.now();
                 final minDate = DateTime(today.year, today.month, today.day);
-                final maxDate = minDate.add(const Duration(days: 6));
+                final maxDate = minDate.add(Duration(days: _bookingWindowDays - 1));
                 if (_selectedDate.isBefore(minDate)) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Please select a valid date.')),
@@ -413,7 +428,7 @@ class _CalendarPageState extends State<CalendarPage> {
                 }
                 if (_selectedDate.isAfter(maxDate)) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('You can only book within the next 7 days.')),
+                    SnackBar(content: Text('You can only book within the next $_bookingWindowDays days.')),
                   );
                   if (mounted) {
                     setState(() => _continuing = false);
@@ -429,17 +444,24 @@ class _CalendarPageState extends State<CalendarPage> {
                   }
                   return;
                 }
-                await Navigator.of(context).push(
+                final slotResult = await Navigator.of(context).push<bool>(
                   MaterialPageRoute(
                     builder: (_) => TimeSlotPage(
                       barberId: widget.barberId,
                       barberName: widget.barberName,
                       selectedDate: _selectedDate,
+                      rescheduleAppointmentId: widget.rescheduleAppointmentId,
+                      reschedulesRemaining: widget.reschedulesRemaining,
                     ),
                   ),
                 );
                 if (mounted) {
                   setState(() => _continuing = false);
+                }
+                if (widget.rescheduleAppointmentId != null &&
+                    slotResult == true &&
+                    context.mounted) {
+                  Navigator.of(context).pop(true);
                 }
               },
               style: ElevatedButton.styleFrom(

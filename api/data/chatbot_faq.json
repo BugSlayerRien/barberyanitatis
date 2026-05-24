@@ -32,7 +32,7 @@
   {
     "id": "cancel",
     "keywords": ["cancel", "reschedule", "change appointment", "postpone"],
-    "answer": "Open the Appointments to view upcoming bookings. Cancel or change according to the options shown there, or contact the shop if you need help."
+    "answer": "Open Appointments, tap Reschedule on a paid booking, and pick a new date and time (up to 3 times, at least 24 hours before your appointment). Your old slot opens for others. Cancel from the same screen if needed."
   },
   {
     "id": "location",

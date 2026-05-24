@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../user/ai_face_scan_page.dart';
 import '../user/api_config.dart';
+import '../user/feature_flags.dart';
 import '../user/scanner/overlay_preview_image.dart';
 import '../user/scanner/overlay_registry.dart';
 import '../user/user_session.dart';
@@ -161,7 +162,7 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
       'variantId': variantId,
     };
 
-    if (widget.livePreviewNext) {
+    if (widget.livePreviewNext && kEnableLiveScanner) {
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => AiFaceScanPage(
@@ -195,7 +196,9 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
     final styles = _visibleStyles;
 
     return KioskScaffold(
-      title: widget.livePreviewNext ? 'Pick a style to preview' : 'Pick your haircut',
+      title: widget.livePreviewNext && kEnableLiveScanner
+          ? 'Pick a style to preview'
+          : 'Pick your haircut',
       body: Column(
         children: [
           Padding(
