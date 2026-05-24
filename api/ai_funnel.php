@@ -22,11 +22,15 @@ function normalize_face_shape(?string $value): ?string
     if ($value === '') {
         return null;
     }
-    $allowed = ['Oval', 'Round', 'Square', 'Heart', 'Diamond', 'Oblong'];
+    $allowed = ['Oval', 'Round', 'Square'];
     foreach ($allowed as $item) {
         if (strcasecmp($item, $value) === 0) {
             return $item;
         }
+    }
+    $lower = strtolower($value);
+    if (in_array($lower, ['oblong', 'heart', 'diamond'], true)) {
+        return 'Oval';
     }
     return null;
 }
@@ -40,11 +44,14 @@ function normalize_hair_texture(?string $value): ?string
     if ($value === '') {
         return null;
     }
-    $allowed = ['Straight', 'Wavy', 'Curly', 'Coily'];
+    $allowed = ['Straight', 'Wavy', 'Curly'];
     foreach ($allowed as $item) {
         if (strcasecmp($item, $value) === 0) {
             return $item;
         }
+    }
+    if (strcasecmp($value, 'coily') === 0) {
+        return 'Curly';
     }
     return null;
 }

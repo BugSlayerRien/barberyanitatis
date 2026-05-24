@@ -100,16 +100,18 @@ function chatbot_format_history($history): string
     return implode("\n", $lines);
 }
 
-function chatbot_gemini_reply(string $message, string $historyBlock): ?string
+function chatbot_gemini_reply(string $message, string $historyBlock, ?string &$error = null): ?string
 {
     if (!ai_gemini_enabled()) {
+        $error = 'Gemini API key is not configured on the server';
         return null;
     }
 
     $prompt = <<<PROMPT
 You are Tati AI Barber, a friendly skilled barber assistant for Tati's Barbershop in the Philippines.
-Give practical, concise advice about haircuts, face shape fit, styling, maintenance, booking, and walk-ins.
-If you are unsure, suggest booking with a barber or asking staff at the shop.
+Reply in 2-4 short sentences. Be warm and practical.
+You can answer greetings, small talk, mood, and general questions — then gently steer toward haircuts, styling, face-shape fit, maintenance, booking, walk-ins, or shop hours when relevant.
+If you are unsure about shop-specific facts, suggest booking with a barber or asking staff at the shop.
 
 Conversation so far:
 {$historyBlock}
@@ -118,7 +120,7 @@ Customer: {$message}
 Barber AI:
 PROMPT;
 
-    return ai_gemini_generate_plain_text($prompt, 0.65, 700);
+    return ai_gemini_generate_plain_text($prompt, 0.65, 700, $error);
 }
 
 $faqHit = chatbot_match_faq($message, $faqEntries);
@@ -131,7 +133,8 @@ if ($faqHit !== null && $faqHit['answer'] !== '') {
 }
 
 $historyBlock = chatbot_format_history($history);
-$aiReply = chatbot_gemini_reply($message, $historyBlock);
+$geminiError = null;
+$aiReply = chatbot_gemini_reply($message, $historyBlock, $geminiError);
 
 if ($aiReply !== null && $aiReply !== '') {
     json_response([
@@ -140,7 +143,16 @@ if ($aiReply !== null && $aiReply !== '') {
     ]);
 }
 
-json_response([
+$fallbackPayload = [
     'reply' => 'I could not find a quick answer. Please ask the front desk or try rephrasing your question about hours, booking, walk-ins, or haircuts.',
     'source' => 'fallback',
-]);
+];
+if ($geminiError !== null && $geminiError !== '') {
+    error_log('chatbot.php Gemini fallback: ' . $geminiError);
+    $debug = strtolower(trim((string)(getenv('APP_DEBUG') ?: '')));
+    if (in_array($debug, ['1', 'true', 'yes'], true)) {
+        $fallbackPayload['geminiError'] = $geminiError;
+    }
+}
+
+json_response($fallbackPayload);

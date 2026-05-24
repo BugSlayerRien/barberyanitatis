@@ -242,6 +242,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         'endTime': endTime,
         'serviceIDs': [serviceId],
         'variantID': UserSession.selectedVariantId,
+        ...FaceScanService.bookingPreviewPayload(),
       }),
     );
 
@@ -288,14 +289,26 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
         backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
       );
-      try {
-        await FaceScanService.attachPreviewsToAppointment(
-          appointmentId: appointmentId,
-          scanSessionId: UserSession.ensureScanSessionId(),
-          variantId: UserSession.selectedVariantId!,
-        );
-      } catch (_) {
-        // Non-blocking: catalog images still show if attach fails.
+      if (bookingData['previewsAttached'] != true) {
+        try {
+          await FaceScanService.attachPreviewsToAppointment(
+            appointmentId: appointmentId,
+            scanSessionId: UserSession.ensureScanSessionId(),
+            variantId: UserSession.selectedVariantId!,
+          );
+        } catch (e) {
+          debugPrint('Preview attach failed: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Booking saved, but preview photos could not be linked. '
+                  'Your barber may see the default style images.',
+                ),
+              ),
+            );
+          }
+        }
       }
     }
 

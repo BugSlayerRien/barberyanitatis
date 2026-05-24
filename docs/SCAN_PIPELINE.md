@@ -6,8 +6,8 @@
 |------|--------|------------|
 | Real-time face tracking | Device camera | ML Kit (mobile) / MediaPipe (web) |
 | 3-angle capture | `AiFaceScanPage` staging | Flutter |
-| Vision analysis | `face_scan.php` → `analyzeCaptures` | **Python** `ai-service` (face shape, hair length, **hair texture**) |
-| Catalog ranking | `FaceScanResultsPage` | **PHP** `ai_scan.php` (`rankByFeatures`, `recommendWithInsights`) |
+| Vision analysis | `face_scan.php` → `analyzeCaptures` | **Python** `ai-service` (face shape, hair length, **hair texture**, mask coverage / bald hint, **hair color**) |
+| Catalog ranking | `FaceScanResultsPage` | **PHP** `variant_ranking.php` + `ai_scan.php` (`rankByFeatures`, `recommendWithInsights`; optional Python style boost / prior-scan de-dupe) |
 | Generative try-on (optional) | Results page | Replicate Flux via `face_scan.php` |
 | Live overlay | `AiFaceScanPage` (`livePreviewOnly: true`) | PNG overlay only — **no ranking** |
 

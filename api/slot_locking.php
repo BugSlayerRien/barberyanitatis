@@ -275,6 +275,113 @@ function release_slots_for_appointment(PDO $pdo, int $appointmentId): void
     }
 }
 
+/**
+ * Derive a single status for a booking unit from member appointment rows.
+ *
+ * @param list<string> $statuses
+ */
+function aggregate_booking_unit_status(array $statuses): string
+{
+    $statuses = array_values(array_unique(array_map(static fn($s): string => trim((string)$s), $statuses)));
+    if ($statuses === []) {
+        return 'Scheduled';
+    }
+
+    if (in_array('PendingPayment', $statuses, true)) {
+        return 'PendingPayment';
+    }
+    if (in_array('InProgress', $statuses, true)) {
+        return 'InProgress';
+    }
+    if (in_array('CheckedIn', $statuses, true)) {
+        return 'CheckedIn';
+    }
+    if (in_array('Scheduled', $statuses, true)) {
+        return 'Scheduled';
+    }
+
+    $terminal = ['Completed', 'Cancelled', 'NoShow'];
+    $nonTerminal = array_values(array_filter(
+        $statuses,
+        static fn(string $status): bool => !in_array($status, $terminal, true)
+    ));
+    if ($nonTerminal === [] && in_array('Completed', $statuses, true)) {
+        return 'Completed';
+    }
+    if ($nonTerminal === [] && in_array('Cancelled', $statuses, true)) {
+        return 'Cancelled';
+    }
+    if ($nonTerminal === [] && in_array('NoShow', $statuses, true)) {
+        return 'NoShow';
+    }
+
+    return $statuses[0];
+}
+
+/**
+ * Mark a single appointment or entire group complete, release slots, and record revenue once.
+ *
+ * @return int 1 when a booking unit was completed, 0 when nothing changed
+ */
+function complete_booking_unit(PDO $pdo, int $appointmentId, ?string $completionTime = null): int
+{
+    ensure_group_booking_schema($pdo);
+
+    $stmt = $pdo->prepare(
+        'SELECT appointment_id, user_id, barber_id, booking_code, booking_group_id, status
+         FROM appointments
+         WHERE appointment_id = :appointment_id
+         LIMIT 1'
+    );
+    $stmt->execute([':appointment_id' => $appointmentId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return 0;
+    }
+
+    $groupId = (int)($row['booking_group_id'] ?? 0);
+    $members = $groupId > 0
+        ? appointments_in_paid_group($pdo, $groupId)
+        : [$row];
+
+    $activeStatuses = ['Scheduled', 'CheckedIn', 'InProgress'];
+    $toComplete = array_values(array_filter(
+        $members,
+        static fn(array $member): bool => in_array((string)($member['status'] ?? ''), $activeStatuses, true)
+    ));
+    if ($toComplete === []) {
+        return 0;
+    }
+
+    $completion = $completionTime ?? date('Y-m-d H:i:s');
+    $ids = array_map(static fn(array $member): int => (int)$member['appointment_id'], $toComplete);
+    $placeholders = implode(',', array_fill(0, count($ids), '?'));
+
+    $pdo->prepare(
+        "UPDATE appointments
+         SET status = 'Completed',
+             completion_time = COALESCE(completion_time, ?),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE appointment_id IN ($placeholders)"
+    )->execute(array_merge([$completion], $ids));
+
+    if ($groupId > 0) {
+        $pdo->prepare(
+            "UPDATE appointment_groups
+             SET status = 'Completed'
+             WHERE group_id = :group_id
+               AND status NOT IN ('Cancelled', 'Completed')"
+        )->execute([':group_id' => $groupId]);
+    }
+
+    release_slots_for_appointment($pdo, (int)$toComplete[0]['appointment_id']);
+
+    require_once __DIR__ . '/payment_recording.php';
+    record_booking_unit_completion_payment($pdo, (int)$row['appointment_id']);
+
+    return 1;
+}
+
 function format_time_range_label(string $startTime, string $endTime): string
 {
     return format_time_range_12h($startTime, $endTime);
@@ -310,26 +417,50 @@ function resolve_group_payment_state(array $members): string
  * @return list<array<string, mixed>>
  */
 /** Promote group rows that have a captured payment but are still PendingPayment. */
-function sync_paid_groups_from_payments(PDO $pdo): void
+function sync_paid_groups_from_payments(PDO $pdo, bool $force = false): void
 {
     static $done = false;
-    if ($done) {
+    if ($done && !$force) {
         return;
     }
-    require_once __DIR__ . '/schema_cache.php';
-    if (!schema_cache_should_run('sync_paid_groups_from_payments', 120)) {
-        $done = true;
 
-        return;
+    if (!$force) {
+        require_once __DIR__ . '/schema_cache.php';
+        if (!schema_cache_should_run('sync_paid_groups_from_payments', 120)) {
+            $done = true;
+
+            return;
+        }
     }
 
     $stmt = $pdo->query(
         "SELECT MIN(a.appointment_id) AS appointment_id
          FROM appointments a
-         INNER JOIN appointment_payments ap ON ap.appointment_id = a.appointment_id
          WHERE a.booking_group_id IS NOT NULL
            AND a.status = 'PendingPayment'
-           AND LOWER(ap.status) IN ('captured', 'paid', 'succeeded')
+           AND (
+                EXISTS (
+                    SELECT 1
+                    FROM appointments a_pay
+                    INNER JOIN appointment_payments ap ON ap.appointment_id = a_pay.appointment_id
+                    WHERE a_pay.booking_group_id = a.booking_group_id
+                      AND LOWER(ap.status) IN ('captured', 'paid', 'succeeded')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM appointments a_int
+                    INNER JOIN appointment_payment_intents i ON i.appointment_id = a_int.appointment_id
+                    WHERE a_int.booking_group_id = a.booking_group_id
+                      AND LOWER(i.status) IN ('paid', 'succeeded', 'captured')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM payments p
+                    INNER JOIN appointments a2 ON a2.appointment_id = p.appointment_id
+                    WHERE a2.booking_group_id = a.booking_group_id
+                      AND p.payment_status = 'Paid'
+                )
+           )
          GROUP BY a.booking_group_id"
     );
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -343,7 +474,9 @@ function sync_paid_groups_from_payments(PDO $pdo): void
         }
     }
 
-    schema_cache_done('sync_paid_groups_from_payments');
+    if (!$force) {
+        schema_cache_done('sync_paid_groups_from_payments');
+    }
     $done = true;
 }
 
@@ -428,7 +561,7 @@ function propagate_group_payment_states(array $appointments): array
  * @param list<array<string, mixed>> $rows Raw appointment rows with services attached
  * @return list<array<string, mixed>>
  */
-function collapse_customer_appointments(array $rows): array
+function collapse_customer_appointments(PDO $pdo, array $rows): array
 {
     $byGroup = [];
     $singles = [];
@@ -461,7 +594,12 @@ function collapse_customer_appointments(array $rows): array
 
         $primary = $members[0];
         $last = $members[count($members) - 1];
-        $peopleCount = count($members);
+        $groupMeta = fetch_booking_group_meta($pdo, $groupId);
+        $peopleCount = (int)($groupMeta['people_count'] ?? 0);
+        if ($peopleCount <= 0) {
+            $peopleCount = count($members);
+        }
+        $displayEndTime = booking_group_display_end_time($last);
 
         $customerName = trim((string)($primary['customerName'] ?? ''));
         $leadName = trim((string)($primary['groupMemberName'] ?? $primary['group_member_name'] ?? ''));
@@ -501,22 +639,12 @@ function collapse_customer_appointments(array $rows): array
             }
         }
 
-        $statuses = array_map(static fn(array $m): string => (string)($m['status'] ?? ''), $members);
-        $allCancelled = $statuses !== [] && count(array_filter(
-            $statuses,
-            static fn(string $st): bool => in_array($st, ['Cancelled', 'NoShow'], true)
-        )) === count($statuses);
-
-        $status = $allCancelled ? 'Cancelled' : 'Scheduled';
-        foreach ($members as $member) {
-            $st = (string)($member['status'] ?? 'Scheduled');
-            if ($st === 'PendingPayment') {
-                $status = 'PendingPayment';
-            } elseif ($st === 'Cancelled' && !$allCancelled) {
-                $status = 'Cancelled';
-            }
-        }
+        $memberStatuses = array_map(static fn(array $m): string => (string)($m['status'] ?? 'Scheduled'), $members);
+        $status = aggregate_booking_unit_status($memberStatuses);
         $paymentState = resolve_group_payment_state($members);
+        if ($paymentState === 'Paid' && $status === 'PendingPayment') {
+            $status = 'Scheduled';
+        }
 
         $perPersonMinutes = 0;
         foreach ($primary['services'] ?? [] as $service) {
@@ -552,10 +680,10 @@ function collapse_customer_appointments(array $rows): array
             'groupMemberNames' => $memberNames,
             'groupMembers' => $memberDetails,
             'startTime' => (string)($primary['startTime'] ?? ''),
-            'endTime' => (string)($last['endTime'] ?? ''),
+            'endTime' => $displayEndTime,
             'timeRange' => format_time_range_label(
                 (string)($primary['startTime'] ?? ''),
-                (string)($last['endTime'] ?? '')
+                $displayEndTime
             ),
             'totalPrice' => number_format($totalPrice, 2, '.', ''),
             'status' => $status,
@@ -655,20 +783,23 @@ function collapse_barber_dashboard_appointments(PDO $pdo, array $rows, int $barb
 
         $primary = $allMembers[0];
         $last = $allMembers[count($allMembers) - 1];
+        $groupMeta = fetch_booking_group_meta($pdo, $groupId);
         $customerName = trim((string)($primary['customer_name'] ?? 'Customer'));
-        $peopleCount = count($allMembers);
+        $peopleCount = (int)($groupMeta['people_count'] ?? 0);
+        if ($peopleCount <= 0) {
+            $peopleCount = count($allMembers);
+        }
+        $displayEndTime = booking_group_display_end_time($last);
         $others = max(0, $peopleCount - 1);
         $displayTitle = $others > 0
             ? $customerName . ' + ' . $others . ' other' . ($others === 1 ? '' : 's')
             : $customerName;
 
-        $status = 'Scheduled';
-        foreach ($allMembers as $member) {
-            if ((string)($member['status'] ?? '') === 'PendingPayment') {
-                $status = 'PendingPayment';
-                break;
-            }
-        }
+        $memberStatuses = array_map(
+            static fn(array $member): string => (string)($member['status'] ?? 'Scheduled'),
+            $allMembers
+        );
+        $status = aggregate_booking_unit_status($memberStatuses);
 
         $primaryBarberRow = $barberMemberRows[0];
         $detailExtras = [];
@@ -685,7 +816,7 @@ function collapse_barber_dashboard_appointments(PDO $pdo, array $rows, int $barb
             'bookingGroupID' => $groupId,
             'appointmentDate' => (string)($primary['appointment_date'] ?? ''),
             'startTime' => (string)($primary['start_time'] ?? ''),
-            'endTime' => (string)($last['end_time'] ?? ''),
+            'endTime' => $displayEndTime,
             'status' => $status,
             'customerID' => (int)($primary['customer_id'] ?? 0),
             'customerName' => $displayTitle,
@@ -694,7 +825,7 @@ function collapse_barber_dashboard_appointments(PDO $pdo, array $rows, int $barb
             'displayTitle' => $displayTitle,
             'timeRange' => format_time_range_label(
                 (string)($primary['start_time'] ?? ''),
-                (string)($last['end_time'] ?? '')
+                $displayEndTime
             ),
             'appointmentIDs' => array_map(
                 static fn(array $m): int => (int)($m['appointment_id'] ?? 0),
@@ -730,7 +861,7 @@ function collapse_barber_dashboard_appointments(PDO $pdo, array $rows, int $barb
  * @param list<array<string, mixed>> $rows
  * @return list<array<string, mixed>>
  */
-function collapse_receptionist_appointments(array $rows): array
+function collapse_receptionist_appointments(PDO $pdo, array $rows): array
 {
     $mapped = [];
     foreach ($rows as $row) {
@@ -743,6 +874,7 @@ function collapse_receptionist_appointments(array $rows): array
             'name' => (string)$row['name'],
             'booker_name' => (string)($row['booker_name'] ?? $row['name'] ?? ''),
             'payment_status' => $row['payment_status'] ?? null,
+            'intent_status' => $row['intent_status'] ?? null,
             'service' => (string)$row['service'],
             'appointment_date' => (string)$row['appointment_date'],
             'time' => (string)$row['time'],
@@ -772,11 +904,19 @@ function collapse_receptionist_appointments(array $rows): array
 
         $primary = $members[0];
         $last = $members[count($members) - 1];
+        $groupMeta = fetch_booking_group_meta($pdo, $gid);
+        $displayEndTime = booking_group_display_end_time([
+            'start_time' => (string)($last['time'] ?? ''),
+            'end_time' => (string)($last['end_time'] ?? ''),
+        ]);
         $lead = trim((string)($primary['booker_name'] ?? $primary['name'] ?? ''));
         if ($lead === '') {
             $lead = 'Customer';
         }
-        $peopleCount = count($members);
+        $peopleCount = (int)($groupMeta['people_count'] ?? 0);
+        if ($peopleCount <= 0) {
+            $peopleCount = count($members);
+        }
         $others = max(0, $peopleCount - 1);
         $label = $others > 0
             ? $lead . ' + ' . $others . ' other' . ($others === 1 ? '' : 's')
@@ -785,20 +925,23 @@ function collapse_receptionist_appointments(array $rows): array
         $groupPaid = false;
         foreach ($members as $m) {
             $paymentStatus = strtolower(trim((string)($m['payment_status'] ?? '')));
-            if (in_array($paymentStatus, ['captured', 'paid', 'succeeded'], true)) {
+            $intentStatus = strtolower(trim((string)($m['intent_status'] ?? '')));
+            if (in_array($paymentStatus, ['captured', 'paid', 'succeeded'], true)
+                || in_array($intentStatus, ['paid', 'succeeded', 'captured'], true)) {
                 $groupPaid = true;
                 break;
             }
         }
 
-        $status = 'Scheduled';
-        foreach ($members as $m) {
-            if ((string)$m['status'] === 'PendingPayment') {
-                $status = 'PendingPayment';
-            }
-        }
+        $memberStatuses = array_map(static fn(array $m): string => (string)$m['status'], $members);
+        $status = aggregate_booking_unit_status($memberStatuses);
         if ($groupPaid && $status === 'PendingPayment') {
             $status = 'Scheduled';
+            try {
+                promote_paid_booking_unit($pdo, (int)$primary['appointment_id']);
+            } catch (Throwable $e) {
+                // Dashboard listing should still reflect paid state.
+            }
         }
 
         $total = 0.0;
@@ -818,13 +961,13 @@ function collapse_receptionist_appointments(array $rows): array
             'service' => (string)$primary['service'],
             'appointment_date' => (string)$primary['appointment_date'],
             'time' => (string)$primary['time'],
-            'end_time' => (string)$last['end_time'],
-            'time_range' => format_time_range_12h((string)$primary['time'], (string)$last['end_time']),
+            'end_time' => $displayEndTime,
+            'time_range' => format_time_range_12h((string)$primary['time'], $displayEndTime),
             'duration' => ((int)count($members) * 60) . ' min',
             'price' => $total,
             'status' => $status,
             'barber' => (string)$primary['barber'],
-            'people_count' => count($members),
+            'people_count' => $peopleCount,
         ];
     }
 

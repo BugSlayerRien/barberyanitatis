@@ -63,30 +63,34 @@ function ai_service_analyze_face(array $absolutePaths): array
 
 /**
  * @param array{front: string, left: string, right: string} $absolutePaths
- * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, styleKey: string, error: string}
+ * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, styleKey: string, previewDiagnostics: array<string, array<string, mixed>>, error: string}
  */
 function ai_service_generate_style(
     array $absolutePaths,
     string $styleName,
     ?string $styleCode,
-    int $hairLengthLevel = 1
+    int $hairLengthLevel = 1,
+    string $hairColorLabel = ''
 ): array {
     $base = ai_service_base_url();
     if ($base === '') {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'error' => 'AI_SERVICE_URL is not configured'];
+        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'previewDiagnostics' => [], 'error' => 'AI_SERVICE_URL is not configured'];
     }
 
-    $style = $styleCode !== null && $styleCode !== '' ? $styleCode : $styleName;
+    $resolvedCode = $styleCode !== null && $styleCode !== '' ? $styleCode : $styleName;
     $fields = [
         'face_image' => ai_service_curl_file($absolutePaths['front'] ?? '', 'front.jpg'),
         'left_image' => ai_service_curl_file($absolutePaths['left'] ?? '', 'left.jpg'),
         'right_image' => ai_service_curl_file($absolutePaths['right'] ?? '', 'right.jpg'),
-        'style' => $style,
+        'style' => $resolvedCode,
+        'style_name' => $styleName,
+        'style_code' => $styleCode ?? '',
         'hair_length_level' => (string)max(0, min(3, $hairLengthLevel)),
+        'hair_color' => $hairColorLabel,
     ];
 
     if ($fields['face_image'] === null || $fields['left_image'] === null || $fields['right_image'] === null) {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'error' => 'Missing capture files for generation'];
+        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'previewDiagnostics' => [], 'error' => 'Missing capture files for generation'];
     }
 
     $response = ai_service_multipart_post($base . '/generate', $fields, 600);
@@ -97,6 +101,7 @@ function ai_service_generate_style(
             'feasibleToday' => true,
             'lengthNote' => null,
             'styleKey' => '',
+            'previewDiagnostics' => [],
             'error' => $response['error'],
         ];
     }
@@ -104,18 +109,21 @@ function ai_service_generate_style(
     $data = $response['data'];
     $resultImages = $data['result_images'] ?? [];
     if (!is_array($resultImages)) {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'error' => 'Sidecar returned no result_images'];
+        return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'previewDiagnostics' => [], 'error' => 'Sidecar returned no result_images'];
     }
+
+    $rawDiagnostics = $data['preview_diagnostics'] ?? $data['previewDiagnostics'] ?? [];
+    $previewDiagnostics = is_array($rawDiagnostics) ? $rawDiagnostics : [];
 
     $images = [];
     foreach (['front', 'left', 'right'] as $angle) {
         $b64 = $resultImages[$angle] ?? '';
         if (!is_string($b64) || $b64 === '') {
-            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'error' => "Missing {$angle} in sidecar response"];
+            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'previewDiagnostics' => [], 'error' => "Missing {$angle} in sidecar response"];
         }
         $bytes = base64_decode($b64, true);
         if ($bytes === false || $bytes === '') {
-            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'error' => "Invalid base64 for {$angle}"];
+            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'styleKey' => '', 'previewDiagnostics' => [], 'error' => "Invalid base64 for {$angle}"];
         }
         $images[$angle] = $bytes;
     }
@@ -126,6 +134,7 @@ function ai_service_generate_style(
         'feasibleToday' => (bool)($data['feasible_today'] ?? $data['feasibleToday'] ?? true),
         'lengthNote' => isset($data['length_note']) ? (string)$data['length_note'] : (isset($data['lengthNote']) ? (string)$data['lengthNote'] : null),
         'styleKey' => (string)($data['style'] ?? ''),
+        'previewDiagnostics' => $previewDiagnostics,
         'error' => '',
     ];
 }

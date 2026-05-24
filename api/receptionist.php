@@ -72,24 +72,14 @@ try {
     $trackingAutomation = run_tracking_automation($pdo, true);
 
     if ($action === 'dashboard') {
-        $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE');
-        $walkInsTodayStmt->execute();
-        $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
-
-        $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE');
-        $appointmentsTodayStmt->execute();
-        $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
-
-        $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM walkin_queue WHERE status = 'InProgress'");
-        $inProgressStmt->execute();
-        $inProgress = (int)$inProgressStmt->fetchColumn();
-
-        $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE is_active = TRUE');
-        $activeBarbersStmt->execute();
-        $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
+        $deskStats = fetch_receptionist_front_desk_stats($pdo);
+        $walkInsToday = $deskStats['walkInsToday'];
+        $appointmentsToday = $deskStats['appointmentsToday'];
+        $inProgress = $deskStats['inProgress'];
+        $activeBarbers = $deskStats['availableBarbers'];
 
         ensure_group_booking_schema($pdo);
-        sync_paid_groups_from_payments($pdo);
+        sync_paid_groups_from_payments($pdo, true);
         sync_paid_appointments_from_payments($pdo, true);
 
         $appointmentsStmt = $pdo->prepare(
@@ -103,7 +93,8 @@ try {
                     SUM(ad.final_price) AS price,
                     a.status,
                     b.full_name AS barber,
-                    pay.status AS payment_status
+                    pay.status AS payment_status,
+                    intent.status AS intent_status
              FROM appointments a
              JOIN users u ON a.user_id = u.user_id
              JOIN barbers b ON a.barber_id = b.barber_id
@@ -116,6 +107,13 @@ try {
                  ORDER BY payment_id DESC
                  LIMIT 1
              ) pay ON TRUE
+             LEFT JOIN LATERAL (
+                 SELECT status
+                 FROM appointment_payment_intents
+                 WHERE appointment_id = a.appointment_id
+                 ORDER BY intent_id DESC
+                 LIMIT 1
+             ) intent ON TRUE
              WHERE a.status NOT IN (\'Cancelled\', \'NoShow\', \'Completed\')
                AND (
                     a.status = \'PendingPayment\'
@@ -123,7 +121,7 @@ try {
                )
                AND b.barber_channel = \'appointment\'
              GROUP BY a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
-                      u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name, pay.status
+                      u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name, pay.status, intent.status
              ORDER BY a.appointment_date ASC, a.start_time ASC'
         );
         $slotDuration = shop_appointment_duration_minutes();
@@ -131,7 +129,7 @@ try {
         $appointmentsStmt->bindValue(':slot_duration_filter', $slotDuration, PDO::PARAM_INT);
         $appointmentsStmt->execute();
         $appointmentRows = $appointmentsStmt->fetchAll();
-        $appointments = collapse_receptionist_appointments(array_map(static function (array $row): array {
+        $appointments = collapse_receptionist_appointments($pdo, array_map(static function (array $row): array {
             return [
                 'appointment_id' => (int)$row['appointment_id'],
                 'barber_id' => (int)$row['barber_id'],
@@ -141,6 +139,7 @@ try {
                 'name' => (string)$row['booker_name'],
                 'booker_name' => (string)$row['booker_name'],
                 'payment_status' => $row['payment_status'] !== null ? (string)$row['payment_status'] : null,
+                'intent_status' => $row['intent_status'] !== null ? (string)$row['intent_status'] : null,
                 'service' => (string)$row['service'],
                 'appointment_date' => (string)$row['appointment_date'],
                 'time' => (string)$row['time'],
@@ -233,8 +232,10 @@ try {
             $completionTime = date('Y-m-d H:i:s');
         }
 
+        ensure_group_booking_schema($pdo);
+
         $apptLookupStmt = $pdo->prepare(
-            'SELECT appointment_id, user_id, barber_id, booking_code, appointment_date, start_time
+            'SELECT appointment_id, user_id, barber_id, booking_code, appointment_date, start_time, booking_group_id
              FROM appointments
              WHERE appointment_id = :appointment_id
              LIMIT 1'
@@ -245,36 +246,87 @@ try {
             json_response(['error' => 'Appointment not found'], 404);
         }
 
+        $groupId = (int)($appt['booking_group_id'] ?? 0);
         $pdo->beginTransaction();
 
-        $stmt = $pdo->prepare(
-            'UPDATE appointments
-             SET status = :status,
-                 checkin_time = COALESCE(:checkin_time, checkin_time),
-                 completion_time = COALESCE(:completion_time, completion_time)
-             WHERE appointment_id = :appointment_id'
-        );
-        $stmt->execute([
-            ':status' => $status,
-            ':checkin_time' => $checkinTime,
-            ':completion_time' => $completionTime,
-            ':appointment_id' => $appointmentID,
-        ]);
+        if ($status === 'Completed') {
+            complete_booking_unit($pdo, $appointmentID, $completionTime);
+        } elseif ($groupId > 0 && in_array($status, ['Cancelled', 'NoShow'], true)) {
+            $cancelStmt = $pdo->prepare(
+                "UPDATE appointments
+                 SET status = :status,
+                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     completion_time = COALESCE(:completion_time, completion_time),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE booking_group_id = :group_id
+                   AND status NOT IN ('Cancelled', 'NoShow', 'Completed')"
+            );
+            $cancelStmt->execute([
+                ':status' => $status,
+                ':checkin_time' => $checkinTime,
+                ':completion_time' => $completionTime,
+                ':group_id' => $groupId,
+            ]);
 
-        $slotStatus = in_array($status, ['Cancelled', 'NoShow', 'Completed'], true) ? 'Available' : 'Booked';
-        $slotStmt = $pdo->prepare(
-            "UPDATE time_slots
-             SET status = :status
-             WHERE barber_id = :barber_id
-               AND slot_date = :slot_date
-               AND slot_time = :slot_time"
-        );
-        $slotStmt->execute([
-            ':status' => $slotStatus,
-            ':barber_id' => (int)$appt['barber_id'],
-            ':slot_date' => (string)$appt['appointment_date'],
-            ':slot_time' => (string)$appt['start_time'],
-        ]);
+            $membersStmt = $pdo->prepare(
+                'SELECT appointment_id FROM appointments WHERE booking_group_id = :group_id'
+            );
+            $membersStmt->execute([':group_id' => $groupId]);
+            foreach ($membersStmt->fetchAll(PDO::FETCH_ASSOC) as $member) {
+                release_slots_for_appointment($pdo, (int)$member['appointment_id']);
+            }
+
+            $pdo->prepare(
+                "UPDATE appointment_groups
+                 SET status = :status
+                 WHERE group_id = :group_id"
+            )->execute([':status' => $status, ':group_id' => $groupId]);
+        } elseif ($groupId > 0) {
+            $groupUpdate = $pdo->prepare(
+                "UPDATE appointments
+                 SET status = :status,
+                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     completion_time = COALESCE(:completion_time, completion_time),
+                     updated_at = CURRENT_TIMESTAMP
+                 WHERE booking_group_id = :group_id
+                   AND status NOT IN ('Cancelled', 'NoShow', 'Completed')"
+            );
+            $groupUpdate->execute([
+                ':status' => $status,
+                ':checkin_time' => $checkinTime,
+                ':completion_time' => $completionTime,
+                ':group_id' => $groupId,
+            ]);
+        } else {
+            $stmt = $pdo->prepare(
+                'UPDATE appointments
+                 SET status = :status,
+                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     completion_time = COALESCE(:completion_time, completion_time)
+                 WHERE appointment_id = :appointment_id'
+            );
+            $stmt->execute([
+                ':status' => $status,
+                ':checkin_time' => $checkinTime,
+                ':completion_time' => $completionTime,
+                ':appointment_id' => $appointmentID,
+            ]);
+
+            $slotStatus = in_array($status, ['Cancelled', 'NoShow', 'Completed'], true) ? 'Available' : 'Booked';
+            $slotStmt = $pdo->prepare(
+                "UPDATE time_slots
+                 SET status = :status
+                 WHERE barber_id = :barber_id
+                   AND slot_date = :slot_date
+                   AND slot_time = :slot_time"
+            );
+            $slotStmt->execute([
+                ':status' => $slotStatus,
+                ':barber_id' => (int)$appt['barber_id'],
+                ':slot_date' => (string)$appt['appointment_date'],
+                ':slot_time' => (string)$appt['start_time'],
+            ]);
+        }
 
         $notifyStatusStmt = $pdo->prepare(
             "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
@@ -285,10 +337,6 @@ try {
             ':title' => 'Appointment status updated',
             ':message' => 'Booking ' . (string)$appt['booking_code'] . ' is now ' . $status . '.',
         ]);
-
-        if ($status === 'Completed') {
-            record_completion_payment($pdo, $appointmentID, null);
-        }
 
         $pdo->commit();
 

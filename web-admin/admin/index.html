@@ -37,6 +37,10 @@
             <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></span>
             <span class="nav-label">Services</span>
           </button>
+          <button data-view="haircuts">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v7"></path><path d="M18 3v7"></path><path d="M6 10c0 4 2 6 6 6s6-2 6-6"></path><path d="M12 16v5"></path></svg></span>
+            <span class="nav-label">Haircuts</span>
+          </button>
 
           <div class="nav-category">Monitoring</div>
           <button data-view="audit">
@@ -161,6 +165,12 @@
 
         <section id="analytics-view" hidden>
           <div class="section-title">Analytics</div>
+          <div class="card" style="margin-bottom: 12px;">
+            <h3>AI Command Center</h3>
+            <p class="ai-center-desc">AI provides a quick business summary, one top suggestion, and one top prediction from your latest metrics.</p>
+            <p id="analytics-summary">Loading summary...</p>
+            <div class="ai-brief-list" id="analytics-ai-brief"></div>
+          </div>
           <div class="split">
             <div class="card">
               <h3>Appointment Status Trend</h3>
@@ -171,13 +181,18 @@
               <canvas id="analytics-services-chart" height="120"></canvas>
             </div>
           </div>
+        </section>
+
+        <section id="haircuts-view" hidden>
+          <div class="section-title">Manage Haircuts</div>
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
+              <input class="input" id="haircuts-search" placeholder="Search name or code" style="max-width: 360px;" />
+              <button class="btn" id="haircuts-add" type="button">Add haircut</button>
+            </div>
+          </div>
           <div class="card">
-            <h3>AI Command Center</h3>
-            <p class="ai-center-desc">AI provides a quick business summary, one top suggestion, one top prediction, and recommended operations you can execute immediately.</p>
-            <p id="analytics-summary">Loading summary...</p>
-            <div class="ai-brief-list" id="analytics-ai-brief"></div>
-            <p class="ai-action-note" id="analytics-action-note">Action buttons stay disabled until AI recommends them.</p>
-            <div class="row-wrap" id="analytics-actions"></div>
+            <div class="list" id="haircuts-table"></div>
           </div>
         </section>
 
@@ -285,6 +300,39 @@
         <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
           <button class="btn" id="service-editor-save" type="button">Save</button>
           <button class="btn secondary" id="service-editor-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="haircut-editor-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner" style="max-width: 720px;">
+        <h3 id="haircut-editor-title" style="margin: 0 0 10px;">Haircut</h3>
+        <div id="haircut-editor-form" class="form-grid"></div>
+        <div id="haircut-overlay-section" style="margin-top: 14px;" hidden>
+          <div class="section-title" style="font-size: 14px;">Overlay PNGs (front / left / right)</div>
+          <div class="form-grid" id="haircut-overlay-uploads"></div>
+        </div>
+        <div id="haircut-variants-section" style="margin-top: 14px;" hidden>
+          <div class="row-wrap" style="justify-content: space-between; align-items: center;">
+            <div class="section-title" style="font-size: 14px; margin: 0;">Variants</div>
+            <button class="btn secondary" id="haircut-variant-add" type="button">Add variant</button>
+          </div>
+          <div class="list" id="haircut-variants-list" style="margin-top: 8px;"></div>
+        </div>
+        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
+          <button class="btn" id="haircut-editor-save" type="button">Save</button>
+          <button class="btn secondary" id="haircut-editor-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="variant-editor-dialog" class="profile-dialog">
+      <div class="profile-dialog-inner">
+        <h3 id="variant-editor-title" style="margin: 0 0 10px;">Variant</h3>
+        <div id="variant-editor-form" class="form-grid"></div>
+        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
+          <button class="btn" id="variant-editor-save" type="button">Save</button>
+          <button class="btn secondary" id="variant-editor-cancel" type="button">Cancel</button>
         </div>
       </div>
     </dialog>

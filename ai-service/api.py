@@ -100,11 +100,18 @@ STYLE_PROMPTS = {
 }
 
 FACE_SHAPE_STYLES = {
-    "oval": ["buzz_cut", "french_crop", "two_block", "messy_quiff", "curly_taper"],
-    "round": ["edgar_cut", "low_fade", "french_crop", "blowout_taper", "curly_mid_fade"],
-    "square": ["two_block", "messy_quiff", "modern_curtains", "wavy_side_sweep", "curly_modern_mullet"],
-    "heart": ["textured_crop", "wavy_side_sweep", "curly_short_crop", "caesar_cut", "wavy_fringe"],
-    "oblong": ["blowout_taper", "wavy_burst_fade", "curly_mid_fade", "modern_curtains", "wavy_messy_top"],
+    "oval": [
+        "buzz_cut", "french_crop", "two_block", "messy_quiff", "curly_taper",
+        "blowout_taper", "wavy_burst_fade", "modern_curtains", "wavy_messy_top",
+    ],
+    "round": [
+        "edgar_cut", "low_fade", "french_crop", "blowout_taper", "curly_mid_fade",
+        "textured_crop", "caesar_cut", "wavy_fringe",
+    ],
+    "square": [
+        "two_block", "messy_quiff", "modern_curtains", "wavy_side_sweep",
+        "curly_modern_mullet", "wavy_side_sweep", "curly_short_crop",
+    ],
 }
 
 STYLE_MIN_LENGTH = {
@@ -327,20 +334,48 @@ def profile_pose_lock_sentence(image_path: Path) -> str:
     )
 
 
-def build_hair_only_prompt(style_description: str, hair_length_level: int = 1) -> str:
+def build_hair_only_prompt(
+    style_description: str,
+    hair_length_level: int = 1,
+    hair_color_label: str = "",
+    style_key: str = "",
+) -> str:
     length_hint = LENGTH_STYLE_HINTS.get(hair_length_level, LENGTH_STYLE_HINTS[1])
     current_label = HAIR_LENGTH_LABELS.get(hair_length_level, "short")
+    display_name = STYLE_NAMES.get(style_key, style_description)
+    color_clause = ""
+    if hair_color_label.strip():
+        color_clause = (
+            f" Preserve the person's natural {hair_color_label.strip()} hair color exactly. "
+            "Do not lighten, redden, bleach, or recolor the hair away from the original tone."
+        )
     return (
-        f"Change ONLY the hair to: {style_description}. "
-        f"The person's current hair length is {current_label}. {length_hint} "
-        "Keep the exact same person, face, facial features, skin, expression, "
-        "eyes, eyebrows shape position, nose, mouth, ears, neck, clothing, pose, "
-        "background, room, lighting, shadows, and camera angle. "
-        "Do not change or replace the background. Do not retouch the face or body. "
-        "Do not add extra hair volume, height, or bulk above the natural hairline or crown. "
-        "Keep the hairline position realistic, not a flat block on top of the head. "
-        "Hair modification only, everything else pixel-identical."
+        "HAIR-ONLY EDIT. Exact haircut style required: "
+        f"\"{display_name}\" — {style_description}. "
+        f"Current hair length is {current_label}. {length_hint} "
+        "FORBIDDEN CHANGES: do not alter the face, skin, eyes, eyebrows, eyelashes, "
+        "eyeglasses, lenses, nose, lips, mouth, ears, jaw, neck, skin texture, facial expression, age, "
+        "gender, clothing, jewelry, or any part of the background. "
+        "The background, wall, room, lighting direction, shadows, and camera framing "
+        "must stay identical to the input photo. "
+        "Do not blur the background, do not replace the background, do not add bokeh. "
+        "Do not retouch, smooth, or reshape the face. Identity must remain unchanged. "
+        "Only change hairstyle shape and hair strands above the forehead; keep the "
+        "hairline natural without a flat helmet shape."
+        f"{color_clause}"
     )
+
+
+def replicate_prediction_input(prompt: str, data_uri: str) -> dict:
+    """Replicate Flux Kontext — conservative settings when using a reference photo."""
+    return {
+        "prompt": prompt,
+        "input_image": data_uri,
+        "aspect_ratio": "match_input_image",
+        "prompt_upsampling": False,
+        "output_format": "png",
+        "safety_tolerance": 2,
+    }
 
 
 def styles_for_length(length_level: int) -> list[str]:
@@ -445,17 +480,268 @@ def create_hair_mask(image_path: Path) -> np.ndarray | None:
     return np.clip(mask_f, 0.0, 1.0)
 
 
-def composite_hair_only(original_bgr: np.ndarray, edited_bgr: np.ndarray, mask: np.ndarray) -> np.ndarray:
+def _landmarks_for_image(image_path: Path):
+    img = cv2.imread(str(image_path))
+    if img is None:
+        return None, None
+    rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img, detect_face_landmarks(rgb)
+
+
+def create_face_preserve_mask(image_path: Path, view_key: str = "front") -> np.ndarray | None:
+    """
+    Soft mask of face skin / features that must stay pixel-identical (not from AI edit).
+    """
+    img, landmarks = _landmarks_for_image(image_path)
+    if img is None or landmarks is None:
+        return None
+
+    h, w = img.shape[:2]
+
+    def point(idx: int) -> np.ndarray:
+        return np.array([landmarks[idx].x * w, landmarks[idx].y * h], dtype=np.float32)
+
+    eyebrow_y = float(np.mean([point(i)[1] for i in EYEBROW_INDICES]))
+    chin_y = float(point(152)[1])
+    top_y = float(point(10)[1])
+    face_height = max(chin_y - top_y, 1.0)
+    nose = point(1)
+    ear_left = point(234)
+    ear_right = point(454)
+    face_center = np.array([(ear_left[0] + ear_right[0]) / 2.0, (eyebrow_y + chin_y) / 2.0])
+
+    mask = np.zeros((h, w), dtype=np.uint8)
+    view = (view_key or "front").lower()
+
+    if view in ("left", "right"):
+        profile_dir = 1.0 if view == "left" else -1.0
+        if (nose[0] - face_center[0]) * profile_dir < 0:
+            profile_dir *= -1.0
+        center_x = int(np.clip(face_center[0] + profile_dir * w * 0.04, 0, w - 1))
+        center_y = int(np.clip((eyebrow_y + chin_y) / 2.0, 0, h - 1))
+        axes = (
+            int(max(w * 0.16, face_height * 0.34)),
+            int(max(face_height * 0.42, h * 0.12)),
+        )
+        cv2.ellipse(mask, (center_x, center_y), axes, 0, 0, 360, 255, -1)
+    else:
+        y_min = eyebrow_y - 0.02 * face_height
+        y_max = chin_y + 0.08 * face_height
+        pts = []
+        for i in range(len(landmarks)):
+            p = point(i)
+            if y_min <= p[1] <= y_max:
+                pts.append(p)
+        if len(pts) < 3:
+            return None
+        hull = cv2.convexHull(np.array(pts, dtype=np.int32))
+        cv2.fillConvexPoly(mask, hull, 255)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13))
+    mask = cv2.dilate(mask, kernel, iterations=1)
+
+    blur = max(int(face_height * 0.045) | 1, 15)
+    if blur % 2 == 0:
+        blur += 1
+    mask_f = cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (blur, blur), 0)
+    return np.clip(mask_f, 0.0, 1.0)
+
+
+def build_hair_edit_mask(image_path: Path, view_key: str = "front") -> np.ndarray | None:
+    """
+    Where AI hair changes are allowed: hair region minus protected face skin.
+    """
+    hair = create_hair_mask(image_path)
+    if hair is None:
+        return None
+
+    img, landmarks = _landmarks_for_image(image_path)
+    if img is None or landmarks is None:
+        return hair
+
+    h, w = img.shape[:2]
+    preserve = create_face_preserve_mask(image_path, view_key)
+    edit = hair.copy()
+    if preserve is not None:
+        # Keep a floor so hair edits are not erased entirely near the hairline.
+        edit = hair * np.clip(1.0 - preserve * 0.92, 0.15, 1.0)
+
+    forehead_y = int(np.clip(landmarks[10].y * h, 0, h - 1))
+    eyebrow_y = int(
+        np.clip(np.mean([landmarks[i].y * h for i in EYEBROW_INDICES]), 0, h - 1)
+    )
+    for row in range(max(0, forehead_y - int(h * 0.04))):
+        edit[row, :] *= 0.04
+
+    edit_u8 = np.clip(edit * 255.0, 0, 255).astype(np.uint8)
+    edit = cv2.GaussianBlur(edit_u8.astype(np.float32) / 255.0, (9, 9), 0)
+
+    return np.clip(edit, 0.0, 1.0)
+
+
+def hair_composite_mode() -> str:
+    raw = os.environ.get("HAIR_COMPOSITE_MODE", HAIR_COMPOSITE_MODE_DEFAULT).strip().lower()
+    if raw in ("full", "face_lock", "off"):
+        return raw
+    return HAIR_COMPOSITE_MODE_DEFAULT
+
+
+def _apply_face_lock(
+    result: np.ndarray,
+    original_bgr: np.ndarray,
+    face_preserve: np.ndarray | None,
+    strength: float = 0.94,
+) -> np.ndarray:
+    if face_preserve is None:
+        return result
+    if face_preserve.shape[:2] != original_bgr.shape[:2]:
+        face_preserve = cv2.resize(
+            face_preserve, (original_bgr.shape[1], original_bgr.shape[0])
+        )
+    lock = np.clip(face_preserve.astype(np.float32), 0.0, 1.0)
+    lock_3 = np.stack([lock, lock, lock], axis=-1)
+    blended = (
+        result.astype(np.float32) * (1.0 - lock_3 * strength)
+        + original_bgr.astype(np.float32) * (lock_3 * strength)
+    )
+    return np.clip(blended, 0, 255).astype(np.uint8)
+
+
+def _mean_abs_diff(a: np.ndarray, b: np.ndarray) -> float:
+    return float(np.mean(np.abs(a.astype(np.float32) - b.astype(np.float32))))
+
+
+def _mean_masked_diff(
+    a: np.ndarray, b: np.ndarray, mask: np.ndarray | None
+) -> float:
+    if mask is None or float(np.max(mask)) < 0.05:
+        return _mean_abs_diff(a, b)
+    m = mask.astype(np.float32)
+    if m.shape[:2] != a.shape[:2]:
+        m = cv2.resize(m, (a.shape[1], a.shape[0]))
+    m3 = np.stack([m, m, m], axis=-1)
+    denom = max(float(np.sum(m3)), 1.0)
+    return float(np.sum(np.abs(a.astype(np.float32) - b.astype(np.float32)) * m3) / denom)
+
+
+def _expand_hair_mask(mask: np.ndarray, factor: float = 1.2) -> np.ndarray:
+    expanded = np.clip(mask.astype(np.float32) * factor, 0.0, 1.0)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    u8 = (expanded * 255).astype(np.uint8)
+    u8 = cv2.dilate(u8, kernel, iterations=1)
+    return cv2.GaussianBlur(u8.astype(np.float32) / 255.0, (9, 9), 0)
+
+
+def composite_hair_only(
+    original_bgr: np.ndarray,
+    edited_bgr: np.ndarray,
+    mask: np.ndarray,
+    preserve_color: bool = True,
+    face_preserve: np.ndarray | None = None,
+    mode: str | None = None,
+) -> tuple[np.ndarray, dict[str, float | bool]]:
+    composite_mode = mode or hair_composite_mode()
+    mask_max = float(np.max(mask)) if mask is not None else 0.0
+
+    if composite_mode == "off":
+        result = _apply_face_lock(edited_bgr, original_bgr, face_preserve)
+        diff = _mean_abs_diff(result, original_bgr)
+        return result, {
+            "compositeDiff": round(diff, 2),
+            "usedRawOutput": True,
+            "maskMax": round(mask_max, 3),
+        }
+
     if edited_bgr.shape[:2] != original_bgr.shape[:2]:
         edited_bgr = cv2.resize(edited_bgr, (original_bgr.shape[1], original_bgr.shape[0]))
 
     if mask.shape[:2] != original_bgr.shape[:2]:
         mask = cv2.resize(mask, (original_bgr.shape[1], original_bgr.shape[0]))
 
-    mask = np.clip(mask.astype(np.float32), 0.0, 1.0)
-    mask_3 = np.stack([mask, mask, mask], axis=-1)
-    blended = edited_bgr.astype(np.float32) * mask_3 + original_bgr.astype(np.float32) * (1.0 - mask_3)
-    return np.clip(blended, 0, 255).astype(np.uint8)
+    edit_mask = np.clip(mask.astype(np.float32), 0.0, 1.0)
+    mask_max = float(np.max(edit_mask))
+
+    edited_work = edited_bgr.copy()
+    light_color = composite_mode == "face_lock"
+    if preserve_color and composite_mode == "full":
+        orig_lab = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        edit_lab = cv2.cvtColor(edited_work, cv2.COLOR_BGR2LAB).astype(np.float32)
+        hair_pixels = edit_mask > 0.25
+        edit_lab[hair_pixels, 1] = (
+            0.40 * edit_lab[hair_pixels, 1] + 0.60 * orig_lab[hair_pixels, 1]
+        )
+        edit_lab[hair_pixels, 2] = (
+            0.40 * edit_lab[hair_pixels, 2] + 0.60 * orig_lab[hair_pixels, 2]
+        )
+        edit_lab[hair_pixels, 0] = (
+            0.65 * edit_lab[hair_pixels, 0] + 0.35 * orig_lab[hair_pixels, 0]
+        )
+        edited_work = cv2.cvtColor(
+            np.clip(edit_lab, 0, 255).astype(np.uint8),
+            cv2.COLOR_LAB2BGR,
+        )
+    elif preserve_color and light_color:
+        orig_lab = cv2.cvtColor(original_bgr, cv2.COLOR_BGR2LAB).astype(np.float32)
+        edit_lab = cv2.cvtColor(edited_work, cv2.COLOR_BGR2LAB).astype(np.float32)
+        hair_pixels = edit_mask > 0.2
+        edit_lab[hair_pixels, 1] = (
+            0.72 * edit_lab[hair_pixels, 1] + 0.28 * orig_lab[hair_pixels, 1]
+        )
+        edit_lab[hair_pixels, 2] = (
+            0.72 * edit_lab[hair_pixels, 2] + 0.28 * orig_lab[hair_pixels, 2]
+        )
+        edit_lab[hair_pixels, 0] = (
+            0.82 * edit_lab[hair_pixels, 0] + 0.18 * orig_lab[hair_pixels, 0]
+        )
+        edited_work = cv2.cvtColor(
+            np.clip(edit_lab, 0, 255).astype(np.uint8),
+            cv2.COLOR_LAB2BGR,
+        )
+
+    def _blend_with_mask(active_mask: np.ndarray) -> np.ndarray:
+        blend_mask = active_mask
+        if light_color:
+            blend_mask = np.clip(active_mask * 1.25, 0.0, 1.0)
+
+        mask_3 = np.stack([blend_mask, blend_mask, blend_mask], axis=-1)
+        blended = (
+            edited_work.astype(np.float32) * mask_3
+            + original_bgr.astype(np.float32) * (1.0 - mask_3)
+        )
+        out = np.clip(blended, 0, 255).astype(np.uint8)
+        background_keep = (active_mask < 0.08).astype(np.float32)
+        bg_3 = np.stack([background_keep, background_keep, background_keep], axis=-1)
+        out = np.clip(
+            out.astype(np.float32) * (1.0 - bg_3) + original_bgr.astype(np.float32) * bg_3,
+            0,
+            255,
+        ).astype(np.uint8)
+        return _apply_face_lock(out, original_bgr, face_preserve)
+
+    result = _blend_with_mask(edit_mask)
+    diff = _mean_abs_diff(result, original_bgr)
+    used_raw = False
+
+    if diff < COMPOSITE_MIN_VISIBLE_DIFF:
+        logger.warning(
+            "Composite diff %.2f below threshold; expanding hair mask and re-blending",
+            diff,
+        )
+        expanded_mask = _expand_hair_mask(edit_mask, factor=1.35)
+        result = _blend_with_mask(expanded_mask)
+        diff = _mean_abs_diff(result, original_bgr)
+        mask_max = float(np.max(expanded_mask))
+
+    face_drift = _mean_masked_diff(result, original_bgr, face_preserve)
+    reject_face = face_drift > 28.0
+
+    return result, {
+        "compositeDiff": round(diff, 2),
+        "usedRawOutput": used_raw,
+        "maskMax": round(mask_max, 3),
+        "faceDrift": round(face_drift, 2),
+        "rejectFaceDrift": reject_face,
+    }
 
 
 def detect_face_shape(image_path: Path) -> tuple[str, list[str]]:
@@ -483,12 +769,10 @@ def detect_face_shape(image_path: Path) -> tuple[str, list[str]]:
         jaw_ratio = jaw_width / cheekbone_width if cheekbone_width > 0 else 1.0
         forehead_ratio = forehead_width / cheekbone_width if cheekbone_width > 0 else 1.0
 
-        if ratio > 1.75:
-            shape = "oblong"
-        elif jaw_ratio > 0.9 and forehead_ratio > 0.9:
+        if jaw_ratio > 0.9 and forehead_ratio > 0.9:
             shape = "square"
         elif forehead_ratio > 1.1 and jaw_ratio < 0.85:
-            shape = "heart"
+            shape = "round" if ratio < 1.35 else "square"
         elif ratio < 1.2:
             shape = "round"
         else:
@@ -578,26 +862,116 @@ def combined_hair_length(image_paths: list[Path]) -> tuple[int, str, float]:
     return max_level, HAIR_LENGTH_LABELS[max_level], round(max(scores), 3)
 
 
-def _hair_region_texture_energy(image_path: Path) -> float | None:
-    """Laplacian variance inside the hair mask — higher for curly/coily hair."""
+# Laplacian variance on hair-mask pixels (tune with shop lighting).
+TEXTURE_STRAIGHT_MAX = 85.0
+TEXTURE_WAVY_MAX = 175.0
+TEXTURE_CURLY_MAX = 280.0
+# Fraction of image pixels with hair mask above threshold (very low = bald/buzzed).
+BALD_MASK_COVERAGE_MAX = 0.012
+
+# full | face_lock | off — how aggressively to blend AI hair onto the capture.
+HAIR_COMPOSITE_MODE_DEFAULT = "face_lock"
+COMPOSITE_MIN_VISIBLE_DIFF = 5.0
+
+
+def _hair_region_stats(image_path: Path) -> tuple[float | None, float | None]:
+    """Return (laplacian_variance, mask_coverage) for visible hair region."""
     img = cv2.imread(str(image_path))
     mask = create_hair_mask(image_path)
     if img is None or mask is None:
-        return None
+        return None, None
+
+    mask_f = np.clip(mask.astype(np.float32), 0.0, 1.0)
+    coverage = float(np.mean(mask_f > 0.25))
+    hair = mask_f > 0.25
+    if not np.any(hair):
+        return None, coverage
 
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    hair = mask > 0.25
-    if not np.any(hair):
-        return None
-
     lap = cv2.Laplacian(gray, cv2.CV_64F)
-    return float(np.var(lap[hair]))
+    return float(np.var(lap[hair])), coverage
+
+
+def _hair_region_texture_energy(image_path: Path) -> float | None:
+    energy, _ = _hair_region_stats(image_path)
+    return energy
+
+
+def combined_hair_mask_coverage(image_paths: list[Path]) -> float:
+    coverages: list[float] = []
+    for path in image_paths:
+        _, coverage = _hair_region_stats(path)
+        if coverage is not None:
+            coverages.append(coverage)
+    if not coverages:
+        return 0.0
+    return float(np.median(coverages))
+
+
+def _rgb_to_hair_color_label(r: float, g: float, b: float) -> str:
+    """Map mean hair RGB (0-255) to a simple visible color label via HSV."""
+    bgr = np.uint8([[[int(round(b)), int(round(g)), int(round(r))]]])
+    h, s, v = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0, 0]
+
+    if v < 45:
+        return "black"
+    if s < 35 and v < 130:
+        return "gray"
+    if s < 40:
+        if v >= 175:
+            return "blonde"
+        if v >= 120:
+            return "brown"
+        return "dark brown"
+    if (h <= 12 or h >= 168) and s >= 40:
+        if v >= 150:
+            return "red"
+        return "dark brown"
+    if v >= 165 and 18 <= h <= 38:
+        return "blonde"
+    if v >= 120:
+        return "brown"
+    return "dark brown"
+
+
+def detect_hair_color(image_paths: list[Path]) -> dict[str, object]:
+    """Sample median RGB inside the hair mask (front capture preferred)."""
+    ordered = list(image_paths)
+    if len(ordered) > 1:
+        front = [p for p in ordered if "front" in p.name.lower()]
+        if front:
+            ordered = front + [p for p in ordered if p not in front]
+
+    samples: list[tuple[float, float, float]] = []
+    for path in ordered:
+        img = cv2.imread(str(path))
+        mask = create_hair_mask(path)
+        if img is None or mask is None:
+            continue
+        hair = mask > 0.25
+        if not np.any(hair):
+            continue
+        bgr = img[hair]
+        mean_b, mean_g, mean_r = np.mean(bgr, axis=0)
+        samples.append((float(mean_r), float(mean_g), float(mean_b)))
+
+    if not samples:
+        return {"label": "", "rgb": None}
+
+    r = float(np.median([s[0] for s in samples]))
+    g = float(np.median([s[1] for s in samples]))
+    b = float(np.median([s[2] for s in samples]))
+    label = _rgb_to_hair_color_label(r, g, b)
+    return {
+        "label": label,
+        "rgb": [int(round(r)), int(round(g)), int(round(b))],
+    }
 
 
 def detect_hair_texture(image_paths: list[Path]) -> tuple[str, float]:
     """
     Classify visible hair texture from capture photos.
-    Returns Straight, Wavy, or Curly (Coily grouped with Curly for catalog matching).
+    Returns Straight, Wavy, or Curly.
     """
     energies: list[float] = []
     for path in image_paths:
@@ -605,16 +979,15 @@ def detect_hair_texture(image_paths: list[Path]) -> tuple[str, float]:
         if energy is not None:
             energies.append(energy)
 
+    coverage = combined_hair_mask_coverage(image_paths)
     if not energies:
-        return "Wavy", 0.0
+        return "Straight", 0.0
 
-    # Median is more stable than mean when one angle has poor mask coverage.
     energy = float(np.median(energies))
 
-    # Thresholds from laplacian variance on hair-mask pixels (tune with shop lighting).
-    if energy < 95.0:
+    if energy < TEXTURE_STRAIGHT_MAX:
         return "Straight", round(energy, 2)
-    if energy < 220.0:
+    if energy < TEXTURE_WAVY_MAX:
         return "Wavy", round(energy, 2)
     return "Curly", round(energy, 2)
 
@@ -651,7 +1024,7 @@ async def generate_view_hairstyle(
     base_prompt: str,
     view_key: str,
     extra: str = "",
-) -> tuple[str | None, str | None]:
+) -> tuple[str | None, str | None, dict[str, float | bool]]:
     try:
         image_bytes = prepare_image_bytes(image_path)
         image_b64 = base64.b64encode(image_bytes).decode()
@@ -667,27 +1040,19 @@ async def generate_view_hairstyle(
                 "Authorization": f"Bearer {REPLICATE_API_TOKEN}",
                 "Content-Type": "application/json",
             },
-            json={
-                "input": {
-                    "prompt": view_prompt,
-                    "input_image": data_uri,
-                    "aspect_ratio": "match_input_image",
-                    "prompt_upsampling": False,
-                    "output_format": "png",
-                }
-            },
+            json={"input": replicate_prediction_input(view_prompt, data_uri)},
         )
 
         if response.status_code >= 400:
             body = response.text[:500]
             logger.error("Replicate HTTP %s for %s: %s", response.status_code, view_key, body)
-            return None, f"Replicate error ({response.status_code}): {body}"
+            return None, f"Replicate error ({response.status_code}): {body}", {}
 
         prediction = response.json()
         prediction_id = prediction.get("id")
         if not prediction_id:
             detail = prediction.get("detail") or prediction
-            return None, f"Replicate did not start ({view_key}): {detail}"
+            return None, f"Replicate did not start ({view_key}): {detail}", {}
 
         status = prediction.get("status")
         if status == "succeeded" and prediction.get("output"):
@@ -700,29 +1065,86 @@ async def generate_view_hairstyle(
             raw_bytes, poll_error = await _poll_replicate_prediction(client, prediction_id)
 
         if poll_error:
-            return None, f"{view_key} view: {poll_error}"
+            return None, f"{view_key} view: {poll_error}", {}
         if raw_bytes is None:
-            return None, f"{view_key} view: no image returned from Replicate"
+            return None, f"{view_key} view: no image returned from Replicate", {}
 
         edited_arr = np.frombuffer(raw_bytes, dtype=np.uint8)
         edited_bgr = cv2.imdecode(edited_arr, cv2.IMREAD_COLOR)
-        original_bgr = cv2.imread(str(image_path))
-        hair_mask = create_hair_mask(image_path)
+        if edited_bgr is None:
+            return None, f"{view_key} view: Replicate returned an unreadable image", {}
 
-        if original_bgr is not None and edited_bgr is not None and hair_mask is not None:
-            final_bgr = composite_hair_only(original_bgr, edited_bgr, hair_mask)
-        elif original_bgr is not None and edited_bgr is not None:
-            final_bgr = edited_bgr
+        original_bgr = cv2.imread(str(image_path))
+        if original_bgr is None:
+            _, encoded = cv2.imencode(".jpg", edited_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            return (
+                base64.b64encode(encoded.tobytes()).decode(),
+                None,
+                {"compositeDiff": -1.0, "usedRawOutput": True, "maskMax": 0.0},
+            )
+
+        mode = hair_composite_mode()
+        face_preserve = create_face_preserve_mask(image_path, view_key)
+        diagnostics: dict[str, float | bool] = {
+            "compositeDiff": 0.0,
+            "usedRawOutput": False,
+            "maskMax": 0.0,
+            "faceDrift": 0.0,
+            "rejectFaceDrift": False,
+        }
+
+        if mode == "off":
+            final_bgr = _apply_face_lock(edited_bgr, original_bgr, face_preserve)
+            diagnostics["compositeDiff"] = round(_mean_abs_diff(final_bgr, original_bgr), 2)
+            diagnostics["faceDrift"] = round(
+                _mean_masked_diff(final_bgr, original_bgr, face_preserve), 2
+            )
         else:
-            return None, f"{view_key} view: could not composite the result image"
+            hair_edit_mask = build_hair_edit_mask(image_path, view_key)
+            if hair_edit_mask is None or float(np.max(hair_edit_mask)) < 0.08:
+                logger.warning("%s view: weak hair mask, using full hair region", view_key)
+                hair_edit_mask = create_hair_mask(image_path)
+
+            if hair_edit_mask is not None:
+                final_bgr, diagnostics = composite_hair_only(
+                    original_bgr,
+                    edited_bgr,
+                    hair_edit_mask,
+                    preserve_color=True,
+                    face_preserve=face_preserve,
+                    mode=mode,
+                )
+            else:
+                logger.warning("%s view: no hair mask; keeping original capture", view_key)
+                final_bgr = original_bgr.copy()
+                diagnostics = {
+                    "compositeDiff": 0.0,
+                    "usedRawOutput": False,
+                    "maskMax": 0.0,
+                    "faceDrift": 0.0,
+                    "rejectFaceDrift": False,
+                }
+
+            if diagnostics.get("rejectFaceDrift"):
+                return (
+                    None,
+                    f"{view_key} view: face region changed too much — retry with a clearer photo",
+                    diagnostics,
+                )
 
         _, encoded = cv2.imencode(".jpg", final_bgr, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        logger.info("Finished %s view", view_key)
-        return base64.b64encode(encoded.tobytes()).decode(), None
+        logger.info(
+            "Finished %s view (diff=%.2f raw=%s mask=%.3f)",
+            view_key,
+            diagnostics.get("compositeDiff", 0),
+            diagnostics.get("usedRawOutput", False),
+            diagnostics.get("maskMax", 0),
+        )
+        return base64.b64encode(encoded.tobytes()).decode(), None, diagnostics
 
     except Exception as exc:
         logger.exception("generate_view_hairstyle failed for %s", view_key)
-        return None, f"{view_key} view: {exc}"
+        return None, f"{view_key} view: {exc}", {}
 
 
 @app.get("/")
@@ -756,7 +1178,12 @@ async def analyze_face(
         shape, _ = detect_face_shape(front_path)
         paths = [front_path, left_path, right_path]
         length_level, length_label, length_score = combined_hair_length(paths)
+        mask_coverage = combined_hair_mask_coverage(paths)
+        no_hair_detected = (
+            length_level == 0 and mask_coverage < BALD_MASK_COVERAGE_MAX
+        )
         hair_texture, hair_texture_score = detect_hair_texture(paths)
+        hair_color = detect_hair_color(paths)
         achievable = styles_for_length(length_level)
         top_styles = recommend_styles(shape, length_level)
 
@@ -767,6 +1194,10 @@ async def analyze_face(
             "hair_length": length_label,
             "hair_length_level": length_level,
             "hair_length_score": length_score,
+            "hair_mask_coverage": round(mask_coverage, 4),
+            "no_hair_detected": no_hair_detected,
+            "hair_color": hair_color.get("label", ""),
+            "hair_color_rgb": hair_color.get("rgb"),
             "achievable_styles": achievable,
             "top_styles": [{"key": s, "name": STYLE_NAMES.get(s, s)} for s in top_styles],
             "profiles_received": ["front", "left", "right"],
@@ -780,8 +1211,11 @@ async def generate_hairstyle(
     face_image: UploadFile = File(...),
     left_image: UploadFile = File(...),
     right_image: UploadFile = File(...),
-    style: str = Form(...),
+    style: str = Form(""),
+    style_name: str = Form(""),
+    style_code: str = Form(""),
     hair_length_level: int = Form(1),
+    hair_color: str = Form(""),
 ):
     if not REPLICATE_API_TOKEN:
         return JSONResponse(
@@ -800,8 +1234,10 @@ async def generate_hairstyle(
         await save_upload(right_image, views["right"])
 
         length_level = max(0, min(3, int(hair_length_level)))
-        style_key = resolve_style_key(style, style)
-        style_desc = STYLE_PROMPTS.get(style_key, f"{style} hairstyle")
+        resolved_name = (style_name or style).strip()
+        resolved_code = (style_code or style).strip()
+        style_key = resolve_style_key(resolved_name, resolved_code)
+        style_desc = STYLE_PROMPTS.get(style_key, f"{resolved_name or resolved_code} hairstyle")
         achievable = set(styles_for_length(length_level))
         feasible_today = style_key in achievable
         length_note = None
@@ -816,25 +1252,34 @@ async def generate_hairstyle(
             "that photo's original head turn and camera angle — do not make every frame face the camera."
         )
 
+        color_label = hair_color.strip()
+        if not color_label:
+            color_info = detect_hair_color(list(views.values()))
+            color_label = str(color_info.get("label", ""))
+
         if feasible_today:
-            base_prompt = build_hair_only_prompt(style_desc, length_level) + profile_note
+            base_prompt = (
+                build_hair_only_prompt(style_desc, length_level, color_label, style_key)
+                + profile_note
+            )
         else:
             base_prompt = (
-                f"Change ONLY the hair to an aspirational preview of: {style_desc}. "
-                "Show how this person could look with enough hair length for this style. "
-                "Keep the exact same face, expression, skin, eyes, clothing, pose, "
-                "background, and lighting. Do not change the background or face. "
-                f"Hair-only edit.{profile_note}"
+                "HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: "
+                f"{style_desc}. "
+                "FORBIDDEN: changing face, skin, eyes, expression, clothing, or background. "
+                "Background and identity must match the input photo exactly. "
+                f"{profile_note}"
             )
 
         replicate_timeout = httpx.Timeout(600.0, connect=60.0)
         result_images: dict[str, str] = {}
+        preview_diagnostics: dict[str, dict[str, float | bool]] = {}
 
         async with httpx.AsyncClient(
             timeout=replicate_timeout, verify=httpx_ssl_verify()
         ) as client:
             for view_key, path in views.items():
-                view_b64, err = await generate_view_hairstyle(
+                view_b64, err, diag = await generate_view_hairstyle(
                     client, path, base_prompt, view_key
                 )
                 if err or view_b64 is None:
@@ -843,6 +1288,7 @@ async def generate_hairstyle(
                         content={"error": err or f"Failed to generate {view_key} view"},
                     )
                 result_images[view_key] = view_b64
+                preview_diagnostics[view_key] = diag
 
             left_h = hashlib.sha256(result_images["left"].encode()).digest()
             right_h = hashlib.sha256(result_images["right"].encode()).digest()
@@ -852,7 +1298,7 @@ async def generate_hairstyle(
                     " CRITICAL: The right-profile output must NOT match the left-profile output. "
                     "This input is RIGHT profile only: nose must stay toward the LEFT side of the frame."
                 )
-                view_b64, err = await generate_view_hairstyle(
+                view_b64, err, diag = await generate_view_hairstyle(
                     client, views["right"], base_prompt, "right", extra=retry_extra
                 )
                 if err or view_b64 is None:
@@ -866,6 +1312,7 @@ async def generate_hairstyle(
                         },
                     )
                 result_images["right"] = view_b64
+                preview_diagnostics["right"] = diag
 
         return {
             "result_images": result_images,
@@ -873,6 +1320,7 @@ async def generate_hairstyle(
             "style": style_key,
             "feasible_today": feasible_today,
             "length_note": length_note,
+            "preview_diagnostics": preview_diagnostics,
         }
 
     except httpx.TimeoutException:

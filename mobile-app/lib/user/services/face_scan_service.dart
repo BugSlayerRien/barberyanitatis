@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_config.dart';
+import '../user_session.dart';
 
 class FaceScanService {
   static const String _consentKey = 'face_scan_consent_accepted_v1';
@@ -78,23 +79,77 @@ class FaceScanService {
     return data;
   }
 
+  static Map<String, dynamic> _rankingRequestBody({
+    required String action,
+    required String faceShape,
+    required String hairTexture,
+    String? hairDensity,
+    int? userId,
+    List<String>? boostStyleKeys,
+    List<int>? downrankVariantIds,
+  }) {
+    return {
+      'action': action,
+      'faceShape': faceShape,
+      'hairTexture': hairTexture,
+      if (hairDensity != null) 'hairDensity': hairDensity,
+      if (userId != null) 'userID': userId,
+      if (boostStyleKeys != null && boostStyleKeys.isNotEmpty)
+        'boostStyleKeys': boostStyleKeys,
+      if (downrankVariantIds != null && downrankVariantIds.isNotEmpty)
+        'downrankVariantIds': downrankVariantIds,
+    };
+  }
+
+  static List<String> boostStyleKeysFromLastScan() {
+    final scan = UserSession.lastScan;
+    if (scan == null) return [];
+    final keys = <String>[];
+    final topStyles = scan['pythonTopStyles'];
+    if (topStyles is List) {
+      for (final item in topStyles) {
+        if (item is Map) {
+          final key = item['key']?.toString() ?? '';
+          if (key.isNotEmpty) keys.add(key);
+        } else {
+          final s = item?.toString() ?? '';
+          if (s.isNotEmpty) keys.add(s);
+        }
+      }
+    }
+    final achievable = scan['achievableStyles'];
+    if (achievable is List) {
+      for (final item in achievable) {
+        final s = item?.toString() ?? '';
+        if (s.isNotEmpty && !keys.contains(s)) keys.add(s);
+      }
+    }
+    return keys.take(8).toList();
+  }
+
   /// Fast ranked list (no Gemini) — used for first paint on results / scanner.
   static Future<List<Map<String, dynamic>>> fetchQuickRankings({
     required String faceShape,
     required String hairTexture,
     String? hairDensity,
     int? userId,
+    List<String>? boostStyleKeys,
+    List<int>? downrankVariantIds,
   }) async {
+    final downrank =
+        downrankVariantIds ?? await UserSession.loadLastRecommendedVariantIds(userId: userId);
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'rankByFeatures',
-        'faceShape': faceShape,
-        'hairTexture': hairTexture,
-        'hairDensity': hairDensity,
-        'userID': userId,
-      }),
+      body: jsonEncode(_rankingRequestBody(
+        action: 'rankByFeatures',
+        faceShape: faceShape,
+        hairTexture: hairTexture,
+        hairDensity: hairDensity,
+        userId: userId,
+        boostStyleKeys: boostStyleKeys ?? boostStyleKeysFromLastScan(),
+        downrankVariantIds: downrank,
+      )),
     );
 
     final data = response.body.isNotEmpty
@@ -138,13 +193,40 @@ class FaceScanService {
 
   static String _categorizeStyleName(String name) {
     final lower = name.toLowerCase();
-    if (RegExp(r'mullet|edgar|quiff|burst|messy|curtains|pompadour').hasMatch(lower)) {
+    if (RegExp(r'mullet|edgar|quiff|burst|messy|curtains|pompadour|curly|wavy|modern')
+        .hasMatch(lower)) {
       return 'alternative';
     }
     if (RegExp(r'crop|taper|fade|buzz|caesar|french|classic|two.?block').hasMatch(lower)) {
       return 'formal';
     }
-    return 'youthful';
+    return 'alternative';
+  }
+
+  static String _localFitReason(
+    Map<String, dynamic> row,
+    String faceShape,
+    String hairTexture, {
+    String category = '',
+  }) {
+    final style = row['style_name']?.toString() ?? 'This style';
+    final pct = row['match_percent'] ?? row['matchPercent'];
+    final rank = row['match_rank_label']?.toString() ?? row['matchRankLabel']?.toString() ?? '';
+    final desc = row['description']?.toString().trim() ?? '';
+    final pctText = pct != null ? ' (${pct}% match)' : '';
+    final rankText = rank.isNotEmpty ? ' $rank.' : '';
+    var text =
+        '$style fits your $faceShape face and $hairTexture hair$pctText.$rankText';
+    if (category == 'formal') {
+      text += ' Clean, professional finish.';
+    } else if (category == 'alternative') {
+      text += ' Bolder shape with everyday wearability.';
+    }
+    if (desc.isNotEmpty) {
+      final snippet = desc.length > 90 ? '${desc.substring(0, 87)}...' : desc;
+      text += ' $snippet';
+    }
+    return text;
   }
 
   /// Client-side grouping when Gemini insights are slow or unavailable.
@@ -159,7 +241,6 @@ class FaceScanService {
         'categories': {
           'formal': <Map<String, dynamic>>[],
           'alternative': <Map<String, dynamic>>[],
-          'youthful': <Map<String, dynamic>>[],
         },
         'aiSummary': '',
         'aiPowered': false,
@@ -172,11 +253,9 @@ class FaceScanService {
       final id = '${row['variant_id'] ?? row['variantId'] ?? ''}'.trim();
       if (id.isEmpty || used.contains(id)) continue;
       used.add(id);
-      final style = row['style_name']?.toString() ?? 'This style';
       topPicks.add({
         ...row,
-        'fit_reason':
-            '$style complements your $faceShape face and $hairTexture hair for everyday wear.',
+        'fit_reason': _localFitReason(row, faceShape, hairTexture),
       });
       if (topPicks.length >= 3) break;
     }
@@ -184,7 +263,6 @@ class FaceScanService {
     final categories = <String, List<Map<String, dynamic>>>{
       'formal': [],
       'alternative': [],
-      'youthful': [],
     };
 
     for (final row in rankings) {
@@ -192,13 +270,12 @@ class FaceScanService {
       if (id.isEmpty || used.contains(id)) continue;
       final name = row['style_name']?.toString() ?? 'Style';
       final cat = _categorizeStyleName(name);
-      if (categories[cat]!.length >= 3) continue;
+      if (categories[cat]!.length >= 2) continue;
       used.add(id);
       categories[cat]!.add({
         ...row,
         'category': cat,
-        'fit_reason':
-            '$name suits your $faceShape face and $hairTexture hair for a $cat look.',
+        'fit_reason': _localFitReason(row, faceShape, hairTexture, category: cat),
       });
     }
 
@@ -222,7 +299,7 @@ class FaceScanService {
       'topPicks': topPicks,
       'categories': categories,
       'aiSummary':
-          'Based on your $faceShape face and $hairTexture hair, we grouped styles into formal, alternative, and youthful options.',
+          'Based on your $faceShape face and $hairTexture hair, we grouped styles into formal and alternative options.',
       'aiPowered': false,
     };
   }
@@ -232,17 +309,23 @@ class FaceScanService {
     required String hairTexture,
     String? hairDensity,
     int? userId,
+    List<String>? boostStyleKeys,
+    List<int>? downrankVariantIds,
   }) async {
+    final downrank =
+        downrankVariantIds ?? await UserSession.loadLastRecommendedVariantIds(userId: userId);
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'recommendWithInsights',
-        'faceShape': faceShape,
-        'hairTexture': hairTexture,
-        'hairDensity': hairDensity,
-        'userID': userId,
-      }),
+      body: jsonEncode(_rankingRequestBody(
+        action: 'recommendWithInsights',
+        faceShape: faceShape,
+        hairTexture: hairTexture,
+        hairDensity: hairDensity,
+        userId: userId,
+        boostStyleKeys: boostStyleKeys ?? boostStyleKeysFromLastScan(),
+        downrankVariantIds: downrank,
+      )),
     );
 
     final data = response.body.isNotEmpty
@@ -361,11 +444,18 @@ class FaceScanService {
   }
 
   static Map<String, String> previewUrlsFromResponse(Map<String, dynamic> data) {
-    return {
+    final urls = {
       'frontViewUrl': data['frontViewUrl']?.toString() ?? '',
       'sideViewUrl': data['sideViewUrl']?.toString() ?? '',
       'backViewUrl': data['backViewUrl']?.toString() ?? '',
     };
+    if (urls.values.every((u) => u.trim().isEmpty)) {
+      throw Exception(
+        data['error']?.toString() ??
+            'Server returned no preview image URLs. Check ai-service logs and try again.',
+      );
+    }
+    return urls;
   }
 
   static Future<Map<String, String>> saveCompositedPreviews({
@@ -405,20 +495,67 @@ class FaceScanService {
     };
   }
 
+  /// Fields to send with booking.php create so AI previews attach server-side.
+  static Map<String, dynamic> bookingPreviewPayload() {
+    final previews =
+        UserSession.selectedPreviewImages ?? UserSession.customerPreviewImages;
+    final payload = <String, dynamic>{
+      'scanSessionId': UserSession.ensureScanSessionId(),
+    };
+    if (previews != null) {
+      final front = previews['frontViewUrl'] ?? previews['front'];
+      final side = previews['sideViewUrl'] ?? previews['left'];
+      final back = previews['backViewUrl'] ?? previews['right'];
+      if (front != null && front.trim().isNotEmpty) {
+        payload['frontViewUrl'] = front.trim();
+      }
+      if (side != null && side.trim().isNotEmpty) {
+        payload['sideViewUrl'] = side.trim();
+      }
+      if (back != null && back.trim().isNotEmpty) {
+        payload['backViewUrl'] = back.trim();
+      }
+    }
+    return payload;
+  }
+
   static Future<void> attachPreviewsToAppointment({
     required int appointmentId,
     required String scanSessionId,
     required int variantId,
   }) async {
-    await http.post(
+    final previews =
+        UserSession.selectedPreviewImages ?? UserSession.customerPreviewImages;
+    final body = <String, dynamic>{
+      'action': 'attachToAppointment',
+      'appointmentID': appointmentId,
+      'scanSessionId': scanSessionId,
+      'variantID': variantId,
+    };
+    if (previews != null) {
+      final front = previews['frontViewUrl'] ?? previews['front'];
+      final side = previews['sideViewUrl'] ?? previews['left'];
+      final back = previews['backViewUrl'] ?? previews['right'];
+      if (front != null && front.trim().isNotEmpty) {
+        body['frontViewUrl'] = front.trim();
+      }
+      if (side != null && side.trim().isNotEmpty) {
+        body['sideViewUrl'] = side.trim();
+      }
+      if (back != null && back.trim().isNotEmpty) {
+        body['backViewUrl'] = back.trim();
+      }
+    }
+
+    final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'attachToAppointment',
-        'appointmentID': appointmentId,
-        'scanSessionId': scanSessionId,
-        'variantID': variantId,
-      }),
+      body: jsonEncode(body),
     );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception(
+        'Could not attach haircut previews (${response.statusCode})',
+      );
+    }
   }
 }

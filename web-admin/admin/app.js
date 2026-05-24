@@ -4,12 +4,17 @@ const views = {
   audit: document.getElementById("audit-view"),
   analytics: document.getElementById("analytics-view"),
   services: document.getElementById("services-view"),
+  haircuts: document.getElementById("haircuts-view"),
   settings: document.getElementById("settings-view"),
 };
 
 const state = {
   users: { customers: [], barbers: [], receptionists: [], admins: [] },
   services: [],
+  haircuts: [],
+  haircutDetail: null,
+  haircutEditor: null,
+  variantEditor: null,
   audit: [],
   activities: [],
   currentUser: null,
@@ -24,33 +29,6 @@ const state = {
 
 const CHATBOT_API_KEY = "REMOVED_GEMINI_KEY";
 const CHATBOT_MODEL = "gemini-2.5-flash";
-const ACTION_CATALOG = [
-  {
-    action: "open-services",
-    label: "Open Services",
-    description: "Review and update service offerings, promos, and bundles.",
-  },
-  {
-    action: "open-users",
-    label: "Open Users",
-    description: "Open customers and staff records for retention or outreach tasks.",
-  },
-  {
-    action: "open-audit",
-    label: "Open Audit",
-    description: "Inspect recent operational logs and queue-related events.",
-  },
-  {
-    action: "open-analytics",
-    label: "Review Analytics",
-    description: "Stay in analytics to review trends and KPI movement.",
-  },
-  {
-    action: "refresh-analytics",
-    label: "Refresh Analytics",
-    description: "Re-run analytics and AI insights with latest available data.",
-  },
-];
 
 const DEFAULT_PAGE_SIZE = 5;
 const PAGE_SIZE_BY_KEY = {
@@ -60,6 +38,7 @@ const PAGE_SIZE_BY_KEY = {
   "receptionists-table": 5,
   "admins-table": 5,
   "services-table": 5,
+  "haircuts-table": 5,
   "audit-list": 5,
 };
 
@@ -386,6 +365,10 @@ function rerenderByPaginationKey(key) {
   }
   if (key === "services-table") {
     renderServices();
+    return;
+  }
+  if (key === "haircuts-table") {
+    renderHaircuts();
     return;
   }
   if (key === "audit-list") {
@@ -1188,6 +1171,385 @@ async function loadServices() {
   renderServices();
 }
 
+function overlayPreviewUrl(assetPath) {
+  if (!assetPath) return "";
+  const clean = String(assetPath).replace(/^assets\//, "");
+  return `../../mobile-app/assets/${clean}`;
+}
+
+async function loadHaircuts() {
+  try {
+    const response = await fetch(resolveApiUrl("admin_hairstyles.php"));
+    if (!response.ok) throw new Error("API error");
+    const data = await response.json();
+    state.haircuts = data.hairstyles ?? [];
+  } catch (_) {
+    state.haircuts = [];
+  }
+  renderHaircuts();
+}
+
+function renderHaircuts() {
+  const query = document.getElementById("haircuts-search")?.value || "";
+  const normalized = (state.haircuts || []).map((row) => ({
+    ...row,
+    overlay_status: row.has_overlay_assets ? "Ready" : "Missing PNGs",
+    is_active: row.is_active === false || row.is_active === "f" ? "No" : "Yes",
+  }));
+  const rows = filterRows(normalized, query, ["style_name", "style_code", "description", "gender"]);
+  renderTable(
+    "haircuts-table",
+    [
+      { key: "style_name", label: "Name" },
+      { key: "style_code", label: "Code" },
+      { key: "gender", label: "Gender" },
+      { key: "variant_count", label: "Variants" },
+      { key: "overlay_status", label: "Overlays" },
+      { key: "is_active", label: "Active" },
+      { key: "actions", label: "Actions" },
+    ],
+    rows.map((row) => ({
+      ...row,
+      actions: `
+        <button class="btn secondary btn-haircut" data-id="${row.hairstyle_id}" type="button">Manage</button>
+        <button class="btn secondary btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Delete</button>
+      `,
+    })),
+  );
+}
+
+async function fetchHaircutDetail(hairstyleId) {
+  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "get", hairstyleID: hairstyleId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Failed to load haircut");
+  }
+  return data;
+}
+
+async function saveHaircut(action, payload) {
+  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Save failed");
+  }
+  return data;
+}
+
+async function saveVariant(action, payload) {
+  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Variant save failed");
+  }
+  return data;
+}
+
+async function uploadHaircutOverlay(hairstyleId, view, file, overlayFolder) {
+  const form = new FormData();
+  form.append("action", "uploadOverlay");
+  form.append("hairstyleID", String(hairstyleId));
+  form.append("view", view);
+  form.append("file", file);
+  if (overlayFolder) {
+    form.append("overlayFolder", overlayFolder);
+  }
+  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    body: form,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Upload failed");
+  }
+  return data;
+}
+
+function renderHaircutVariantsList() {
+  const list = document.getElementById("haircut-variants-list");
+  if (!list || !state.haircutDetail) return;
+  const variants = state.haircutDetail.variants ?? [];
+  if (!variants.length) {
+    list.innerHTML = '<div class="card empty">No variants yet.</div>';
+    return;
+  }
+  list.innerHTML = variants
+    .map(
+      (variant) => `
+        <div class="card" style="margin-bottom: 8px;">
+          <div class="row-wrap" style="justify-content: space-between;">
+            <div>
+              <strong>${variant.face_shape}</strong> · ${variant.hair_texture}
+              <p class="meta">${variant.estimated_minutes} min · confidence ${variant.confidence_score}</p>
+            </div>
+            <div class="row-wrap">
+              <button class="btn secondary btn-variant-edit" data-id="${variant.variant_id}" type="button">Edit</button>
+              <button class="btn secondary btn-variant-delete" data-id="${variant.variant_id}" type="button">Delete</button>
+            </div>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderHaircutOverlayUploads(hairstyle) {
+  const section = document.getElementById("haircut-overlay-section");
+  const container = document.getElementById("haircut-overlay-uploads");
+  if (!section || !container || !hairstyle) return;
+
+  section.removeAttribute("hidden");
+  const folder = hairstyle.overlay_folder || "";
+  const views = [
+    { key: "front", label: "Front", url: hairstyle.front_view_url },
+    { key: "left", label: "Left", url: hairstyle.side_view_url },
+    { key: "right", label: "Right", url: hairstyle.back_view_url },
+  ];
+
+  container.innerHTML = `
+    <label>Overlay folder slug
+      <input class="input" id="hc-overlay-folder" value="${folder}" placeholder="e.g. wavy_mod_cut" />
+    </label>
+    ${views
+      .map(
+        (view) => `
+          <label>${view.label} PNG
+            <input class="input" type="file" accept="image/png" data-overlay-view="${view.key}" />
+            ${view.url ? `<img src="${overlayPreviewUrl(view.url)}" alt="${view.label}" style="max-width: 120px; margin-top: 6px; border-radius: 8px;" />` : ""}
+          </label>
+        `,
+      )
+      .join("")}
+  `;
+
+  container.querySelectorAll("input[data-overlay-view]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file || !state.haircutEditor?.hairstyleId) return;
+      try {
+        const folderInput = document.getElementById("hc-overlay-folder");
+        await uploadHaircutOverlay(
+          state.haircutEditor.hairstyleId,
+          input.getAttribute("data-overlay-view"),
+          file,
+          folderInput?.value?.trim() || "",
+        );
+        toast("Overlay uploaded.");
+        state.haircutDetail = await fetchHaircutDetail(state.haircutEditor.hairstyleId);
+        openHaircutEditor(state.haircutDetail.hairstyle, state.haircutDetail.variants);
+        await loadHaircuts();
+      } catch (error) {
+        toast(error.message || "Upload failed", "error");
+      } finally {
+        input.value = "";
+      }
+    });
+  });
+}
+
+function openHaircutEditor(hairstyle, variants = []) {
+  const dialog = document.getElementById("haircut-editor-dialog");
+  const title = document.getElementById("haircut-editor-title");
+  const form = document.getElementById("haircut-editor-form");
+  const variantsSection = document.getElementById("haircut-variants-section");
+  if (!(dialog instanceof HTMLDialogElement) || !title || !form) return;
+
+  const isEdit = Boolean(hairstyle);
+  state.haircutEditor = {
+    mode: isEdit ? "edit" : "create",
+    hairstyleId: hairstyle?.hairstyle_id ?? null,
+  };
+  title.textContent = isEdit ? "Manage haircut" : "Add haircut";
+  const active = hairstyle?.is_active === false || hairstyle?.is_active === "f" ? "0" : "1";
+
+  form.innerHTML = `
+    <label>Style name
+      <input class="input" id="hc-name" value="${hairstyle?.style_name ?? ""}" />
+    </label>
+    <label>Style code
+      <input class="input" id="hc-code" value="${hairstyle?.style_code ?? ""}" placeholder="HC-WAVY-MOD" />
+    </label>
+    <label>Description
+      <input class="input" id="hc-description" value="${hairstyle?.description ?? ""}" />
+    </label>
+    <label>Gender
+      <select class="select" id="hc-gender">
+        ${["Male", "Female", "Unisex"]
+          .map((g) => `<option value="${g}" ${(hairstyle?.gender ?? "Unisex") === g ? "selected" : ""}>${g}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label>Difficulty
+      <select class="select" id="hc-difficulty">
+        ${["Easy", "Medium", "Hard"]
+          .map((d) => `<option value="${d}" ${(hairstyle?.difficulty ?? "Medium") === d ? "selected" : ""}>${d}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label>Maintenance
+      <select class="select" id="hc-maintenance">
+        ${["Low", "Medium", "High"]
+          .map((m) => `<option value="${m}" ${(hairstyle?.maintenance ?? "Medium") === m ? "selected" : ""}>${m}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label>Active
+      <select class="select" id="hc-active">
+        <option value="1" ${active === "1" ? "selected" : ""}>Yes</option>
+        <option value="0" ${active === "0" ? "selected" : ""}>No</option>
+      </select>
+    </label>
+  `;
+
+  if (isEdit) {
+    variantsSection?.removeAttribute("hidden");
+    state.haircutDetail = { hairstyle, variants };
+    renderHaircutVariantsList();
+    renderHaircutOverlayUploads(hairstyle);
+  } else {
+    variantsSection?.setAttribute("hidden", "");
+    document.getElementById("haircut-overlay-section")?.setAttribute("hidden", "");
+  }
+
+  dialog.showModal();
+}
+
+async function saveHaircutEditor() {
+  const dialog = document.getElementById("haircut-editor-dialog");
+  if (!(dialog instanceof HTMLDialogElement) || !state.haircutEditor) return;
+
+  const payload = {
+    styleName: document.getElementById("hc-name")?.value?.trim() || "",
+    styleCode: document.getElementById("hc-code")?.value?.trim() || "",
+    description: document.getElementById("hc-description")?.value?.trim() || "",
+    gender: document.getElementById("hc-gender")?.value || "Unisex",
+    difficulty: document.getElementById("hc-difficulty")?.value || "Medium",
+    maintenance: document.getElementById("hc-maintenance")?.value || "Medium",
+    isActive: Number(document.getElementById("hc-active")?.value ?? 1) !== 0,
+  };
+
+  if (!payload.styleName) {
+    toast("Style name is required.");
+    return;
+  }
+
+  try {
+    if (state.haircutEditor.mode === "create") {
+      const data = await saveHaircut("create", payload);
+      toast("Haircut created.");
+      state.haircutEditor.hairstyleId = data.hairstyleID;
+      state.haircutDetail = await fetchHaircutDetail(data.hairstyleID);
+      openHaircutEditor(state.haircutDetail.hairstyle, state.haircutDetail.variants);
+    } else {
+      await saveHaircut("update", { hairstyleID: state.haircutEditor.hairstyleId, ...payload });
+      toast("Haircut updated.");
+    }
+    await loadHaircuts();
+  } catch (error) {
+    toast(error.message || "Save failed", "error");
+  }
+}
+
+function openVariantEditor(variant) {
+  const dialog = document.getElementById("variant-editor-dialog");
+  const title = document.getElementById("variant-editor-title");
+  const form = document.getElementById("variant-editor-form");
+  if (!(dialog instanceof HTMLDialogElement) || !title || !form) return;
+
+  const isEdit = Boolean(variant);
+  state.variantEditor = {
+    mode: isEdit ? "edit" : "create",
+    variantId: variant?.variant_id ?? null,
+    hairstyleId: state.haircutEditor?.hairstyleId ?? null,
+  };
+  title.textContent = isEdit ? "Edit variant" : "Add variant";
+
+  form.innerHTML = `
+    <label>Face shape
+      <select class="select" id="hv-face">
+        ${["Oval", "Round", "Square"]
+          .map((f) => `<option value="${f}" ${(variant?.face_shape ?? "Oval") === f ? "selected" : ""}>${f}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label>Hair texture
+      <select class="select" id="hv-texture">
+        ${["Straight", "Wavy", "Curly"]
+          .map((t) => `<option value="${t}" ${(variant?.hair_texture ?? "Straight") === t ? "selected" : ""}>${t}</option>`)
+          .join("")}
+      </select>
+    </label>
+    <label>Barber instructions
+      <input class="input" id="hv-instructions" value="${variant?.barber_instructions ?? ""}" />
+    </label>
+    <label>Clipper sizes
+      <input class="input" id="hv-clippers" value="${variant?.clipper_sizes ?? ""}" />
+    </label>
+    <label>Styling products
+      <input class="input" id="hv-products" value="${variant?.styling_products ?? ""}" />
+    </label>
+    <label>Estimated minutes
+      <input class="input" id="hv-minutes" type="number" min="10" value="${Number(variant?.estimated_minutes ?? 40)}" />
+    </label>
+    <label>Confidence (0–1)
+      <input class="input" id="hv-confidence" type="number" min="0" max="1" step="0.01" value="${Number(variant?.confidence_score ?? 0.85)}" />
+    </label>
+  `;
+
+  dialog.showModal();
+}
+
+async function saveVariantEditor() {
+  const dialog = document.getElementById("variant-editor-dialog");
+  if (!(dialog instanceof HTMLDialogElement) || !state.variantEditor) return;
+
+  const payload = {
+    faceShape: document.getElementById("hv-face")?.value?.trim() || "Oval",
+    hairTexture: document.getElementById("hv-texture")?.value || "Straight",
+    barberInstructions: document.getElementById("hv-instructions")?.value?.trim() || "",
+    clipperSizes: document.getElementById("hv-clippers")?.value?.trim() || "",
+    stylingProducts: document.getElementById("hv-products")?.value?.trim() || "",
+    estimatedMinutes: Number(document.getElementById("hv-minutes")?.value ?? 40),
+    confidenceScore: Number(document.getElementById("hv-confidence")?.value ?? 0.85),
+  };
+
+  try {
+    if (state.variantEditor.mode === "create") {
+      await saveVariant("createVariant", {
+        hairstyleID: state.variantEditor.hairstyleId,
+        ...payload,
+      });
+      toast("Variant created.");
+    } else {
+      await saveVariant("updateVariant", {
+        variantID: state.variantEditor.variantId,
+        ...payload,
+      });
+      toast("Variant updated.");
+    }
+    if (state.haircutEditor?.hairstyleId) {
+      state.haircutDetail = await fetchHaircutDetail(state.haircutEditor.hairstyleId);
+      renderHaircutVariantsList();
+    }
+    dialog.close();
+    state.variantEditor = null;
+  } catch (error) {
+    toast(error.message || "Variant save failed", "error");
+  }
+}
+
 function renderAudit() {
   const list = document.getElementById("audit-list");
   const query = (document.getElementById("audit-search")?.value || "").trim().toLowerCase();
@@ -1367,53 +1729,6 @@ function renderAnalyticsCharts(metrics) {
   });
 }
 
-function inferActionFromInsight(text) {
-  const source = String(text || "").toLowerCase();
-  if (source.includes("promote") || source.includes("bundle") || source.includes("offer")) {
-    return { label: "Open Services", action: "open-services" };
-  }
-  if (source.includes("rebook") || source.includes("reminder")) {
-    return { label: "Open Users", action: "open-users" };
-  }
-  if (source.includes("barber") || source.includes("slots") || source.includes("queue")) {
-    return { label: "Open Audit", action: "open-audit" };
-  }
-  if (source.includes("revenue") || source.includes("transactions")) {
-    return { label: "Refresh Analytics", action: "refresh-analytics" };
-  }
-  return { label: "Review Analytics", action: "open-analytics" };
-}
-
-function renderAiActions(insights) {
-  const container = document.getElementById("analytics-actions");
-  const note = document.getElementById("analytics-action-note");
-  if (!container) return;
-
-  const enabled = new Set();
-  insights.forEach((line) => {
-    const option = inferActionFromInsight(line);
-    enabled.add(option.action);
-  });
-
-  if (note) {
-    note.textContent = enabled.size
-      ? `AI recommended ${enabled.size} action${enabled.size > 1 ? "s" : ""}. Enabled buttons are ready to use.`
-      : "No action is recommended right now. Buttons remain disabled until AI advises them.";
-  }
-
-  container.innerHTML = ACTION_CATALOG
-    .map((option) => {
-      const isEnabled = enabled.has(option.action);
-      return `
-        <div class="ai-action-item ${isEnabled ? "" : "is-disabled"}">
-          <button class="btn ai-action" data-ai-action="${option.action}" ${isEnabled ? "" : "disabled"}>${option.label}</button>
-          <div class="ai-action-desc">${option.description}</div>
-        </div>
-      `;
-    })
-    .join("");
-}
-
 function renderAiBrief(summary, suggestive, predictive) {
   const container = document.getElementById("analytics-ai-brief");
   const summaryEl = document.getElementById("analytics-summary");
@@ -1448,7 +1763,6 @@ async function loadAnalytics() {
     const brief = document.getElementById("analytics-ai-brief");
     if (brief) brief.innerHTML = '<div class="ai-brief-item">AI insights are currently unavailable.</div>';
     destroyAnalyticsCharts();
-    renderAiActions([]);
   }
 }
 
@@ -1539,11 +1853,9 @@ async function renderAiInsights(metrics, summary) {
   try {
     const insights = await buildGeminiInsights(metrics, summary);
     renderAiBrief(summary, insights.suggestive, insights.predictive);
-    renderAiActions([...insights.suggestive, ...insights.predictive]);
   } catch (_) {
     const fallback = fallbackInsights(metrics);
     renderAiBrief(summary, fallback.suggestive, fallback.predictive);
-    renderAiActions([...fallback.suggestive, ...fallback.predictive]);
   }
 }
 
@@ -1575,6 +1887,7 @@ async function refreshAll() {
     loadAudit(),
     loadAnalytics(),
     loadServices(),
+    loadHaircuts(),
     loadSettings(),
     loadAiStatus(),
   ]);
@@ -1634,19 +1947,64 @@ document.addEventListener("click", async (event) => {
     }
   }
 
-  if (target.classList.contains("ai-action")) {
-    const action = target.dataset.aiAction;
-    if (!action) return;
-    if (action === "open-services") showView("services");
-    if (action === "open-users") showView("users");
-    if (action === "open-audit") showView("audit");
-    if (action === "open-analytics") showView("analytics");
-    if (action === "refresh-analytics") {
-      showView("analytics");
-      await loadAnalytics();
-      setLastUpdated();
+  if (target.classList.contains("btn-haircut")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    try {
+      const detail = await fetchHaircutDetail(Number(id));
+      openHaircutEditor(detail.hairstyle, detail.variants);
+    } catch (error) {
+      toast(error.message || "Failed to open haircut", "error");
     }
   }
+
+  if (target.classList.contains("btn-haircut-delete")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction("Deactivate this haircut?", {
+      title: "Deactivate haircut",
+      confirmLabel: "Deactivate",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await saveHaircut("delete", { hairstyleID: Number(id) });
+      toast("Haircut deactivated.");
+      await loadHaircuts();
+    } catch (error) {
+      toast(error.message || "Delete failed", "error");
+    }
+  }
+
+  if (target.classList.contains("btn-variant-edit")) {
+    const id = target.dataset.id;
+    const variant = (state.haircutDetail?.variants ?? []).find(
+      (row) => String(row.variant_id) === String(id),
+    );
+    openVariantEditor(variant);
+  }
+
+  if (target.classList.contains("btn-variant-delete")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction("Delete this variant?", {
+      title: "Delete variant",
+      confirmLabel: "Delete",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await saveVariant("deleteVariant", { variantID: Number(id) });
+      toast("Variant deleted.");
+      if (state.haircutEditor?.hairstyleId) {
+        state.haircutDetail = await fetchHaircutDetail(state.haircutEditor.hairstyleId);
+        renderHaircutVariantsList();
+      }
+    } catch (error) {
+      toast(error.message || "Delete failed", "error");
+    }
+  }
+
 });
 
 document.getElementById("users-search")?.addEventListener("input", () => {
@@ -1663,6 +2021,25 @@ document.getElementById("services-search")?.addEventListener("input", () => {
 });
 
 document.getElementById("services-add")?.addEventListener("click", () => openServiceEditor(null));
+document.getElementById("haircuts-add")?.addEventListener("click", () => openHaircutEditor(null));
+document.getElementById("haircuts-search")?.addEventListener("input", () => {
+  resetPagination(["haircuts-table"]);
+  renderHaircuts();
+});
+document.getElementById("haircut-editor-save")?.addEventListener("click", saveHaircutEditor);
+document.getElementById("haircut-editor-cancel")?.addEventListener("click", () => {
+  const dialog = document.getElementById("haircut-editor-dialog");
+  if (dialog instanceof HTMLDialogElement) dialog.close();
+  state.haircutEditor = null;
+  state.haircutDetail = null;
+});
+document.getElementById("haircut-variant-add")?.addEventListener("click", () => openVariantEditor(null));
+document.getElementById("variant-editor-save")?.addEventListener("click", saveVariantEditor);
+document.getElementById("variant-editor-cancel")?.addEventListener("click", () => {
+  const dialog = document.getElementById("variant-editor-dialog");
+  if (dialog instanceof HTMLDialogElement) dialog.close();
+  state.variantEditor = null;
+});
 document.getElementById("service-editor-save")?.addEventListener("click", saveServiceEditor);
 document.getElementById("service-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("service-editor-dialog");
@@ -1877,6 +2254,14 @@ document.getElementById("global-search")?.addEventListener("input", (event) => {
       servicesSearch.value = value;
       resetPagination(["services-table"]);
       renderServices();
+    }
+  }
+  if (activeView === "haircuts") {
+    const haircutsSearch = document.getElementById("haircuts-search");
+    if (haircutsSearch) {
+      haircutsSearch.value = value;
+      resetPagination(["haircuts-table"]);
+      renderHaircuts();
     }
   }
 });

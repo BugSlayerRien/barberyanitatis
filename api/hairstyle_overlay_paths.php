@@ -3,6 +3,59 @@
 
 declare(strict_types=1);
 
+/**
+ * Canonical HC-* codes for the mobile overlay haircut library (24 styles).
+ * Keep in sync with scripts/seed_all_overlay_hairstyles.php and OverlayRegistry.
+ *
+ * @return list<string>
+ */
+function overlay_library_style_codes(): array
+{
+    return [
+        'HC-BLOWOUT-TAPER',
+        'HC-BUZZ-CUT',
+        'HC-CAESAR',
+        'HC-CREW',
+        'HC-CURLY-BURST',
+        'HC-CURLY-CREW',
+        'HC-CURLY-DROP',
+        'HC-CURLY-MID',
+        'HC-CURLY-MULLET',
+        'HC-CURLY-TAPER',
+        'HC-EDGAR',
+        'HC-FRENCH-CROP',
+        'HC-LOW-FADE',
+        'HC-MESSY-QUIFF',
+        'HC-MODERN-CURTAINS',
+        'HC-MODERN-MULLET',
+        'HC-POMPADOUR',
+        'HC-TEXTURED-CROP',
+        'HC-TWO-BLOCK',
+        'HC-WAVY-BURST',
+        'HC-WAVY-FRINGE',
+        'HC-WAVY-MESSY',
+        'HC-WAVY-MOD',
+        'HC-WAVY-SWEEP',
+    ];
+}
+
+function overlay_library_catalog_size(): int
+{
+    return count(overlay_library_style_codes());
+}
+
+function is_overlay_library_row(array $row): bool
+{
+    $code = strtoupper(trim((string)($row['style_code'] ?? '')));
+    if ($code !== '' && in_array($code, overlay_library_style_codes(), true)) {
+        return true;
+    }
+
+    $name = (string)($row['style_name'] ?? '');
+
+    return resolve_hairstyle_overlay_key($name) !== null;
+}
+
 function hairstyle_overlay_paths(): array
 {
     return [
@@ -181,6 +234,86 @@ function apply_hairstyle_overlay_paths(array $row): array
     $row['front_view_url'] = $paths['front'];
     $row['side_view_url'] = $paths['side'];
     $row['back_view_url'] = $paths['back'];
+    $row['overlay_folder'] = overlay_folder_from_asset_path($paths['front']);
 
     return $row;
+}
+
+function overlay_folder_from_asset_path(string $assetPath): ?string
+{
+    if (preg_match('#assets/images/overlays/([^/]+)/#', $assetPath, $matches) === 1) {
+        return $matches[1];
+    }
+
+    return null;
+}
+
+/**
+ * @return array{front: string, side: string, back: string, folder: string}|null
+ */
+function overlay_paths_for_style_name(string $styleName): ?array
+{
+    $key = resolve_hairstyle_overlay_key($styleName);
+    if ($key === null) {
+        return null;
+    }
+
+    $paths = hairstyle_overlay_paths()[$key];
+    $folder = overlay_folder_from_asset_path($paths['front']);
+    if ($folder === null) {
+        return null;
+    }
+
+    return [
+        'front' => $paths['front'],
+        'side' => $paths['side'],
+        'back' => $paths['back'],
+        'folder' => $folder,
+    ];
+}
+
+/**
+ * @return array{folder: string, filename: string}|null
+ */
+function overlay_target_for_view(string $styleName, string $view): ?array
+{
+    $paths = overlay_paths_for_style_name($styleName);
+    if ($paths === null) {
+        return null;
+    }
+
+    $viewKey = match (strtolower(trim($view))) {
+        'front' => 'front',
+        'left', 'side' => 'side',
+        'right', 'back' => 'back',
+        default => null,
+    };
+    if ($viewKey === null) {
+        return null;
+    }
+
+    $assetPath = $paths[$viewKey];
+    $filename = basename($assetPath);
+    if ($filename === '') {
+        return null;
+    }
+
+    return [
+        'folder' => $paths['folder'],
+        'filename' => $filename,
+    ];
+}
+
+function mobile_app_overlay_root(): string
+{
+    return dirname(__DIR__) . '/mobile-app/assets/images/overlays';
+}
+
+function slugify_overlay_folder(string $value): string
+{
+    $slug = strtolower(trim($value));
+    $slug = preg_replace('/[^a-z0-9]+/', '_', $slug) ?? '';
+    $slug = trim((string)$slug, '_');
+
+    return $slug !== '' ? $slug : 'custom_style';
 }

@@ -12,21 +12,11 @@ try {
     ensure_walkin_guest_name_column($pdo);
     auto_complete_due_appointments($pdo);
 
-    $walkInsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE');
-    $walkInsTodayStmt->execute();
-    $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
-
-    $appointmentsTodayStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = CURRENT_DATE');
-    $appointmentsTodayStmt->execute();
-    $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
-
-    $inProgressStmt = $pdo->prepare("SELECT COUNT(*) FROM walkin_queue WHERE status = 'InProgress'");
-    $inProgressStmt->execute();
-    $inProgress = (int)$inProgressStmt->fetchColumn();
-
-    $activeBarbersStmt = $pdo->prepare('SELECT COUNT(*) FROM barbers WHERE is_active = TRUE');
-    $activeBarbersStmt->execute();
-    $activeBarbers = (int)$activeBarbersStmt->fetchColumn();
+    $deskStats = fetch_receptionist_front_desk_stats($pdo);
+    $walkInsToday = $deskStats['walkInsToday'];
+    $appointmentsToday = $deskStats['appointmentsToday'];
+    $inProgress = $deskStats['inProgress'];
+    $activeBarbers = $deskStats['availableBarbers'];
 
     $appointmentsStmt = $pdo->prepare(
         'SELECT a.appointment_id, u.full_name AS name,

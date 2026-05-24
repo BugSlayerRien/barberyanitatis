@@ -61,6 +61,50 @@ function ensure_group_booking_schema(PDO $pdo): void
 }
 
 /**
+ * @return array{people_count: int, total_amount: float, status: string}|null
+ */
+function fetch_booking_group_meta(PDO $pdo, int $groupId): ?array
+{
+    ensure_group_booking_schema($pdo);
+    if ($groupId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT people_count, total_amount, status
+         FROM appointment_groups
+         WHERE group_id = :group_id
+         LIMIT 1'
+    );
+    $stmt->execute([':group_id' => $groupId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+
+    return [
+        'people_count' => (int)($row['people_count'] ?? 0),
+        'total_amount' => (float)($row['total_amount'] ?? 0),
+        'status' => (string)($row['status'] ?? ''),
+    ];
+}
+
+/**
+ * End of the booking window for display (last slot start + service duration).
+ *
+ * @param array<string, mixed> $lastMember
+ */
+function booking_group_display_end_time(array $lastMember): string
+{
+    $start = (string)($lastMember['start_time'] ?? $lastMember['startTime'] ?? '');
+    if ($start === '') {
+        return (string)($lastMember['end_time'] ?? $lastMember['endTime'] ?? '');
+    }
+
+    return shop_add_minutes_to_time($start, shop_appointment_duration_minutes());
+}
+
+/**
  * @return string[]
  */
 function group_slot_time_order(): array
