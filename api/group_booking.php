@@ -258,7 +258,7 @@ function find_split_barber_option(array $barberMaps, string $slotDate, int $coun
  */
 function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopleCount, ?string $preferredDate): array
 {
-    $windowEnd = shop_window_end_date(7);
+    $windowEnd = shop_window_end_date();
     $dates = [];
     $start = shop_earliest_bookable_slot_start()->setTime(0, 0);
     $end = DateTimeImmutable::createFromFormat('Y-m-d', $windowEnd, new DateTimeZone(shop_timezone()));
@@ -393,7 +393,8 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
 
         return [
             'status' => 'partial',
-            'reason' => 'Cannot fit all ' . $peopleCount . ' people in one consecutive block in the next 7 days. '
+            'reason' => 'Cannot fit all ' . $peopleCount . ' people in one consecutive block in the next '
+                . shop_booking_window_days() . ' days. '
                 . 'Largest block today has ' . $bestPartial['availableCount'] . ' hour(s). '
                 . 'Reduce group size or pick another day — partial groups are not auto-booked.',
             'options' => $options,
@@ -403,7 +404,8 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
 
     return [
         'status' => 'unavailable',
-        'reason' => 'No consecutive availability for ' . $peopleCount . ' people in the next 7 days.',
+        'reason' => 'No consecutive availability for ' . $peopleCount . ' people in the next '
+            . shop_booking_window_days() . ' days.',
         'options' => [],
         'requiresConfirmation' => true,
     ];

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../user/ai_face_scan_page.dart';
+import '../user/feature_flags.dart';
+import '../user/user_session.dart';
 import 'kiosk_barber_page.dart';
 import 'kiosk_scan_mode_page.dart';
 import 'kiosk_session.dart';
@@ -13,6 +16,14 @@ class KioskIntentPage extends StatelessWidget {
 
   void _goScan(BuildContext context) {
     KioskSession.entryPath = KioskEntryPath.scanFace;
+    if (!kEnableLiveScanner) {
+      KioskSession.scanMode = KioskScanMode.threeAngle;
+      UserSession.resetScanState();
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AiFaceScanPage(kioskMode: true)),
+      );
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const KioskScanModePage()),
     );
@@ -54,7 +65,8 @@ class KioskIntentPage extends StatelessWidget {
             const SizedBox(height: 20),
             _IntentCard(
               title: 'Scan face for recommendations',
-              subtitle: 'AI suggests styles that suit you. Then choose 3-angle capture or live preview.',
+              subtitle:
+                  'AI suggests styles that suit you. Capture front, left, and right photos for recommendations and previews.',
               icon: Icons.face_retouching_natural_outlined,
               onTap: () => _goScan(context),
             ),

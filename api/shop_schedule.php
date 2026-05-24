@@ -230,10 +230,91 @@ function shop_is_suggestable_slot(string $slotDate, string $slotTime): bool
     return $slotDateTime >= shop_next_bookable_slot_start();
 }
 
-function shop_window_end_date(int $windowDays = 7): string
+function shop_booking_window_days(): int
 {
-    $days = max(1, $windowDays);
-    return shop_now()->setTime(0, 0)->modify('+' . ($days - 1) . ' day')->format('Y-m-d');
+    $days = (int)(getenv('BOOKING_WINDOW_DAYS') ?: ($_ENV['BOOKING_WINDOW_DAYS'] ?? 30));
+
+    return max(1, min(60, $days));
+}
+
+function shop_max_reschedules_per_appointment(): int
+{
+    return 3;
+}
+
+function shop_reschedule_notice_hours(): int
+{
+    return 24;
+}
+
+function shop_window_end_date(?int $windowDays = null): string
+{
+    $days = $windowDays ?? shop_booking_window_days();
+
+    return shop_now()->setTime(0, 0)->modify('+' . (max(1, $days) - 1) . ' day')->format('Y-m-d');
+}
+
+/**
+ * Whether a customer may reschedule this appointment (policy only; not slot availability).
+ *
+ * @return array{allowed: bool, reason: string, remaining: int}
+ */
+function can_customer_reschedule_appointment(array $appt, string $paymentState): array
+{
+    $max = shop_max_reschedules_per_appointment();
+    $count = (int)($appt['reschedule_count'] ?? 0);
+    $remaining = max(0, $max - $count);
+
+    if ($paymentState !== 'Paid') {
+        return [
+            'allowed' => false,
+            'reason' => 'Reschedule is available only after payment is confirmed.',
+            'remaining' => $remaining,
+        ];
+    }
+
+    $status = (string)($appt['status'] ?? '');
+    if ($status !== 'Scheduled') {
+        return [
+            'allowed' => false,
+            'reason' => 'Only scheduled upcoming appointments can be rescheduled.',
+            'remaining' => $remaining,
+        ];
+    }
+
+    if ($count >= $max) {
+        return [
+            'allowed' => false,
+            'reason' => 'You have used all ' . $max . ' reschedules for this appointment.',
+            'remaining' => 0,
+        ];
+    }
+
+    $slotDate = (string)($appt['appointment_date'] ?? '');
+    $slotTime = (string)($appt['start_time'] ?? '');
+    $currentStart = shop_slot_start_datetime($slotDate, $slotTime);
+    if ($currentStart === null) {
+        return [
+            'allowed' => false,
+            'reason' => 'This appointment time is invalid.',
+            'remaining' => $remaining,
+        ];
+    }
+
+    $noticeDeadline = shop_now()->modify('+' . shop_reschedule_notice_hours() . ' hours');
+    if ($currentStart < $noticeDeadline) {
+        return [
+            'allowed' => false,
+            'reason' => 'Reschedule at least ' . shop_reschedule_notice_hours() . ' hours before your appointment.',
+            'remaining' => $remaining,
+        ];
+    }
+
+    return [
+        'allowed' => true,
+        'reason' => '',
+        'remaining' => $remaining,
+    ];
 }
 
 function shop_add_minutes_to_time(string $time, int $minutes): string

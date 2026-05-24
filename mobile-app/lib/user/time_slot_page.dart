@@ -17,14 +17,26 @@ class TimeSlotPage extends StatefulWidget {
   final int barberId;
   final String barberName;
   final DateTime selectedDate;
+  final int? rescheduleAppointmentId;
+  final int? reschedulesRemaining;
 
-  const TimeSlotPage({required this.barberId, required this.barberName, required this.selectedDate, super.key});
+  const TimeSlotPage({
+    required this.barberId,
+    required this.barberName,
+    required this.selectedDate,
+    this.rescheduleAppointmentId,
+    this.reschedulesRemaining,
+    super.key,
+  });
 
   @override
   State<TimeSlotPage> createState() => _TimeSlotPageState();
 }
 
 class _TimeSlotPageState extends State<TimeSlotPage> {
+  bool get _isRescheduleMode =>
+      widget.rescheduleAppointmentId != null && widget.rescheduleAppointmentId! > 0;
+
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
   static const int _appointmentDurationMinutes = 60;
@@ -443,13 +455,23 @@ Keep the total response under 24 words.
           icon: const Icon(Icons.close, color: Colors.white, size: 28),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text('Select Time', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text(
+          _isRescheduleMode ? 'Reschedule' : 'Select Time',
+          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (_isRescheduleMode && widget.reschedulesRemaining != null) ...[
+              Text(
+                '${widget.reschedulesRemaining} reschedule(s) remaining for this appointment.',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 12),
+            ],
             // Date and Barber Info
             Container(
               padding: const EdgeInsets.all(16),
@@ -712,6 +734,48 @@ Keep the total response under 24 words.
                         );
                         return;
                       }
+
+                      final startTime = _selectedTime ?? '';
+                      const duration = _appointmentDurationMinutes;
+                      final endTime = _addMinutes(startTime, duration);
+
+                      if (_isRescheduleMode) {
+                        final response = await http.post(
+                          Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+                          headers: {'Content-Type': 'application/json'},
+                          body: jsonEncode({
+                            'action': 'reschedule',
+                            'appointmentID': widget.rescheduleAppointmentId,
+                            'userID': UserSession.userId,
+                            'appointmentDate': _formatDate(_activeDate),
+                            'startTime': startTime,
+                            'endTime': endTime,
+                          }),
+                        );
+                        if (!context.mounted) return;
+                        final data = response.body.isNotEmpty
+                            ? jsonDecode(response.body) as Map<String, dynamic>
+                            : <String, dynamic>{};
+                        if (response.statusCode != 200) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(data['error']?.toString() ?? 'Reschedule failed.'),
+                            ),
+                          );
+                          return;
+                        }
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              data['message']?.toString() ?? 'Appointment rescheduled.',
+                            ),
+                          ),
+                        );
+                        Navigator.of(context).pop(true);
+                        Navigator.of(context).pop(true);
+                        return;
+                      }
+
                       if (UserSession.selectedVariantId == null) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Select a hairstyle before booking.')),
@@ -761,10 +825,6 @@ Keep the total response under 24 words.
                       }
 
                       final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
-
-                      final startTime = _selectedTime ?? '';
-                      const duration = _appointmentDurationMinutes;
-                      final endTime = _addMinutes(startTime, duration);
 
                       final response = await http.post(
                         Uri.parse('${ApiConfig.baseUrl}/booking.php'),
@@ -869,9 +929,9 @@ Keep the total response under 24 words.
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                     )
-                  : const Text(
-                      'Confirm Booking',
-                      style: TextStyle(
+                  : Text(
+                      _isRescheduleMode ? 'Confirm Reschedule' : 'Confirm Booking',
+                      style: const TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
                         color: Colors.black,

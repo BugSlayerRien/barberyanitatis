@@ -17,6 +17,7 @@ import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
 import 'services/booking_draft_service.dart';
 import 'ai_face_scan_page.dart';
+import 'feature_flags.dart';
 import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
 import 'scanner/overlay_preview_image.dart';
@@ -314,6 +315,17 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   }
 
   void _openTryOnLive(BuildContext context, Map<String, dynamic> style) {
+    if (!kEnableLiveScanner) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Run a 3-angle face scan, then use Generate preview on your results.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final hasCaptures = UserSession.capturedFaceImages != null &&
         UserSession.capturedFaceImages!.isNotEmpty;
 
@@ -417,20 +429,22 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: Colors.white70, fontSize: 11, height: 1.3),
                   ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 32,
-                    child: OutlinedButton(
-                      onPressed: () => _openTryOnLive(context, style),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white38),
-                        padding: EdgeInsets.zero,
+                  if (kEnableLiveScanner) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 32,
+                      child: OutlinedButton(
+                        onPressed: () => _openTryOnLive(context, style),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white38),
+                          padding: EdgeInsets.zero,
+                        ),
+                        child: const Text('Try live', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
                       ),
-                      child: const Text('Try live', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

@@ -139,14 +139,15 @@ function replicate_build_hair_only_prompt(
             . ' hair color exactly. Do not lighten, redden, or recolor the hair.';
     }
 
-    return 'HAIR-ONLY EDIT. Replace only the hair on this person\'s head with: '
-        . "{$styleDescription}. "
-        . "Current hair length is {$currentLabel}. {$lengthHint} "
-        . 'FORBIDDEN CHANGES: do not alter the face, skin, eyes, eyebrows, nose, lips, '
-        . 'mouth, ears, jaw, neck, clothing, or background. '
-        . 'The background, lighting, shadows, and camera framing must stay identical to the input. '
-        . 'Do not blur or replace the background. Do not retouch or reshape the face. '
-        . 'Identity must remain unchanged. Only change hairstyle above the forehead.'
+    return 'Change only the hair on this person. Replace the entire haircut on the full head — '
+        . 'crown, top, sides, temples, sideburns, and back hairline — with: '
+        . "{$styleDescription}. Current length: {$currentLabel}. {$lengthHint}"
+        . ' Remove all of the old hairstyle everywhere, not just tips or one side. '
+        . 'The new cut must look clearly different from the original silhouette. '
+        . 'Do not paste extra hair onto forehead skin or cheeks. '
+        . 'Keep the same facial features, skin tone, eyebrows, eyes, eyeglasses if present, '
+        . 'ears, neck, shirt, and room background. '
+        . 'Maintain the original head pose, camera angle, framing, and lighting.'
         . $colorClause;
 }
 
@@ -400,7 +401,8 @@ function replicate_generate_three_view_previews(
     $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
     $lengthNote = null;
     if (!$feasibleToday) {
-        $lengthNote = 'Hair too short — cannot be done today. Preview shows how you could look with more length.';
+        $lengthNote = 'This style usually needs more length than detected today. '
+            . 'Preview shows the target look — ask your barber what is achievable today.';
     }
 
     $profileNote = ' Use the same haircut design on all three photos, but each output must keep '

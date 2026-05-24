@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
+import 'feature_flags.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
@@ -263,9 +264,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     } catch (e) {
       if (!mounted) return;
       if (_topPicks.isEmpty) {
-        setState(() {
-          _error = e.toString();
-          _recommendationsLoading = false;
+      setState(() {
+        _error = e.toString();
+        _recommendationsLoading = false;
           _categoriesLoading = false;
         });
       } else if (_topPicks.isNotEmpty) {
@@ -348,6 +349,19 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   }
 
   Future<void> _openLivePreview() async {
+    if (!kEnableLiveScanner) {
+      if (_selected == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Select a style below, then tap Generate preview.'),
+          ),
+        );
+        return;
+      }
+      unawaited(_onRegeneratePreviewPressed());
+      return;
+    }
+
     UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
     final selectedBefore = _selected;
     await Navigator.of(context).push(
@@ -629,6 +643,13 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       return 'Hair region was hard to detect. Retake with hair visible or tap Regenerate.';
     }
     if (diff != null && diff >= 0 && diff < 5.0) {
+      final replicateDiff = (diag['replicateHairDiff'] as num?)?.toDouble();
+      if (replicateDiff != null && replicateDiff >= 8.0) {
+        return 'AI changed the hair but blending kept it soft. Tap Regenerate for a stronger cut.';
+      }
+      if (replicateDiff != null && replicateDiff < 4.0) {
+        return 'AI made a small change on this angle. Tap Regenerate or try brighter lighting.';
+      }
       return 'Hair change is subtle on this angle (score ${diff.toStringAsFixed(1)}). Tap Regenerate if you want a stronger style.';
     }
     if (usedRaw) {
@@ -814,16 +835,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
 
     try {
-      if (await BookingGuard.hasActiveAppointment(userId: userId)) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You already have an active appointment.')),
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-        );
-        return;
-      }
+    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+      );
+      return;
+    }
 
       final scanSessionId = UserSession.ensureScanSessionId();
       UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
@@ -864,20 +885,20 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
       unawaited(
         AiFunnelService.saveSelection(
-          scanSessionId: UserSession.ensureScanSessionId(),
-          userId: userId,
-          variantId: variantId,
-          styleName: UserSession.selectedStyleName ?? 'Style',
+        scanSessionId: UserSession.ensureScanSessionId(),
+        userId: userId,
+        variantId: variantId,
+        styleName: UserSession.selectedStyleName ?? 'Style',
           faceShape: _faceShape,
           hairTexture: _hairTexture,
-          hairDensity: null,
-          hairLength: null,
-          estimatedMinutes: int.tryParse(
-            '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
-          ),
-          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+        hairDensity: null,
+        hairLength: null,
+        estimatedMinutes: int.tryParse(
+          '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
+        ),
+        frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+        sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+        backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
         ).catchError((_) {}),
       );
 
@@ -970,7 +991,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 }
               },
             ),
-    ),
+            ),
     );
   }
 
@@ -1048,7 +1069,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white38, fontSize: 12),
             ),
-            const SizedBox(height: 12),
+              const SizedBox(height: 12),
             if (_lengthNote != null && _lengthNote!.isNotEmpty) ...[
               Container(
                 width: double.infinity,
@@ -1091,9 +1112,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                               key: ValueKey(
                                 'replicate-$variantId-$angleKey-$_previewImageCacheBuster',
                               ),
-                              fit: BoxFit.cover,
-                              width: double.infinity,
-                              gaplessPlayback: true,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          gaplessPlayback: true,
                               errorBuilder: (_, error, ___) {
                                 WidgetsBinding.instance.addPostFrameCallback((_) {
                                   if (!mounted) return;
@@ -1115,7 +1136,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ),
             ),
             if (_previewError != null) ...[
-              const SizedBox(height: 8),
+            const SizedBox(height: 8),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
@@ -1179,10 +1200,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ),
             const SizedBox(height: 8),
             if (_selected != null) ...[
-              Text(
+            Text(
                 'Preview: $_selectedStyleName',
-                style: const TextStyle(color: Colors.white70, fontSize: 13),
-              ),
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
             ] else
               const Text(
                 'Select a style below, expand for details, then tap Generate preview.',
@@ -1206,9 +1227,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ),
             ] else ...[
               if (_topPicks.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                _sectionTitle('Top picks'),
-                ..._topPicks.map(_styleTile),
+              const SizedBox(height: 18),
+              _sectionTitle('Top picks'),
+              ..._topPicks.map(_styleTile),
               ],
               if (_categoriesLoading) ...[
                 const SizedBox(height: 16),
@@ -1231,14 +1252,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 ),
               ] else ...[
                 if (_categories['formal']!.isNotEmpty) ...[
-                  const SizedBox(height: 16),
-                  _sectionTitle('Formal'),
-                  ..._categories['formal']!.map(_styleTile),
+              const SizedBox(height: 16),
+              _sectionTitle('Formal'),
+              ..._categories['formal']!.map(_styleTile),
                 ],
                 if (_categories['alternative']!.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  _sectionTitle('Alternative'),
-                  ..._categories['alternative']!.map(_styleTile),
+              const SizedBox(height: 12),
+              _sectionTitle('Alternative'),
+              ..._categories['alternative']!.map(_styleTile),
                 ],
               ],
             ],
@@ -1265,7 +1286,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                       ),
               ),
             ),
-            if (!widget.kioskMode) ...[
+            if (!widget.kioskMode && kEnableLiveScanner) ...[
               const SizedBox(height: 10),
               OutlinedButton.icon(
                 onPressed: _openLivePreview,
@@ -1382,13 +1403,13 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Container(
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF1F1F1F) : const Color(0xFF141414),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: selected ? Colors.white : Colors.white10, width: selected ? 1.5 : 1),
-        ),
-        child: Column(
+        child: Container(
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF1F1F1F) : const Color(0xFF141414),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: selected ? Colors.white : Colors.white10, width: selected ? 1.5 : 1),
+          ),
+          child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             InkWell(
@@ -1397,8 +1418,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
                     Icon(
                       expanded ? Icons.expand_less : Icons.expand_more,
                       color: Colors.white54,
@@ -1440,7 +1461,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ),
             if (expanded) ...[
               const Divider(height: 1, color: Colors.white12),
-              Padding(
+                Padding(
                 padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
