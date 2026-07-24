@@ -67,3 +67,35 @@ app.*.map.json
 **/*.sql.gz
 **/*.dump
 **/*.bak
+
+# ==============================
+# Java / Android heap dumps
+# ==============================
+*.hprof
+
+# ==============================
+# AI temporary files
+# ==============================
+ai-service/temp_uploads/
+
+# ==============================
+# Uploaded face scans
+# ==============================
+uploads/face_scans/
+
+# ==============================
+# PayMongo temporary cache
+# ==============================
+mobile-app/backend/paymongo/.source_charge_cache/
+
+# ==============================
+# Flutter build caches
+# ==============================
+mobile-app/.dart_tool/
+mobile-app/build/
+
+# ==============================
+# Python caches
+# ==============================
+__pycache__/
+*.py[cod]
