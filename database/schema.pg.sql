@@ -73,6 +73,19 @@ CREATE TABLE IF NOT EXISTS barbers (
 
 CREATE INDEX IF NOT EXISTS idx_barbers_code_active ON barbers (barber_code, is_active);
 
+CREATE TABLE IF NOT EXISTS barber_unavailability_requests (
+  request_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  barber_id BIGINT NOT NULL,
+  request_date DATE NOT NULL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'Pending'
+    CHECK (status IN ('Pending', 'Approved', 'Rejected')),
+  reviewed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT fk_unavailability_barber FOREIGN KEY (barber_id) REFERENCES barbers(barber_id) ON DELETE CASCADE,
+  CONSTRAINT uq_barber_unavailability_date UNIQUE (barber_id, request_date)
+);
+
 -- =========================
 -- 3. HAIRSTYLE CATALOG (AI DATASET)
 -- =========================

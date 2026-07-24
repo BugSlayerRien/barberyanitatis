@@ -41,6 +41,10 @@
             <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v7"></path><path d="M18 3v7"></path><path d="M6 10c0 4 2 6 6 6s6-2 6-6"></path><path d="M12 16v5"></path></svg></span>
             <span class="nav-label">Haircuts</span>
           </button>
+          <button data-view="schedule">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="M12 14v3"></path><path d="M10.5 15.5h3"></path></svg></span>
+            <span class="nav-label">Operating Schedule</span>
+          </button>
 
           <div class="nav-category">Monitoring</div>
           <button data-view="audit">
@@ -209,6 +213,100 @@
           </div>
         </section>
 
+        <section id="schedule-view" hidden>
+          <div class="section-title">Operating Schedule</div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin: 0 0 10px;">Business calendar</h3>
+            <p class="meta" style="margin: 0 0 10px;">See which days the shop is open or closed. Click a day for details.</p>
+            <div class="row-wrap" style="justify-content: space-between; margin-bottom: 10px;">
+              <strong id="schedule-cal-month-label">—</strong>
+              <div class="row-wrap">
+                <button class="btn secondary" id="schedule-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+                <button class="btn secondary" id="schedule-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+              </div>
+            </div>
+            <div class="schedule-calendar" id="schedule-calendar-grid"></div>
+            <div class="schedule-cal-legend row-wrap" style="margin-top: 10px; gap: 12px;">
+              <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
+              <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
+              <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
+              <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
+            </div>
+            <div class="meta" id="schedule-cal-day-detail" style="margin-top: 12px; line-height: 1.6;"></div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin: 0 0 10px;">Weekly hours</h3>
+            <p class="meta" style="margin: 0 0 10px;">Set opening hours per day. Changes apply to new availability; existing appointments are kept.</p>
+            <div class="list" id="schedule-weekly"></div>
+            <div class="row-wrap" style="margin-top: 12px;">
+              <button class="btn" id="schedule-save-weekly" type="button">Save weekly hours</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin: 0 0 10px;">Break windows</h3>
+            <p class="meta" style="margin: 0 0 10px;">No slots can be booked during a break. Use “Every day” for breaks that repeat daily.</p>
+            <div class="list" id="schedule-breaks"></div>
+            <div class="row-wrap" style="margin-top: 12px;">
+              <select class="select" id="schedule-break-day">
+                <option value="">Every day</option>
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+              <input class="input" type="time" id="schedule-break-start" value="12:00" style="max-width: 130px;" />
+              <input class="input" type="time" id="schedule-break-end" value="13:00" style="max-width: 130px;" />
+              <input class="input" id="schedule-break-label" placeholder="Label (optional)" style="max-width: 200px;" />
+              <button class="btn secondary" id="schedule-break-add" type="button">Add break</button>
+              <button class="btn" id="schedule-save-breaks" type="button">Save breaks</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin: 0 0 10px;">Closed dates</h3>
+            <p class="meta" style="margin: 0 0 10px;">Holidays or one-off closures. No bookings are offered on these dates.</p>
+            <div class="list" id="schedule-closed-dates"></div>
+            <div class="row-wrap" style="margin-top: 12px;">
+              <input class="input" type="date" id="schedule-closed-date" style="max-width: 180px;" />
+              <input class="input" id="schedule-closed-reason" placeholder="Reason (e.g. Holiday)" style="max-width: 260px;" />
+              <button class="btn" id="schedule-closed-add" type="button">Add closed date</button>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin: 0 0 10px;">Slot settings</h3>
+            <div class="form-grid">
+              <label>Appointment slot duration (minutes)
+                <input class="input" type="number" id="schedule-slot-minutes" min="5" max="240" step="5" />
+              </label>
+              <label>Walk-in duration (minutes)
+                <input class="input" type="number" id="schedule-walkin-minutes" min="5" max="240" step="5" />
+              </label>
+              <label>Timezone
+                <input class="input" id="schedule-timezone" disabled />
+              </label>
+            </div>
+            <div class="row-wrap" style="margin-top: 12px;">
+              <button class="btn" id="schedule-save-slots" type="button">Save slot settings</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h3 style="margin: 0 0 10px;">Preview bookable slots</h3>
+            <div class="row-wrap">
+              <input class="input" type="date" id="schedule-preview-date" style="max-width: 180px;" />
+              <button class="btn secondary" id="schedule-preview-btn" type="button">Preview</button>
+            </div>
+            <div class="meta" id="schedule-preview-result" style="margin-top: 10px; line-height: 1.6;"></div>
+          </div>
+        </section>
+
         <section id="settings-view" hidden>
           <div class="section-title">System Settings</div>
           <div class="card">
@@ -222,11 +320,8 @@
               <label>Test notification email
                 <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" />
               </label>
-              <label>Open time
-                <input class="input" type="time" id="setting-open" value="09:00" />
-              </label>
-              <label>Close time
-                <input class="input" type="time" id="setting-close" value="20:00" />
+              <label>Shop hours
+                <button class="btn secondary" data-jump="schedule" type="button">Managed in Operating Schedule</button>
               </label>
               <label>Require MFA
                 <input type="checkbox" id="setting-mfa" />

@@ -69,6 +69,23 @@
           </div>
           <div class="grid stats" id="analytics-stats"></div>
 
+          <div class="card" style="margin-bottom: 16px;">
+            <h3 style="margin: 0 0 8px;">Team leave calendar</h3>
+            <p class="meta" style="margin: 0 0 10px;">Approved barber absences. Click a day to see who is off.</p>
+            <div class="row-wrap" style="justify-content: space-between; margin-bottom: 10px;">
+              <strong id="leave-cal-month-label">—</strong>
+              <div class="row-wrap" style="gap: 8px;">
+                <select class="select" id="leave-cal-barber-filter" style="max-width: 200px;">
+                  <option value="">All barbers</option>
+                </select>
+                <button class="btn secondary" id="leave-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+                <button class="btn secondary" id="leave-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+              </div>
+            </div>
+            <div class="schedule-calendar leave-calendar" id="leave-calendar-grid"></div>
+            <div class="meta" id="leave-cal-day-detail" style="margin-top: 12px; line-height: 1.6;"></div>
+          </div>
+
           <div class="split" style="margin-top: 16px;">
             <div>
               <div class="section-title">Today’s Appointments</div>

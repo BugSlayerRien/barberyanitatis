@@ -5,9 +5,163 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/payment_recording.php';
 
+/**
+ * Operating schedule configuration. Loaded once per request from
+ * shop_weekly_hours / shop_break_windows / shop_closed_dates / system_settings,
+ * falling back to the legacy hardcoded values when tables are missing.
+ *
+ * @return array{
+ *   weekly: array<int, array{is_closed: bool, open: string, close: string}>,
+ *   breaks: list<array{day: ?int, start: string, end: string}>,
+ *   closed_dates: array<string, true>,
+ *   slot_minutes: int, appointment_minutes: int, walkin_minutes: int, timezone: string
+ * }
+ */
+function shop_schedule_config(bool $refresh = false): array
+{
+    static $config = null;
+    if ($config !== null && !$refresh) {
+        return $config;
+    }
+
+    $weekly = [];
+    for ($day = 0; $day <= 6; $day++) {
+        $weekly[$day] = ['is_closed' => false, 'open' => '09:00:00', 'close' => '20:00:00'];
+    }
+
+    $config = [
+        'weekly' => $weekly,
+        'breaks' => [['day' => null, 'start' => '12:00:00', 'end' => '13:00:00']],
+        'closed_dates' => [],
+        'slot_minutes' => 60,
+        'appointment_minutes' => 60,
+        'walkin_minutes' => 35,
+        'timezone' => 'Asia/Manila',
+    ];
+
+    try {
+        require_once __DIR__ . '/db.php';
+        $pdo = get_db_connection();
+
+        $weeklyRows = $pdo->query(
+            'SELECT day_of_week, is_closed, open_time, close_time FROM shop_weekly_hours'
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        if ($weeklyRows) {
+            foreach ($weeklyRows as $row) {
+                $day = (int)$row['day_of_week'];
+                if ($day < 0 || $day > 6) {
+                    continue;
+                }
+                $config['weekly'][$day] = [
+                    'is_closed' => (bool)$row['is_closed'],
+                    'open' => shop_schedule_time_str((string)$row['open_time']),
+                    'close' => shop_schedule_time_str((string)$row['close_time']),
+                ];
+            }
+
+            // Schedule management is active: breaks come from DB (may be empty).
+            $breakRows = $pdo->query(
+                'SELECT day_of_week, start_time, end_time FROM shop_break_windows'
+            )->fetchAll(PDO::FETCH_ASSOC);
+            $config['breaks'] = array_map(static fn(array $row): array => [
+                'day' => $row['day_of_week'] !== null ? (int)$row['day_of_week'] : null,
+                'start' => shop_schedule_time_str((string)$row['start_time']),
+                'end' => shop_schedule_time_str((string)$row['end_time']),
+            ], $breakRows);
+
+            $closedRows = $pdo->query(
+                "SELECT closed_date FROM shop_closed_dates WHERE closed_date >= CURRENT_DATE - INTERVAL '7 day'"
+            )->fetchAll(PDO::FETCH_COLUMN);
+            $config['closed_dates'] = array_fill_keys(array_map('strval', $closedRows), true);
+        }
+
+        $settingRows = $pdo->query(
+            "SELECT setting_key, setting_value FROM system_settings
+             WHERE setting_key IN ('shop_slot_duration_minutes', 'shop_appointment_duration_minutes', 'shop_walkin_duration_minutes', 'shop_timezone')"
+        )->fetchAll(PDO::FETCH_KEY_PAIR);
+        foreach (['shop_slot_duration_minutes' => 'slot_minutes', 'shop_appointment_duration_minutes' => 'appointment_minutes', 'shop_walkin_duration_minutes' => 'walkin_minutes'] as $key => $target) {
+            $value = (int)($settingRows[$key] ?? 0);
+            if ($value >= 5 && $value <= 240) {
+                $config[$target] = $value;
+            }
+        }
+        $tz = trim((string)($settingRows['shop_timezone'] ?? ''));
+        if ($tz !== '' && in_array($tz, DateTimeZone::listIdentifiers(), true)) {
+            $config['timezone'] = $tz;
+        }
+    } catch (Throwable $e) {
+        // Tables not migrated yet — legacy defaults above keep everything working.
+    }
+
+    return $config;
+}
+
+function shop_schedule_reset_cache(): void
+{
+    shop_schedule_config(true);
+}
+
+/** Normalize '9:00' / '09:00' / '09:00:00' to 'HH:MM:SS'. */
+function shop_schedule_time_str(string $time): string
+{
+    $parts = explode(':', trim($time));
+    return sprintf('%02d:%02d:%02d', (int)($parts[0] ?? 0), (int)($parts[1] ?? 0), (int)($parts[2] ?? 0));
+}
+
+/** 0=Sunday .. 6=Saturday, or null when the date is malformed. */
+function shop_weekday(string $date): ?int
+{
+    $dt = DateTimeImmutable::createFromFormat('!Y-m-d', $date, new DateTimeZone(shop_timezone()));
+    return $dt === false ? null : (int)$dt->format('w');
+}
+
+/**
+ * Effective hours for a date; with null date returns the widest open/close
+ * envelope across all open days (used by callers without date context).
+ *
+ * @return array{is_closed: bool, open: string, close: string}
+ */
+function shop_day_hours(?string $date): array
+{
+    $cfg = shop_schedule_config();
+
+    if ($date !== null) {
+        $dow = shop_weekday($date);
+        if ($dow !== null) {
+            $day = $cfg['weekly'][$dow];
+            return [
+                'is_closed' => $day['is_closed'] || isset($cfg['closed_dates'][$date]),
+                'open' => $day['open'],
+                'close' => $day['close'],
+            ];
+        }
+    }
+
+    $open = null;
+    $close = null;
+    foreach ($cfg['weekly'] as $day) {
+        if ($day['is_closed']) {
+            continue;
+        }
+        if ($open === null || $day['open'] < $open) {
+            $open = $day['open'];
+        }
+        if ($close === null || $day['close'] > $close) {
+            $close = $day['close'];
+        }
+    }
+
+    if ($open === null || $close === null) {
+        return ['is_closed' => true, 'open' => '09:00:00', 'close' => '20:00:00'];
+    }
+
+    return ['is_closed' => false, 'open' => $open, 'close' => $close];
+}
+
 function shop_timezone(): string
 {
-    return 'Asia/Manila';
+    return shop_schedule_config()['timezone'];
 }
 
 function shop_now(): DateTimeImmutable
@@ -25,30 +179,36 @@ function shop_current_time(): string
     return shop_now()->format('H:i:s');
 }
 
-function shop_open_time(): string
+function shop_open_time(?string $date = null): string
 {
-    return '09:00:00';
+    return shop_day_hours($date)['open'];
 }
 
-function shop_close_time(): string
+function shop_close_time(?string $date = null): string
 {
-    return '20:00:00';
+    return shop_day_hours($date)['close'];
+}
+
+/** True when the shop is closed that date (weekly closure or holiday). */
+function shop_is_closed_date(string $date): bool
+{
+    return shop_day_hours($date)['is_closed'];
 }
 
 function shop_slot_duration_minutes(): int
 {
-    return 60;
+    return shop_schedule_config()['slot_minutes'];
 }
 
 function shop_appointment_duration_minutes(): int
 {
-    return 60;
+    return shop_schedule_config()['appointment_minutes'];
 }
 
 /** Regular walk-in / kiosk service window (minutes). */
 function shop_walkin_duration_minutes(): int
 {
-    return 35;
+    return shop_schedule_config()['walkin_minutes'];
 }
 
 /** Reservation/payment hold length for unpaid appointments (minutes). */
@@ -84,43 +244,78 @@ function format_time_range_12h(string $startTime, string $endTime): string
 }
 
 /**
- * Hourly slots from 9:00 AM through 7:00 PM start (each 1-hour block ends by 8:00 PM close).
+ * Break windows applying to the given date (global + day-specific);
+ * with null date only global windows are returned.
+ *
+ * @return list<array{start: string, end: string}>
+ */
+function shop_break_windows(?string $date = null): array
+{
+    $cfg = shop_schedule_config();
+    $dow = $date !== null ? shop_weekday($date) : null;
+
+    $windows = [];
+    foreach ($cfg['breaks'] as $break) {
+        if ($break['day'] === null || ($dow !== null && $break['day'] === $dow)) {
+            $windows[] = ['start' => $break['start'], 'end' => $break['end']];
+        }
+    }
+
+    return $windows;
+}
+
+/** True when a slot starting at $time would overlap any break window. */
+function shop_is_break_slot_time(string $time, ?string $date = null): bool
+{
+    $normalized = shop_schedule_time_str($time);
+    $slotEnd = shop_add_minutes_to_time($normalized, shop_appointment_duration_minutes());
+
+    foreach (shop_break_windows($date) as $window) {
+        if ($normalized < $window['end'] && $slotEnd > $window['start']) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Bookable on-the-hour slot starts for a date (or the global envelope when
+ * null), bounded by open/close and excluding break windows.
  *
  * @return string[]
  */
-/** Lunch break — no bookable slots at this hour. */
-function shop_break_hours(): array
+function shop_default_slot_times(?string $date = null): array
 {
-    return [12];
-}
-
-function shop_is_break_slot_time(string $time): bool
-{
-    $normalized = shop_normalize_slot_time($time);
-    if ($normalized === null) {
-        return false;
+    $hours = shop_day_hours($date);
+    if ($hours['is_closed']) {
+        return [];
     }
 
-    return in_array((int)substr($normalized, 0, 2), shop_break_hours(), true);
-}
+    $openHour = (int)substr($hours['open'], 0, 2);
+    if (substr($hours['open'], 3, 2) !== '00') {
+        $openHour++;
+    }
+    $lastStart = shop_add_minutes_to_time($hours['close'], -shop_appointment_duration_minutes());
+    $lastHour = (int)substr($lastStart, 0, 2);
 
-function shop_default_slot_times(): array
-{
     $times = [];
-    for ($hour = 9; $hour <= 19; $hour++) {
-        if (in_array($hour, shop_break_hours(), true)) {
+    for ($hour = $openHour; $hour <= $lastHour; $hour++) {
+        $time = sprintf('%02d:00:00', $hour);
+        if (shop_is_break_slot_time($time, $date)) {
             continue;
         }
-        $times[] = sprintf('%02d:00:00', $hour);
+        $times[] = $time;
     }
 
     return $times;
 }
 
 /**
- * Normalize to on-the-hour shop slot (09:00–19:00) or null when invalid.
+ * Normalize to an on-the-hour slot within shop hours for the date
+ * (global envelope when null), or null when invalid/closed.
  */
-function shop_normalize_slot_time(string $time): ?string
+function shop_normalize_slot_time(string $time, ?string $date = null): ?string
 {
     $parts = explode(':', trim($time));
     if (count($parts) < 2) {
@@ -129,16 +324,32 @@ function shop_normalize_slot_time(string $time): ?string
 
     $hour = (int)$parts[0];
     $minute = (int)$parts[1];
-    if ($minute !== 0 || $hour < 9 || $hour > 19) {
+    if ($minute !== 0 || $hour < 0 || $hour > 23) {
         return null;
     }
 
-    return sprintf('%02d:00:00', $hour);
+    $hours = shop_day_hours($date);
+    if ($hours['is_closed']) {
+        return null;
+    }
+
+    $openHour = (int)substr($hours['open'], 0, 2);
+    if (substr($hours['open'], 3, 2) !== '00') {
+        $openHour++;
+    }
+    $normalized = sprintf('%02d:00:00', $hour);
+    $lastStart = shop_add_minutes_to_time($hours['close'], -shop_appointment_duration_minutes());
+
+    if ($hour < $openHour || $normalized > $lastStart) {
+        return null;
+    }
+
+    return $normalized;
 }
 
-function shop_is_allowed_slot_time(string $time): bool
+function shop_is_allowed_slot_time(string $time, ?string $date = null): bool
 {
-    return shop_normalize_slot_time($time) !== null;
+    return shop_normalize_slot_time($time, $date) !== null;
 }
 
 /** Minimum notice before a suggested “best” slot (earliest pick). */
@@ -165,12 +376,26 @@ function shop_next_bookable_slot_start(): DateTimeImmutable
         $minimum = $minimum->setTime((int)$minimum->format('H'), 0)->modify('+1 hour');
     }
 
-    $hour = (int)$minimum->format('H');
-    if ($hour < 9) {
-        return $minimum->setTime(9, 0);
-    }
-    if ($hour > 19) {
-        return $minimum->modify('+1 day')->setTime(9, 0);
+    for ($i = 0; $i < 30; $i++) {
+        $date = $minimum->format('Y-m-d');
+        $hours = shop_day_hours($date);
+        if (!$hours['is_closed']) {
+            $openHour = (int)substr($hours['open'], 0, 2);
+            if (substr($hours['open'], 3, 2) !== '00') {
+                $openHour++;
+            }
+            $lastStart = shop_add_minutes_to_time($hours['close'], -shop_appointment_duration_minutes());
+            $lastHour = (int)substr($lastStart, 0, 2);
+
+            $hour = (int)$minimum->format('H');
+            if ($hour < $openHour) {
+                return $minimum->setTime($openHour, 0);
+            }
+            if ($hour <= $lastHour) {
+                return $minimum;
+            }
+        }
+        $minimum = $minimum->modify('+1 day')->setTime(0, 0);
     }
 
     return $minimum;
@@ -178,8 +403,8 @@ function shop_next_bookable_slot_start(): DateTimeImmutable
 
 function shop_slot_start_datetime(string $slotDate, string $slotTime): ?DateTimeImmutable
 {
-    $normalized = shop_normalize_slot_time($slotTime);
-    if ($normalized === null || shop_is_break_slot_time($normalized)) {
+    $normalized = shop_normalize_slot_time($slotTime, $slotDate);
+    if ($normalized === null || shop_is_break_slot_time($normalized, $slotDate)) {
         return null;
     }
 
@@ -201,8 +426,11 @@ function shop_earliest_bookable_slot_start(): DateTimeImmutable
         $minimum = $minimum->setTime((int)$minimum->format('H'), 0)->modify('+1 hour');
     }
 
-    if ((int)$minimum->format('H') === 12) {
-        $minimum = $minimum->setTime(13, 0);
+    foreach (shop_break_windows($minimum->format('Y-m-d')) as $window) {
+        $time = $minimum->format('H:i:s');
+        if ($time >= $window['start'] && $time < $window['end']) {
+            $minimum = $minimum->setTime((int)substr($window['end'], 0, 2), (int)substr($window['end'], 3, 2));
+        }
     }
 
     return $minimum;
@@ -294,6 +522,16 @@ function can_customer_reschedule_appointment(array $appt, string $paymentState):
     $slotTime = (string)($appt['start_time'] ?? '');
     $currentStart = shop_slot_start_datetime($slotDate, $slotTime);
     if ($currentStart === null) {
+        // The day may have been closed after booking; parse leniently so the
+        // customer can still reschedule away from it.
+        $lenient = DateTimeImmutable::createFromFormat(
+            'Y-m-d H:i:s',
+            $slotDate . ' ' . shop_schedule_time_str($slotTime),
+            new DateTimeZone(shop_timezone())
+        );
+        $currentStart = $lenient === false ? null : $lenient;
+    }
+    if ($currentStart === null) {
         return [
             'allowed' => false,
             'reason' => 'This appointment time is invalid.',
@@ -331,14 +569,16 @@ function shop_add_minutes_to_time(string $time, int $minutes): string
     return sprintf('%02d:%02d:%02d', $endHour, $endMinute, $endSecond);
 }
 
-function shop_is_time_within_hours(string $time): bool
+function shop_is_time_within_hours(string $time, ?string $date = null): bool
 {
     $normalized = strlen($time) === 5 ? $time . ':00' : $time;
-    $open = shop_open_time();
-    $close = shop_close_time();
-    $lastStart = shop_add_minutes_to_time($close, -shop_appointment_duration_minutes());
+    $hours = shop_day_hours($date);
+    if ($hours['is_closed']) {
+        return false;
+    }
+    $lastStart = shop_add_minutes_to_time($hours['close'], -shop_appointment_duration_minutes());
 
-    return $normalized >= $open && $normalized <= $lastStart;
+    return $normalized >= $hours['open'] && $normalized <= $lastStart;
 }
 
 /**

@@ -210,13 +210,10 @@ try {
     $action = strtolower(trim((string)($input['action'] ?? 'update')));
 
     if ($action === 'update') {
-        $openTime = trim((string)($input['openTime'] ?? '09:00'));
-        $closeTime = trim((string)($input['closeTime'] ?? '20:00'));
+        // Shop hours are managed via operating_schedule.php (shop_weekly_hours).
         upsert_setting($pdo, 'email_notifications_enabled', !empty($input['emailNotificationsEnabled']) ? '1' : '0', 'Boolean', 'notifications');
         upsert_setting($pdo, 'auto_backup_enabled', !empty($input['autoBackupEnabled']) ? '1' : '0', 'Boolean', 'backup');
         upsert_setting($pdo, 'force_mfa', !empty($input['forceMfa']) ? '1' : '0', 'Boolean', 'security');
-        upsert_setting($pdo, 'shop_open_time', $openTime, 'String', 'operations');
-        upsert_setting($pdo, 'shop_close_time', $closeTime, 'String', 'operations');
         if (!empty($input['notificationFromEmail'])) {
             upsert_setting($pdo, 'notification_from_email', trim((string)$input['notificationFromEmail']), 'String', 'notifications');
         }

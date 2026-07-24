@@ -5,6 +5,7 @@ const views = {
   analytics: document.getElementById("analytics-view"),
   services: document.getElementById("services-view"),
   haircuts: document.getElementById("haircuts-view"),
+  schedule: document.getElementById("schedule-view"),
   settings: document.getElementById("settings-view"),
 };
 
@@ -17,6 +18,9 @@ const state = {
   variantEditor: null,
   audit: [],
   activities: [],
+  schedule: null,
+  scheduleCalendar: null,
+  scheduleCalSelected: null,
   currentUser: null,
   profileEditMode: false,
   accountEditor: null,
@@ -1866,14 +1870,241 @@ async function loadSettings() {
     const data = await response.json();
     const settings = data.settings ?? {};
     document.getElementById("setting-email").checked = settings.emailNotificationsEnabled === 1;
-    document.getElementById("setting-open").value = settings.openTime || "09:00";
-    document.getElementById("setting-close").value = settings.closeTime || "18:00";
     document.getElementById("setting-mfa").checked = settings.forceMfa === 1;
     document.getElementById("setting-backup").checked = settings.autoBackupEnabled === 1;
     const fromEmail = document.getElementById("setting-from-email");
     if (fromEmail) {
       fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
     }
+  } catch (_) {
+    // no-op
+  }
+}
+
+const SCHEDULE_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+const SCHEDULE_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function escapeScheduleText(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+
+async function scheduleApi(payload) {
+  const response = await fetch(resolveApiUrl("operating_schedule.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error || "Schedule API error");
+  }
+  return data;
+}
+
+function renderScheduleWeekly() {
+  const list = document.getElementById("schedule-weekly");
+  if (!list || !state.schedule) return;
+  const byDay = new Map(state.schedule.weekly.map((day) => [day.dayOfWeek, day]));
+  list.innerHTML = SCHEDULE_DAY_ORDER.map((dow) => {
+    const day = byDay.get(dow) || { isClosed: false, openTime: "09:00", closeTime: "20:00" };
+    return `
+      <div class="row-wrap" data-schedule-day="${dow}" style="gap: 12px;">
+        <strong style="width: 110px;">${SCHEDULE_DAY_NAMES[dow]}</strong>
+        <label class="meta" style="display: flex; align-items: center; gap: 6px;">
+          <input type="checkbox" class="schedule-day-closed" ${day.isClosed ? "checked" : ""} /> Closed
+        </label>
+        <input class="input schedule-day-open" type="time" value="${day.openTime}" ${day.isClosed ? "disabled" : ""} style="max-width: 130px;" />
+        <span class="meta">to</span>
+        <input class="input schedule-day-close" type="time" value="${day.closeTime}" ${day.isClosed ? "disabled" : ""} style="max-width: 130px;" />
+      </div>`;
+  }).join("");
+
+  list.querySelectorAll(".schedule-day-closed").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const row = checkbox.closest("[data-schedule-day]");
+      row?.querySelectorAll("input[type=time]").forEach((input) => {
+        input.disabled = checkbox.checked;
+      });
+    });
+  });
+}
+
+function renderScheduleBreaks() {
+  const list = document.getElementById("schedule-breaks");
+  if (!list || !state.schedule) return;
+  const breaks = state.schedule.breaks || [];
+  if (!breaks.length) {
+    list.innerHTML = '<div class="meta">No break windows. Slots run straight through opening hours.</div>';
+    return;
+  }
+  list.innerHTML = breaks.map((item, index) => `
+    <div class="row-wrap" style="gap: 12px;">
+      <strong style="width: 110px;">${escapeScheduleText(item.dayName)}</strong>
+      <span>${item.startTime} – ${item.endTime}</span>
+      <span class="meta">${escapeScheduleText(item.label)}</span>
+      <button class="btn secondary schedule-break-remove" data-index="${index}" type="button">Remove</button>
+    </div>`).join("");
+
+  list.querySelectorAll(".schedule-break-remove").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.schedule.breaks.splice(Number(button.dataset.index), 1);
+      renderScheduleBreaks();
+    });
+  });
+}
+
+function renderScheduleClosedDates() {
+  const list = document.getElementById("schedule-closed-dates");
+  if (!list || !state.schedule) return;
+  const dates = state.schedule.closedDates || [];
+  if (!dates.length) {
+    list.innerHTML = '<div class="meta">No upcoming closed dates.</div>';
+    return;
+  }
+  list.innerHTML = dates.map((item) => `
+    <div class="row-wrap" style="gap: 12px;">
+      <strong style="width: 110px;">${item.date}</strong>
+      <span class="meta">${escapeScheduleText(item.reason) || "—"}</span>
+      <button class="btn secondary schedule-closed-remove" data-date="${item.date}" type="button">Remove</button>
+    </div>`).join("");
+
+  list.querySelectorAll(".schedule-closed-remove").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const confirmed = await confirmAction(`Remove closed date ${button.dataset.date}?`, { confirmLabel: "Remove" });
+      if (!confirmed) return;
+      try {
+        const data = await scheduleApi({ action: "removeClosedDate", date: button.dataset.date });
+        state.schedule = data.schedule;
+        renderSchedule();
+        toast("Closed date removed.", "success");
+        if (state.scheduleCalendar) {
+          loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+        }
+      } catch (error) {
+        toast(error.message, "error");
+      }
+    });
+  });
+}
+
+function renderScheduleSettings() {
+  if (!state.schedule) return;
+  const settings = state.schedule.settings || {};
+  const slotInput = document.getElementById("schedule-slot-minutes");
+  const walkinInput = document.getElementById("schedule-walkin-minutes");
+  const timezoneInput = document.getElementById("schedule-timezone");
+  if (slotInput) slotInput.value = settings.appointmentMinutes ?? 60;
+  if (walkinInput) walkinInput.value = settings.walkinMinutes ?? 35;
+  if (timezoneInput) timezoneInput.value = settings.timezone || "Asia/Manila";
+}
+
+function renderSchedule() {
+  renderScheduleWeekly();
+  renderScheduleBreaks();
+  renderScheduleClosedDates();
+  renderScheduleSettings();
+  renderScheduleCalendar();
+}
+
+function renderScheduleCalDayDetail(day) {
+  const detail = document.getElementById("schedule-cal-day-detail");
+  if (!detail) return;
+  if (!day) {
+    detail.innerHTML = "Select a day to see hours and closure details.";
+    return;
+  }
+  if (day.status === "open") {
+    detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Open ${day.openTime}–${day.closeTime}. `
+      + `${day.bookableSlotCount} bookable slot(s).`;
+    return;
+  }
+  detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Closed. ${escapeScheduleText(day.reason)}`;
+}
+
+function renderScheduleCalendar() {
+  const grid = document.getElementById("schedule-calendar-grid");
+  const label = document.getElementById("schedule-cal-month-label");
+  const cal = state.scheduleCalendar;
+  if (!grid || !cal) return;
+
+  if (label) label.textContent = cal.monthLabel || "—";
+
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const firstDay = new Date(cal.year, cal.month - 1, 1).getDay();
+  const cells = [];
+
+  weekdays.forEach((name) => {
+    cells.push(`<div class="cal-weekday">${name}</div>`);
+  });
+  for (let i = 0; i < firstDay; i++) {
+    cells.push('<div class="cal-day cal-empty"></div>');
+  }
+
+  (cal.days || []).forEach((day) => {
+    const selected = state.scheduleCalSelected === day.date;
+    const statusClass = day.isPast ? "cal-past" : `cal-${day.status.replace(/_/g, "-")}`;
+    const title = day.status === "open"
+      ? `Open ${day.openTime}–${day.closeTime}`
+      : day.reason;
+    cells.push(
+      `<button type="button" class="cal-day ${statusClass}${selected ? " cal-selected" : ""}" `
+      + `data-date="${day.date}" title="${escapeScheduleText(title)}">${Number(day.date.slice(-2))}</button>`
+    );
+  });
+
+  grid.innerHTML = cells.join("");
+
+  grid.querySelectorAll(".cal-day[data-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const date = button.getAttribute("data-date");
+      const day = (cal.days || []).find((d) => d.date === date);
+      state.scheduleCalSelected = date;
+      renderScheduleCalendar();
+      renderScheduleCalDayDetail(day);
+      const closedInput = document.getElementById("schedule-closed-date");
+      if (closedInput && day && day.status === "open" && !day.isPast) {
+        closedInput.value = date;
+      }
+    });
+  });
+
+  if (state.scheduleCalSelected) {
+    const selectedDay = (cal.days || []).find((d) => d.date === state.scheduleCalSelected);
+    renderScheduleCalDayDetail(selectedDay);
+  } else {
+    renderScheduleCalDayDetail(null);
+  }
+}
+
+async function loadScheduleCalendar(year, month) {
+  const now = new Date();
+  const y = year ?? now.getFullYear();
+  const m = month ?? now.getMonth() + 1;
+  try {
+    const data = await scheduleApi({ action: "calendarMonth", year: y, month: m });
+    state.scheduleCalendar = data;
+    if (!state.scheduleCalSelected) {
+      state.scheduleCalSelected = `${y}-${String(m).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    }
+    renderScheduleCalendar();
+  } catch (error) {
+    toast(error.message, "error");
+  }
+}
+
+function showScheduleWarnings(warnings) {
+  (warnings || []).forEach((warning) => toast(warning, "warning"));
+}
+
+async function loadOperatingSchedule() {
+  try {
+    const response = await fetch(resolveApiUrl("operating_schedule.php"));
+    if (!response.ok) throw new Error("API error");
+    const data = await response.json();
+    state.schedule = data.schedule;
+    renderSchedule();
+    const now = new Date();
+    await loadScheduleCalendar(now.getFullYear(), now.getMonth() + 1);
   } catch (_) {
     // no-op
   }
@@ -1889,6 +2120,7 @@ async function refreshAll() {
     loadServices(),
     loadHaircuts(),
     loadSettings(),
+    loadOperatingSchedule(),
     loadAiStatus(),
   ]);
   setLastUpdated();
@@ -2094,8 +2326,6 @@ document.getElementById("settings-save")?.addEventListener("click", async () => 
     const payload = {
       action: "update",
       emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
-      openTime: document.getElementById("setting-open").value,
-      closeTime: document.getElementById("setting-close").value,
       forceMfa: document.getElementById("setting-mfa").checked ? 1 : 0,
       autoBackupEnabled: document.getElementById("setting-backup").checked ? 1 : 0,
       notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
@@ -2224,6 +2454,146 @@ document.getElementById("settings-download-backup")?.addEventListener("click", a
     toast(data.message || "Backup downloaded.");
   } catch (error) {
     toast(error.message || "Backup failed");
+  }
+});
+
+document.getElementById("schedule-cal-prev")?.addEventListener("click", () => {
+  const cal = state.scheduleCalendar;
+  if (!cal) return;
+  let y = cal.year;
+  let m = cal.month - 1;
+  if (m < 1) { m = 12; y -= 1; }
+  loadScheduleCalendar(y, m);
+});
+
+document.getElementById("schedule-cal-next")?.addEventListener("click", () => {
+  const cal = state.scheduleCalendar;
+  if (!cal) return;
+  let y = cal.year;
+  let m = cal.month + 1;
+  if (m > 12) { m = 1; y += 1; }
+  loadScheduleCalendar(y, m);
+});
+
+document.getElementById("schedule-save-weekly")?.addEventListener("click", async () => {
+  const rows = document.querySelectorAll("#schedule-weekly [data-schedule-day]");
+  const days = Array.from(rows).map((row) => ({
+    dayOfWeek: Number(row.getAttribute("data-schedule-day")),
+    isClosed: row.querySelector(".schedule-day-closed")?.checked || false,
+    openTime: row.querySelector(".schedule-day-open")?.value || "09:00",
+    closeTime: row.querySelector(".schedule-day-close")?.value || "20:00",
+  }));
+  try {
+    const data = await scheduleApi({ action: "updateWeekly", days });
+    state.schedule = data.schedule;
+    renderSchedule();
+    toast("Weekly hours saved.", "success");
+    showScheduleWarnings(data.warnings);
+    if (state.scheduleCalendar) {
+      loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+
+document.getElementById("schedule-break-add")?.addEventListener("click", () => {
+  if (!state.schedule) return;
+  const dayRaw = document.getElementById("schedule-break-day")?.value ?? "";
+  const startTime = document.getElementById("schedule-break-start")?.value || "";
+  const endTime = document.getElementById("schedule-break-end")?.value || "";
+  const label = document.getElementById("schedule-break-label")?.value?.trim() || "";
+  if (!startTime || !endTime || endTime <= startTime) {
+    toast("Enter a valid break window (end after start).", "error");
+    return;
+  }
+  const dayOfWeek = dayRaw === "" ? null : Number(dayRaw);
+  state.schedule.breaks.push({
+    dayOfWeek,
+    dayName: dayOfWeek === null ? "Every day" : SCHEDULE_DAY_NAMES[dayOfWeek],
+    startTime,
+    endTime,
+    label,
+  });
+  renderScheduleBreaks();
+  toast("Break added. Click Save breaks to apply.", "info");
+});
+
+document.getElementById("schedule-save-breaks")?.addEventListener("click", async () => {
+  if (!state.schedule) return;
+  const breaks = (state.schedule.breaks || []).map((item) => ({
+    dayOfWeek: item.dayOfWeek,
+    startTime: item.startTime,
+    endTime: item.endTime,
+    label: item.label,
+  }));
+  try {
+    const data = await scheduleApi({ action: "updateBreaks", breaks });
+    state.schedule = data.schedule;
+    renderSchedule();
+    toast("Break windows saved.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+
+document.getElementById("schedule-closed-add")?.addEventListener("click", async () => {
+  const date = document.getElementById("schedule-closed-date")?.value || "";
+  const reason = document.getElementById("schedule-closed-reason")?.value?.trim() || "";
+  if (!date) {
+    toast("Pick a date first.", "error");
+    return;
+  }
+  try {
+    const data = await scheduleApi({ action: "addClosedDate", date, reason });
+    state.schedule = data.schedule;
+    renderSchedule();
+    toast("Closed date added.", "success");
+    showScheduleWarnings(data.warnings);
+    if (state.scheduleCalendar) {
+      loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+    }
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+
+document.getElementById("schedule-save-slots")?.addEventListener("click", async () => {
+  const slotMinutes = Number(document.getElementById("schedule-slot-minutes")?.value || 0);
+  const walkinMinutes = Number(document.getElementById("schedule-walkin-minutes")?.value || 0);
+  try {
+    const data = await scheduleApi({
+      action: "updateSlotSettings",
+      slotMinutes,
+      appointmentMinutes: slotMinutes,
+      walkinMinutes,
+    });
+    state.schedule = data.schedule;
+    renderSchedule();
+    toast("Slot settings saved.", "success");
+  } catch (error) {
+    toast(error.message, "error");
+  }
+});
+
+document.getElementById("schedule-preview-btn")?.addEventListener("click", async () => {
+  const date = document.getElementById("schedule-preview-date")?.value || "";
+  const result = document.getElementById("schedule-preview-result");
+  if (!date || !result) {
+    toast("Pick a date to preview.", "error");
+    return;
+  }
+  try {
+    const data = await scheduleApi({ action: "previewSlots", date });
+    if (data.isClosed) {
+      result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> — Shop is closed.`;
+      return;
+    }
+    const slotLabels = (data.slots || []).map((slot) => slot.label).join(", ") || "No bookable slots.";
+    const breakText = (data.breaks || []).map((b) => `${b.startTime}–${b.endTime}`).join(", ") || "None";
+    result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> — Open ${data.openTime}–${data.closeTime} · Breaks: ${breakText}<br />Bookable slots: ${slotLabels}`;
+  } catch (error) {
+    toast(error.message, "error");
   }
 });
 

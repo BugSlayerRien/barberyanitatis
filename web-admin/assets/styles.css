@@ -827,3 +827,89 @@ canvas {
     grid-template-columns: 1fr;
   }
 }
+
+/* Operating / leave calendars */
+.schedule-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.cal-weekday {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  padding: 4px 0;
+}
+
+.cal-day {
+  aspect-ratio: 1;
+  min-height: 36px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.cal-day.cal-empty {
+  border: none;
+  background: transparent;
+  cursor: default;
+}
+
+.cal-day.cal-open {
+  background: rgba(255, 255, 255, 0.92);
+  color: #111;
+}
+
+.cal-day.cal-closed-weekly {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+}
+
+.cal-day.cal-closed-holiday {
+  background: rgba(220, 80, 80, 0.18);
+  color: #ffb4b4;
+  border-color: rgba(220, 80, 80, 0.35);
+}
+
+.cal-day.cal-past {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
+  opacity: 0.7;
+}
+
+.cal-day.cal-selected {
+  outline: 2px solid var(--gold);
+  outline-offset: 1px;
+}
+
+.cal-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  margin-right: 4px;
+  vertical-align: middle;
+  border: 1px solid var(--border-soft);
+}
+
+.cal-legend-swatch.cal-open { background: rgba(255, 255, 255, 0.92); }
+.cal-legend-swatch.cal-closed-weekly { background: rgba(255, 255, 255, 0.08); }
+.cal-legend-swatch.cal-closed-holiday { background: rgba(220, 80, 80, 0.18); }
+.cal-legend-swatch.cal-past { background: rgba(255, 255, 255, 0.04); }
+
+.leave-calendar .cal-day.cal-has-leave {
+  background: rgba(169, 153, 65, 0.22);
+  color: #f5e6a8;
+  border-color: rgba(169, 153, 65, 0.45);
+}
+
+.leave-calendar .cal-day.cal-selected {
+  outline: 2px solid var(--gold);
+}

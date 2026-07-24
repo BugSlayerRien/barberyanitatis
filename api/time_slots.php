@@ -20,9 +20,9 @@ if (!in_array($action, ['listByBarberDate', 'suggestBestSlot', 'availabilityByBa
 /**
  * @return string[]
  */
-function default_slot_times(): array
+function default_slot_times(?string $date = null): array
 {
-    return shop_default_slot_times();
+    return shop_default_slot_times($date);
 }
 
 function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): void
@@ -39,7 +39,7 @@ function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): voi
     );
 
     foreach ($dates as $slotDate) {
-        foreach (default_slot_times() as $slotTime) {
+        foreach (default_slot_times($slotDate) as $slotTime) {
             $insertStmt->execute([
                 ':barber_id' => $barberID,
                 ':slot_date' => $slotDate,
@@ -98,11 +98,11 @@ function ensure_week_seeded_for_barber(PDO $pdo, int $barberID, ?int $windowDays
  * @param array<int, array<string, mixed>> $dbRows
  * @return array<int, array<string, mixed>>
  */
-function merge_barber_slots_for_date(array $dbRows, int $capacity = 10): array
+function merge_barber_slots_for_date(array $dbRows, int $capacity = 10, ?string $slotDate = null): array
 {
     $byTime = [];
     foreach ($dbRows as $row) {
-        $normalized = shop_normalize_slot_time((string)($row['slot_time'] ?? ''));
+        $normalized = shop_normalize_slot_time((string)($row['slot_time'] ?? ''), $slotDate);
         if ($normalized === null) {
             continue;
         }
@@ -138,7 +138,7 @@ function merge_barber_slots_for_date(array $dbRows, int $capacity = 10): array
     }
 
     $merged = [];
-    foreach (default_slot_times() as $slotTime) {
+    foreach (default_slot_times($slotDate) as $slotTime) {
         if (isset($byTime[$slotTime])) {
             $merged[] = $byTime[$slotTime];
             continue;
@@ -211,7 +211,25 @@ try {
         $bookingWindowDays = shop_booking_window_days();
         $shopWindowEnd = shop_window_end_date($bookingWindowDays);
 
-        $runBestSlotQuery = static function (PDO $pdo, string $leadDate, string $leadTime, string $shopWindowEnd, string $appointmentFilter): ?array {
+        // Dynamic envelope bounds (per-date rules re-checked after the query).
+        $envelopeTimes = shop_default_slot_times();
+        $envelopeHours = $envelopeTimes === []
+            ? '9 AND 19'
+            : (int)substr($envelopeTimes[0], 0, 2) . ' AND ' . (int)substr($envelopeTimes[count($envelopeTimes) - 1], 0, 2);
+        $breakHours = [];
+        foreach ($envelopeTimes === [] ? [] : range((int)substr($envelopeTimes[0], 0, 2), (int)substr($envelopeTimes[count($envelopeTimes) - 1], 0, 2)) as $hour) {
+            if (shop_is_break_slot_time(sprintf('%02d:00:00', $hour))) {
+                $breakHours[] = $hour;
+            }
+        }
+        $breakFilter = $breakHours === [] ? '' : ' AND EXTRACT(HOUR FROM ts.slot_time) NOT IN (' . implode(',', $breakHours) . ')';
+        $breakFilter2 = str_replace('ts.slot_time', 'ts2.slot_time', $breakFilter);
+        $closedDates = array_keys(shop_schedule_config()['closed_dates']);
+        $closedFilter = $closedDates === []
+            ? ''
+            : " AND ts.slot_date NOT IN ('" . implode("','", array_map(static fn(string $d): string => preg_replace('/[^0-9-]/', '', $d), $closedDates)) . "')";
+
+        $runBestSlotQuery = static function (PDO $pdo, string $leadDate, string $leadTime, string $shopWindowEnd, string $appointmentFilter) use ($envelopeHours, $breakFilter, $breakFilter2, $closedFilter): ?array {
             $bestStmt = $pdo->prepare(
                 "SELECT ts.barber_id, ts.slot_date, ts.slot_time,
                         (
@@ -221,18 +239,16 @@ try {
                                AND ts2.slot_date = ts.slot_date
                                AND ts2.status = 'Available'
                                AND EXTRACT(MINUTE FROM ts2.slot_time) = 0
-                               AND EXTRACT(HOUR FROM ts2.slot_time) BETWEEN 9 AND 19
-                               AND EXTRACT(HOUR FROM ts2.slot_time) <> 12
+                               AND EXTRACT(HOUR FROM ts2.slot_time) BETWEEN {$envelopeHours}{$breakFilter2}
                         ) AS available_count
                    FROM time_slots ts
                    JOIN barbers b ON b.barber_id = ts.barber_id
                   WHERE b.is_active = TRUE{$appointmentFilter}
                     AND ts.status = 'Available'
-                    AND ts.slot_date <= :window_end_date
+                    AND ts.slot_date <= :window_end_date{$closedFilter}
                     AND " . bookable_slot_sql_clause() . "
                     AND EXTRACT(MINUTE FROM ts.slot_time) = 0
-                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN 9 AND 19
-                    AND EXTRACT(HOUR FROM ts.slot_time) <> 12
+                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN {$envelopeHours}{$breakFilter}
                   ORDER BY ts.slot_date ASC, ts.slot_time ASC
                   LIMIT 1"
             );
@@ -266,7 +282,7 @@ try {
             json_response(['error' => 'No available slots found'], 404);
         }
 
-        $normalizedSlotTime = shop_normalize_slot_time((string)$best['slot_time']);
+        $normalizedSlotTime = shop_normalize_slot_time((string)$best['slot_time'], (string)$best['slot_date']);
         if ($normalizedSlotTime === null || !shop_is_suggestable_slot((string)$best['slot_date'], $normalizedSlotTime)) {
             json_response(['error' => 'No available time for suggested slot'], 404);
         }
@@ -404,8 +420,8 @@ try {
         ':slot_date' => $slotDate,
     ]);
 
-    $rows = array_values(array_filter($stmt->fetchAll(), static function (array $row): bool {
-        return !shop_is_break_slot_time((string)($row['slot_time'] ?? ''));
+    $rows = array_values(array_filter($stmt->fetchAll(), static function (array $row) use ($slotDate): bool {
+        return !shop_is_break_slot_time((string)($row['slot_time'] ?? ''), $slotDate);
     }));
 
     if (!$rows) {
@@ -424,7 +440,7 @@ try {
         }
     }
 
-    $merged = merge_barber_slots_for_date($rows, $capacity);
+    $merged = merge_barber_slots_for_date($rows, $capacity, $slotDate);
     $minBookable = shop_earliest_bookable_slot_start();
     foreach ($merged as &$slot) {
         $time = (string)($slot['slot_time'] ?? '');

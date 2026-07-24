@@ -107,9 +107,9 @@ function booking_group_display_end_time(array $lastMember): string
 /**
  * @return string[]
  */
-function group_slot_time_order(): array
+function group_slot_time_order(?string $slotDate = null): array
 {
-    return shop_default_slot_times();
+    return shop_default_slot_times($slotDate);
 }
 
 function slot_time_add_hours(string $time, int $hours): string
@@ -134,8 +134,8 @@ function fetch_barber_slot_map(PDO $pdo, int $barberId, string $slotDate): array
     $stmt->execute([':barber_id' => $barberId, ':slot_date' => $slotDate]);
     $map = [];
     foreach ($stmt->fetchAll() as $row) {
-        $time = shop_normalize_slot_time((string)$row['slot_time']);
-        if ($time === null || shop_is_break_slot_time($time)) {
+        $time = shop_normalize_slot_time((string)$row['slot_time'], $slotDate);
+        if ($time === null || shop_is_break_slot_time($time, $slotDate)) {
             continue;
         }
         $map[$time] = (string)$row['status'];
@@ -162,7 +162,7 @@ function fetch_barber_slot_map(PDO $pdo, int $barberId, string $slotDate): array
 
 function is_slot_bookable_for_group(string $slotDate, string $slotTime, array $slotMap): bool
 {
-    if (shop_is_break_slot_time($slotTime)) {
+    if (shop_is_break_slot_time($slotTime, $slotDate)) {
         return false;
     }
     if (!shop_is_future_slot($slotDate, $slotTime)) {
@@ -179,7 +179,7 @@ function is_slot_bookable_for_group(string $slotDate, string $slotTime, array $s
  */
 function find_consecutive_runs(array $slotMap, string $slotDate, int $count): array
 {
-    $times = group_slot_time_order();
+    $times = group_slot_time_order($slotDate);
     $runs = [];
 
     for ($start = 0, $len = count($times); $start <= $len - $count; $start++) {
@@ -220,7 +220,7 @@ function fetch_appointment_barber_ids(PDO $pdo): array
  */
 function find_split_barber_option(array $barberMaps, string $slotDate, int $count, array $barberNames): ?array
 {
-    $times = group_slot_time_order();
+    $times = group_slot_time_order($slotDate);
     foreach ($times as $time) {
         if (!shop_is_future_slot($slotDate, $time)) {
             continue;

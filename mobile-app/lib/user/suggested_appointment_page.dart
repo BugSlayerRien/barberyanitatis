@@ -17,10 +17,12 @@ import 'services/booking_draft_service.dart';
 
 class SuggestedAppointmentPage extends StatefulWidget {
   final Map<String, dynamic> suggestion;
+  final bool skipPreviews;
 
   const SuggestedAppointmentPage({
     super.key,
     required this.suggestion,
+    this.skipPreviews = false,
   });
 
   @override
@@ -31,6 +33,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   static const Duration _bookingLeadTime = Duration(hours: 2);
   bool _booking = false;
   bool _refreshingSuggestion = false;
+  bool _retriedAfterConflict = false;
   late Map<String, dynamic> _suggestion;
 
   @override
@@ -242,7 +245,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         'endTime': endTime,
         'serviceIDs': [serviceId],
         'variantID': UserSession.selectedVariantId,
-        ...FaceScanService.bookingPreviewPayload(),
+        if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
       }),
     );
 
@@ -256,11 +259,38 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
           : <String, dynamic>{};
       setState(() => _booking = false);
       if (response.statusCode == 409) {
+        final errorText = data['error']?.toString() ?? '';
+        if (errorText.contains('active appointment')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('You already have an active appointment.')),
+          );
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+          );
+          return;
+        }
+        if (!_retriedAfterConflict) {
+          _retriedAfterConflict = true;
+          await _refreshSuggestionIfStale();
+          if (!mounted) return;
+          if (!_isPastOrInvalidSlot(
+            date: _suggestion['slotDate']?.toString() ?? '',
+            time: _suggestion['slotTime']?.toString() ?? '',
+          )) {
+            setState(() => _booking = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('That slot was just taken. Trying the next available time…')),
+            );
+            await _proceedToPayment();
+            return;
+          }
+        }
+        setState(() => _booking = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You already have an active appointment.')),
+          SnackBar(content: Text(errorText.isNotEmpty ? errorText : 'This slot is no longer available.')),
         );
         Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+          MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
         );
         return;
       }
@@ -277,7 +307,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
 
     await BookingDraftService.clear();
 
-    if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null) {
+    if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null && !widget.skipPreviews) {
       await AiFunnelService.trackBookingCreated(
         scanSessionId: UserSession.ensureScanSessionId(),
         userId: UserSession.userId!,
@@ -406,7 +436,10 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Suggested Appointment', style: TextStyle(color: Colors.white)),
+        title: Text(
+          widget.skipPreviews ? 'Quick Booking' : 'Suggested Appointment',
+          style: const TextStyle(color: Colors.white),
+        ),
       ),
       body: Center(
         child: SingleChildScrollView(
@@ -425,11 +458,19 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Suggested Appointment',
-                    style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                  Text(
+                    widget.skipPreviews ? 'Quick Booking' : 'Suggested Appointment',
+                    style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
                   ),
-                  if (suggestionReason.isNotEmpty)
+                  if (widget.skipPreviews)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8, bottom: 12),
+                      child: Text(
+                        'Booking with your usual style — no face scan needed.',
+                        style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                      ),
+                    )
+                  else if (suggestionReason.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 12),
                       child: Text(
