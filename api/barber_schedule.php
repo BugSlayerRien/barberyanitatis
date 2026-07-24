@@ -12,7 +12,7 @@ require_method('POST');
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? 'listMonth'));
 
-$allowed = ['listMonth', 'submitUnavailability', 'listRequests', 'reviewRequest'];
+$allowed = ['listMonth', 'submitUnavailability', 'listRequests', 'reviewRequest', 'listApprovedLeaveMonth', 'listApprovedLeaveUpcoming'];
 if (!in_array($action, $allowed, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -216,8 +216,8 @@ try {
         if ($decision === 'Approved') {
             $barberId = (int)$row['barber_id'];
             $date = (string)$row['request_date'];
-            foreach (shop_default_slot_times() as $slotTime) {
-                $normalized = shop_normalize_slot_time($slotTime);
+            foreach (shop_default_slot_times($date) as $slotTime) {
+                $normalized = shop_normalize_slot_time($slotTime, $date);
                 if ($normalized === null) {
                     continue;
                 }
@@ -236,6 +236,100 @@ try {
 
         $pdo->commit();
         json_response(['message' => 'Request ' . strtolower($decision)]);
+    }
+
+    if ($action === 'listApprovedLeaveMonth') {
+        $year = (int)($input['year'] ?? 0);
+        $month = (int)($input['month'] ?? 0);
+        $barberID = (int)($input['barberID'] ?? 0);
+        if ($year < 2000 || $month < 1 || $month > 12) {
+            json_response(['error' => 'Missing or invalid year/month'], 422);
+        }
+
+        $monthStart = sprintf('%04d-%02d-01', $year, $month);
+        $monthEnd = date('Y-m-d', strtotime($monthStart . ' +1 month'));
+
+        $sql = "SELECT r.request_id, r.barber_id, b.full_name AS barber_name,
+                       r.request_date, r.note
+                FROM barber_unavailability_requests r
+                JOIN barbers b ON b.barber_id = r.barber_id
+                WHERE r.status = 'Approved'
+                  AND r.request_date >= :month_start
+                  AND r.request_date < :month_end";
+        $params = [':month_start' => $monthStart, ':month_end' => $monthEnd];
+        if ($barberID > 0) {
+            $sql .= ' AND r.barber_id = :barber_id';
+            $params[':barber_id'] = $barberID;
+        }
+        $sql .= ' ORDER BY r.request_date ASC, b.full_name ASC';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $leaveDays = [];
+        $byDate = [];
+        foreach ($rows as $row) {
+            $date = (string)$row['request_date'];
+            $entry = [
+                'requestId' => (int)$row['request_id'],
+                'barberId' => (int)$row['barber_id'],
+                'barberName' => (string)$row['barber_name'],
+                'date' => $date,
+                'note' => (string)($row['note'] ?? ''),
+            ];
+            $leaveDays[] = $entry;
+            $byDate[$date][] = [
+                'barberId' => (int)$row['barber_id'],
+                'barberName' => (string)$row['barber_name'],
+                'note' => (string)($row['note'] ?? ''),
+            ];
+        }
+
+        json_response([
+            'year' => $year,
+            'month' => $month,
+            'monthLabel' => date('F Y', strtotime($monthStart)),
+            'leaveDays' => $leaveDays,
+            'byDate' => $byDate,
+        ]);
+    }
+
+    if ($action === 'listApprovedLeaveUpcoming') {
+        $barberID = (int)($input['barberID'] ?? 0);
+        $daysAhead = max(1, min(60, (int)($input['daysAhead'] ?? 30)));
+        $rangeStart = shop_today();
+        $rangeEnd = (new DateTimeImmutable($rangeStart, new DateTimeZone(shop_timezone())))
+            ->modify('+' . $daysAhead . ' days')
+            ->format('Y-m-d');
+
+        $sql = "SELECT r.request_id, r.barber_id, b.full_name AS barber_name,
+                       r.request_date, r.note
+                FROM barber_unavailability_requests r
+                JOIN barbers b ON b.barber_id = r.barber_id
+                WHERE r.status = 'Approved'
+                  AND r.request_date >= :range_start
+                  AND r.request_date <= :range_end";
+        $params = [':range_start' => $rangeStart, ':range_end' => $rangeEnd];
+        if ($barberID > 0) {
+            $sql .= ' AND r.barber_id = :barber_id';
+            $params[':barber_id'] = $barberID;
+        }
+        $sql .= ' ORDER BY r.request_date ASC, b.full_name ASC';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        json_response([
+            'leaveDays' => array_map(static fn(array $row): array => [
+                'requestId' => (int)$row['request_id'],
+                'barberId' => (int)$row['barber_id'],
+                'barberName' => (string)$row['barber_name'],
+                'date' => (string)$row['request_date'],
+                'note' => (string)($row['note'] ?? ''),
+            ], $rows),
+        ]);
     }
 } catch (PDOException $e) {
     if ($pdo->inTransaction()) {

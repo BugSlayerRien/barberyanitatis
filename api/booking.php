@@ -205,7 +205,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule'], true)) {
+if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule', 'getQuickBookProfile'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -216,7 +216,7 @@ try {
     ensure_appointments_status_constraint($pdo);
     ensure_barber_channel_column($pdo);
     ensure_group_booking_schema($pdo);
-    $readOnlyActions = ['listByCustomer', 'listByBarber'];
+    $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile'];
     if (!in_array($action, $readOnlyActions, true)) {
         ensure_appointment_detail_image_columns($pdo);
         ensure_reschedule_count_column($pdo);
@@ -322,12 +322,19 @@ try {
             json_response(['error' => 'Invalid appointment date/time value.'], 422);
         }
 
-        if (shop_is_break_slot_time($startTime)) {
-            json_response(['error' => '12:00 PM is barber lunch break and cannot be booked.'], 422);
+        if (shop_is_closed_date($appointmentDate)) {
+            json_response(['error' => 'The shop is closed on the selected date.'], 422);
         }
 
-        if (!shop_is_time_within_hours($startTime) || !shop_is_allowed_slot_time($startTime)) {
-            json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
+        if (shop_is_break_slot_time($startTime, $appointmentDate)) {
+            json_response(['error' => format_time_12h($startTime) . ' falls on a barber break and cannot be booked.'], 422);
+        }
+
+        if (!shop_is_time_within_hours($startTime, $appointmentDate) || !shop_is_allowed_slot_time($startTime, $appointmentDate)) {
+            json_response([
+                'error' => 'Selected time is outside shop hours ('
+                    . format_time_range_12h(shop_open_time($appointmentDate), shop_close_time($appointmentDate)) . ').',
+            ], 422);
         }
 
         $durationMinutes = shop_appointment_duration_minutes();
@@ -565,6 +572,88 @@ try {
         }
 
         json_response($responsePayload, 201);
+    }
+
+    if ($action === 'getQuickBookProfile') {
+        require_once __DIR__ . '/ai_funnel.php';
+        ensure_ai_funnel_tables($pdo);
+
+        $userID = (int)($input['userID'] ?? 0);
+        if ($userID <= 0) {
+            json_response(['error' => 'Invalid userID'], 422);
+        }
+
+        $completedStmt = $pdo->prepare(
+            "SELECT ad.variant_id, ad.service_id,
+                    COALESCE(hs.style_name, s.service_name) AS style_name
+             FROM appointments a
+             JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+             JOIN services s ON s.service_id = ad.service_id
+             LEFT JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
+             LEFT JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
+             WHERE a.user_id = :user_id
+               AND a.status = 'Completed'
+               AND ad.variant_id IS NOT NULL
+               AND ad.variant_id > 0
+             ORDER BY a.appointment_date DESC, a.start_time DESC
+             LIMIT 1"
+        );
+        $completedStmt->execute([':user_id' => $userID]);
+        $completed = $completedStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($completed) {
+            json_response([
+                'profile' => [
+                    'eligible' => true,
+                    'variantId' => (int)$completed['variant_id'],
+                    'styleName' => (string)($completed['style_name'] ?? 'Haircut'),
+                    'serviceId' => (int)$completed['service_id'],
+                    'source' => 'completed_appointment',
+                ],
+            ]);
+        }
+
+        $prefStmt = $pdo->prepare(
+            'SELECT preferred_variant_id, preferred_style_name
+             FROM user_style_preferences
+             WHERE user_id = :user_id
+               AND preferred_variant_id IS NOT NULL
+               AND preferred_variant_id > 0
+             LIMIT 1'
+        );
+        $prefStmt->execute([':user_id' => $userID]);
+        $pref = $prefStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($pref) {
+            $variantId = (int)$pref['preferred_variant_id'];
+            $serviceStmt = $pdo->prepare(
+                "SELECT service_id FROM services
+                 WHERE is_active = TRUE AND LOWER(category) = 'haircut'
+                 ORDER BY service_id ASC LIMIT 1"
+            );
+            $serviceStmt->execute();
+            $serviceId = (int)($serviceStmt->fetchColumn() ?: 0);
+
+            json_response([
+                'profile' => [
+                    'eligible' => true,
+                    'variantId' => $variantId,
+                    'styleName' => (string)($pref['preferred_style_name'] ?? 'Haircut'),
+                    'serviceId' => $serviceId > 0 ? $serviceId : null,
+                    'source' => 'style_preference',
+                ],
+            ]);
+        }
+
+        json_response([
+            'profile' => [
+                'eligible' => false,
+                'variantId' => null,
+                'styleName' => null,
+                'serviceId' => null,
+                'source' => null,
+            ],
+        ]);
     }
 
     if ($action === 'listByCustomer') {
@@ -877,12 +966,19 @@ try {
             json_response(['error' => 'Invalid appointmentDate format (expected YYYY-MM-DD).'], 422);
         }
 
-        if (shop_is_break_slot_time($newStartTime)) {
-            json_response(['error' => '12:00 PM is barber lunch break and cannot be booked.'], 422);
+        if (shop_is_closed_date($newDate)) {
+            json_response(['error' => 'The shop is closed on the selected date.'], 422);
         }
 
-        if (!shop_is_allowed_slot_time($newStartTime)) {
-            json_response(['error' => 'Selected time is outside shop hours (9:00 AM – 7:00 PM).'], 422);
+        if (shop_is_break_slot_time($newStartTime, $newDate)) {
+            json_response(['error' => format_time_12h($newStartTime) . ' falls on a barber break and cannot be booked.'], 422);
+        }
+
+        if (!shop_is_allowed_slot_time($newStartTime, $newDate)) {
+            json_response([
+                'error' => 'Selected time is outside shop hours ('
+                    . format_time_range_12h(shop_open_time($newDate), shop_close_time($newDate)) . ').',
+            ], 422);
         }
 
         if (!shop_is_future_slot($newDate, $newStartTime)) {

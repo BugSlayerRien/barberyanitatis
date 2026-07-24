@@ -24,6 +24,7 @@ import 'barber_selection_page.dart';
 import 'group_size_page.dart';
 import 'time_format_utils.dart';
 import 'booking_guard.dart';
+import 'suggested_appointment_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -45,6 +46,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   Map<String, dynamic>? _nextUpcomingAppointment;
   Map<String, dynamic>? _slotSuggestion;
+  Map<String, dynamic>? _quickBookProfile;
   BookingDraft? _bookingDraft;
   bool _loadingHomeInsights = false;
   bool _hasActiveAppointment = false;
@@ -120,6 +122,7 @@ class _DashboardPageState extends State<DashboardPage>
       setState(() {
         _nextUpcomingAppointment = null;
         _slotSuggestion = null;
+        _quickBookProfile = null;
         _bookingDraft = null;
         _hasActiveAppointment = false;
         _loadingHomeInsights = false;
@@ -133,6 +136,7 @@ class _DashboardPageState extends State<DashboardPage>
 
     Map<String, dynamic>? upcoming;
     Map<String, dynamic>? suggestion;
+    Map<String, dynamic>? quickProfile;
     BookingDraft? draft;
     var hasActive = false;
 
@@ -204,6 +208,21 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (_) {}
 
+    try {
+      final profileResponse = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'getQuickBookProfile',
+          'userID': userId,
+        }),
+      );
+      if (profileResponse.statusCode == 200 && profileResponse.body.isNotEmpty) {
+        final profileData = jsonDecode(profileResponse.body) as Map<String, dynamic>;
+        quickProfile = profileData['profile'] as Map<String, dynamic>?;
+      }
+    } catch (_) {}
+
     final slotResult = await BookingSlotsService.fetchBestSuggestion();
     if (slotResult.isSuccess) {
       suggestion = slotResult.suggestion;
@@ -213,6 +232,7 @@ class _DashboardPageState extends State<DashboardPage>
     setState(() {
       _nextUpcomingAppointment = upcoming;
       _slotSuggestion = suggestion;
+      _quickBookProfile = quickProfile;
       _bookingDraft = draft;
       _hasActiveAppointment = hasActive;
       _loadingHomeInsights = false;
@@ -259,6 +279,70 @@ class _DashboardPageState extends State<DashboardPage>
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
     );
+  }
+
+  bool get _canQuickBook {
+    if (_hasActiveAppointment) return false;
+    final profile = _quickBookProfile;
+    if (profile == null || profile['eligible'] != true) return false;
+    final variantId = int.tryParse('${profile['variantId'] ?? ''}') ?? 0;
+    return variantId > 0 && _slotSuggestion != null;
+  }
+
+  Future<void> _handleQuickBook() async {
+    if (!_canQuickBook) {
+      if (_hasActiveAppointment) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        await _openAppointments();
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+      return;
+    }
+
+    final profile = _quickBookProfile!;
+    final suggestion = Map<String, dynamic>.from(_slotSuggestion!);
+    final variantId = int.tryParse('${profile['variantId'] ?? ''}') ?? 0;
+    if (variantId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No saved hairstyle found. Try a face scan first.')),
+      );
+      return;
+    }
+
+    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
+    if (!mounted) return;
+    if (hasActive) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      await _openAppointments();
+      return;
+    }
+
+    UserSession.selectedVariantId = variantId;
+    UserSession.selectedStyleName = profile['styleName']?.toString() ?? 'Haircut';
+    final serviceId = int.tryParse('${profile['serviceId'] ?? ''}');
+    if (serviceId != null && serviceId > 0) {
+      UserSession.selectedServiceId = serviceId;
+    }
+    UserSession.selectedPreviewImages = null;
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SuggestedAppointmentPage(
+          suggestion: suggestion,
+          skipPreviews: true,
+        ),
+      ),
+    );
+    if (mounted) {
+      await _loadHomeInsights();
+    }
   }
 
   String _formatShortDate(String isoDate) {
@@ -498,6 +582,67 @@ class _DashboardPageState extends State<DashboardPage>
     );
   }
 
+  Widget _buildQuickBookCard() {
+    if (!_canQuickBook) {
+      return const SizedBox.shrink();
+    }
+
+    final styleName = _quickBookProfile?['styleName']?.toString() ?? 'your usual style';
+    final suggestion = _slotSuggestion!;
+    final line = _slotTeaserLine(suggestion);
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1E1A10), Color(0xFF2A2412)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFA99941)),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: _handleQuickBook,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                const Icon(Icons.flash_on, color: Color(0xFFA99941), size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Book your next slot',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$styleName · $line',
+                        style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAvailabilityTeaser() {
     if (_loadingHomeInsights && _slotSuggestion == null) {
       return Container(
@@ -531,7 +676,12 @@ class _DashboardPageState extends State<DashboardPage>
       return const SizedBox.shrink();
     }
 
-    return Container(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: _canQuickBook ? _handleQuickBook : null,
+        child: Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -548,9 +698,9 @@ class _DashboardPageState extends State<DashboardPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Barber availability',
-                  style: TextStyle(
+                Text(
+                  _canQuickBook ? 'Tap to quick book' : 'Barber availability',
+                  style: const TextStyle(
                     color: Colors.white54,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -569,7 +719,11 @@ class _DashboardPageState extends State<DashboardPage>
               ],
             ),
           ),
+          if (_canQuickBook)
+            const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
         ],
+      ),
+        ),
       ),
     );
   }
@@ -589,7 +743,7 @@ class _DashboardPageState extends State<DashboardPage>
           child: _QuickActionTile(
             icon: Icons.calendar_month_outlined,
             label: 'Book',
-            onTap: _openAppointments,
+            onTap: _canQuickBook ? _handleQuickBook : _openAppointments,
           ),
         ),
         const SizedBox(width: 10),
@@ -754,6 +908,7 @@ class _DashboardPageState extends State<DashboardPage>
 
             _buildUpcomingStrip(),
             _buildContinueBookingCard(),
+            _buildQuickBookCard(),
             _buildAvailabilityTeaser(),
             _buildQuickActions(),
             const SizedBox(height: 14),

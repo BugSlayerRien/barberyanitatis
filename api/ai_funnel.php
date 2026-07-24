@@ -4,13 +4,22 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 
-require_method('POST');
+function ai_funnel_is_direct_request(): bool
+{
+    $script = realpath($_SERVER['SCRIPT_FILENAME'] ?? '');
+    $self = realpath(__FILE__);
+    return $script !== false && $self !== false && $script === $self;
+}
 
-$input = get_json_input();
-$action = trim((string)($input['action'] ?? ''));
+if (ai_funnel_is_direct_request()) {
+    require_method('POST');
 
-if (!in_array($action, ['trackScan', 'saveSelection', 'trackBookingCreated'], true)) {
-    json_response(['error' => 'Invalid action'], 400);
+    $input = get_json_input();
+    $action = trim((string)($input['action'] ?? ''));
+
+    if (!in_array($action, ['trackScan', 'saveSelection', 'trackBookingCreated'], true)) {
+        json_response(['error' => 'Invalid action'], 400);
+    }
 }
 
 function normalize_face_shape(?string $value): ?string
@@ -210,6 +219,7 @@ function insert_event(
     ]);
 }
 
+if (ai_funnel_is_direct_request()) {
 try {
     $pdo = get_db_connection();
     ensure_ai_funnel_tables($pdo);
@@ -364,4 +374,5 @@ try {
         $pdo->rollBack();
     }
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+}
 }

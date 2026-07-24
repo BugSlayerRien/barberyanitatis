@@ -10,6 +10,9 @@ const state = {
   currentUser: null,
   profileEditMode: false,
   pagination: {},
+  leaveCalendar: null,
+  leaveCalSelected: null,
+  leaveCalBarberId: "",
 };
 
 const DEFAULT_PAGE_SIZE = 5;
@@ -839,6 +842,7 @@ async function loadOptions() {
     }
 
     window.__barbersCache = barbers;
+    populateLeaveBarberFilter(barbers);
     renderSplitBarbers(barbers);
   } catch (error) {
     window.__barbersCache = [];
@@ -879,6 +883,9 @@ async function loadBarberUnavailabilityRequests() {
         const id = Number(btn.getAttribute("data-approve"));
         await postJson(apiUrl("barber_schedule.php"), { action: "reviewRequest", requestID: id, decision: "Approved" });
         await loadBarberUnavailabilityRequests();
+        if (state.leaveCalendar) {
+          await loadBarberLeaveCalendar(state.leaveCalendar.year, state.leaveCalendar.month);
+        }
       });
     });
     list.querySelectorAll("[data-reject]").forEach((btn) => {
@@ -891,6 +898,110 @@ async function loadBarberUnavailabilityRequests() {
   } catch (error) {
     list.innerHTML = '<div class="card">Could not load time-off requests.</div>';
   }
+}
+
+function escapeLeaveText(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+
+function renderLeaveCalDayDetail(date, byDate) {
+  const detail = document.getElementById("leave-cal-day-detail");
+  if (!detail) return;
+  if (!date || !byDate || !byDate[date]?.length) {
+    detail.innerHTML = date
+      ? `<strong>${date}</strong> — No approved leave on this day.`
+      : "Select a day to see barbers on leave.";
+    return;
+  }
+  const rows = byDate[date]
+    .map((entry) => `<li><strong>${escapeLeaveText(entry.barberName)}</strong>${entry.note ? ` — ${escapeLeaveText(entry.note)}` : ""}</li>`)
+    .join("");
+  detail.innerHTML = `<strong>${date}</strong><ul style="margin: 8px 0 0; padding-left: 18px;">${rows}</ul>`;
+}
+
+function renderBarberLeaveCalendar() {
+  const grid = document.getElementById("leave-calendar-grid");
+  const label = document.getElementById("leave-cal-month-label");
+  const cal = state.leaveCalendar;
+  if (!grid || !cal) return;
+
+  if (label) label.textContent = cal.monthLabel || "—";
+
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const firstDay = new Date(cal.year, cal.month - 1, 1).getDay();
+  const byDate = cal.byDate || {};
+  const cells = [];
+
+  weekdays.forEach((name) => {
+    cells.push(`<div class="cal-weekday">${name}</div>`);
+  });
+  for (let i = 0; i < firstDay; i++) {
+    cells.push('<div class="cal-day cal-empty"></div>');
+  }
+
+  const daysInMonth = new Date(cal.year, cal.month, 0).getDate();
+  for (let day = 1; day <= daysInMonth; day++) {
+    const date = `${cal.year}-${String(cal.month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const entries = byDate[date] || [];
+    const hasLeave = entries.length > 0;
+    const selected = state.leaveCalSelected === date;
+    const badge = hasLeave ? `<span class="meta" style="font-size:9px;display:block;">${entries.length}</span>` : "";
+    cells.push(
+      `<button type="button" class="cal-day cal-open${hasLeave ? " cal-has-leave" : ""}${selected ? " cal-selected" : ""}" `
+      + `data-date="${date}">${day}${badge}</button>`
+    );
+  }
+
+  grid.innerHTML = cells.join("");
+
+  grid.querySelectorAll(".cal-day[data-date]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.leaveCalSelected = button.getAttribute("data-date");
+      renderBarberLeaveCalendar();
+      renderLeaveCalDayDetail(state.leaveCalSelected, byDate);
+    });
+  });
+
+  if (state.leaveCalSelected) {
+    renderLeaveCalDayDetail(state.leaveCalSelected, byDate);
+  } else {
+    renderLeaveCalDayDetail(null, byDate);
+  }
+}
+
+async function loadBarberLeaveCalendar(year, month) {
+  const now = new Date();
+  const y = year ?? now.getFullYear();
+  const m = month ?? now.getMonth() + 1;
+  const payload = { action: "listApprovedLeaveMonth", year: y, month: m };
+  if (state.leaveCalBarberId) {
+    payload.barberID = Number(state.leaveCalBarberId);
+  }
+  try {
+    const data = await postJson(apiUrl("barber_schedule.php"), payload);
+    state.leaveCalendar = data;
+    renderBarberLeaveCalendar();
+  } catch (_) {
+    const grid = document.getElementById("leave-calendar-grid");
+    if (grid) grid.innerHTML = '<div class="meta">Could not load leave calendar.</div>';
+  }
+}
+
+function populateLeaveBarberFilter(barbers) {
+  const select = document.getElementById("leave-cal-barber-filter");
+  if (!select) return;
+  const current = state.leaveCalBarberId || "";
+  select.innerHTML = '<option value="">All barbers</option>';
+  (barbers || []).forEach((barber) => {
+    const id = barber.barber_id ?? barber.barberID;
+    const name = barber.full_name ?? barber.fullName ?? "Barber";
+    if (!id) return;
+    const option = document.createElement("option");
+    option.value = String(id);
+    option.textContent = name;
+    select.appendChild(option);
+  });
+  select.value = current;
 }
 
 async function loadDashboard(showOverlay = false) {
@@ -970,6 +1081,8 @@ async function refreshAll() {
   const updated = document.getElementById("last-updated");
   if (updated) updated.textContent = "Updating…";
   await loadDashboard(false);
+  const now = new Date();
+  await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
 }
 
 document.addEventListener("click", async (event) => {
@@ -1150,6 +1263,35 @@ walkinForm?.addEventListener("submit", async (event) => {
 
 refreshButton?.addEventListener("click", () => refreshAll());
 
+document.getElementById("leave-cal-prev")?.addEventListener("click", () => {
+  const cal = state.leaveCalendar;
+  if (!cal) return;
+  let y = cal.year;
+  let m = cal.month - 1;
+  if (m < 1) { m = 12; y -= 1; }
+  loadBarberLeaveCalendar(y, m);
+});
+
+document.getElementById("leave-cal-next")?.addEventListener("click", () => {
+  const cal = state.leaveCalendar;
+  if (!cal) return;
+  let y = cal.year;
+  let m = cal.month + 1;
+  if (m > 12) { m = 1; y += 1; }
+  loadBarberLeaveCalendar(y, m);
+});
+
+document.getElementById("leave-cal-barber-filter")?.addEventListener("change", (event) => {
+  state.leaveCalBarberId = event.target.value || "";
+  const cal = state.leaveCalendar;
+  if (cal) {
+    loadBarberLeaveCalendar(cal.year, cal.month);
+  } else {
+    const now = new Date();
+    loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
+  }
+});
+
 appointmentsSearch?.addEventListener("input", () => {
   resetPagination(["appointments-table"]);
   renderAppointments(state.appointments);
@@ -1222,6 +1364,8 @@ async function init() {
   renderProfileChip();
   await loadOptions();
   await loadDashboard(false);
+  const now = new Date();
+  await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
   startTrackingAutoRefresh();
   startTrackingProgressTicker();
 }
