@@ -2,7 +2,7 @@
 
 KEY ISSUES (TIER 1 - CRITICAL):
 1) Supabase Auth broken - seed script creates users in public.users, not auth.users
-2) Web Admin/Receptionist auth flow incomplete
+2) Web Admin/Receptionist auth flow incomplete.
 3) AI Hairstyle API hardcoded with fallback images
 4) Payment integration incomplete (PayMongo not fully wired)
 
