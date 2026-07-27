@@ -6,6 +6,23 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api_config.dart';
 import '../user_session.dart';
 
+/// Thrown when the server refuses a new AI hairstyle generation because the user has
+/// already used their free style quota (see AI_TRYON_STYLE_LIMIT on the server).
+class FaceScanQuotaExceededException implements Exception {
+  final String message;
+  final int limit;
+  final int used;
+
+  FaceScanQuotaExceededException({
+    required this.message,
+    required this.limit,
+    required this.used,
+  });
+
+  @override
+  String toString() => message;
+}
+
 class FaceScanService {
   static const String _consentKey = 'face_scan_consent_accepted_v1';
 
@@ -415,7 +432,8 @@ class FaceScanService {
     return data;
   }
 
-  /// Replicate Flux try-on for all 3 capture angles (server-side; may take several minutes).
+  /// AI try-on (Gemini, falling back to Replicate) for all 3 capture angles
+  /// (server-side; may take several minutes).
   static Future<Map<String, dynamic>> generateStylePreviews({
     required String scanSessionId,
     required int variantId,
@@ -450,17 +468,33 @@ class FaceScanService {
         ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
         : <String, dynamic>{};
 
+    if (response.statusCode == 429 || data['quotaExceeded'] == true) {
+      final quota = data['quota'] is Map ? Map<String, dynamic>.from(data['quota'] as Map) : const {};
+      throw FaceScanQuotaExceededException(
+        message: data['error']?.toString() ??
+            "You've reached your free AI hairstyle generation limit.",
+        limit: (quota['limit'] as num?)?.toInt() ?? 2,
+        used: (quota['used'] as num?)?.toInt() ?? 0,
+      );
+    }
+
     if (response.statusCode != 200) {
       final err = data['error']?.toString() ?? 'Failed to generate style previews';
       final lower = err.toLowerCase();
-      if (lower.contains('402') || lower.contains('credit') || lower.contains('billing')) {
+      if (lower.contains('402') || lower.contains('credit') || lower.contains('billing') || lower.contains('quota')) {
         throw Exception(
-          'Replicate credits may be exhausted. Add credits at replicate.com/account/billing, then try again.\n$err',
+          'The AI provider has no credits/quota left right now. Please try again in a few minutes.\n$err',
         );
       }
       throw Exception(err);
     }
     return data;
+  }
+
+  /// Remaining free-style quota info from the last generateStylePreviews response, if any.
+  static Map<String, dynamic>? quotaFromResponse(Map<String, dynamic> data) {
+    final quota = data['quota'];
+    return quota is Map ? Map<String, dynamic>.from(quota) : null;
   }
 
   static Map<String, String> previewUrlsFromResponse(Map<String, dynamic> data) {
@@ -515,26 +549,48 @@ class FaceScanService {
     };
   }
 
+  /// True only for a real AI-generated scan preview (saved under uploads/face_scans/...),
+  /// never a catalog/library asset path (e.g. assets/images/overlays/...).
+  static bool _isGeneratedPreviewUrl(String? url) {
+    if (url == null) return false;
+    final trimmed = url.trim();
+    return trimmed.isNotEmpty && trimmed.contains('uploads/face_scans/');
+  }
+
   /// Fields to send with booking.php create so AI previews attach server-side.
+  ///
+  /// Returns an empty map for pure library/catalog bookings (no real AI try-on was
+  /// generated for this selection), so booking.php never attempts to attach a
+  /// scanSessionId or catalog asset paths to the appointment.
   static Map<String, dynamic> bookingPreviewPayload() {
     final previews =
         UserSession.selectedPreviewImages ?? UserSession.customerPreviewImages;
+    if (previews == null) {
+      return <String, dynamic>{};
+    }
+
+    final front = previews['frontViewUrl'] ?? previews['front'];
+    final side = previews['sideViewUrl'] ?? previews['left'];
+    final back = previews['backViewUrl'] ?? previews['right'];
+
+    final hasAiPreview = _isGeneratedPreviewUrl(front) ||
+        _isGeneratedPreviewUrl(side) ||
+        _isGeneratedPreviewUrl(back);
+    if (!hasAiPreview) {
+      return <String, dynamic>{};
+    }
+
     final payload = <String, dynamic>{
       'scanSessionId': UserSession.ensureScanSessionId(),
     };
-    if (previews != null) {
-      final front = previews['frontViewUrl'] ?? previews['front'];
-      final side = previews['sideViewUrl'] ?? previews['left'];
-      final back = previews['backViewUrl'] ?? previews['right'];
-      if (front != null && front.trim().isNotEmpty) {
-        payload['frontViewUrl'] = front.trim();
-      }
-      if (side != null && side.trim().isNotEmpty) {
-        payload['sideViewUrl'] = side.trim();
-      }
-      if (back != null && back.trim().isNotEmpty) {
-        payload['backViewUrl'] = back.trim();
-      }
+    if (front != null && front.trim().isNotEmpty) {
+      payload['frontViewUrl'] = front.trim();
+    }
+    if (side != null && side.trim().isNotEmpty) {
+      payload['sideViewUrl'] = side.trim();
+    }
+    if (back != null && back.trim().isNotEmpty) {
+      payload['backViewUrl'] = back.trim();
     }
     return payload;
   }

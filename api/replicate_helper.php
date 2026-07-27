@@ -124,6 +124,11 @@ function replicate_resolve_style_key(string $styleName, ?string $styleCode = nul
     return 'barbers_cut';
 }
 
+/**
+ * Shared hair-only, identity-locked edit prompt used by every image-generation provider
+ * (Gemini and the Replicate fallback) so results stay consistent regardless of which
+ * provider actually renders the image.
+ */
 function replicate_build_hair_only_prompt(
     string $styleDescription,
     int $hairLengthLevel = 1,
@@ -136,18 +141,23 @@ function replicate_build_hair_only_prompt(
     $colorClause = '';
     if (trim($hairColorLabel) !== '') {
         $colorClause = ' Preserve the person\'s natural ' . trim($hairColorLabel)
-            . ' hair color exactly. Do not lighten, redden, or recolor the hair.';
+            . ' hair color exactly. Do not lighten, darken, redden, or recolor the hair.';
     }
 
-    return 'Change only the hair on this person. Replace the entire haircut on the full head — '
-        . 'crown, top, sides, temples, sideburns, and back hairline — with: '
-        . "{$styleDescription}. Current length: {$currentLabel}. {$lengthHint}"
-        . ' Remove all of the old hairstyle everywhere, not just tips or one side. '
-        . 'The new cut must look clearly different from the original silhouette. '
-        . 'Do not paste extra hair onto forehead skin or cheeks. '
-        . 'Keep the same facial features, skin tone, eyebrows, eyes, eyeglasses if present, '
-        . 'ears, neck, shirt, and room background. '
-        . 'Maintain the original head pose, camera angle, framing, and lighting.'
+    return 'Photo-realistic HAIR-ONLY edit of the attached photo. Change ONLY the hair on this '
+        . 'exact person — crown, top, sides, temples, sideburns, and back hairline — to this '
+        . "exact haircut: \"{$styleDescription}\". Current length: {$currentLabel}. {$lengthHint} "
+        . 'Completely remove the old hairstyle everywhere, not just the tips or one side; the new '
+        . 'cut silhouette must look clearly different from the original. Do not paste extra hair '
+        . 'onto forehead skin, cheeks, or neck. '
+        . 'STRICT IDENTITY LOCK — do not change: face shape, facial features, facial expression, '
+        . 'skin tone and texture, blemishes or marks, eyebrows, eyes, eyeglasses if present, ears, '
+        . 'neck, body proportions, age, or gender. This must remain the exact same person, not a '
+        . 'different or idealized person. '
+        . 'Keep the same shirt/clothing and the same room background unchanged. '
+        . 'Preserve the original head pose, camera angle, framing, perspective, and lighting '
+        . 'direction/intensity exactly as captured in the source photo. '
+        . 'Output one single photo-realistic image — not an illustration, sketch, or cartoon.'
         . $colorClause;
 }
 
