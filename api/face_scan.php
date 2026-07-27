@@ -4,6 +4,8 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/replicate_helper.php';
+require_once __DIR__ . '/ai_gemini_image_helper.php';
+require_once __DIR__ . '/ai_tryon_provider.php';
 require_once __DIR__ . '/ai_service_client.php';
 require_once __DIR__ . '/face_scan_attach.php';
 
@@ -68,6 +70,27 @@ function ensure_face_scan_tables(PDO $pdo): void
     $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_length_label TEXT');
     $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS hair_color_label TEXT');
     $pdo->exec('ALTER TABLE face_scan_sessions ADD COLUMN IF NOT EXISTS no_hair_detected BOOLEAN DEFAULT FALSE');
+
+    // Marks previews made from captures that have since been overwritten (e.g. the user
+    // retook their photos in the same session). Stale previews are never served from
+    // cache or attached to a booking, but they still count toward the generation quota —
+    // otherwise retaking a photo would be a free way to reset the 2-style limit.
+    $pdo->exec('ALTER TABLE face_scan_previews ADD COLUMN IF NOT EXISTS is_stale BOOLEAN NOT NULL DEFAULT FALSE');
+}
+
+/**
+ * Mark any previews generated from this session's previous captures as stale so a new
+ * physical scan (or a retake within the same session) can never surface an old try-on
+ * image as if it came from the current face.
+ */
+function invalidate_stale_previews_for_session(PDO $pdo, string $scanSessionId): void
+{
+    $pdo->prepare(
+        'UPDATE face_scan_previews
+         SET is_stale = TRUE
+         WHERE scan_session_id = :scan_session_id
+           AND is_stale = FALSE'
+    )->execute([':scan_session_id' => $scanSessionId]);
 }
 
 function face_scan_upload_root(): string
@@ -255,6 +278,10 @@ try {
         $consentTs = $consentAt !== '' ? $consentAt : date('c');
 
         $pdo->beginTransaction();
+
+        // New/overwritten captures mean any previously generated previews for this
+        // session no longer reflect the current face — invalidate them up front.
+        invalidate_stale_previews_for_session($pdo, $scanSessionId);
 
         $sessionStmt = $pdo->prepare(
             'INSERT INTO face_scan_sessions (scan_session_id, user_id, face_shape, hair_texture, hair_density, consent_at)
@@ -490,10 +517,10 @@ try {
     if ($action === 'generateStylePreviews') {
         set_time_limit(600);
 
-        if (!ai_service_is_available() && !replicate_is_configured()) {
+        if (!ai_service_is_available() && !ai_tryon_is_configured()) {
             json_response([
                 'error' => 'AI generation is not configured',
-                'hint' => 'Start ai-service (AI_SERVICE_URL) or set REPLICATE_API_TOKEN in .env.',
+                'hint' => 'Start ai-service (AI_SERVICE_URL) or set GEMINI_API_KEY / GEMINI_IMAGE_API_KEY (preferred) or REPLICATE_API_TOKEN in .env.',
             ], 503);
         }
 
@@ -513,7 +540,7 @@ try {
             $cachedStmt = $pdo->prepare(
                 'SELECT front_url, left_url, right_url
                  FROM face_scan_previews
-                 WHERE scan_session_id = :scan_session_id AND variant_id = :variant_id
+                 WHERE scan_session_id = :scan_session_id AND variant_id = :variant_id AND is_stale = FALSE
                  ORDER BY preview_id DESC
                  LIMIT 1'
             );
@@ -532,10 +559,31 @@ try {
                         'frontViewUrl' => $cached['front_url'],
                         'sideViewUrl' => $cached['left_url'],
                         'backViewUrl' => $cached['right_url'],
-                        'provider' => 'replicate',
+                        'provider' => 'cache',
                         'cached' => true,
+                        'quota' => ai_tryon_quota_status($pdo, $userID),
                     ]);
                 }
+            }
+        }
+
+        // Quota is enforced only on a genuine new generation call (cache hits above are
+        // free, and a regenerate of a style the user already has never costs a new slot).
+        if ($userID !== null && !ai_tryon_unlimited()) {
+            $styleLimit = ai_tryon_style_limit();
+            $stylesUsed = ai_tryon_styles_used($pdo, $userID);
+            if ($stylesUsed >= $styleLimit && !ai_tryon_user_has_generated_variant($pdo, $userID, $variantID)) {
+                json_response([
+                    'error' => "You've reached your free AI hairstyle generation limit ({$styleLimit} styles).",
+                    'quotaExceeded' => true,
+                    'quota' => [
+                        'limit' => $styleLimit,
+                        'used' => $stylesUsed,
+                        'remaining' => 0,
+                        'unlimited' => false,
+                    ],
+                    'hint' => 'You can still view or regenerate a style you already tried.',
+                ], 429);
             }
         }
 
@@ -580,7 +628,7 @@ try {
 
         $feasibleToday = true;
         $lengthNote = null;
-        $provider = 'php-replicate';
+        $provider = ai_tryon_provider_name();
         $images = [];
         $previewDiagnostics = [];
 
@@ -614,7 +662,7 @@ try {
             $previewDiagnostics = $generated['previewDiagnostics'] ?? [];
             $provider = 'ai-service';
         } else {
-            $generated = replicate_generate_three_view_previews(
+            $generated = ai_tryon_generate_three_view_previews(
                 [
                     'front' => (string)$captures['front'],
                     'left' => (string)$captures['left'],
@@ -625,17 +673,20 @@ try {
                 $hairLengthLevel,
                 $hairColorLabel
             );
+            $provider = $generated['provider'] ?? $provider;
             if (!$generated['ok']) {
                 $err = (string)$generated['error'];
                 $isBilling = stripos($err, '402') !== false
                     || stripos($err, 'insufficient credit') !== false
-                    || stripos($err, 'billing') !== false;
+                    || stripos($err, 'billing') !== false
+                    || stripos($err, 'quota') !== false
+                    || stripos($err, 'resource_exhausted') !== false;
                 json_response([
                     'error' => $isBilling
-                        ? 'Replicate account has no credits left for AI haircut generation.'
+                        ? 'The AI provider has no credits/quota left for haircut generation right now.'
                         : $err,
                     'hint' => $isBilling
-                        ? 'Add credits at https://replicate.com/account/billing — wait a few minutes, then try again.'
+                        ? 'Check your Gemini/Replicate billing and quota, wait a few minutes, then try again.'
                         : 'Check server logs for details.',
                 ], $isBilling ? 402 : 502);
             }
@@ -686,6 +737,7 @@ try {
             'lengthNote' => $lengthNote,
             'cached' => false,
             'previewDiagnostics' => $previewDiagnostics,
+            'quota' => ai_tryon_quota_status($pdo, $userID),
         ]);
     }
 

@@ -16,6 +16,7 @@ function ensure_face_scan_preview_storage(PDO $pdo): void
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         )"
     );
+    $pdo->exec('ALTER TABLE face_scan_previews ADD COLUMN IF NOT EXISTS is_stale BOOLEAN NOT NULL DEFAULT FALSE');
     $pdo->exec(
         'ALTER TABLE appointments
          ADD COLUMN IF NOT EXISTS scan_session_id VARCHAR(80)'
@@ -61,6 +62,33 @@ function normalize_preview_relative_url(string $url): string
 }
 
 /**
+ * True only when $url is a real AI-generated capture/preview file that belongs to
+ * this exact scan session (uploads/face_scans/{scanSessionId}/...). Catalog/library
+ * asset paths (e.g. assets/images/overlays/...) and other sessions' files must never
+ * pass this check — otherwise they can be written into an appointment's "AI preview"
+ * columns or the face_scan_previews table.
+ */
+function is_scan_session_preview_url(string $url, string $scanSessionId): bool
+{
+    $normalized = normalize_preview_relative_url($url);
+    if ($normalized === '') {
+        return false;
+    }
+
+    $safeSession = preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId) ?? '';
+    if ($safeSession === '') {
+        return false;
+    }
+
+    $prefix = 'uploads/face_scans/' . $safeSession . '/';
+    if (!str_starts_with($normalized, $prefix)) {
+        return false;
+    }
+
+    return face_scan_preview_file_exists($normalized);
+}
+
+/**
  * @param array{frontViewUrl?: string, sideViewUrl?: string, backViewUrl?: string} $fallback
  */
 function upsert_face_scan_previews_from_urls(
@@ -77,9 +105,9 @@ function upsert_face_scan_previews_from_urls(
         return;
     }
 
-    $validFront = $front !== '' && face_scan_preview_file_exists($front);
-    $validLeft = $left !== '' && face_scan_preview_file_exists($left);
-    $validRight = $right !== '' && face_scan_preview_file_exists($right);
+    $validFront = $front !== '' && is_scan_session_preview_url($front, $scanSessionId);
+    $validLeft = $left !== '' && is_scan_session_preview_url($left, $scanSessionId);
+    $validRight = $right !== '' && is_scan_session_preview_url($right, $scanSessionId);
     if (!$validFront && !$validLeft && !$validRight) {
         return;
     }
@@ -146,22 +174,55 @@ function attach_scan_previews_to_appointment(
 
     ensure_face_scan_preview_storage($pdo);
 
+    // Soft-bind: if this appointment and this scan session both have a known owner and
+    // they disagree, never attach — otherwise another user's session could paste its
+    // preview images onto this appointment.
+    $apptOwnerStmt = $pdo->prepare(
+        'SELECT user_id FROM appointments WHERE appointment_id = :appointment_id LIMIT 1'
+    );
+    $apptOwnerStmt->execute([':appointment_id' => $appointmentId]);
+    $apptUserIdRaw = $apptOwnerStmt->fetchColumn();
+    $apptUserId = ($apptUserIdRaw !== false && $apptUserIdRaw !== null) ? (int)$apptUserIdRaw : null;
+
+    $sessionOwnerStmt = $pdo->prepare(
+        'SELECT user_id FROM face_scan_sessions WHERE scan_session_id = :scan_session_id LIMIT 1'
+    );
+    $sessionOwnerStmt->execute([':scan_session_id' => $scanSessionId]);
+    $sessionUserIdRaw = $sessionOwnerStmt->fetchColumn();
+    $sessionUserId = ($sessionUserIdRaw !== false && $sessionUserIdRaw !== null) ? (int)$sessionUserIdRaw : null;
+
+    if ($apptUserId !== null && $sessionUserId !== null && $apptUserId !== $sessionUserId) {
+        error_log(sprintf(
+            'face_scan_attach: skipped — appointment %d belongs to user %d but scan session %s belongs to user %d',
+            $appointmentId,
+            $apptUserId,
+            $scanSessionId,
+            $sessionUserId
+        ));
+        return ['front' => null, 'left' => null, 'right' => null, 'attached' => false];
+    }
+
     $fallback = $urlFallback ?? [];
     if ($variantId > 0 && $fallback !== []) {
         upsert_face_scan_previews_from_urls($pdo, $scanSessionId, $variantId, $fallback);
     }
 
+    // NOTE: :variant_id is bound twice below under two different placeholder names —
+    // PDO with ATTR_EMULATE_PREPARES=false (native prepares) rejects reusing the same
+    // named placeholder more than once in a single statement.
     $previewStmt = $pdo->prepare(
         'SELECT front_url, left_url, right_url
          FROM face_scan_previews
          WHERE scan_session_id = :scan_session_id
-           AND (:variant_id <= 0 OR variant_id = :variant_id)
+           AND is_stale = FALSE
+           AND (:variant_id_filter <= 0 OR variant_id = :variant_id_match)
          ORDER BY preview_id DESC
          LIMIT 1'
     );
     $previewStmt->execute([
         ':scan_session_id' => $scanSessionId,
-        ':variant_id' => $variantId,
+        ':variant_id_filter' => $variantId,
+        ':variant_id_match' => $variantId,
     ]);
     $preview = $previewStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
@@ -169,13 +230,18 @@ function attach_scan_previews_to_appointment(
     $left = $preview['left_url'] ?? null;
     $right = $preview['right_url'] ?? null;
 
-    if (($front === null || $front === '') && !empty($fallback['frontViewUrl'])) {
+    // Fallback URLs from the client are only trusted when they are real AI preview
+    // files that belong to this exact scan session — never catalog/library asset paths.
+    if (($front === null || $front === '') && !empty($fallback['frontViewUrl'])
+        && is_scan_session_preview_url((string)$fallback['frontViewUrl'], $scanSessionId)) {
         $front = normalize_preview_relative_url((string)$fallback['frontViewUrl']);
     }
-    if (($left === null || $left === '') && !empty($fallback['sideViewUrl'])) {
+    if (($left === null || $left === '') && !empty($fallback['sideViewUrl'])
+        && is_scan_session_preview_url((string)$fallback['sideViewUrl'], $scanSessionId)) {
         $left = normalize_preview_relative_url((string)$fallback['sideViewUrl']);
     }
-    if (($right === null || $right === '') && !empty($fallback['backViewUrl'])) {
+    if (($right === null || $right === '') && !empty($fallback['backViewUrl'])
+        && is_scan_session_preview_url((string)$fallback['backViewUrl'], $scanSessionId)) {
         $right = normalize_preview_relative_url((string)$fallback['backViewUrl']);
     }
 

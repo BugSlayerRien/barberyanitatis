@@ -410,7 +410,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           ),
           content: Text(
             'Create a fresh AI try-on for "$styleName"? '
-            'This uses Replicate credits again and can take several minutes.',
+            'This uses one of your free style generations again and can take several minutes.',
             style: const TextStyle(color: Colors.white70, height: 1.4),
           ),
           actions: [
@@ -439,7 +439,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           ),
           content: Text(
             'Generate a preview for "$styleName"? '
-            'This uses Replicate credits and can take several minutes.',
+            'This uses one of your free style generations and can take several minutes.',
             style: const TextStyle(color: Colors.white70, height: 1.4),
           ),
           actions: [
@@ -467,7 +467,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         ),
         content: Text(
           'You already have a saved preview for "$styleName". '
-          'Load it without using credits, or generate a new one.',
+          'Load it for free, or generate a new one.',
           style: const TextStyle(color: Colors.white70, height: 1.4),
         ),
         actions: [
@@ -767,17 +767,25 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       });
       UserSession.selectedPreviewImages = urls;
       UserSession.customerPreviewImages = urls;
+      final quota = FaceScanService.quotaFromResponse(data);
       if (fromCache) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Loaded saved preview (no new Replicate credits used).'),
+            content: Text('Loaded saved preview (free — no new generation used).'),
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('AI preview ready — swipe angles to compare.')),
+          SnackBar(content: Text(_generationSuccessMessage(quota))),
         );
       }
+    } on FaceScanQuotaExceededException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _previewGenerating = false;
+        _previewError = null;
+      });
+      await _showQuotaExceededDialog(e);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -785,6 +793,42 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         _previewGenerating = false;
       });
     }
+  }
+
+  String _generationSuccessMessage(Map<String, dynamic>? quota) {
+    if (quota == null || quota['unlimited'] == true) {
+      return 'AI preview ready — swipe angles to compare.';
+    }
+    final limit = (quota['limit'] as num?)?.toInt();
+    final used = (quota['used'] as num?)?.toInt();
+    if (limit == null || used == null) {
+      return 'AI preview ready — swipe angles to compare.';
+    }
+    return 'AI preview ready — swipe angles to compare. ($used of $limit free styles used)';
+  }
+
+  Future<void> _showQuotaExceededDialog(FaceScanQuotaExceededException e) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Free style limit reached',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          '${e.message}\n\nYou can still view and book any style you already generated.',
+          style: const TextStyle(color: Colors.white70, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   String get _selectedStyleName =>
