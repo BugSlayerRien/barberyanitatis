@@ -644,6 +644,12 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildAvailabilityTeaser() {
+    // When quick-book is available, the gold "Book your next slot" card already
+    // shows the same suggestion and action — skip this duplicate teaser.
+    if (_canQuickBook) {
+      return const SizedBox.shrink();
+    }
+
     if (_loadingHomeInsights && _slotSuggestion == null) {
       return Container(
         width: double.infinity,
@@ -676,12 +682,8 @@ class _DashboardPageState extends State<DashboardPage>
       return const SizedBox.shrink();
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: _canQuickBook ? _handleQuickBook : null,
-        child: Container(
+    // Informational only: next open slot when the user can't one-tap quick book yet.
+    return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
@@ -698,9 +700,9 @@ class _DashboardPageState extends State<DashboardPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _canQuickBook ? 'Tap to quick book' : 'Barber availability',
-                  style: const TextStyle(
+                const Text(
+                  'Barber availability',
+                  style: TextStyle(
                     color: Colors.white54,
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -719,11 +721,7 @@ class _DashboardPageState extends State<DashboardPage>
               ],
             ),
           ),
-          if (_canQuickBook)
-            const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
         ],
-      ),
-        ),
       ),
     );
   }

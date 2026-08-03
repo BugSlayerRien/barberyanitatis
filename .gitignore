@@ -76,12 +76,14 @@ app.*.map.json
 # ==============================
 # AI temporary files
 # ==============================
-ai-service/temp_uploads/
+ai-service/temp_uploads/**
+!ai-service/temp_uploads/.gitkeep
 
 # ==============================
 # Uploaded face scans
 # ==============================
-uploads/face_scans/
+uploads/face_scans/**
+!uploads/face_scans/.gitkeep
 
 # ==============================
 # PayMongo temporary cache
