@@ -111,9 +111,25 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     _hairColorLabel =
         widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
+    _restoreCachedPreviewsFromSession();
     UserSession.lastRecommendations = [];
     UserSession.hasRecentRecommendations = false;
     _loadRecommendations();
+  }
+
+  /// Rehydrate AI try-ons from session memory after navigation recreates this page.
+  void _restoreCachedPreviewsFromSession() {
+    final urls =
+        UserSession.selectedPreviewImages ?? UserSession.customerPreviewImages;
+    final variantId = UserSession.selectedVariantId;
+    if (variantId == null || variantId <= 0 || urls == null) {
+      return;
+    }
+    final front = urls['frontViewUrl']?.trim() ?? '';
+    if (front.isEmpty) {
+      return;
+    }
+    _replicatePreviewsByVariant['$variantId'] = Map<String, String>.from(urls);
   }
 
   Future<void> _applyHairTextureOverride(String texture) async {
@@ -203,6 +219,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           _recommendationsLoading = false;
           _categoriesLoading = true;
           if (!preserveSelection) {
+            final sessionVariantId = UserSession.selectedVariantId;
+            if (sessionVariantId != null && sessionVariantId > 0) {
+              for (final row in _topPicks) {
+                if ((int.tryParse('${row['variant_id'] ?? row['variantId']}') ?? 0) ==
+                    sessionVariantId) {
+                  _selected = row;
+                  break;
+                }
+              }
+            }
             _selected ??= widget.presetRecommendation ?? _topPicks.first;
           }
         });
@@ -311,9 +337,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     required bool aiPowered,
     required bool preserveSelection,
   }) {
+    final sessionVariantId = UserSession.selectedVariantId;
     final selectedId = preserveSelection && _selected != null
         ? '${_selected!['variant_id'] ?? _selected!['variantId']}'
-        : null;
+        : (sessionVariantId != null && sessionVariantId > 0
+            ? '$sessionVariantId'
+            : null);
 
     setState(() {
       _topPicks = topPicks;
@@ -321,15 +350,27 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       _aiSummary = aiSummary;
       _aiPowered = aiPowered;
       _recommendationsLoading = false;
-      if (!preserveSelection) {
-        _selected ??= widget.presetRecommendation ?? (topPicks.isNotEmpty ? topPicks.first : null);
-      } else if (selectedId != null && selectedId.isNotEmpty) {
-        for (final row in topPicks) {
+      if (selectedId != null && selectedId.isNotEmpty) {
+        Map<String, dynamic>? match;
+        for (final row in [
+          ...topPicks,
+          ...categories['formal']!,
+          ...categories['alternative']!,
+        ]) {
           if ('${row['variant_id'] ?? row['variantId']}' == selectedId) {
-            _selected = row;
+            match = row;
             break;
           }
         }
+        if (match != null) {
+          _selected = match;
+        } else if (!preserveSelection) {
+          _selected ??= widget.presetRecommendation ??
+              (topPicks.isNotEmpty ? topPicks.first : null);
+        }
+      } else if (!preserveSelection) {
+        _selected ??= widget.presetRecommendation ??
+            (topPicks.isNotEmpty ? topPicks.first : null);
       }
     });
 
@@ -713,6 +754,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           _previewError = null;
           _previewGenerating = false;
         });
+        UserSession.selectedVariantId = variantId;
+        UserSession.selectedStyleName = _selectedStyleName;
         UserSession.selectedPreviewImages = urls;
         UserSession.customerPreviewImages = urls;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -765,6 +808,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         _previewGenerating = false;
         _previewError = null;
       });
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedStyleName = _selectedStyleName;
       UserSession.selectedPreviewImages = urls;
       UserSession.customerPreviewImages = urls;
       final quota = FaceScanService.quotaFromResponse(data);
@@ -879,16 +924,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
 
     try {
-    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-      );
-      return;
-    }
+      if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+        if (!mounted) return;
+        setState(() => _bookingInFlight = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        // Keep this results page under Appointments so generated previews stay in memory.
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
+      }
 
       final scanSessionId = UserSession.ensureScanSessionId();
       UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
@@ -929,20 +976,20 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
       unawaited(
         AiFunnelService.saveSelection(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: userId,
-        variantId: variantId,
-        styleName: UserSession.selectedStyleName ?? 'Style',
+          scanSessionId: UserSession.ensureScanSessionId(),
+          userId: userId,
+          variantId: variantId,
+          styleName: UserSession.selectedStyleName ?? 'Style',
           faceShape: _faceShape,
           hairTexture: _hairTexture,
-        hairDensity: null,
-        hairLength: null,
-        estimatedMinutes: int.tryParse(
-          '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
-        ),
-        frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-        sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-        backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+          hairDensity: null,
+          hairLength: null,
+          estimatedMinutes: int.tryParse(
+            '${selected['estimated_minutes'] ?? selected['estimatedMinutes'] ?? 60}',
+          ),
+          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
         ).catchError((_) {}),
       );
 
@@ -1014,12 +1061,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               currentIndex: 2,
               onTap: (index) {
                 if (index == 0) {
+                  // Leaving results entirely — discard in-memory scan UI state.
                   UserSession.resetScanState();
                   Navigator.of(context).pushReplacement(
                     MaterialPageRoute(builder: (_) => const DashboardPage()),
                   );
                 } else if (index == 1) {
-                  Navigator.of(context).pushReplacement(
+                  // Push (not replace) so generated previews survive when user backs out.
+                  Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const AppointmentsPage()),
                   );
                 } else if (index == 2) {

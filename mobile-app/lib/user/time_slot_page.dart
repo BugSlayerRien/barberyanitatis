@@ -146,6 +146,16 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     if (!mounted) {
       return;
     }
+
+    if (!_isWithinWeatherForecastWindow(_activeDate)) {
+      setState(() {
+        _weatherSummary = null;
+        _timeAdvice = null;
+        _loadingWeatherAdvice = false;
+      });
+      return;
+    }
+
     setState(() {
       _loadingWeatherAdvice = true;
     });
@@ -232,6 +242,22 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     }
   }
 
+  /// Open-Meteo daily forecast is reliable near-term; hide advice beyond 7 days.
+  bool _isWithinWeatherForecastWindow(DateTime date) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final target = DateTime(date.year, date.month, date.day);
+    final daysAhead = target.difference(today).inDays;
+    return daysAhead >= 0 && daysAhead <= 7;
+  }
+
+  String _bestTimePrefix() {
+    if (_isSameDay(_activeDate, DateTime.now())) {
+      return 'Best today';
+    }
+    return 'Best for ${_formatDisplayDate(_activeDate)}';
+  }
+
   List<Map<String, dynamic>> _availableSlotsForAdvice() {
     return _slots.where(_isSlotBookable).toList();
   }
@@ -240,7 +266,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     final high = maxTemp != null ? '${maxTemp.toStringAsFixed(0)}C' : 'n/a';
     final low = minTemp != null ? '${minTemp.toStringAsFixed(0)}C' : 'n/a';
     final rain = rainChance != null ? '${rainChance.toStringAsFixed(0)}%' : 'n/a';
-    return 'Forecast: high $high, low $low, rain chance $rain.';
+    final dayLabel = _isSameDay(_activeDate, DateTime.now())
+        ? 'today'
+        : _formatDisplayDate(_activeDate);
+    return 'Forecast for $dayLabel: high $high, low $low, rain chance $rain.';
   }
 
   String _buildHeuristicAdvice({
@@ -261,13 +290,14 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     );
 
     final displayTime = preferred['display_time']?.toString() ?? preferred['slot_time']?.toString() ?? '';
+    final prefix = _bestTimePrefix();
     if (rainChance != null && rainChance >= 60) {
-      return 'Best today: $displayTime. It keeps distance from occupied times and lowers rain-travel risk.';
+      return '$prefix: $displayTime. It keeps distance from occupied times and lowers rain-travel risk.';
     }
     if (maxTemp != null && maxTemp >= 33) {
-      return 'Best today: $displayTime. It stays buffered from occupied times and avoids hotter commute hours.';
+      return '$prefix: $displayTime. It stays buffered from occupied times and avoids hotter commute hours.';
     }
-    return 'Best today: $displayTime. It is the most buffered slot from currently taken times.';
+    return '$prefix: $displayTime. It is the most buffered slot from currently taken times.';
   }
 
   String? _validateAiAdvice(String? aiAdvice, List<Map<String, dynamic>> availableSlots) {
@@ -281,7 +311,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     }
 
     final lower = cleaned.toLowerCase();
-    if (lower == 'best today:' || cleaned.endsWith(':')) {
+    if (lower.startsWith('best today:') && cleaned.length <= 'best today:'.length + 1) {
+      return null;
+    }
+    if (cleaned.endsWith(':')) {
       return null;
     }
 
@@ -330,11 +363,12 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       return null;
     }
 
+    final bestPrefix = _bestTimePrefix();
     final prompt = '''
 You are a scheduling assistant for a barbershop.
-Pick the best appointment time for the customer based on weather and available slots.
-Date: $date
-Weather summary: $weatherSummary
+Pick the best appointment time for the customer based on weather and available slots for the selected date only.
+Selected date: $date
+Weather summary for that date: $weatherSummary
 High temp: ${maxTemp?.toStringAsFixed(1) ?? 'n/a'}
 Low temp: ${minTemp?.toStringAsFixed(1) ?? 'n/a'}
 Rain chance: ${rainChance?.toStringAsFixed(1) ?? 'n/a'}
@@ -343,8 +377,9 @@ Taken slots: ${occupiedText.isEmpty ? 'none' : occupiedText}
 Preferred buffered slot: $recommendedTime
 
 Return exactly one short sentence in this format:
-Best today: <time>. <reason>
+$bestPrefix: <time>. <reason>
 Use the preferred buffered slot as the time unless it is not in available slots.
+Do not say "today" unless the selected date is actually today.
 Keep the total response under 24 words.
 ''';
 
@@ -525,6 +560,7 @@ Keep the total response under 24 words.
               ),
             ),
             const SizedBox(height: 16),
+            if (_isWithinWeatherForecastWindow(_activeDate)) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(14),
@@ -548,9 +584,9 @@ Keep the total response under 24 words.
                   const SizedBox(width: 10),
                   Expanded(
                     child: _loadingWeatherAdvice
-                        ? const Text(
-                            'Checking weather and suggested best time...',
-                            style: TextStyle(color: Colors.white70, fontSize: 12),
+                        ? Text(
+                            'Checking weather for ${_formatDisplayDate(_activeDate)} and suggested best time...',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
                           )
                         : Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -575,6 +611,7 @@ Keep the total response under 24 words.
               ),
             ),
             const SizedBox(height: 18),
+            ],
 
             if (UserSession.selectedStyleName != null || UserSession.selectedVariantId != null) ...[
               const Text('Selected Haircut', style: TextStyle(color: Colors.white70, fontSize: 12)),
