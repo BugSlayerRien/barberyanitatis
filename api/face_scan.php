@@ -520,7 +520,7 @@ try {
         if (!ai_service_is_available() && !ai_tryon_is_configured()) {
             json_response([
                 'error' => 'AI generation is not configured',
-                'hint' => 'Start ai-service (AI_SERVICE_URL) or set GEMINI_API_KEY / GEMINI_IMAGE_API_KEY (preferred) or REPLICATE_API_TOKEN in .env.',
+                'hint' => 'Start ai-service (AI_SERVICE_URL) or set XAI_API_KEY / GEMINI_API_KEY / REPLICATE_API_TOKEN in .env.',
             ], 503);
         }
 
@@ -634,7 +634,11 @@ try {
 
         $hairColorLabel = trim((string)($sessionMeta['hair_color_label'] ?? ''));
 
-        if (ai_service_is_available()) {
+        // Explicit gemini/grok in AI_TRYON_PROVIDER always wins over the Python sidecar
+        // for image generation (sidecar remains used for face analysis only).
+        $useCloudTryOn = ai_tryon_prefers_cloud_provider() || !ai_service_is_available();
+
+        if (!$useCloudTryOn && ai_service_is_available()) {
             $generated = ai_service_generate_style(
                 $absolute,
                 $styleName,
@@ -686,7 +690,7 @@ try {
                         ? 'The AI provider has no credits/quota left for haircut generation right now.'
                         : $err,
                     'hint' => $isBilling
-                        ? 'Check your Gemini/Replicate billing and quota, wait a few minutes, then try again.'
+                        ? 'Check your Gemini/Grok/Replicate billing and quota, wait a few minutes, then try again.'
                         : 'Check server logs for details.',
                 ], $isBilling ? 402 : 502);
             }
