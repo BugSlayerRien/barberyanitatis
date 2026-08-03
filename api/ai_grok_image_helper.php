@@ -1,0 +1,211 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Grok Imagine (xAI) image editing for 3-angle face-scan try-on.
+ * Uses POST https://api.x.ai/v1/images/edits with model grok-imagine-image by default.
+ *
+ * Reuses the shared style tables, hair-only prompt builder, and image resize/data-URI
+ * helper from replicate_helper.php so all providers stay behaviorally consistent.
+ */
+
+require_once __DIR__ . '/replicate_helper.php';
+
+function grok_image_api_key(): string
+{
+    return trim((string)(
+        getenv('GROK_IMAGE_API_KEY')
+        ?: ($_ENV['GROK_IMAGE_API_KEY'] ?? $_SERVER['GROK_IMAGE_API_KEY'] ?? '')
+        ?: getenv('XAI_API_KEY')
+        ?: ($_ENV['XAI_API_KEY'] ?? $_SERVER['XAI_API_KEY'] ?? '')
+    ));
+}
+
+function grok_image_model(): string
+{
+    $model = trim((string)(getenv('GROK_IMAGE_MODEL') ?: ($_ENV['GROK_IMAGE_MODEL'] ?? '')));
+    return $model !== '' ? $model : 'grok-imagine-image';
+}
+
+function grok_image_is_configured(): bool
+{
+    $key = grok_image_api_key();
+    return $key !== '' && $key !== 'REPLACE_WITH_XAI_KEY';
+}
+
+/**
+ * Single image-edit call via Grok Imagine: source photo + text prompt → raw image bytes.
+ *
+ * @return array{ok: bool, bytes: string, error: string}
+ */
+function grok_generate_image_edit(string $absoluteImagePath, string $prompt): array
+{
+    $apiKey = grok_image_api_key();
+    if ($apiKey === '') {
+        return ['ok' => false, 'bytes' => '', 'error' => 'Grok/xAI image API key is not configured'];
+    }
+
+    $data = replicate_image_to_data_uri($absoluteImagePath);
+    if (!$data['ok']) {
+        return ['ok' => false, 'bytes' => '', 'error' => $data['error']];
+    }
+
+    $payload = json_encode([
+        'model' => grok_image_model(),
+        'prompt' => $prompt,
+        'image' => [
+            'url' => $data['dataUri'],
+            'type' => 'image_url',
+        ],
+    ]);
+    if ($payload === false) {
+        return ['ok' => false, 'bytes' => '', 'error' => 'Failed to encode Grok payload'];
+    }
+
+    $ch = curl_init('https://api.x.ai/v1/images/edits');
+    $opts = [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Authorization: Bearer ' . $apiKey,
+        ],
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_TIMEOUT => 180,
+    ];
+    if (function_exists('api_curl_ssl_options')) {
+        $opts += api_curl_ssl_options();
+    }
+    curl_setopt_array($ch, $opts);
+    $raw = curl_exec($ch);
+    $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+
+    if (!is_string($raw)) {
+        return ['ok' => false, 'bytes' => '', 'error' => $curlError !== '' ? $curlError : 'No response from Grok'];
+    }
+
+    $decoded = json_decode($raw, true);
+    if ($httpCode < 200 || $httpCode >= 300 || !is_array($decoded)) {
+        $detail = is_array($decoded)
+            ? (string)($decoded['error']['message'] ?? $decoded['error'] ?? substr($raw, 0, 400))
+            : substr($raw, 0, 400);
+        return ['ok' => false, 'bytes' => '', 'error' => "Grok error ({$httpCode}): {$detail}"];
+    }
+
+    $outputUrl = '';
+    if (!empty($decoded['data'][0]['url']) && is_string($decoded['data'][0]['url'])) {
+        $outputUrl = $decoded['data'][0]['url'];
+    } elseif (!empty($decoded['url']) && is_string($decoded['url'])) {
+        $outputUrl = $decoded['url'];
+    } elseif (!empty($decoded['data'][0]['b64_json']) && is_string($decoded['data'][0]['b64_json'])) {
+        $bytes = base64_decode($decoded['data'][0]['b64_json'], true);
+        if (is_string($bytes) && $bytes !== '') {
+            return ['ok' => true, 'bytes' => $bytes, 'error' => ''];
+        }
+    }
+
+    if ($outputUrl === '') {
+        return ['ok' => false, 'bytes' => '', 'error' => 'Grok returned no image URL'];
+    }
+
+    $imgCh = curl_init($outputUrl);
+    $imgOpts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 120,
+        CURLOPT_FOLLOWLOCATION => true,
+    ];
+    if (function_exists('api_curl_ssl_options')) {
+        $imgOpts += api_curl_ssl_options();
+    }
+    curl_setopt_array($imgCh, $imgOpts);
+    $imgBytes = curl_exec($imgCh);
+    curl_close($imgCh);
+
+    if (!is_string($imgBytes) || $imgBytes === '') {
+        return ['ok' => false, 'bytes' => '', 'error' => 'Failed to download Grok-generated image'];
+    }
+
+    return ['ok' => true, 'bytes' => $imgBytes, 'error' => ''];
+}
+
+/**
+ * Generate front/left/right try-on images via Grok Imagine from stored captures.
+ *
+ * @param array{front: string, left: string, right: string} $capturePaths relative paths
+ * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string}
+ */
+function grok_generate_three_view_previews(
+    array $capturePaths,
+    string $styleName,
+    ?string $styleCode = null,
+    int $hairLengthLevel = 1,
+    string $hairColorLabel = ''
+): array {
+    foreach (['front', 'left', 'right'] as $angle) {
+        if (empty($capturePaths[$angle])) {
+            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'error' => "Missing capture: {$angle}"];
+        }
+    }
+
+    $styleKey = replicate_resolve_style_key($styleName, $styleCode);
+    $prompts = replicate_style_prompts();
+    $styleDesc = $prompts[$styleKey] ?? ($styleName . ' hairstyle');
+    $minLengths = replicate_style_min_length();
+    $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
+    $lengthNote = null;
+    if (!$feasibleToday) {
+        $lengthNote = 'This style usually needs more length than detected today. '
+            . 'Preview shows the target look — ask your barber what is achievable today.';
+    }
+
+    $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
+        . "that photo's original head turn and camera angle — do not make every frame face the camera.";
+
+    if ($feasibleToday) {
+        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
+    } else {
+        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
+            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
+            . "Identity and background must match the input.{$profileNote}";
+    }
+
+    $hints = replicate_view_angle_hints();
+    $resultImages = [];
+    foreach (['front', 'left', 'right'] as $viewKey) {
+        $absolute = replicate_absolute_path_from_relative((string)$capturePaths[$viewKey]);
+        $viewPrompt = $basePrompt . ' ' . ($hints[$viewKey] ?? '');
+        $generated = grok_generate_image_edit($absolute, $viewPrompt);
+        if (!$generated['ok']) {
+            return [
+                'ok' => false,
+                'images' => [],
+                'feasibleToday' => $feasibleToday,
+                'lengthNote' => $lengthNote,
+                'error' => $viewKey . ' view: ' . $generated['error'],
+            ];
+        }
+        $resultImages[$viewKey] = $generated['bytes'];
+    }
+
+    if (isset($resultImages['left'], $resultImages['right'])
+        && hash('sha256', $resultImages['left']) === hash('sha256', $resultImages['right'])) {
+        $absoluteRight = replicate_absolute_path_from_relative((string)$capturePaths['right']);
+        $retryPrompt = $basePrompt . ' ' . ($hints['right'] ?? '')
+            . ' CRITICAL: The right-profile output must NOT match the left-profile output. '
+            . 'This input is RIGHT profile only: nose must stay toward the LEFT side of the frame.';
+        $retry = grok_generate_image_edit($absoluteRight, $retryPrompt);
+        if ($retry['ok']) {
+            $resultImages['right'] = $retry['bytes'];
+        }
+    }
+
+    return [
+        'ok' => true,
+        'images' => $resultImages,
+        'feasibleToday' => $feasibleToday,
+        'lengthNote' => $lengthNote,
+        'error' => '',
+    ];
+}

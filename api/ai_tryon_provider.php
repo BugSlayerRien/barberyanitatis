@@ -4,23 +4,26 @@ declare(strict_types=1);
 /**
  * Provider abstraction for AI hairstyle try-on image generation. face_scan.php should
  * only ever call ai_tryon_generate_three_view_previews() — swapping providers (Gemini,
- * Replicate, a future Grok, etc.) never requires touching the API contract or the mobile
- * client.
+ * Grok, Replicate, etc.) never requires touching the API contract or the mobile client.
  */
 
 require_once __DIR__ . '/replicate_helper.php';
 require_once __DIR__ . '/ai_gemini_image_helper.php';
+require_once __DIR__ . '/ai_grok_image_helper.php';
 
 function ai_tryon_provider_name(): string
 {
     $configured = strtolower(trim((string)(
         getenv('AI_TRYON_PROVIDER') ?: ($_ENV['AI_TRYON_PROVIDER'] ?? '')
     )));
-    if (in_array($configured, ['gemini', 'replicate'], true)) {
+    if (in_array($configured, ['gemini', 'grok', 'replicate'], true)) {
         return $configured;
     }
     if (gemini_image_is_configured()) {
         return 'gemini';
+    }
+    if (grok_image_is_configured()) {
+        return 'grok';
     }
     if (replicate_is_configured()) {
         return 'replicate';
@@ -30,12 +33,24 @@ function ai_tryon_provider_name(): string
 
 function ai_tryon_is_configured(): bool
 {
-    return gemini_image_is_configured() || replicate_is_configured();
+    return gemini_image_is_configured() || grok_image_is_configured() || replicate_is_configured();
 }
 
 /**
- * Generate front/left/right try-on images using the configured provider, with an
- * automatic fallback to Replicate if Gemini fails and Replicate is also configured.
+ * True when AI_TRYON_PROVIDER is explicitly set to a cloud image provider that should
+ * bypass the Python sidecar for generation (sidecar still used for face analysis).
+ */
+function ai_tryon_prefers_cloud_provider(): bool
+{
+    $configured = strtolower(trim((string)(
+        getenv('AI_TRYON_PROVIDER') ?: ($_ENV['AI_TRYON_PROVIDER'] ?? '')
+    )));
+    return in_array($configured, ['gemini', 'grok'], true);
+}
+
+/**
+ * Generate front/left/right try-on images using the configured provider, with fallbacks
+ * to other configured providers on failure.
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
  * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string, provider: string}
@@ -49,17 +64,59 @@ function ai_tryon_generate_three_view_previews(
 ): array {
     $provider = ai_tryon_provider_name();
 
+    if ($provider === 'grok') {
+        $result = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+        if ($result['ok']) {
+            $result['provider'] = 'grok';
+            return $result;
+        }
+        error_log('ai_tryon_provider: Grok failed (' . $result['error'] . '), trying fallbacks.');
+
+        if (gemini_image_is_configured()) {
+            $fallback = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            if ($fallback['ok']) {
+                $fallback['provider'] = 'gemini';
+                return $fallback;
+            }
+            error_log('ai_tryon_provider: Gemini fallback failed (' . $fallback['error'] . ').');
+        }
+
+        if (replicate_is_configured()) {
+            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback['provider'] = 'replicate';
+            return $fallback;
+        }
+
+        $result['provider'] = 'grok';
+        return $result;
+    }
+
     if ($provider === 'gemini') {
         $result = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
-        if ($result['ok'] || !replicate_is_configured()) {
+        if ($result['ok']) {
             $result['provider'] = 'gemini';
             return $result;
         }
 
-        error_log('ai_tryon_provider: Gemini failed (' . $result['error'] . '), falling back to Replicate.');
-        $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
-        $fallback['provider'] = 'replicate';
-        return $fallback;
+        error_log('ai_tryon_provider: Gemini failed (' . $result['error'] . '), trying fallbacks.');
+
+        if (grok_image_is_configured()) {
+            $fallback = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            if ($fallback['ok']) {
+                $fallback['provider'] = 'grok';
+                return $fallback;
+            }
+            error_log('ai_tryon_provider: Grok fallback failed (' . $fallback['error'] . ').');
+        }
+
+        if (replicate_is_configured()) {
+            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback['provider'] = 'replicate';
+            return $fallback;
+        }
+
+        $result['provider'] = 'gemini';
+        return $result;
     }
 
     if ($provider === 'replicate') {
@@ -73,7 +130,7 @@ function ai_tryon_generate_three_view_previews(
         'images' => [],
         'feasibleToday' => true,
         'lengthNote' => null,
-        'error' => 'No AI try-on provider is configured. Set GEMINI_API_KEY (or GEMINI_IMAGE_API_KEY) or REPLICATE_API_TOKEN in .env.',
+        'error' => 'No AI try-on provider is configured. Set XAI_API_KEY, GEMINI_API_KEY, or REPLICATE_API_TOKEN in .env.',
         'provider' => 'none',
     ];
 }
