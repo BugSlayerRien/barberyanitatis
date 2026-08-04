@@ -9,8 +9,9 @@ class ApiConfig {
   static const String webBaseUrl = 'http://localhost$_apiPath';
 
   /// PC Wi‑Fi IPv4 from `ipconfig` (override: `--dart-define=LAN_HOST=192.168.1.x`).
+  /// Update this whenever your PC's LAN IP changes (router DHCP).
   static const String defaultLanHost =
-      String.fromEnvironment('LAN_HOST', defaultValue: '192.168.1.4');
+      String.fromEnvironment('LAN_HOST', defaultValue: '192.168.1.3');
 
   static const String androidEmulatorBaseUrl = 'http://10.0.2.2$_apiPath';
   static String lanBaseUrl(String host) => 'http://$host$_apiPath';

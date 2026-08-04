@@ -164,6 +164,46 @@ function shop_timezone(): string
     return shop_schedule_config()['timezone'];
 }
 
+/** Escape shop timezone for safe use inside SQL string literals. */
+function shop_timezone_sql(): string
+{
+    return str_replace("'", "''", shop_timezone());
+}
+
+/**
+ * SQL expression: interpret a naive appointment wall-clock timestamp as shop-local time
+ * and convert to timestamptz for comparison with NOW().
+ *
+ * Example: shop_local_ts_sql('appointment_date', 'start_time')
+ * → ((appointment_date + start_time) AT TIME ZONE 'Asia/Manila')
+ */
+function shop_local_ts_sql(string $dateExpr, string $timeExpr): string
+{
+    $tz = shop_timezone_sql();
+
+    return "(({$dateExpr}::date + {$timeExpr}::time) AT TIME ZONE '{$tz}')";
+}
+
+/**
+ * SQL expression for "today" in the shop timezone (date only).
+ */
+function shop_local_today_sql(): string
+{
+    $tz = shop_timezone_sql();
+
+    return "((CURRENT_TIMESTAMP AT TIME ZONE '{$tz}')::date)";
+}
+
+/**
+ * SQL expression for current local time-of-day in the shop timezone.
+ */
+function shop_local_time_sql(): string
+{
+    $tz = shop_timezone_sql();
+
+    return "((CURRENT_TIMESTAMP AT TIME ZONE '{$tz}')::time)";
+}
+
 function shop_now(): DateTimeImmutable
 {
     return new DateTimeImmutable('now', new DateTimeZone(shop_timezone()));
@@ -780,14 +820,16 @@ function auto_start_due_booking_groups(PDO $pdo): int
     require_once __DIR__ . '/group_booking.php';
     ensure_group_booking_schema($pdo);
 
+    $localToday = shop_local_today_sql();
+    $localTime = shop_local_time_sql();
     $selectStmt = $pdo->query(
         "SELECT booking_group_id
          FROM appointments
          WHERE booking_group_id IS NOT NULL
            AND status IN ('Scheduled', 'CheckedIn')
            AND (
-                appointment_date < CURRENT_DATE
-                OR (appointment_date = CURRENT_DATE AND start_time <= CURRENT_TIME)
+                appointment_date < {$localToday}
+                OR (appointment_date = {$localToday} AND start_time <= {$localTime})
            )
          GROUP BY booking_group_id"
     );
@@ -826,17 +868,20 @@ function auto_start_due_appointments(PDO $pdo): int
     $duration = shop_appointment_duration_minutes();
     $startedGroups = auto_start_due_booking_groups($pdo);
 
+    $localToday = shop_local_today_sql();
+    $localTime = shop_local_time_sql();
+    $startTs = shop_local_ts_sql('appointment_date', 'start_time');
     $selectStmt = $pdo->prepare(
         "SELECT appointment_id, booking_code, user_id
          FROM appointments
          WHERE booking_group_id IS NULL
            AND status IN ('Scheduled', 'CheckedIn')
            AND (
-                appointment_date < CURRENT_DATE
-                OR (appointment_date = CURRENT_DATE AND start_time <= CURRENT_TIME)
+                appointment_date < {$localToday}
+                OR (appointment_date = {$localToday} AND start_time <= {$localTime})
            )
            AND (
-                appointment_date::timestamp + start_time + make_interval(mins => :duration) > NOW()
+                {$startTs} + make_interval(mins => :duration) > NOW()
            )"
     );
     $selectStmt->execute([':duration' => $duration]);
@@ -1023,6 +1068,8 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
     ensure_group_booking_schema($pdo);
     $duration = shop_appointment_duration_minutes();
     $completedUnits = 0;
+    $startTs = shop_local_ts_sql('appointment_date', 'start_time');
+    $endTs = shop_local_ts_sql('appointment_date', 'end_time');
 
     $groupStmt = $pdo->prepare(
         "SELECT booking_group_id, MIN(appointment_id) AS lead_appointment_id,
@@ -1031,16 +1078,14 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
          WHERE booking_group_id IS NOT NULL
            AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
          GROUP BY booking_group_id
-         HAVING MAX(
-                appointment_date::timestamp + start_time + make_interval(mins => :duration)
-            ) <= NOW()
+         HAVING MAX({$startTs} + make_interval(mins => :duration)) <= NOW()
             OR MAX(
                 CASE
                     WHEN end_time IS NOT NULL
                          AND end_time <> '00:00:00'::time
                          AND end_time > start_time
-                    THEN appointment_date::timestamp + end_time
-                    ELSE NULL::timestamp
+                    THEN {$endTs}
+                    ELSE NULL::timestamptz
                 END
             ) <= NOW()"
     );
@@ -1077,12 +1122,12 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
          WHERE booking_group_id IS NULL
            AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
            AND (
-                appointment_date::timestamp + start_time + make_interval(mins => :duration) <= NOW()
+                {$startTs} + make_interval(mins => :duration) <= NOW()
                 OR (
                     end_time IS NOT NULL
                     AND end_time <> '00:00:00'::time
                     AND end_time > start_time
-                    AND appointment_date::timestamp + end_time <= NOW()
+                    AND {$endTs} <= NOW()
                 )
            )"
     );
