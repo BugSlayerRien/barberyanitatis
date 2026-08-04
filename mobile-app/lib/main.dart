@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_navigator.dart';
 
@@ -80,14 +79,7 @@ class TatisBarbershopApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         fontFamily: 'CenturyGothic',
-        textTheme: baseTextTheme.copyWith(
-          titleSmall: GoogleFonts.montserrat(textStyle: baseTextTheme.titleSmall),
-          titleMedium: GoogleFonts.montserrat(textStyle: baseTextTheme.titleMedium),
-          titleLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.titleLarge),
-          labelSmall: GoogleFonts.montserrat(textStyle: baseTextTheme.labelSmall),
-          labelMedium: GoogleFonts.montserrat(textStyle: baseTextTheme.labelMedium),
-          labelLarge: GoogleFonts.montserrat(textStyle: baseTextTheme.labelLarge),
-        ),
+        textTheme: baseTextTheme,
       ),
       home: _appMode == 'kiosk' ? const KioskHomePage() : const SplashPage(),
       routes: {

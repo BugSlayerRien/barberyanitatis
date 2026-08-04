@@ -573,33 +573,47 @@ class _AuthPageState extends State<AuthPage> {
                       setState(() => _obscureLogin = !_obscureLogin))),
         ),
         const SizedBox(height: 12),
-        // Remember me and Forgot password
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        // Remember me and Forgot password — pinned to opposite sides
+        Row(
           children: [
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Checkbox(
-                  value: _rememberMe,
-                  onChanged: (value) =>
-                      setState(() => _rememberMe = value ?? false),
-                  side: const BorderSide(color: Colors.white54),
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Checkbox(
+                    value: _rememberMe,
+                    onChanged: (value) =>
+                        setState(() => _rememberMe = value ?? false),
+                    side: const BorderSide(color: Colors.white54),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ),
-                const Text('Remember me',
-                    style: TextStyle(color: Colors.white70, fontSize: 12)),
+                const SizedBox(width: 6),
+                const Text(
+                  'Remember me',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
               ],
             ),
+            const Spacer(),
             TextButton(
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
                 );
               },
-              child: const Text('Forgot password?',
-                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+              style: TextButton.styleFrom(
+                padding: EdgeInsets.zero,
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text(
+                'Forgot password?',
+                style: TextStyle(color: Colors.white70, fontSize: 12),
+              ),
             ),
           ],
         ),

@@ -49,8 +49,28 @@ function ai_tryon_prefers_cloud_provider(): bool
 }
 
 /**
+ * When AI_TRYON_PROVIDER is explicitly set (gemini|grok|replicate), fail on that
+ * provider instead of silently burning credits on another (e.g. Replicate).
+ * Set AI_TRYON_ALLOW_FALLBACK=true to restore cross-provider fallbacks.
+ */
+function ai_tryon_allow_fallback(): bool
+{
+    $configured = strtolower(trim((string)(
+        getenv('AI_TRYON_PROVIDER') ?: ($_ENV['AI_TRYON_PROVIDER'] ?? '')
+    )));
+    // Auto mode (blank provider) may still chain providers.
+    if ($configured === '' || !in_array($configured, ['gemini', 'grok', 'replicate'], true)) {
+        return true;
+    }
+    $raw = strtolower(trim((string)(
+        getenv('AI_TRYON_ALLOW_FALLBACK') ?: ($_ENV['AI_TRYON_ALLOW_FALLBACK'] ?? '')
+    )));
+    return in_array($raw, ['1', 'true', 'yes', 'on'], true);
+}
+
+/**
  * Generate front/left/right try-on images using the configured provider, with fallbacks
- * to other configured providers on failure.
+ * to other configured providers on failure (only when allowed — see ai_tryon_allow_fallback).
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
  * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string, provider: string}
@@ -63,6 +83,7 @@ function ai_tryon_generate_three_view_previews(
     string $hairColorLabel
 ): array {
     $provider = ai_tryon_provider_name();
+    $allowFallback = ai_tryon_allow_fallback();
 
     if ($provider === 'grok') {
         $result = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
@@ -70,9 +91,10 @@ function ai_tryon_generate_three_view_previews(
             $result['provider'] = 'grok';
             return $result;
         }
-        error_log('ai_tryon_provider: Grok failed (' . $result['error'] . '), trying fallbacks.');
+        error_log('ai_tryon_provider: Grok failed (' . $result['error'] . ')'
+            . ($allowFallback ? ', trying fallbacks.' : ' — fallbacks disabled (AI_TRYON_PROVIDER=grok).'));
 
-        if (gemini_image_is_configured()) {
+        if ($allowFallback && gemini_image_is_configured()) {
             $fallback = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
             if ($fallback['ok']) {
                 $fallback['provider'] = 'gemini';
@@ -81,7 +103,7 @@ function ai_tryon_generate_three_view_previews(
             error_log('ai_tryon_provider: Gemini fallback failed (' . $fallback['error'] . ').');
         }
 
-        if (replicate_is_configured()) {
+        if ($allowFallback && replicate_is_configured()) {
             $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
             $fallback['provider'] = 'replicate';
             return $fallback;
@@ -98,9 +120,10 @@ function ai_tryon_generate_three_view_previews(
             return $result;
         }
 
-        error_log('ai_tryon_provider: Gemini failed (' . $result['error'] . '), trying fallbacks.');
+        error_log('ai_tryon_provider: Gemini failed (' . $result['error'] . ')'
+            . ($allowFallback ? ', trying fallbacks.' : ' — fallbacks disabled (AI_TRYON_PROVIDER=gemini).'));
 
-        if (grok_image_is_configured()) {
+        if ($allowFallback && grok_image_is_configured()) {
             $fallback = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
             if ($fallback['ok']) {
                 $fallback['provider'] = 'grok';
@@ -109,7 +132,7 @@ function ai_tryon_generate_three_view_previews(
             error_log('ai_tryon_provider: Grok fallback failed (' . $fallback['error'] . ').');
         }
 
-        if (replicate_is_configured()) {
+        if ($allowFallback && replicate_is_configured()) {
             $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
             $fallback['provider'] = 'replicate';
             return $fallback;
