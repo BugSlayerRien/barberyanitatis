@@ -780,14 +780,17 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildQuickActions() {
-    return _QuickActionTile(
-      icon: Icons.folder_open_outlined,
-      label: 'Library',
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const HaircutsListPage()),
-        );
-      },
+    return SizedBox(
+      width: double.infinity,
+      child: _QuickActionTile(
+        icon: Icons.folder_open_outlined,
+        label: 'Library',
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const HaircutsListPage()),
+          );
+        },
+      ),
     );
   }
 
@@ -1303,24 +1306,27 @@ class _QuickActionTile extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: Colors.white24),
           ),
-          child: Column(
+          child: Row(
             children: [
-              Icon(icon, color: Colors.white, size: 22),
-              const SizedBox(height: 6),
+              Icon(icon, color: Colors.white, size: 24),
+              const SizedBox(width: 12),
               Text(
                 label,
                 style: const TextStyle(
                   fontFamily: _DashboardPageState._fontFamily,
                   color: Colors.white,
-                  fontSize: 11,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
+              const Spacer(),
+              const Icon(Icons.chevron_right, color: Colors.white54, size: 20),
             ],
           ),
         ),

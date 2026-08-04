@@ -86,6 +86,16 @@ uploads/face_scans/**
 !uploads/face_scans/.gitkeep
 
 # ==============================
+# Uploaded profile / barber photos
+# ==============================
+uploads/profiles/**
+!uploads/profiles/.gitkeep
+uploads/profile/**
+!uploads/profile/.gitkeep
+uploads/barbers/**
+!uploads/barbers/.gitkeep
+
+# ==============================
 # PayMongo temporary cache
 # ==============================
 mobile-app/backend/paymongo/.source_charge_cache/
