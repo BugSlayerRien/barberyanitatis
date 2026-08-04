@@ -35,13 +35,14 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage>
     with WidgetsBindingObserver, RouteAware {
+  static const _fontFamily = 'CenturyGothic';
+
   int _selectedIndex = 0; // Home tab
 
   bool _showWelcome = true;
   Timer? _welcomeTimer;
 
   bool _needsHairTextureOnboarding = false;
-  String? _userHairTexture;
   bool _isRouteSubscribed = false;
 
   Map<String, dynamic>? _nextUpcomingAppointment;
@@ -50,6 +51,10 @@ class _DashboardPageState extends State<DashboardPage>
   BookingDraft? _bookingDraft;
   bool _loadingHomeInsights = false;
   bool _hasActiveAppointment = false;
+  Map<String, dynamic>? _favoriteBarber;
+  Map<String, dynamic>? _recentHaircut;
+  Map<String, dynamic>? _trendingHaircut;
+  bool _loadingPersonalInsights = false;
   @override
   void initState() {
     super.initState();
@@ -125,13 +130,20 @@ class _DashboardPageState extends State<DashboardPage>
         _quickBookProfile = null;
         _bookingDraft = null;
         _hasActiveAppointment = false;
+        _favoriteBarber = null;
+        _recentHaircut = null;
+        _trendingHaircut = null;
         _loadingHomeInsights = false;
+        _loadingPersonalInsights = false;
       });
       return;
     }
 
     if (mounted) {
-      setState(() => _loadingHomeInsights = true);
+      setState(() {
+        _loadingHomeInsights = true;
+        _loadingPersonalInsights = true;
+      });
     }
 
     Map<String, dynamic>? upcoming;
@@ -144,18 +156,20 @@ class _DashboardPageState extends State<DashboardPage>
       hasActive = await BookingGuard.hasActiveAppointment(userId: userId);
     } catch (_) {}
 
-    draft = await BookingDraftService.load();
-    if (draft == null &&
-        UserSession.selectedVariantId != null &&
-        UserSession.selectedVariantId! > 0) {
-      draft = BookingDraft(
-        variantId: UserSession.selectedVariantId!,
-        styleName: UserSession.selectedStyleName,
-        serviceId: UserSession.selectedServiceId,
-        estimatedMinutes: UserSession.selectedEstimatedMinutes,
-        step: 'barber',
-        updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-      );
+    if (!hasActive) {
+      draft = await BookingDraftService.load();
+      if (draft == null &&
+          UserSession.selectedVariantId != null &&
+          UserSession.selectedVariantId! > 0) {
+        draft = BookingDraft(
+          variantId: UserSession.selectedVariantId!,
+          styleName: UserSession.selectedStyleName,
+          serviceId: UserSession.selectedServiceId,
+          estimatedMinutes: UserSession.selectedEstimatedMinutes,
+          step: 'barber',
+          updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+        );
+      }
     }
 
     try {
@@ -208,25 +222,57 @@ class _DashboardPageState extends State<DashboardPage>
       }
     } catch (_) {}
 
+    // Skip slow next-slot / quick-book lookups when the user already has an appointment.
+    if (!hasActive) {
+      try {
+        final profileResponse = await http.post(
+          Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'getQuickBookProfile',
+            'userID': userId,
+          }),
+        );
+        if (profileResponse.statusCode == 200 && profileResponse.body.isNotEmpty) {
+          final profileData =
+              jsonDecode(profileResponse.body) as Map<String, dynamic>;
+          quickProfile = profileData['profile'] as Map<String, dynamic>?;
+        }
+      } catch (_) {}
+
+      final slotResult = await BookingSlotsService.fetchBestSuggestion();
+      if (slotResult.isSuccess) {
+        suggestion = slotResult.suggestion;
+      }
+    }
+
+    Map<String, dynamic>? favoriteBarber;
+    Map<String, dynamic>? recentHaircut;
+    Map<String, dynamic>? trendingHaircut;
     try {
-      final profileResponse = await http.post(
+      final insightsResponse = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/booking.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'action': 'getQuickBookProfile',
+          'action': 'getCustomerHomeInsights',
           'userID': userId,
         }),
       );
-      if (profileResponse.statusCode == 200 && profileResponse.body.isNotEmpty) {
-        final profileData = jsonDecode(profileResponse.body) as Map<String, dynamic>;
-        quickProfile = profileData['profile'] as Map<String, dynamic>?;
+      if (insightsResponse.statusCode == 200 &&
+          insightsResponse.body.isNotEmpty) {
+        final insights =
+            jsonDecode(insightsResponse.body) as Map<String, dynamic>;
+        favoriteBarber = insights['favoriteBarber'] is Map
+            ? Map<String, dynamic>.from(insights['favoriteBarber'] as Map)
+            : null;
+        recentHaircut = insights['recentHaircut'] is Map
+            ? Map<String, dynamic>.from(insights['recentHaircut'] as Map)
+            : null;
+        trendingHaircut = insights['trendingHaircut'] is Map
+            ? Map<String, dynamic>.from(insights['trendingHaircut'] as Map)
+            : null;
       }
     } catch (_) {}
-
-    final slotResult = await BookingSlotsService.fetchBestSuggestion();
-    if (slotResult.isSuccess) {
-      suggestion = slotResult.suggestion;
-    }
 
     if (!mounted) return;
     setState(() {
@@ -235,7 +281,11 @@ class _DashboardPageState extends State<DashboardPage>
       _quickBookProfile = quickProfile;
       _bookingDraft = draft;
       _hasActiveAppointment = hasActive;
+      _favoriteBarber = favoriteBarber;
+      _recentHaircut = recentHaircut;
+      _trendingHaircut = trendingHaircut;
       _loadingHomeInsights = false;
+      _loadingPersonalInsights = false;
     });
   }
 
@@ -265,7 +315,6 @@ class _DashboardPageState extends State<DashboardPage>
 
     if (!mounted) return;
     setState(() {
-      _userHairTexture = texture;
       _needsHairTextureOnboarding = texture == null || texture.isEmpty;
     });
   }
@@ -278,6 +327,32 @@ class _DashboardPageState extends State<DashboardPage>
   void _openFaceScan() {
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+    );
+  }
+
+  void _openLastScanResults() {
+    final captures = UserSession.capturedFaceImages;
+    if (captures == null || captures.isEmpty) {
+      _openFaceScan();
+      return;
+    }
+    final scan = UserSession.lastScan ?? {};
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FaceScanResultsPage(
+          captures: Map<String, String>.from(captures),
+          faceShape: scan['faceShape']?.toString() ?? 'oval',
+          hairTexture: scan['hairTexture']?.toString() ??
+              UserSession.preferredHairTexture ??
+              'Straight',
+          hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
+          hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
+          analysisProvider: scan['analysisProvider']?.toString(),
+          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
+          noHairDetected: scan['noHairDetected'] == true,
+          hairColorLabel: scan['hairColor']?.toString(),
+        ),
+      ),
     );
   }
 
@@ -410,33 +485,6 @@ class _DashboardPageState extends State<DashboardPage>
 
     Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-    );
-  }
-
-  void _openLastScanResults() {
-    final captures = UserSession.capturedFaceImages;
-    if (captures == null || captures.isEmpty) {
-      _openFaceScan();
-      return;
-    }
-    final scan = UserSession.lastScan ?? {};
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => FaceScanResultsPage(
-          captures: Map<String, String>.from(captures),
-          faceShape: scan['faceShape']?.toString() ?? 'oval',
-          hairTexture: scan['hairTexture']?.toString() ??
-              _userHairTexture ??
-              UserSession.preferredHairTexture ??
-              'Straight',
-          hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
-          hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
-          analysisProvider: scan['analysisProvider']?.toString(),
-          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
-          noHairDetected: scan['noHairDetected'] == true,
-          hairColorLabel: scan['hairColor']?.toString(),
-        ),
-      ),
     );
   }
 
@@ -644,6 +692,11 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildAvailabilityTeaser() {
+    // Hide entirely when the customer already has something booked.
+    if (_hasActiveAppointment || _nextUpcomingAppointment != null) {
+      return const SizedBox.shrink();
+    }
+
     // When quick-book is available, the gold "Book your next slot" card already
     // shows the same suggestion and action — skip this duplicate teaser.
     if (_canQuickBook) {
@@ -727,42 +780,21 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildQuickActions() {
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickActionTile(
-            icon: Icons.face_retouching_natural,
-            label: 'Face scan',
-            onTap: _openFaceScan,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _QuickActionTile(
-            icon: Icons.calendar_month_outlined,
-            label: 'Book',
-            onTap: _canQuickBook ? _handleQuickBook : _openAppointments,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _QuickActionTile(
-            icon: Icons.folder_open_outlined,
-            label: 'Library',
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const HaircutsListPage()),
-              );
-            },
-          ),
-        ),
-      ],
+    return _QuickActionTile(
+      icon: Icons.folder_open_outlined,
+      label: 'Library',
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const HaircutsListPage()),
+        );
+      },
     );
   }
 
-  Widget _buildScanStatusCard() {
+  Widget _buildScanSessionCard() {
     final scan = UserSession.lastScan;
-    final hasScan = UserSession.hasRecentRecommendations || _hasActiveScanSession;
+    final hasScan =
+        UserSession.hasRecentRecommendations || _hasActiveScanSession;
 
     if (!hasScan) {
       return Container(
@@ -777,25 +809,52 @@ class _DashboardPageState extends State<DashboardPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Get personalized picks',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+              'Scan Session',
+              style: TextStyle(
+                fontFamily: _fontFamily,
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              'No scan results yet.',
+              style: TextStyle(
+                fontFamily: _fontFamily,
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 6),
             const Text(
-              'Run a 3-angle face scan for AI recommendations and try-on previews.',
-              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+              'Try our AI Face Scan for personalized recommendations!',
+              style: TextStyle(
+                fontFamily: _fontFamily,
+                color: Colors.white54,
+                fontSize: 12,
+                height: 1.4,
+              ),
             ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
+            const SizedBox(height: 14),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton(
                 onPressed: _openFaceScan,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(44),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
-                child: const Text('Start face scan', style: TextStyle(fontWeight: FontWeight.w700)),
+                child: const Text(
+                  'Start Scanning',
+                  style: TextStyle(
+                    fontFamily: _fontFamily,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                  ),
+                ),
               ),
             ),
           ],
@@ -804,7 +863,9 @@ class _DashboardPageState extends State<DashboardPage>
     }
 
     final face = scan?['faceShape']?.toString() ?? '—';
-    final texture = scan?['hairTexture']?.toString() ?? _userHairTexture ?? '—';
+    final texture = scan?['hairTexture']?.toString() ??
+        UserSession.preferredHairTexture ??
+        '—';
     final length = scan?['hairLength']?.toString() ?? '—';
 
     return Container(
@@ -819,10 +880,15 @@ class _DashboardPageState extends State<DashboardPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Your last scan',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16),
+            'Scan Session',
+            style: TextStyle(
+              fontFamily: _fontFamily,
+              color: Colors.white,
+              fontWeight: FontWeight.w700,
+              fontSize: 16,
+            ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
           Wrap(
             spacing: 8,
             runSpacing: 6,
@@ -842,7 +908,10 @@ class _DashboardPageState extends State<DashboardPage>
                     foregroundColor: Colors.white,
                     side: const BorderSide(color: Colors.white38),
                   ),
-                  child: const Text('View results'),
+                  child: const Text(
+                    'View results',
+                    style: TextStyle(fontFamily: _fontFamily),
+                  ),
                 ),
               ),
               const SizedBox(width: 10),
@@ -853,13 +922,269 @@ class _DashboardPageState extends State<DashboardPage>
                     backgroundColor: Colors.white,
                     foregroundColor: Colors.black,
                   ),
-                  child: const Text('New scan'),
+                  child: const Text(
+                    'New scan',
+                    style: TextStyle(
+                      fontFamily: _fontFamily,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _bookWithFavoriteBarber() async {
+    final barber = _favoriteBarber;
+    if (barber == null) return;
+    final barberId = int.tryParse('${barber['barberId']}') ?? 0;
+    final barberName = barber['fullName']?.toString() ?? 'Barber';
+    if (barberId <= 0) return;
+
+    if (_hasActiveAppointment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      await _openAppointments();
+      return;
+    }
+
+    await BookingDraftService.saveFromSession(
+      step: 'calendar',
+      barberId: barberId,
+      barberName: barberName,
+    );
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => GroupSizePage(
+          barberId: barberId,
+          barberName: barberName,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _bookAgainRecentHaircut() async {
+    final recent = _recentHaircut;
+    if (recent == null) return;
+
+    if (_hasActiveAppointment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      await _openAppointments();
+      return;
+    }
+
+    final variantId = int.tryParse('${recent['variantId']}') ?? 0;
+    final serviceId = int.tryParse('${recent['serviceId']}') ?? 0;
+    final styleName = recent['styleName']?.toString() ?? 'Haircut';
+    if (variantId > 0) {
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedStyleName = styleName;
+    }
+    if (serviceId > 0) {
+      UserSession.selectedServiceId = serviceId;
+    }
+
+    final barberId = int.tryParse('${recent['barberId']}') ?? 0;
+    final barberName = recent['barberName']?.toString() ?? 'Barber';
+    if (barberId > 0) {
+      await BookingDraftService.saveFromSession(
+        step: 'calendar',
+        barberId: barberId,
+        barberName: barberName,
+      );
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => GroupSizePage(
+            barberId: barberId,
+            barberName: barberName,
+          ),
+        ),
+      );
+      return;
+    }
+
+    await BookingDraftService.saveFromSession(step: 'barber');
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+    );
+  }
+
+  Future<void> _bookTrendingHaircut() async {
+    final trend = _trendingHaircut;
+    if (trend == null) return;
+
+    if (_hasActiveAppointment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You already have an active appointment.')),
+      );
+      await _openAppointments();
+      return;
+    }
+
+    final variantId = int.tryParse('${trend['variantId']}') ?? 0;
+    final serviceId = int.tryParse('${trend['serviceId']}') ?? 0;
+    final styleName = trend['styleName']?.toString() ?? 'Haircut';
+    if (variantId > 0) {
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedStyleName = styleName;
+    }
+    if (serviceId > 0) {
+      UserSession.selectedServiceId = serviceId;
+    }
+
+    await BookingDraftService.saveFromSession(step: 'barber');
+    if (!mounted) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+    );
+  }
+
+  Widget _buildPersonalizedSection() {
+    if (_loadingPersonalInsights &&
+        _favoriteBarber == null &&
+        _recentHaircut == null &&
+        _trendingHaircut == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF151515),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
+            ),
+            SizedBox(width: 12),
+            Text(
+              'Loading your picks…',
+              style: TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final cards = <Widget>[];
+
+    if (_favoriteBarber != null) {
+      final barber = _favoriteBarber!;
+      final rating = barber['avgRating'];
+      final ratingText = rating is num
+          ? rating.toStringAsFixed(1)
+          : (double.tryParse('$rating')?.toStringAsFixed(1) ?? '—');
+      final source = barber['source']?.toString() == 'customer_ratings'
+          ? 'From your ratings'
+          : 'Most booked by you';
+      cards.add(
+        _InsightCard(
+          eyebrow: 'Favorite barber',
+          title: barber['fullName']?.toString() ?? 'Barber',
+          subtitle: '$source · $ratingText★',
+          icon: Icons.star_rounded,
+          accent: const Color(0xFFA99941),
+          onAction: _bookWithFavoriteBarber,
+        ),
+      );
+    }
+
+    if (_recentHaircut != null) {
+      final recent = _recentHaircut!;
+      final date = recent['appointmentDate']?.toString() ?? '';
+      final barberName = recent['barberName']?.toString() ?? 'Barber';
+      cards.add(
+        _InsightCard(
+          eyebrow: 'Recent haircut',
+          title: recent['styleName']?.toString() ?? 'Haircut',
+          subtitle: date.isNotEmpty ? 'With $barberName · $date' : 'With $barberName',
+          icon: Icons.content_cut,
+          accent: Colors.white70,
+          onAction: _bookAgainRecentHaircut,
+        ),
+      );
+    }
+
+    if (_trendingHaircut != null) {
+      final trend = _trendingHaircut!;
+      final count = int.tryParse('${trend['bookingCount']}') ?? 0;
+      cards.add(
+        _InsightCard(
+          eyebrow: 'Trending haircut',
+          title: trend['styleName']?.toString() ?? 'Haircut',
+          subtitle: count > 0
+              ? 'Booked $count times in the last 90 days'
+              : 'Popular with customers right now',
+          icon: Icons.local_fire_department_outlined,
+          accent: const Color(0xFFE07A3D),
+          onAction: _bookTrendingHaircut,
+        ),
+      );
+    }
+
+    if (cards.isEmpty) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF151515),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Your dashboard',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 16,
+              ),
+            ),
+            SizedBox(height: 6),
+            Text(
+              'After a few bookings and ratings, your favorite barber, recent cut, and trending styles will show up here.',
+              style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'For you',
+          style: TextStyle(
+            fontFamily: _fontFamily,
+            color: Colors.white,
+            fontSize: 16,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
+        ...cards.map(
+          (card) => Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: card,
+          ),
+        ),
+      ],
     );
   }
 
@@ -910,7 +1235,9 @@ class _DashboardPageState extends State<DashboardPage>
             _buildAvailabilityTeaser(),
             _buildQuickActions(),
             const SizedBox(height: 14),
-            _buildScanStatusCard(),
+            _buildScanSessionCard(),
+            const SizedBox(height: 14),
+            _buildPersonalizedSection(),
             const SizedBox(height: 24),
           ],
         ),
@@ -920,7 +1247,6 @@ class _DashboardPageState extends State<DashboardPage>
               onCompleted: () async {
                 setState(() {
                   _needsHairTextureOnboarding = false;
-                  _userHairTexture = UserSession.preferredHairTexture;
                 });
                 await _loadHomeInsights();
               },
@@ -988,11 +1314,119 @@ class _QuickActionTile extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 label,
-                style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w600),
+                style: const TextStyle(
+                  fontFamily: _DashboardPageState._fontFamily,
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _InsightCard extends StatelessWidget {
+  final String eyebrow;
+  final String title;
+  final String subtitle;
+  final IconData icon;
+  final Color accent;
+  final VoidCallback onAction;
+
+  const _InsightCard({
+    required this.eyebrow,
+    required this.title,
+    required this.subtitle,
+    required this.icon,
+    required this.accent,
+    required this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151515),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.16),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: accent, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  eyebrow,
+                  style: TextStyle(
+                    fontFamily: _DashboardPageState._fontFamily,
+                    color: accent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: _DashboardPageState._fontFamily,
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  subtitle,
+                  style: const TextStyle(
+                    fontFamily: _DashboardPageState._fontFamily,
+                    color: Colors.white54,
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onAction,
+              borderRadius: BorderRadius.circular(10),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white38),
+                ),
+                child: const Icon(
+                  Icons.arrow_forward_ios,
+                  color: Colors.white70,
+                  size: 16,
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1012,33 +1446,14 @@ class _ScanChip extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: Colors.white24),
       ),
-      child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 11)),
-    );
-  }
-}
-
-class _BulletPoint extends StatelessWidget {
-  final String text;
-
-  const _BulletPoint(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          margin: const EdgeInsets.only(top: 4),
-          width: 6,
-          height: 6,
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-          ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          fontFamily: _DashboardPageState._fontFamily,
+          color: Colors.white70,
+          fontSize: 11,
         ),
-        const SizedBox(width: 12),
-        Expanded(child: Text(text, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4))),
-      ],
+      ),
     );
   }
 }

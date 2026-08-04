@@ -205,7 +205,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule', 'getQuickBookProfile'], true)) {
+if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule', 'getQuickBookProfile', 'getCustomerHomeInsights'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -216,7 +216,7 @@ try {
     ensure_appointments_status_constraint($pdo);
     ensure_barber_channel_column($pdo);
     ensure_group_booking_schema($pdo);
-    $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile'];
+    $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile', 'getCustomerHomeInsights'];
     if (!in_array($action, $readOnlyActions, true)) {
         ensure_appointment_detail_image_columns($pdo);
         ensure_reschedule_count_column($pdo);
@@ -572,6 +572,136 @@ try {
         }
 
         json_response($responsePayload, 201);
+    }
+
+    if ($action === 'getCustomerHomeInsights') {
+        $userID = (int)($input['userID'] ?? 0);
+        if ($userID <= 0) {
+            json_response(['error' => 'Invalid userID'], 422);
+        }
+
+        $favoriteBarber = null;
+        $feedbackTableExists = (int)$pdo->query(
+            "SELECT COUNT(*) FROM information_schema.tables
+             WHERE table_schema = current_schema() AND table_name = 'barber_feedback'"
+        )->fetchColumn() > 0;
+
+        if ($feedbackTableExists) {
+            $favStmt = $pdo->prepare(
+                "SELECT b.barber_id, b.full_name, b.specialty, b.profile_image,
+                        ROUND(AVG(bf.rating)::numeric, 1) AS avg_rating,
+                        COUNT(*)::int AS rating_count
+                 FROM barber_feedback bf
+                 JOIN barbers b ON b.barber_id = bf.barber_id
+                 WHERE bf.user_id = :user_id
+                   AND b.is_active = TRUE
+                 GROUP BY b.barber_id, b.full_name, b.specialty, b.profile_image
+                 ORDER BY AVG(bf.rating) DESC, COUNT(*) DESC
+                 LIMIT 1"
+            );
+            $favStmt->execute([':user_id' => $userID]);
+            $favRow = $favStmt->fetch(PDO::FETCH_ASSOC);
+            if ($favRow) {
+                $favoriteBarber = [
+                    'barberId' => (int)$favRow['barber_id'],
+                    'fullName' => (string)$favRow['full_name'],
+                    'specialty' => (string)($favRow['specialty'] ?? ''),
+                    'profileImage' => (string)($favRow['profile_image'] ?? ''),
+                    'avgRating' => (float)$favRow['avg_rating'],
+                    'ratingCount' => (int)$favRow['rating_count'],
+                    'source' => 'customer_ratings',
+                ];
+            }
+        }
+
+        if ($favoriteBarber === null) {
+            $mostBookedStmt = $pdo->prepare(
+                "SELECT b.barber_id, b.full_name, b.specialty, b.profile_image, b.rating,
+                        COUNT(*)::int AS booking_count
+                 FROM appointments a
+                 JOIN barbers b ON b.barber_id = a.barber_id
+                 WHERE a.user_id = :user_id
+                   AND a.status IN ('Completed', 'Scheduled', 'CheckedIn', 'InProgress')
+                   AND b.is_active = TRUE
+                 GROUP BY b.barber_id, b.full_name, b.specialty, b.profile_image, b.rating
+                 ORDER BY COUNT(*) DESC, b.rating DESC
+                 LIMIT 1"
+            );
+            $mostBookedStmt->execute([':user_id' => $userID]);
+            $bookedRow = $mostBookedStmt->fetch(PDO::FETCH_ASSOC);
+            if ($bookedRow) {
+                $favoriteBarber = [
+                    'barberId' => (int)$bookedRow['barber_id'],
+                    'fullName' => (string)$bookedRow['full_name'],
+                    'specialty' => (string)($bookedRow['specialty'] ?? ''),
+                    'profileImage' => (string)($bookedRow['profile_image'] ?? ''),
+                    'avgRating' => (float)$bookedRow['rating'],
+                    'ratingCount' => (int)$bookedRow['booking_count'],
+                    'source' => 'most_booked',
+                ];
+            }
+        }
+
+        $recentHaircut = null;
+        $recentStmt = $pdo->prepare(
+            "SELECT a.appointment_id, a.appointment_date, a.barber_id, b.full_name AS barber_name,
+                    ad.variant_id, ad.service_id,
+                    COALESCE(hs.style_name, s.service_name) AS style_name
+             FROM appointments a
+             JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+             JOIN services s ON s.service_id = ad.service_id
+             LEFT JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
+             LEFT JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
+             LEFT JOIN barbers b ON b.barber_id = a.barber_id
+             WHERE a.user_id = :user_id
+               AND a.status = 'Completed'
+             ORDER BY a.appointment_date DESC, a.start_time DESC
+             LIMIT 1"
+        );
+        $recentStmt->execute([':user_id' => $userID]);
+        $recentRow = $recentStmt->fetch(PDO::FETCH_ASSOC);
+        if ($recentRow) {
+            $recentHaircut = [
+                'appointmentId' => (int)$recentRow['appointment_id'],
+                'styleName' => (string)($recentRow['style_name'] ?? 'Haircut'),
+                'variantId' => (int)($recentRow['variant_id'] ?? 0),
+                'serviceId' => (int)($recentRow['service_id'] ?? 0),
+                'barberId' => (int)($recentRow['barber_id'] ?? 0),
+                'barberName' => (string)($recentRow['barber_name'] ?? 'Barber'),
+                'appointmentDate' => (string)($recentRow['appointment_date'] ?? ''),
+            ];
+        }
+
+        $trendingHaircut = null;
+        $trendStmt = $pdo->query(
+            "SELECT hv.variant_id, hs.style_name, ad.service_id, COUNT(*)::int AS booking_count
+             FROM appointment_details ad
+             JOIN appointments a ON a.appointment_id = ad.appointment_id
+             JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
+             JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
+             WHERE ad.variant_id IS NOT NULL
+               AND ad.variant_id > 0
+               AND a.status IN ('Completed', 'Scheduled', 'CheckedIn', 'InProgress')
+               AND a.appointment_date >= (CURRENT_DATE - INTERVAL '90 days')
+             GROUP BY hv.variant_id, hs.style_name, ad.service_id
+             ORDER BY COUNT(*) DESC, hs.style_name ASC
+             LIMIT 1"
+        );
+        $trendRow = $trendStmt ? $trendStmt->fetch(PDO::FETCH_ASSOC) : false;
+        if ($trendRow) {
+            $trendingHaircut = [
+                'variantId' => (int)$trendRow['variant_id'],
+                'styleName' => (string)($trendRow['style_name'] ?? 'Haircut'),
+                'serviceId' => (int)($trendRow['service_id'] ?? 0),
+                'bookingCount' => (int)$trendRow['booking_count'],
+            ];
+        }
+
+        json_response([
+            'favoriteBarber' => $favoriteBarber,
+            'recentHaircut' => $recentHaircut,
+            'trendingHaircut' => $trendingHaircut,
+        ]);
     }
 
     if ($action === 'getQuickBookProfile') {

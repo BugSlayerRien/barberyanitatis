@@ -165,55 +165,61 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
           ],
         ),
       ),
-      bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          color: Color(0xFF111111),
-          border: Border(top: BorderSide(color: Colors.white12)),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _navButton(
-              icon: Icons.event_available,
-              isActive: _currentTab == _tabDashboard,
-              onTap: () {
-                setState(() => _currentTab = _tabDashboard);
-              },
-            ),
-            _navButton(
-              icon: Icons.calendar_month_outlined,
-              isActive: _currentTab == _tabCalendar,
-              onTap: () {
-                setState(() => _currentTab = _tabCalendar);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const BarberCalendarPage()),
-                );
-              },
-            ),
-            _navButton(
-              icon: Icons.person_outline,
-              isActive: _currentTab == _tabProfile,
-              onTap: () {
-                setState(() => _currentTab = _tabProfile);
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const BarberProfilePage()),
-                );
-              },
-            ),
-            _navButton(
-              icon: Icons.menu,
-              isActive: _currentTab == _tabMenu,
-              onTap: () async {
-                setState(() => _currentTab = _tabMenu);
-                await showAppMenuSheet(context);
-                if (mounted) {
-                  setState(() => _currentTab = _tabDashboard);
-                }
-              },
-            ),
-          ],
-        ),
+      bottomNavigationBar: BottomNavigationBar(
+        backgroundColor: const Color(0xFF1A1A1A),
+        selectedItemColor: Colors.white,
+        unselectedItemColor: Colors.white54,
+        type: BottomNavigationBarType.fixed,
+        currentIndex: _currentTab.clamp(0, 3),
+        showSelectedLabels: true,
+        showUnselectedLabels: true,
+        selectedFontSize: 11,
+        unselectedFontSize: 10,
+        onTap: (index) async {
+          if (index == _tabDashboard) {
+            setState(() => _currentTab = _tabDashboard);
+            return;
+          }
+          if (index == _tabCalendar) {
+            setState(() => _currentTab = _tabCalendar);
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BarberCalendarPage()),
+            );
+            if (mounted) setState(() => _currentTab = _tabDashboard);
+            return;
+          }
+          if (index == _tabProfile) {
+            setState(() => _currentTab = _tabProfile);
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BarberProfilePage()),
+            );
+            if (mounted) setState(() => _currentTab = _tabDashboard);
+            return;
+          }
+          if (index == _tabMenu) {
+            setState(() => _currentTab = _tabMenu);
+            await showAppMenuSheet(context);
+            if (mounted) setState(() => _currentTab = _tabDashboard);
+          }
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.event_available),
+            label: 'Dashboard',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.calendar_month_outlined),
+            label: 'Calendar',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.person_outline),
+            label: 'Profile',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.menu),
+            label: 'Menu',
+          ),
+        ],
       ),
     ),
     );
@@ -225,20 +231,17 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
         Padding(
           padding: EdgeInsets.symmetric(vertical: 24),
           child: Center(
-            child: Text('No appointments assigned yet.', style: TextStyle(color: Colors.white70)),
+            child: Text(
+              'No appointments assigned yet.',
+              style: TextStyle(color: Colors.white70),
+            ),
           ),
         ),
       ];
     }
 
-    const order = [
-      'Scheduled',
-      'CheckedIn',
-      'InProgress',
-      'Completed',
-      'Cancelled',
-      'NoShow',
-    ];
+    const upcomingStatuses = ['Scheduled', 'CheckedIn', 'InProgress'];
+    const folderStatuses = ['Completed', 'Cancelled', 'NoShow'];
 
     final groups = <String, List<Map<String, dynamic>>>{};
     for (final appt in _appointments) {
@@ -247,21 +250,52 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       groups[status]!.add(appt);
     }
 
-    final statuses = <String>[];
-    for (final status in order) {
-      if (groups.containsKey(status)) {
-        statuses.add(status);
-      }
+    final widgets = <Widget>[];
+
+    // Upcoming appointments are always visible (not tucked into folders).
+    final upcoming = <Map<String, dynamic>>[];
+    for (final status in upcomingStatuses) {
+      upcoming.addAll(groups[status] ?? const []);
     }
-    for (final status in groups.keys) {
-      if (!statuses.contains(status)) {
-        statuses.add(status);
-      }
+    widgets.add(
+      const Padding(
+        padding: EdgeInsets.only(bottom: 10),
+        child: Text(
+          'Upcoming appointments',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 18,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+    if (upcoming.isEmpty) {
+      widgets.add(
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 14),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFF121212),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white12),
+          ),
+          child: const Text(
+            'No scheduled appointments right now.',
+            style: TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+      );
+    } else {
+      widgets.addAll(upcoming.map((appt) => _appointmentTile(context, appt)));
+      widgets.add(const SizedBox(height: 8));
     }
 
-    final widgets = <Widget>[];
-    for (final status in statuses) {
+    // Completed / cancelled / no-show stay in collapsible folders.
+    for (final status in folderStatuses) {
       final items = groups[status] ?? [];
+      if (items.isEmpty) continue;
       final isExpanded = _expandedStatus == status;
       widgets.add(
         _statusHeader(
@@ -281,6 +315,34 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       }
       widgets.add(const SizedBox(height: 14));
     }
+
+    // Any unexpected status still appears as a folder so nothing is hidden.
+    for (final status in groups.keys) {
+      if (upcomingStatuses.contains(status) || folderStatuses.contains(status)) {
+        continue;
+      }
+      final items = groups[status] ?? [];
+      if (items.isEmpty) continue;
+      final isExpanded = _expandedStatus == status;
+      widgets.add(
+        _statusHeader(
+          status: status,
+          count: items.length,
+          isExpanded: isExpanded,
+          onTap: () {
+            setState(() {
+              _expandedStatus = isExpanded ? null : status;
+            });
+          },
+        ),
+      );
+      if (isExpanded) {
+        widgets.add(const SizedBox(height: 8));
+        widgets.addAll(items.map((appt) => _appointmentTile(context, appt)));
+      }
+      widgets.add(const SizedBox(height: 14));
+    }
+
     return widgets;
   }
 
@@ -408,27 +470,6 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               ),
             ),
             const Icon(Icons.chevron_right, color: Colors.white54),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _navButton({
-    required IconData icon,
-    required bool isActive,
-    required VoidCallback onTap,
-  }) {
-    final color = isActive ? Colors.white : Colors.white54;
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: onTap,
-      child: SizedBox(
-        width: 64,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: color, size: 24),
           ],
         ),
       ),

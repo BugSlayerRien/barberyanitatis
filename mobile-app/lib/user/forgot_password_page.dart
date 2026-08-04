@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'auth_redirect.dart';
+
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
 
@@ -21,15 +23,27 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   Future<void> _sendReset() async {
     final email = _emailController.text.trim();
     if (email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter your email.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter your email.')),
+      );
       return;
     }
     setState(() => _isSubmitting = true);
     try {
-      await Supabase.instance.client.auth.resetPasswordForEmail(email);
+      AuthRedirect.prepareWebOAuthReturn();
+      // redirectTo is required so the email link opens the app/web callback and
+      // AuthBootstrap can route to ResetPasswordPage on passwordRecovery.
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset email sent.')),
+        const SnackBar(
+          content: Text(
+            'If an account exists for that email, a password reset link was sent.',
+          ),
+        ),
       );
       Navigator.of(context).pop();
     } catch (e) {
@@ -73,12 +87,16 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 children: [
                   const Text(
                     'Reset your password',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Enter your email and we’ll send a reset link.',
-                    style: TextStyle(color: Colors.white70, fontSize: 12),
+                    'Enter your email and we’ll send a reset link. Open that link on this device to set a new password.',
+                    style: TextStyle(color: Colors.white70, fontSize: 12, height: 1.4),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -90,8 +108,14 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                       hintStyle: const TextStyle(color: Colors.white54),
                       filled: true,
                       fillColor: const Color(0xFF1A1A1A),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 14,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 18),
