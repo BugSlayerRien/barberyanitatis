@@ -21,8 +21,8 @@ const PAGE_SIZE_BY_KEY = {
   "walkins-table": 5,
   "tracking-regular-list": 5,
   "tracking-exclusive-list": 5,
-  "barbers-regular-list": 5,
-  "barbers-exclusive-list": 5,
+  "barbers-regular-list": 9,
+  "barbers-exclusive-list": 9,
 };
 
 const navButtons = document.querySelectorAll(".nav button");
@@ -790,7 +790,7 @@ function renderBarbers(items, listId) {
   const paged = paginateRows(listId, items);
   paged.items.forEach((item) => {
     const card = document.createElement("div");
-    card.className = "card gradient";
+    card.className = "card gradient barber-card";
     card.innerHTML = `
       <h4>${item.name}</h4>
       <p>${item.specialty}</p>
@@ -858,20 +858,20 @@ async function loadBarberUnavailabilityRequests() {
     const data = await postJson(apiUrl("barber_schedule.php"), { action: "listRequests", status: "Pending" });
     const rows = data.requests ?? [];
     if (!rows.length) {
-      list.innerHTML = '<div class="card">No pending requests.</div>';
+      list.innerHTML = '<div class="time-off-card"><p class="meta" style="margin:0;">No pending time-off requests.</p></div>';
       return;
     }
 
     list.innerHTML = "";
     rows.forEach((row) => {
       const card = document.createElement("div");
-      card.className = "card";
+      card.className = "time-off-card";
       card.innerHTML = `
         <h4>${row.barber_name ?? "Barber"}</h4>
-        <p>Date: ${row.request_date}</p>
-        <p>${row.note ?? ""}</p>
-        <div class="row-wrap">
-          <button class="btn" data-approve="${row.request_id}" type="button">Approve</button>
+        <p><strong>Date:</strong> ${row.request_date}</p>
+        <p>${row.note ? `<strong>Note:</strong> ${row.note}` : "No note provided."}</p>
+        <div class="row-wrap" style="margin-top: 8px;">
+          <button class="btn gold" data-approve="${row.request_id}" type="button">Approve</button>
           <button class="btn secondary" data-reject="${row.request_id}" type="button">Reject</button>
         </div>
       `;
@@ -896,7 +896,7 @@ async function loadBarberUnavailabilityRequests() {
       });
     });
   } catch (error) {
-    list.innerHTML = '<div class="card">Could not load time-off requests.</div>';
+    list.innerHTML = '<div class="time-off-card"><p class="meta" style="margin:0;">Could not load time-off requests.</p></div>';
   }
 }
 

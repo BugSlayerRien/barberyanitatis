@@ -309,32 +309,51 @@
 
         <section id="settings-view" hidden>
           <div class="section-title">System Settings</div>
-          <div class="card">
-            <div class="form-grid">
-              <label>Enable email notifications
-                <input type="checkbox" id="setting-email" />
-              </label>
-              <label>Notification from email
-                <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" />
-              </label>
-              <label>Test notification email
-                <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" />
-              </label>
-              <label>Shop hours
-                <button class="btn secondary" data-jump="schedule" type="button">Managed in Operating Schedule</button>
-              </label>
-              <label>Require MFA
-                <input type="checkbox" id="setting-mfa" />
-              </label>
-              <label>Automatic backups
-                <input type="checkbox" id="setting-backup" />
-              </label>
+          <div class="settings-layout">
+            <div class="card settings-panel">
+              <h3>Email notifications</h3>
+              <div class="form-grid">
+                <label>Enable email notifications
+                  <input type="checkbox" id="setting-email" />
+                </label>
+                <label>Notification from email
+                  <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" />
+                </label>
+                <label>Test notification email
+                  <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" />
+                </label>
+              </div>
+              <div class="settings-actions">
+                <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
+                <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
+              </div>
             </div>
-            <div class="row-wrap" style="margin-top:12px; gap: 8px; flex-wrap: wrap;">
-              <button class="btn secondary" id="settings-save" type="button">Save settings</button>
-              <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
-              <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
-              <button class="btn secondary" id="settings-download-backup" type="button">Download backup</button>
+
+            <div class="card settings-panel">
+              <h3>Security</h3>
+              <div class="form-grid">
+                <label>Require MFA for staff accounts
+                  <input type="checkbox" id="setting-mfa" />
+                </label>
+                <label>Automatic database backups
+                  <input type="checkbox" id="setting-backup" />
+                </label>
+              </div>
+              <div class="settings-actions">
+                <button class="btn secondary" id="settings-download-backup" type="button">Download backup</button>
+              </div>
+            </div>
+
+            <div class="card settings-panel">
+              <h3>Shop hours</h3>
+              <p class="meta" style="margin: 0 0 10px;">Weekly hours, breaks, holidays, and slot duration are configured on the operating schedule page.</p>
+              <button class="btn secondary" data-jump="schedule" type="button">Open Operating Schedule</button>
+            </div>
+
+            <div class="card settings-panel">
+              <h3>Save changes</h3>
+              <p class="meta" style="margin: 0 0 10px;">Apply notification and security toggles above.</p>
+              <button class="btn" id="settings-save" type="button">Save settings</button>
             </div>
           </div>
         </section>
