@@ -159,17 +159,23 @@
 
         <section id="barbers-view" hidden>
           <div class="section-title">Barbers</div>
+
           <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin-top: 0;">Regular barbers</h3>
-            <div class="list" id="barbers-regular-list"></div>
+            <h3 style="margin-top: 0; font-size: 14px; color: var(--text);">Regular barbers</h3>
+            <p class="meta" style="margin: 0 0 10px;">Walk-in and kiosk channel.</p>
+            <div class="list barber-grid" id="barbers-regular-list"></div>
           </div>
-          <div class="card">
-            <h3 style="margin-top: 0;">Exclusive barbers</h3>
-            <div class="list" id="barbers-exclusive-list"></div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3 style="margin-top: 0; font-size: 14px; color: var(--text);">Exclusive barbers</h3>
+            <p class="meta" style="margin: 0 0 10px;">Appointment channel only.</p>
+            <div class="list barber-grid" id="barbers-exclusive-list"></div>
           </div>
-          <div class="card" style="margin-top: 12px;">
-            <h3 style="margin-top: 0;">Barber time-off requests</h3>
-            <div class="list" id="barber-unavailability-list"></div>
+
+          <div class="card time-off-section">
+            <h3 class="section-heading">Barber time-off requests</h3>
+            <p class="meta" style="margin: 0 0 12px;">Pending leave requests waiting for front-desk approval.</p>
+            <div class="time-off-grid" id="barber-unavailability-list"></div>
           </div>
         </section>
       </main>
