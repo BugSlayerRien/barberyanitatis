@@ -1989,7 +1989,6 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   Widget _buildStagingUI() {
     final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
     final progress = (_stageIndex + (_goodPositionFrames / 12.0)) / _stages.length;
-    final capturedCount = _capturedImages.length;
 
     return PopScope(
       canPop: widget.kioskMode,
@@ -2009,7 +2008,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
                 'We will capture three angles of your face for the best preview.',
@@ -2027,7 +2026,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                 child: kIsWeb ? _buildStagingWebCamera(currentStage) : _buildStagingCameraView(currentStage),
               ),
               const SizedBox(height: 14),
-              _stageStatusRow(capturedCount),
+              _stageStatusRow(),
             ],
           ),
         ),
@@ -2211,91 +2210,154 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
-  Widget _stageStatusRow(int capturedCount) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_capturedImages.isNotEmpty) ...[
-          SizedBox(
-            height: 72,
-            child: Row(
-              children: _stages.map((stage) {
-                final b64 = _capturedImages[stage.keyName];
-                return Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.white24),
-                      ),
-                      clipBehavior: Clip.antiAlias,
-                      child: b64 != null
-                          ? Image.memory(
-                              base64Decode(b64),
-                              fit: BoxFit.cover,
-                              gaplessPlayback: true,
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          const SizedBox(height: 10),
-        ],
-        Row(
-      children: _stages.asMap().entries.map((entry) {
-        final index = entry.key;
-        final stage = entry.value;
-        final captured = _capturedImages.containsKey(stage.keyName);
-        final active = index == _stageIndex;
+  Widget _stageStatusRow() {
+    // Always reserve three equal columns so capturing Front (and showing
+    // thumbnails) cannot shrink the status cards or leave a gap on the right.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = 8.0;
+        final count = _stages.length;
+        final slotWidth = (constraints.maxWidth - gap * (count - 1)) / count;
 
-        return Expanded(
-          child: Container(
-            margin: EdgeInsets.only(right: index == _stages.length - 1 ? 0 : 8),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: captured
-                  ? const Color(0xFF1B1B1B)
-                  : active
-                      ? const Color(0xFF18120A)
-                      : const Color(0xFF101010),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: captured
-                    ? Colors.white.withOpacity(0.6)
-                    : active
-                        ? Colors.white24
-                        : Colors.white12,
-              ),
-            ),
-            child: Column(
+        Widget slot({required Widget child, required double height}) {
+          return SizedBox(
+            width: slotWidth,
+            height: height,
+            child: child,
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
               children: [
-                Icon(stage.icon, size: 18, color: captured ? Colors.white : Colors.white54),
-                const SizedBox(height: 6),
-                Text(
-                  stage.label,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  captured ? '✓' : active ? '...' : 'Pending',
-                  style: TextStyle(
-                    color: captured ? Colors.white : Colors.white54,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                for (var i = 0; i < count; i++) ...[
+                  if (i > 0) const SizedBox(width: gap),
+                  slot(
+                    height: 72,
+                    child: _stageThumbnailSlot(_stages[i]),
                   ),
-                ),
+                ],
               ],
             ),
-          ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                for (var i = 0; i < count; i++) ...[
+                  if (i > 0) const SizedBox(width: gap),
+                  slot(
+                    height: 78,
+                    child: _stageStatusCard(
+                      stage: _stages[i],
+                      index: i,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
         );
-      }).toList(),
+      },
+    );
+  }
+
+  Widget _stageThumbnailSlot(_CaptureStage stage) {
+    final b64 = _capturedImages[stage.keyName];
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: b64 != null
+            ? Image.memory(
+                base64Decode(b64),
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: double.infinity,
+                alignment: Alignment.center,
+                gaplessPlayback: true,
+                errorBuilder: (_, __, ___) => Icon(
+                  stage.icon,
+                  size: 22,
+                  color: Colors.white24,
+                ),
+              )
+            : Center(
+                child: Icon(stage.icon, size: 22, color: Colors.white24),
+              ),
+      ),
+    );
+  }
+
+  Widget _stageStatusCard({
+    required _CaptureStage stage,
+    required int index,
+  }) {
+    final captured = _capturedImages.containsKey(stage.keyName);
+    final active = index == _stageIndex;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: captured
+            ? const Color(0xFF1B1B1B)
+            : active
+                ? const Color(0xFF18120A)
+                : const Color(0xFF101010),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: captured
+              ? Colors.white.withOpacity(0.6)
+              : active
+                  ? Colors.white24
+                  : Colors.white12,
         ),
-      ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              stage.icon,
+              size: 18,
+              color: captured ? Colors.white : Colors.white54,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              stage.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              captured
+                  ? '✓'
+                  : active
+                      ? '...'
+                      : 'Pending',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: TextStyle(
+                color: captured ? Colors.white : Colors.white54,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
