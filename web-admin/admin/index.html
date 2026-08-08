@@ -168,22 +168,95 @@
         </section>
 
         <section id="analytics-view" hidden>
-          <div class="section-title">Analytics</div>
-          <div class="card" style="margin-bottom: 12px;">
-            <h3>AI Command Center</h3>
-            <p class="ai-center-desc">AI provides a quick business summary, one top suggestion, and one top prediction from your latest metrics.</p>
-            <p id="analytics-summary">Loading summary...</p>
-            <div class="ai-brief-list" id="analytics-ai-brief"></div>
+          <div class="analytics-header row-wrap" style="justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px;">
+            <div>
+              <div class="section-title" style="margin-bottom: 4px;">Analytics</div>
+              <p class="meta" id="analytics-period-label" style="margin: 0;">Business performance from live shop data.</p>
+            </div>
+            <div class="row-wrap" style="gap: 8px; align-items: center;">
+              <div class="analytics-period-tabs" id="analytics-period-tabs" role="tablist" aria-label="Date range">
+                <button type="button" class="btn secondary analytics-period-btn" data-period="7d">7 Days</button>
+                <button type="button" class="btn secondary analytics-period-btn is-active" data-period="30d">30 Days</button>
+                <button type="button" class="btn secondary analytics-period-btn" data-period="3m">3 Months</button>
+                <button type="button" class="btn secondary analytics-period-btn" data-period="1y">1 Year</button>
+              </div>
+              <button class="btn secondary" id="analytics-refresh" type="button">Refresh</button>
+            </div>
           </div>
-          <div class="split">
+
+          <div class="grid stats analytics-kpi-grid" id="analytics-kpi-grid" style="margin-bottom: 12px;"></div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <div class="row-wrap" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
+              <h3 style="margin: 0;">Revenue &amp; Appointment Trends</h3>
+              <div class="row-wrap" style="gap: 6px;">
+                <button type="button" class="btn secondary analytics-trend-btn is-active" data-trend="revenue">Revenue</button>
+                <button type="button" class="btn secondary analytics-trend-btn" data-trend="appointments">Appointments</button>
+              </div>
+            </div>
+            <div class="analytics-chart-wrap">
+              <canvas id="analytics-trend-chart" height="140"></canvas>
+            </div>
+            <div class="meta" id="analytics-trend-empty" hidden>No trend data for this period.</div>
+          </div>
+
+          <div class="split" style="margin-bottom: 12px;">
             <div class="card">
-              <h3>Appointment Status Trend</h3>
-              <canvas id="analytics-status-chart" height="120"></canvas>
+              <h3>Appointment Status Mix</h3>
+              <div class="analytics-chart-wrap">
+                <canvas id="analytics-status-chart" height="140"></canvas>
+              </div>
             </div>
             <div class="card">
-              <h3>Top Services Demand</h3>
-              <canvas id="analytics-services-chart" height="120"></canvas>
+              <h3>Top Services</h3>
+              <div class="analytics-chart-wrap">
+                <canvas id="analytics-services-chart" height="140"></canvas>
+              </div>
+              <div class="list" id="analytics-services-list" style="margin-top: 10px;"></div>
             </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3>Barber Performance</h3>
+            <div class="table-wrap">
+              <table class="table" id="analytics-barber-table">
+                <thead>
+                  <tr>
+                    <th>Barber</th>
+                    <th>Completed</th>
+                    <th>Revenue</th>
+                    <th>Avg rating</th>
+                    <th>Cancel / No-show</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+            <div class="meta" id="analytics-barber-empty" hidden>No barber activity in this period.</div>
+          </div>
+
+          <div class="split" style="margin-bottom: 12px;">
+            <div class="card">
+              <h3>Appointment Operations</h3>
+              <div class="analytics-ops-kpis" id="analytics-ops-kpis"></div>
+              <div class="analytics-chart-wrap" style="margin-top: 10px;">
+                <canvas id="analytics-hours-chart" height="120"></canvas>
+              </div>
+              <div class="analytics-chart-wrap" style="margin-top: 10px;">
+                <canvas id="analytics-days-chart" height="120"></canvas>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Customer Insights</h3>
+              <div id="analytics-customers" class="analytics-stack"></div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom: 12px;">
+            <h3>AI Business Insights</h3>
+            <p class="ai-center-desc">Insight, recommendation, and prediction are grounded in the metrics above. The AI will not invent statistics.</p>
+            <p id="analytics-summary" class="meta">Loading insights…</p>
+            <div class="ai-brief-list" id="analytics-ai-brief"></div>
           </div>
         </section>
 

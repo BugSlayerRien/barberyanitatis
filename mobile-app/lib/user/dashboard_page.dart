@@ -10,6 +10,7 @@ import 'widgets/ai_chatbot_fab.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
 import 'ai_face_scan_page.dart';
 import 'appointments_page.dart';
@@ -49,12 +50,18 @@ class _DashboardPageState extends State<DashboardPage>
   Map<String, dynamic>? _slotSuggestion;
   Map<String, dynamic>? _quickBookProfile;
   BookingDraft? _bookingDraft;
-  bool _loadingHomeInsights = false;
   bool _hasActiveAppointment = false;
   Map<String, dynamic>? _favoriteBarber;
   Map<String, dynamic>? _recentHaircut;
   Map<String, dynamic>? _trendingHaircut;
   bool _loadingPersonalInsights = false;
+  /// First successful "For you" resolve — avoid skeleton flash on soft refresh.
+  bool _personalInsightsResolved = false;
+  /// Ignores stale responses when home refresh is triggered again quickly.
+  int _homeLoadToken = 0;
+  DateTime? _suggestionFetchedAt;
+  static const Duration _suggestionTtl = Duration(seconds: 60);
+
   @override
   void initState() {
     super.initState();
@@ -105,10 +112,11 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<void> _bootstrap() async {
+    // Shell (Library / Scan / section layout) paints immediately.
+    // Hair-texture check and dashboard data load run concurrently — do not
+    // wait for profile.php before starting appointment/insights fetches.
+    unawaited(_loadHomeInsights());
     await _resolveHairTexture();
-    if (mounted && !_needsHairTextureOnboarding) {
-      await _loadHomeInsights();
-    }
   }
 
   Future<void> _openAppointments() async {
@@ -116,8 +124,193 @@ class _DashboardPageState extends State<DashboardPage>
       MaterialPageRoute(builder: (_) => const AppointmentsPage()),
     );
     if (mounted) {
-      await _loadHomeInsights();
+      unawaited(_loadHomeInsights());
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchCustomerAppointments(int userId) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'listByCustomer',
+        'userID': userId,
+      }),
+    );
+    if (response.statusCode != 200 || response.body.isEmpty) {
+      return const [];
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    return (data['appointments'] as List<dynamic>? ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+  }
+
+  Map<String, dynamic>? _firstUpcomingFromAppointments(
+    List<Map<String, dynamic>> items,
+  ) {
+    for (final appt in items) {
+      final status = appt['status']?.toString() ?? '';
+      if (status == 'Completed' ||
+          status == 'Cancelled' ||
+          status == 'NoShow') {
+        continue;
+      }
+      final services = (appt['services'] as List<dynamic>? ?? []);
+      final firstService = services.isNotEmpty
+          ? Map<String, dynamic>.from(services.first as Map)
+          : <String, dynamic>{};
+      final isGroup = appt['isGroup'] == true;
+      final displayTitle = isGroup
+          ? (appt['displayTitle']?.toString() ??
+              firstService['hairstyleName']?.toString() ??
+              'Group booking')
+          : (firstService['hairstyleName']?.toString() ??
+              firstService['serviceName']?.toString() ??
+              'Haircut');
+      final timeRangeRaw = appt['timeRange']?.toString() ?? '';
+      final timeRange = timeRangeRaw.isNotEmpty
+          ? formatTimeRangeTo12h(timeRangeRaw)
+          : formatTo12Hour(appt['startTime']?.toString() ?? '');
+      return {
+        'appointmentId': appt['appointmentID'],
+        'service': displayTitle,
+        'barber': appt['barberName']?.toString() ?? 'Barber',
+        'date': appt['appointmentDate']?.toString() ?? '',
+        'time': timeRange,
+        'status': status,
+      };
+    }
+    return null;
+  }
+
+  bool _hasActiveFromAppointments(List<Map<String, dynamic>> items) {
+    for (final appt in items) {
+      if (BookingGuard.isActiveStatus(appt['status']?.toString() ?? '')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> _fetchQuickBookProfile(int userId) async {
+    final profileResponse = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'getQuickBookProfile',
+        'userID': userId,
+      }),
+    );
+    if (profileResponse.statusCode != 200 || profileResponse.body.isEmpty) {
+      return null;
+    }
+    final profileData =
+        jsonDecode(profileResponse.body) as Map<String, dynamic>;
+    return profileData['profile'] as Map<String, dynamic>?;
+  }
+
+  Future<
+      ({
+        Map<String, dynamic>? favoriteBarber,
+        Map<String, dynamic>? recentHaircut,
+        Map<String, dynamic>? trendingHaircut,
+      })> _fetchPersonalInsights(int userId) async {
+    final insightsResponse = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'getCustomerHomeInsights',
+        'userID': userId,
+      }),
+    );
+    if (insightsResponse.statusCode != 200 ||
+        insightsResponse.body.isEmpty) {
+      return (
+        favoriteBarber: null,
+        recentHaircut: null,
+        trendingHaircut: null,
+      );
+    }
+    final insights =
+        jsonDecode(insightsResponse.body) as Map<String, dynamic>;
+    return (
+      favoriteBarber: insights['favoriteBarber'] is Map
+          ? Map<String, dynamic>.from(insights['favoriteBarber'] as Map)
+          : null,
+      recentHaircut: insights['recentHaircut'] is Map
+          ? Map<String, dynamic>.from(insights['recentHaircut'] as Map)
+          : null,
+      trendingHaircut: insights['trendingHaircut'] is Map
+          ? Map<String, dynamic>.from(insights['trendingHaircut'] as Map)
+          : null,
+    );
+  }
+
+  Future<void> _applyPersonalInsights(
+    int token,
+    Future<
+            ({
+              Map<String, dynamic>? favoriteBarber,
+              Map<String, dynamic>? recentHaircut,
+              Map<String, dynamic>? trendingHaircut,
+            })>
+        personalFuture,
+  ) async {
+    try {
+      final personal = await personalFuture;
+      if (!mounted || token != _homeLoadToken) return;
+      setState(() {
+        _favoriteBarber = personal.favoriteBarber;
+        _recentHaircut = personal.recentHaircut;
+        _trendingHaircut = personal.trendingHaircut;
+        _loadingPersonalInsights = false;
+        _personalInsightsResolved = true;
+      });
+    } catch (_) {
+      if (!mounted || token != _homeLoadToken) return;
+      setState(() {
+        _loadingPersonalInsights = false;
+        _personalInsightsResolved = true;
+      });
+    }
+  }
+
+  bool get _suggestionStillFresh {
+    final fetchedAt = _suggestionFetchedAt;
+    if (_slotSuggestion == null || fetchedAt == null) return false;
+    return DateTime.now().difference(fetchedAt) < _suggestionTtl;
+  }
+
+  Future<void> _loadSuggestionInBackground(int userId, int token) async {
+    if (_suggestionStillFresh) {
+      return;
+    }
+
+    Map<String, dynamic>? suggestion;
+    try {
+      final slotResult = await BookingSlotsService.fetchBestSuggestion(
+        timeout: BookingSlotsService.dashboardTimeout,
+      );
+      if (slotResult.isSuccess) {
+        suggestion = slotResult.suggestion;
+      }
+    } catch (_) {}
+
+    if (!mounted || token != _homeLoadToken) return;
+    if (_hasActiveAppointment) {
+      setState(() {
+        _slotSuggestion = null;
+        _quickBookProfile = null;
+      });
+      return;
+    }
+
+    if (suggestion == null) return;
+    setState(() {
+      _slotSuggestion = suggestion;
+      _suggestionFetchedAt = DateTime.now();
+    });
   }
 
   Future<void> _loadHomeInsights() async {
@@ -133,160 +326,81 @@ class _DashboardPageState extends State<DashboardPage>
         _favoriteBarber = null;
         _recentHaircut = null;
         _trendingHaircut = null;
-        _loadingHomeInsights = false;
         _loadingPersonalInsights = false;
+        _personalInsightsResolved = true;
+        _suggestionFetchedAt = null;
       });
       return;
     }
 
-    if (mounted) {
-      setState(() {
-        _loadingHomeInsights = true;
-        _loadingPersonalInsights = true;
-      });
+    final token = ++_homeLoadToken;
+    final showPersonalSkeleton = !_personalInsightsResolved;
+    if (mounted && showPersonalSkeleton) {
+      setState(() => _loadingPersonalInsights = true);
     }
+
+    // Fire independent home requests together.
+    final personalFuture = _fetchPersonalInsights(userId);
+    final appointmentsFuture = _fetchCustomerAppointments(userId);
+    final quickBookFuture = _fetchQuickBookProfile(userId);
+    unawaited(_applyPersonalInsights(token, personalFuture));
 
     Map<String, dynamic>? upcoming;
-    Map<String, dynamic>? suggestion;
-    Map<String, dynamic>? quickProfile;
-    BookingDraft? draft;
     var hasActive = false;
+    Map<String, dynamic>? quickProfile;
 
     try {
-      hasActive = await BookingGuard.hasActiveAppointment(userId: userId);
-    } catch (_) {}
+      final results = await Future.wait<Object?>([
+        appointmentsFuture,
+        quickBookFuture,
+      ]);
+      if (!mounted || token != _homeLoadToken) return;
 
-    if (!hasActive) {
-      draft = await BookingDraftService.load();
-      if (draft == null &&
-          UserSession.selectedVariantId != null &&
-          UserSession.selectedVariantId! > 0) {
-        draft = BookingDraft(
-          variantId: UserSession.selectedVariantId!,
-          styleName: UserSession.selectedStyleName,
-          serviceId: UserSession.selectedServiceId,
-          estimatedMinutes: UserSession.selectedEstimatedMinutes,
-          step: 'barber',
-          updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-        );
-      }
+      final items = results[0] as List<Map<String, dynamic>>;
+      quickProfile = results[1] as Map<String, dynamic>?;
+      hasActive = _hasActiveFromAppointments(items);
+      upcoming = _firstUpcomingFromAppointments(items);
+    } catch (_) {
+      // Appointment / quick-book failed independently.
     }
 
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'listByCustomer',
-          'userID': userId,
-        }),
-      );
-      if (response.statusCode == 200 && response.body.isNotEmpty) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final items = (data['appointments'] as List<dynamic>? ?? [])
-            .map((item) => Map<String, dynamic>.from(item as Map))
-            .toList();
-        for (final appt in items) {
-          final status = appt['status']?.toString() ?? '';
-          if (status == 'Completed' ||
-              status == 'Cancelled' ||
-              status == 'NoShow') {
-            continue;
-          }
-          final services = (appt['services'] as List<dynamic>? ?? []);
-          final firstService = services.isNotEmpty
-              ? Map<String, dynamic>.from(services.first as Map)
-              : <String, dynamic>{};
-          final isGroup = appt['isGroup'] == true;
-          final displayTitle = isGroup
-              ? (appt['displayTitle']?.toString() ??
-                  firstService['hairstyleName']?.toString() ??
-                  'Group booking')
-              : (firstService['hairstyleName']?.toString() ??
-                  firstService['serviceName']?.toString() ??
-                  'Haircut');
-          final timeRangeRaw = appt['timeRange']?.toString() ?? '';
-          final timeRange = timeRangeRaw.isNotEmpty
-              ? formatTimeRangeTo12h(timeRangeRaw)
-              : formatTo12Hour(appt['startTime']?.toString() ?? '');
-          upcoming = {
-            'appointmentId': appt['appointmentID'],
-            'service': displayTitle,
-            'barber': appt['barberName']?.toString() ?? 'Barber',
-            'date': appt['appointmentDate']?.toString() ?? '',
-            'time': timeRange,
-            'status': status,
-          };
-          break;
-        }
-      }
-    } catch (_) {}
-
-    // Skip slow next-slot / quick-book lookups when the user already has an appointment.
+    BookingDraft? draft;
     if (!hasActive) {
       try {
-        final profileResponse = await http.post(
-          Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'action': 'getQuickBookProfile',
-            'userID': userId,
-          }),
-        );
-        if (profileResponse.statusCode == 200 && profileResponse.body.isNotEmpty) {
-          final profileData =
-              jsonDecode(profileResponse.body) as Map<String, dynamic>;
-          quickProfile = profileData['profile'] as Map<String, dynamic>?;
+        draft = await BookingDraftService.load();
+        if (draft == null &&
+            UserSession.selectedVariantId != null &&
+            UserSession.selectedVariantId! > 0) {
+          draft = BookingDraft(
+            variantId: UserSession.selectedVariantId!,
+            styleName: UserSession.selectedStyleName,
+            serviceId: UserSession.selectedServiceId,
+            estimatedMinutes: UserSession.selectedEstimatedMinutes,
+            step: 'barber',
+            updatedAtMs: DateTime.now().millisecondsSinceEpoch,
+          );
         }
       } catch (_) {}
-
-      final slotResult = await BookingSlotsService.fetchBestSuggestion();
-      if (slotResult.isSuccess) {
-        suggestion = slotResult.suggestion;
-      }
     }
 
-    Map<String, dynamic>? favoriteBarber;
-    Map<String, dynamic>? recentHaircut;
-    Map<String, dynamic>? trendingHaircut;
-    try {
-      final insightsResponse = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'getCustomerHomeInsights',
-          'userID': userId,
-        }),
-      );
-      if (insightsResponse.statusCode == 200 &&
-          insightsResponse.body.isNotEmpty) {
-        final insights =
-            jsonDecode(insightsResponse.body) as Map<String, dynamic>;
-        favoriteBarber = insights['favoriteBarber'] is Map
-            ? Map<String, dynamic>.from(insights['favoriteBarber'] as Map)
-            : null;
-        recentHaircut = insights['recentHaircut'] is Map
-            ? Map<String, dynamic>.from(insights['recentHaircut'] as Map)
-            : null;
-        trendingHaircut = insights['trendingHaircut'] is Map
-            ? Map<String, dynamic>.from(insights['trendingHaircut'] as Map)
-            : null;
-      }
-    } catch (_) {}
-
-    if (!mounted) return;
+    if (!mounted || token != _homeLoadToken) return;
     setState(() {
       _nextUpcomingAppointment = upcoming;
-      _slotSuggestion = suggestion;
-      _quickBookProfile = quickProfile;
-      _bookingDraft = draft;
       _hasActiveAppointment = hasActive;
-      _favoriteBarber = favoriteBarber;
-      _recentHaircut = recentHaircut;
-      _trendingHaircut = trendingHaircut;
-      _loadingHomeInsights = false;
-      _loadingPersonalInsights = false;
+      _bookingDraft = draft;
+      if (hasActive) {
+        _slotSuggestion = null;
+        _quickBookProfile = null;
+        _suggestionFetchedAt = null;
+      } else {
+        _quickBookProfile = quickProfile;
+      }
     });
+
+    // Optional next-slot teaser: short timeout, no skeleton, in-memory TTL.
+    if (!hasActive) {
+      unawaited(_loadSuggestionInBackground(userId, token));
+    }
   }
 
   Future<void> _resolveHairTexture() async {
@@ -703,33 +817,8 @@ class _DashboardPageState extends State<DashboardPage>
       return const SizedBox.shrink();
     }
 
-    if (_loadingHomeInsights && _slotSuggestion == null) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFF121212),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
-            ),
-            SizedBox(width: 12),
-            Text(
-              'Checking barber availability…',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
-            ),
-          ],
-        ),
-      );
-    }
-
+    // Optional teaser: never show a loading skeleton — suggestBestSlot can be slow
+    // (slot seeding). Appear only when a suggestion is already available.
     final suggestion = _slotSuggestion;
     if (suggestion == null) {
       return const SizedBox.shrink();
@@ -1053,30 +1142,28 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildPersonalizedSection() {
-    if (_loadingPersonalInsights &&
-        _favoriteBarber == null &&
-        _recentHaircut == null &&
-        _trendingHaircut == null) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
-        decoration: BoxDecoration(
-          color: const Color(0xFF151515),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white12),
-        ),
-        child: const Row(
+    final showSkeleton = _loadingPersonalInsights && !_personalInsightsResolved;
+
+    if (showSkeleton) {
+      return const AppShimmer(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white54),
-            ),
-            SizedBox(width: 12),
             Text(
-              'Loading your picks…',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
+              'For you',
+              style: TextStyle(
+                fontFamily: _fontFamily,
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+              ),
             ),
+            SizedBox(height: 10),
+            _InsightCardSkeleton(),
+            SizedBox(height: 10),
+            _InsightCardSkeleton(),
+            SizedBox(height: 10),
+            _InsightCardSkeleton(),
           ],
         ),
       );
@@ -1459,6 +1546,43 @@ class _ScanChip extends StatelessWidget {
           color: Colors.white70,
           fontSize: 11,
         ),
+      ),
+    );
+  }
+}
+
+class _InsightCardSkeleton extends StatelessWidget {
+  const _InsightCardSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151515),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: const Row(
+        children: [
+          AppShimmerBox(width: 40, height: 40, borderRadius: 10),
+          SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppShimmerBox(width: 88, height: 10, borderRadius: 4),
+                SizedBox(height: 8),
+                AppShimmerBox(width: 140, height: 14, borderRadius: 4),
+                SizedBox(height: 8),
+                AppShimmerBox(width: 180, height: 11, borderRadius: 4),
+              ],
+            ),
+          ),
+          SizedBox(width: 8),
+          AppShimmerBox(width: 40, height: 40, borderRadius: 10),
+        ],
       ),
     );
   }

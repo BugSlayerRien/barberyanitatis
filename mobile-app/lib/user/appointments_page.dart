@@ -11,6 +11,7 @@ import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
@@ -1493,80 +1494,49 @@ class _AppointmentsPageState extends State<AppointmentsPage>
   }
 
   Widget _buildAppointmentsSkeleton() {
-    return Column(
-      children: List.generate(
-        3,
-        (index) => Container(
-          margin: const EdgeInsets.only(bottom: 16),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+    return AppShimmer(
+      child: Column(
+        children: List.generate(
+          3,
+          (index) => Container(
+            margin: const EdgeInsets.only(bottom: 16),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white10),
             ),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white10),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 160,
-                height: 14,
-                decoration: BoxDecoration(
-                  color: Colors.white12,
-                  borderRadius: BorderRadius.circular(6),
+            child: const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                AppShimmerBox(width: 160, height: 14, borderRadius: 6),
+                SizedBox(height: 10),
+                AppShimmerBox(width: 120, height: 12, borderRadius: 6),
+                SizedBox(height: 14),
+                Row(
+                  children: [
+                    Expanded(
+                      child: AppShimmerBox(height: 12, borderRadius: 6),
+                    ),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: AppShimmerBox(height: 12, borderRadius: 6),
+                    ),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 10),
-              Container(
-                width: 120,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.white12,
-                  borderRadius: BorderRadius.circular(6),
+                SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    AppShimmerBox(width: 88, height: 32, borderRadius: 6),
+                  ],
                 ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: Colors.white12,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Container(
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: Colors.white12,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  Container(
-                    width: 88,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: Colors.white12,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

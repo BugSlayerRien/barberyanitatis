@@ -39,9 +39,14 @@ class SuggestSlotResult {
 }
 
 class BookingSlotsService {
-  static const Duration _timeout = Duration(seconds: 45);
+  static const Duration defaultTimeout = Duration(seconds: 45);
 
-  static Future<SuggestSlotResult> fetchBestSuggestion() async {
+  /// Dashboard home uses a short timeout — suggestion is optional UI, not a booking gate.
+  static const Duration dashboardTimeout = Duration(seconds: 8);
+
+  static Future<SuggestSlotResult> fetchBestSuggestion({
+    Duration timeout = defaultTimeout,
+  }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/time_slots.php');
     try {
       final response = await http
@@ -50,7 +55,7 @@ class BookingSlotsService {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({'action': 'suggestBestSlot'}),
           )
-          .timeout(_timeout);
+          .timeout(timeout);
 
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;

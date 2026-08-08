@@ -26,8 +26,9 @@ const state = {
   accountEditor: null,
   serviceEditor: null,
   analytics: null,
-  statusChart: null,
-  servicesChart: null,
+  analyticsPeriod: "30d",
+  analyticsTrendMode: "revenue",
+  analyticsCharts: {},
   pagination: {},
 };
 
@@ -1653,214 +1654,383 @@ function renderAnalyticsMetrics(metrics) {
 }
 
 function destroyAnalyticsCharts() {
-  if (state.statusChart) {
-    state.statusChart.destroy();
-    state.statusChart = null;
+  Object.values(state.analyticsCharts || {}).forEach((chart) => {
+    try {
+      chart?.destroy?.();
+    } catch (_) {
+      // ignore
+    }
+  });
+  state.analyticsCharts = {};
+  // legacy keys
+  state.statusChart = null;
+  state.servicesChart = null;
+}
+
+function formatPeso(amount) {
+  const value = Number(amount ?? 0);
+  return `₱${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function escapeAnalyticsText(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
+}
+
+function chartDefaults() {
+  return {
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { labels: { color: "#c9c9c9" } },
+    },
+    scales: {
+      x: { ticks: { color: "#c9c9c9", maxRotation: 0 }, grid: { color: "rgba(255,255,255,0.08)" } },
+      y: { ticks: { color: "#c9c9c9", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" }, beginAtZero: true },
+    },
+  };
+}
+
+function renderAnalyticsKpis(metrics) {
+  const grid = document.getElementById("analytics-kpi-grid");
+  if (!grid) return;
+  const kpis = metrics?.kpis || {};
+  const cards = [
+    { title: "Total Revenue", value: formatPeso(kpis.totalRevenue) },
+    { title: "Total Appointments", value: String(kpis.totalAppointments ?? 0) },
+    { title: "Completed", value: String(kpis.completedAppointments ?? 0) },
+    {
+      title: "Cancelled / No-show",
+      value: String(kpis.cancelledOrNoShow ?? 0),
+      meta: `${kpis.cancelled ?? 0} cancelled · ${kpis.noShow ?? 0} no-show`,
+    },
+    { title: "Total Customers", value: String(kpis.totalCustomers ?? 0) },
+    {
+      title: "Average Rating",
+      value: kpis.averageRating == null ? "—" : Number(kpis.averageRating).toFixed(2),
+      meta: kpis.ratingCount ? `${kpis.ratingCount} rating(s) in period` : "From barber profiles / feedback",
+    },
+  ];
+  grid.innerHTML = cards.map((card) => `
+    <div class="card">
+      <h3>${escapeAnalyticsText(card.title)}</h3>
+      <div class="value">${escapeAnalyticsText(card.value)}</div>
+      ${card.meta ? `<div class="meta">${escapeAnalyticsText(card.meta)}</div>` : ""}
+    </div>
+  `).join("");
+}
+
+function renderTrendChart(metrics) {
+  if (typeof Chart === "undefined") return;
+  const canvas = document.getElementById("analytics-trend-chart");
+  const empty = document.getElementById("analytics-trend-empty");
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+
+  const mode = state.analyticsTrendMode || "revenue";
+  const rows = mode === "revenue"
+    ? (metrics?.trends?.revenue || [])
+    : (metrics?.trends?.appointments || []);
+
+  if (state.analyticsCharts.trend) {
+    state.analyticsCharts.trend.destroy();
+    delete state.analyticsCharts.trend;
   }
-  if (state.servicesChart) {
-    state.servicesChart.destroy();
-    state.servicesChart = null;
+
+  if (!rows.length) {
+    if (empty) empty.hidden = false;
+    return;
   }
+  if (empty) empty.hidden = true;
+
+  const labels = rows.map((row) => row.bucket);
+  const values = rows.map((row) => Number(mode === "revenue" ? row.amount : row.count) || 0);
+
+  state.analyticsCharts.trend = new Chart(canvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label: mode === "revenue" ? "Revenue (₱)" : "Appointments",
+        data: values,
+        borderColor: mode === "revenue" ? "#a99941" : "#00b0ff",
+        backgroundColor: mode === "revenue" ? "rgba(169,153,65,0.18)" : "rgba(0,176,255,0.18)",
+        tension: 0.35,
+        fill: true,
+      }],
+    },
+    options: chartDefaults(),
+  });
 }
 
 function renderAnalyticsCharts(metrics) {
-  if (typeof Chart === "undefined") {
-    return;
-  }
+  if (typeof Chart === "undefined") return;
+
+  destroyAnalyticsCharts();
+  renderTrendChart(metrics);
 
   const statusCanvas = document.getElementById("analytics-status-chart");
   const servicesCanvas = document.getElementById("analytics-services-chart");
-  if (!(statusCanvas instanceof HTMLCanvasElement) || !(servicesCanvas instanceof HTMLCanvasElement)) {
-    return;
-  }
-
-  destroyAnalyticsCharts();
+  const hoursCanvas = document.getElementById("analytics-hours-chart");
+  const daysCanvas = document.getElementById("analytics-days-chart");
 
   const statusRows = metrics?.appointmentStatusCounts ?? [];
-  const statusLabels = statusRows.map((row) => row.status || "Unknown");
-  const statusValues = statusRows.map((row) => Number(row.count ?? 0));
-
-  state.statusChart = new Chart(statusCanvas, {
-    type: "line",
-    data: {
-      labels: statusLabels.length ? statusLabels : ["No Data"],
-      datasets: [
-        {
-          label: "Appointments",
-          data: statusValues.length ? statusValues : [0],
-          borderColor: "#00b0ff",
-          backgroundColor: "rgba(0, 176, 255, 0.2)",
-          tension: 0.35,
-          fill: true,
-        },
-      ],
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#c9c9c9" } } },
-      scales: {
-        x: { ticks: { color: "#c9c9c9" }, grid: { color: "rgba(255,255,255,0.08)" } },
-        y: { ticks: { color: "#c9c9c9", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" } },
+  if (statusCanvas instanceof HTMLCanvasElement) {
+    state.analyticsCharts.status = new Chart(statusCanvas, {
+      type: "doughnut",
+      data: {
+        labels: statusRows.length ? statusRows.map((r) => r.status || "Unknown") : ["No Data"],
+        datasets: [{
+          data: statusRows.length ? statusRows.map((r) => Number(r.count ?? 0)) : [1],
+          backgroundColor: ["#00c853", "#00b0ff", "#f7c948", "#ff4f81", "#ff7043", "#9e9e9e", "#7e57c2"],
+        }],
       },
-    },
-  });
+      options: {
+        maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom", labels: { color: "#c9c9c9", boxWidth: 12 } } },
+      },
+    });
+  }
 
   const serviceRows = metrics?.topServices ?? [];
-  const serviceLabels = serviceRows.map((row) => row.service_name || "Service");
-  const serviceValues = serviceRows.map((row) => Number(row.count ?? 0));
-
-  state.servicesChart = new Chart(servicesCanvas, {
-    type: "bar",
-    data: {
-      labels: serviceLabels.length ? serviceLabels : ["No Data"],
-      datasets: [
-        {
+  if (servicesCanvas instanceof HTMLCanvasElement) {
+    state.analyticsCharts.services = new Chart(servicesCanvas, {
+      type: "bar",
+      data: {
+        labels: serviceRows.length ? serviceRows.map((r) => r.service_name || "Service") : ["No Data"],
+        datasets: [{
           label: "Bookings",
-          data: serviceValues.length ? serviceValues : [0],
-          backgroundColor: ["#ff4f81", "#00b0ff", "#f7c948", "#00c853", "#ff7043"],
+          data: serviceRows.length ? serviceRows.map((r) => Number(r.booking_count ?? r.count ?? 0)) : [0],
+          backgroundColor: "#00b0ff",
           borderRadius: 8,
-        },
-      ],
-    },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { labels: { color: "#c9c9c9" } } },
-      scales: {
-        x: { ticks: { color: "#c9c9c9" }, grid: { color: "rgba(255,255,255,0.08)" } },
-        y: { ticks: { color: "#c9c9c9", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" } },
+        }],
       },
-    },
-  });
+      options: chartDefaults(),
+    });
+  }
+
+  const list = document.getElementById("analytics-services-list");
+  if (list) {
+    list.innerHTML = serviceRows.length
+      ? serviceRows.map((row) => `
+          <div class="analytics-stack-item">
+            <strong>${escapeAnalyticsText(row.service_name)}</strong>
+            ${Number(row.booking_count ?? row.count ?? 0)} bookings · ${formatPeso(row.revenue ?? 0)} completed revenue
+          </div>
+        `).join("")
+      : '<div class="meta">No service bookings in this period.</div>';
+  }
+
+  const peakHours = metrics?.operations?.peakHours ?? [];
+  if (hoursCanvas instanceof HTMLCanvasElement) {
+    const hourLabels = [];
+    const hourValues = [];
+    const hourMap = Object.fromEntries(peakHours.map((r) => [Number(r.hour), Number(r.count)]));
+    for (let h = 7; h <= 21; h += 1) {
+      hourLabels.push(`${String(h).padStart(2, "0")}:00`);
+      hourValues.push(hourMap[h] || 0);
+    }
+    state.analyticsCharts.hours = new Chart(hoursCanvas, {
+      type: "bar",
+      data: {
+        labels: hourLabels,
+        datasets: [{
+          label: "Bookings by hour",
+          data: hourValues,
+          backgroundColor: "rgba(0,176,255,0.55)",
+          borderRadius: 6,
+        }],
+      },
+      options: { ...chartDefaults(), plugins: { legend: { display: false } } },
+    });
+  }
+
+  const busiestDays = metrics?.operations?.busiestDays ?? [];
+  if (daysCanvas instanceof HTMLCanvasElement) {
+    const dayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayMap = Object.fromEntries(busiestDays.map((r) => [Number(r.dow), Number(r.count)]));
+    state.analyticsCharts.days = new Chart(daysCanvas, {
+      type: "bar",
+      data: {
+        labels: dayNames,
+        datasets: [{
+          label: "Bookings by day",
+          data: dayNames.map((_, i) => dayMap[i] || 0),
+          backgroundColor: "rgba(169,153,65,0.65)",
+          borderRadius: 6,
+        }],
+      },
+      options: { ...chartDefaults(), plugins: { legend: { display: false } } },
+    });
+  }
 }
 
-function renderAiBrief(summary, suggestive, predictive) {
+function renderBarberTable(metrics) {
+  const table = document.getElementById("analytics-barber-table");
+  const empty = document.getElementById("analytics-barber-empty");
+  if (!table) return;
+  const tbody = table.querySelector("tbody");
+  const rows = metrics?.barberPerformance ?? [];
+  if (!tbody) return;
+
+  if (!rows.length) {
+    tbody.innerHTML = "";
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
+
+  tbody.innerHTML = rows.map((row) => {
+    const rating = row.avgRating == null ? "—" : Number(row.avgRating).toFixed(2);
+    const cancelNoShow = `${Number(row.cancelled || 0)} / ${Number(row.noShow || 0)}`;
+    return `<tr>
+      <td>${escapeAnalyticsText(row.barberName)}</td>
+      <td>${Number(row.completed || 0)}</td>
+      <td>${formatPeso(row.revenue)}</td>
+      <td>${rating}</td>
+      <td>${cancelNoShow}</td>
+    </tr>`;
+  }).join("");
+}
+
+function renderOperations(metrics) {
+  const el = document.getElementById("analytics-ops-kpis");
+  if (!el) return;
+  const ops = metrics?.operations || {};
+  el.innerHTML = `
+    <div class="ops-pill"><div class="label">Appointments</div><div class="value">${Number(ops.appointmentVolume || 0)}</div></div>
+    <div class="ops-pill"><div class="label">Walk-ins</div><div class="value">${Number(ops.walkinVolume || 0)}</div></div>
+    <div class="ops-pill"><div class="label">Cancel rate</div><div class="value">${Number(ops.cancellationRate || 0)}%</div></div>
+    <div class="ops-pill"><div class="label">No-show rate</div><div class="value">${Number(ops.noShowRate || 0)}%</div></div>
+  `;
+}
+
+function renderCustomers(metrics) {
+  const el = document.getElementById("analytics-customers");
+  if (!el) return;
+  const c = metrics?.customers || {};
+  const favBarber = c.mostBookedBarber;
+  const styles = c.mostFavoritedHairstyles || [];
+  el.innerHTML = `
+    <div class="analytics-stack-item"><strong>New customers</strong>${Number(c.newCustomers || 0)}</div>
+    <div class="analytics-stack-item"><strong>Returning customers</strong>${Number(c.returningCustomers || 0)}</div>
+    <div class="analytics-stack-item"><strong>Total customers</strong>${Number(c.totalCustomers || 0)}</div>
+    <div class="analytics-stack-item">
+      <strong>Most booked barber</strong>
+      ${favBarber
+        ? `${escapeAnalyticsText(favBarber.barberName)} · ${Number(favBarber.bookingCount)} bookings`
+        : "Insufficient data"}
+      <div class="meta" style="margin-top:4px;">${escapeAnalyticsText(favBarber?.note || "Barber favorites are not stored.")}</div>
+    </div>
+    <div class="analytics-stack-item">
+      <strong>Most favorited hairstyles</strong>
+      ${styles.length
+        ? styles.slice(0, 5).map((s) => `${escapeAnalyticsText(s.style_name)} (${s.favorite_count})`).join(", ")
+        : "No favorites recorded yet."}
+    </div>
+  `;
+}
+
+function renderAiBrief(summary, insightPayload) {
   const container = document.getElementById("analytics-ai-brief");
   const summaryEl = document.getElementById("analytics-summary");
   if (!container || !summaryEl) return;
 
-  const shortSummary = String(summary || "No AI summary available.")
-    .replace(/\s+/g, " ")
-    .trim();
-  summaryEl.textContent = shortSummary;
+  summaryEl.textContent = String(summary || "No AI summary available.").replace(/\s+/g, " ").trim();
 
-  const topSuggestive = suggestive?.[0] || "No suggestive insight yet.";
-  const topPredictive = predictive?.[0] || "No predictive insight yet.";
+  const insight = insightPayload?.insight || "Insufficient data for a reliable insight.";
+  const recommendation = insightPayload?.recommendation || "Collect more appointments and ratings in this period.";
+  const prediction = insightPayload?.prediction || "Insufficient data for a reliable prediction.";
 
   container.innerHTML = `
-    <div class="ai-brief-item"><strong>Suggest:</strong> ${topSuggestive}</div>
-    <div class="ai-brief-item"><strong>Predict:</strong> ${topPredictive}</div>
+    <div class="ai-brief-item"><strong>Insight:</strong> ${escapeAnalyticsText(insight)}</div>
+    <div class="ai-brief-item"><strong>Recommendation:</strong> ${escapeAnalyticsText(recommendation)}</div>
+    <div class="ai-brief-item"><strong>Prediction:</strong> ${escapeAnalyticsText(prediction)}</div>
   `;
 }
 
-async function loadAnalytics() {
+function renderAnalyticsDashboard(data) {
+  const metrics = data?.metrics ?? null;
+  state.analytics = metrics;
+
+  const label = document.getElementById("analytics-period-label");
+  if (label && metrics) {
+    label.textContent = `${metrics.periodLabel || "Selected period"} · ${metrics.startDate || ""} to ${metrics.endDate || ""}`;
+  }
+
+  renderAnalyticsKpis(metrics);
+  renderAnalyticsCharts(metrics);
+  renderBarberTable(metrics);
+  renderOperations(metrics);
+  renderCustomers(metrics);
+  renderAiBrief(data?.summary, data?.aiInsights);
+}
+
+async function loadAnalytics(period = state.analyticsPeriod || "30d") {
+  state.analyticsPeriod = period;
+  document.querySelectorAll(".analytics-period-btn").forEach((btn) => {
+    btn.classList.toggle("is-active", btn.dataset.period === period);
+  });
+
+  const summaryEl = document.getElementById("analytics-summary");
+  if (summaryEl) summaryEl.textContent = "Loading insights…";
+
   try {
-    const response = await fetch(resolveApiUrl("admin_analytics.php"));
+    const response = await fetch(resolveApiUrl(`admin_analytics.php?period=${encodeURIComponent(period)}`));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
-    state.analytics = data.metrics ?? null;
-    renderAnalyticsCharts(data.metrics ?? null);
-    await renderAiInsights(data.metrics ?? null, data.summary ?? "");
+    if (data.error) throw new Error(data.error);
+    renderAnalyticsDashboard(data);
   } catch (_) {
     state.analytics = null;
-    const summaryEl = document.getElementById("analytics-summary");
-    if (summaryEl) summaryEl.textContent = "Failed to load AI summary.";
-    const brief = document.getElementById("analytics-ai-brief");
-    if (brief) brief.innerHTML = '<div class="ai-brief-item">AI insights are currently unavailable.</div>';
     destroyAnalyticsCharts();
-  }
-}
-
-function fallbackInsights(metrics) {
-  const monthlyRevenue = Number(metrics?.monthlyRevenue ?? 0);
-  const activeServices = Number(metrics?.activeServices ?? 0);
-  const totalUsers = Number(metrics?.totalUsers ?? 0);
-  return {
-    suggestive: [
-      "Promote your top 3 services during peak hours to increase average ticket size.",
-      activeServices < 5
-        ? "Add more active services to improve upsell opportunities at the front desk."
-        : "Bundle high-demand services into combo offers to improve conversion.",
-      "Use receptionist reminders to rebook clients before they leave the shop.",
-    ],
-    predictive: [
-      monthlyRevenue > 0
-        ? `If current pace holds, projected monthly revenue remains around PHP ${monthlyRevenue.toFixed(2)}.`
-        : "Revenue trend cannot be projected yet because paid transactions are limited.",
-      totalUsers > 50
-        ? "Customer demand is likely to rise this weekend; prepare additional barber slots."
-        : "Customer volume is still building; run targeted promos to increase recurring visits.",
-      "Expect morning queue pressure; prioritize quick services in the first two hours.",
-    ],
-  };
-}
-
-function parseInsightJson(text) {
-  const clean = String(text || "").trim();
-  if (!clean) return null;
-  const match = clean.match(/\{[\s\S]*\}/);
-  if (!match) return null;
-  try {
-    const parsed = JSON.parse(match[0]);
-    if (!Array.isArray(parsed.suggestive) || !Array.isArray(parsed.predictive)) {
-      return null;
+    if (summaryEl) summaryEl.textContent = "Failed to load analytics.";
+    const brief = document.getElementById("analytics-ai-brief");
+    if (brief) {
+      brief.innerHTML = '<div class="ai-brief-item">Analytics are currently unavailable. Check the API connection and try Refresh.</div>';
     }
-    return parsed;
-  } catch (_) {
-    return null;
+    const grid = document.getElementById("analytics-kpi-grid");
+    if (grid) grid.innerHTML = '<div class="card"><h3>Error</h3><div class="meta">Could not load analytics metrics.</div></div>';
   }
 }
 
-async function buildGeminiInsights(metrics, summary) {
-  const prompt = [
-    "You are an analytics strategist for a barbershop.",
-    "Using the provided metrics, produce practical recommendations.",
-    "Return strict JSON with keys suggestive and predictive.",
-    "Each key must contain an array of exactly 3 short strings.",
-    "Do not include markdown or extra keys.",
-    `Metrics JSON: ${JSON.stringify(metrics || {})}`,
-    `Current summary: ${summary || "N/A"}`,
-  ].join("\n");
+function bindAnalyticsControls() {
+  document.querySelectorAll(".analytics-period-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const period = btn.dataset.period || "30d";
+      loadAnalytics(period);
+    });
+  });
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${CHATBOT_MODEL}:generateContent?key=${CHATBOT_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          temperature: 0.4,
-          topP: 0.9,
-          maxOutputTokens: 400,
-        },
-      }),
-    }
-  );
+  document.getElementById("analytics-refresh")?.addEventListener("click", () => {
+    loadAnalytics(state.analyticsPeriod || "30d");
+  });
 
-  if (!response.ok) {
-    throw new Error("Gemini request failed");
-  }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  const parsed = parseInsightJson(text);
-  if (!parsed) {
-    throw new Error("Gemini response parse failed");
-  }
-  return {
-    suggestive: parsed.suggestive.slice(0, 3),
-    predictive: parsed.predictive.slice(0, 3),
-  };
+  document.querySelectorAll(".analytics-trend-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.analyticsTrendMode = btn.dataset.trend || "revenue";
+      document.querySelectorAll(".analytics-trend-btn").forEach((b) => {
+        b.classList.toggle("is-active", b.dataset.trend === state.analyticsTrendMode);
+      });
+      if (state.analytics) {
+        if (state.analyticsCharts.trend) {
+          state.analyticsCharts.trend.destroy();
+          delete state.analyticsCharts.trend;
+        }
+        renderTrendChart(state.analytics);
+      }
+    });
+  });
 }
+
+bindAnalyticsControls();
 
 async function renderAiInsights(metrics, summary) {
-  try {
-    const insights = await buildGeminiInsights(metrics, summary);
-    renderAiBrief(summary, insights.suggestive, insights.predictive);
-  } catch (_) {
-    const fallback = fallbackInsights(metrics);
-    renderAiBrief(summary, fallback.suggestive, fallback.predictive);
-  }
+  // Kept for compatibility; insights now come from admin_analytics.php aiInsights.
+  renderAiBrief(summary, {
+    insight: summary,
+    recommendation: "Review the KPI and operations panels for actionable detail.",
+    prediction: metrics?.appointmentsInPeriod >= 10
+      ? "Near-term volume may resemble the selected period if staffing stays similar."
+      : "Insufficient data for a reliable prediction.",
+  });
 }
 
 async function loadSettings() {
