@@ -24,8 +24,48 @@ class CalendarPage extends StatefulWidget {
   State<CalendarPage> createState() => _CalendarPageState();
 }
 
+class _DayAvailability {
+  const _DayAvailability({
+    required this.availableCount,
+    required this.bookedCount,
+    required this.totalSlots,
+    required this.isClosed,
+    required this.closureStatus,
+    required this.closureReason,
+    required this.closureMessage,
+  });
+
+  final int availableCount;
+  final int bookedCount;
+  final int totalSlots;
+  final bool isClosed;
+  final String closureStatus;
+  final String closureReason;
+  final String closureMessage;
+
+  factory _DayAvailability.fromJson(Map<String, dynamic> row) {
+    return _DayAvailability(
+      availableCount: _asInt(row['availableCount']),
+      bookedCount: _asInt(row['bookedCount']),
+      totalSlots: _asInt(row['totalSlots']),
+      isClosed: row['isClosed'] == true,
+      closureStatus: row['closureStatus']?.toString() ?? 'open',
+      closureReason: row['closureReason']?.toString() ?? '',
+      closureMessage: row['closureMessage']?.toString() ?? '',
+    );
+  }
+
+  static int _asInt(dynamic value) {
+    if (value is int) return value;
+    return int.tryParse('$value') ?? 0;
+  }
+}
+
 class _CalendarPageState extends State<CalendarPage> {
   static const int _bookingWindowDays = 30;
+  static const Color _closedHolidayFill = Color(0xFF3A1F1F);
+  static const Color _closedHolidayText = Color(0xFFFFB4B4);
+  static const Color _closedWeeklyFill = Color(0xFF1C1C1C);
 
   String get _pageTitle =>
       widget.rescheduleAppointmentId != null ? 'Reschedule' : 'Select Date';
@@ -35,10 +75,13 @@ class _CalendarPageState extends State<CalendarPage> {
   int _availableSlots = 0;
   int _totalSlots = 0;
   int _bookedSlots = 0;
+  bool _selectedIsClosed = false;
+  String _selectedClosureMessage = '';
+  String _selectedClosureReason = '';
   bool _loadingSlots = false;
   bool _loadingMonthAvailability = false;
   bool _continuing = false;
-  Map<String, int> _availableByDate = {};
+  Map<String, _DayAvailability> _dayByDate = {};
 
   @override
   void initState() {
@@ -70,20 +113,17 @@ class _CalendarPageState extends State<CalendarPage> {
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
 
-        final mapped = <String, int>{};
+        final mapped = <String, _DayAvailability>{};
         for (final row in rows) {
           final key = row['slotDate']?.toString() ?? '';
-          final count = row['availableCount'] is int
-              ? row['availableCount'] as int
-              : int.tryParse('${row['availableCount']}') ?? 0;
           if (key.isNotEmpty) {
-            mapped[key] = count;
+            mapped[key] = _DayAvailability.fromJson(row);
           }
         }
 
         if (!mounted) return;
         setState(() {
-          _availableByDate = mapped;
+          _dayByDate = mapped;
         });
       }
     } catch (_) {
@@ -112,27 +152,63 @@ class _CalendarPageState extends State<CalendarPage> {
           ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
           : <String, dynamic>{};
       if (response.statusCode == 200) {
+        final isClosed = data['isClosed'] == true;
+        final closureMessage = data['closureMessage']?.toString() ?? '';
+        final closureReason = data['closureReason']?.toString() ?? '';
+
+        if (isClosed) {
+          setState(() {
+            _selectedIsClosed = true;
+            _selectedClosureMessage = closureMessage.isNotEmpty
+                ? closureMessage
+                : "We're closed this day.";
+            _selectedClosureReason = closureReason;
+            _availableSlots = 0;
+            _totalSlots = 0;
+            _bookedSlots = 0;
+          });
+          return;
+        }
+
         final slots = (data['slots'] as List<dynamic>? ?? []);
         final selectedDay = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
         final now = DateTime.now();
-        final available = slots.where((slot) {
-          final row = Map<String, dynamic>.from(slot as Map);
-          final status = row['status']?.toString().toLowerCase() ?? '';
-          if (status != 'available') {
-            return false;
-          }
-          final slotTime = row['slot_time']?.toString() ?? '';
-          final slotDateTime = tryParseSlotDateTime(date: selectedDay, time: slotTime);
-          return slotDateTime != null && slotDateTime.isAfter(now);
-        }).length;
-        final booked = slots.where((slot) {
-          final row = Map<String, dynamic>.from(slot as Map);
-          final status = row['status']?.toString().toLowerCase() ?? '';
-          return status == 'booked';
-        }).length;
+        final availableFromPayload = data['availableCount'];
+        final bookedFromPayload = data['bookedCount'];
+        final totalFromPayload = data['totalSlots'];
+
+        int available;
+        int booked;
+        int total;
+        if (availableFromPayload != null && bookedFromPayload != null && totalFromPayload != null) {
+          available = _DayAvailability._asInt(availableFromPayload);
+          booked = _DayAvailability._asInt(bookedFromPayload);
+          total = _DayAvailability._asInt(totalFromPayload);
+        } else {
+          available = slots.where((slot) {
+            final row = Map<String, dynamic>.from(slot as Map);
+            final status = row['status']?.toString().toLowerCase() ?? '';
+            if (status != 'available') {
+              return false;
+            }
+            final slotTime = row['slot_time']?.toString() ?? '';
+            final slotDateTime = tryParseSlotDateTime(date: selectedDay, time: slotTime);
+            return slotDateTime != null && slotDateTime.isAfter(now);
+          }).length;
+          booked = slots.where((slot) {
+            final row = Map<String, dynamic>.from(slot as Map);
+            final status = row['status']?.toString().toLowerCase() ?? '';
+            return status == 'booked';
+          }).length;
+          total = slots.length;
+        }
+
         setState(() {
+          _selectedIsClosed = false;
+          _selectedClosureMessage = '';
+          _selectedClosureReason = '';
           _availableSlots = available;
-          _totalSlots = slots.length;
+          _totalSlots = total;
           _bookedSlots = booked;
         });
       }
@@ -145,9 +221,49 @@ class _CalendarPageState extends State<CalendarPage> {
     }
   }
 
+  void _onDayTapped({
+    required DateTime date,
+    required bool inBookingWindow,
+    required bool isPast,
+    required bool isBeyondWindow,
+    required _DayAvailability? dayInfo,
+  }) {
+    final isClosed = dayInfo?.isClosed == true;
+
+    if (isPast) {
+      return;
+    }
+
+    if (isBeyondWindow) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You can book up to $_bookingWindowDays days in advance.'),
+        ),
+      );
+      return;
+    }
+
+    if (isClosed) {
+      setState(() => _selectedDate = date);
+      _fetchSlotCount();
+      final message = (dayInfo?.closureMessage.isNotEmpty == true)
+          ? dayInfo!.closureMessage
+          : "We're closed this day.";
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+      return;
+    }
+
+    if (inBookingWindow) {
+      setState(() => _selectedDate = date);
+      _fetchSlotCount();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final showInitialSkeleton = _loadingMonthAvailability && _availableByDate.isEmpty;
+    final showInitialSkeleton = _loadingMonthAvailability && _dayByDate.isEmpty;
     if (showInitialSkeleton) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
@@ -172,9 +288,12 @@ class _CalendarPageState extends State<CalendarPage> {
     final bookingWindowEnd = todayDate.add(Duration(days: _bookingWindowDays - 1));
     final currentMonthKey = DateTime(today.year, today.month);
     final canGoPrev = _currentMonth.isAfter(currentMonthKey);
-    final slotsTaken = _bookedSlots.clamp(0, _totalSlots);
-    final takenColor = slotsTaken > 5 ? Colors.yellow : Colors.red;
-    final slotsTakenLabel = '$slotsTaken/$_totalSlots slots taken';
+    final slotsBooked = _bookedSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _bookedSlots);
+    final slotsOpen = _availableSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _availableSlots);
+    final usageColor = _slotUsageColor(slotsBooked, _totalSlots);
+    final slotsSummaryLabel = _totalSlots > 0
+        ? '$slotsBooked of $_totalSlots slots booked · $slotsOpen open'
+        : (_selectedIsClosed ? 'Closed' : 'No slots');
 
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
@@ -196,7 +315,7 @@ class _CalendarPageState extends State<CalendarPage> {
               widget.rescheduleAppointmentId != null && widget.reschedulesRemaining != null
                   ? 'Pick a new date. ${widget.reschedulesRemaining} reschedule(s) left. '
                   : 'Book from today through ${_formatWindowEnd(bookingWindowEnd)} ($_bookingWindowDays days). '
-              'White days have open times with ${_barberNameLabel()}; gray days are past, outside the window, or fully booked.',
+              'White days have open times with ${_barberNameLabel()}. Red-tinted days are closed. Gray days are past, outside the window, or fully booked.',
               style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
             ),
             const SizedBox(height: 24),
@@ -290,51 +409,70 @@ class _CalendarPageState extends State<CalendarPage> {
                                 final day = index + 1;
                                 final date = DateTime(_currentMonth.year, _currentMonth.month, day);
                                 final dateKey = _formatDate(date);
+                                final dayInfo = _dayByDate[dateKey];
                                 final isSelected = _selectedDate.day == day &&
                                     _selectedDate.month == _currentMonth.month &&
                                     _selectedDate.year == _currentMonth.year;
                                 final isPast = date.isBefore(todayDate);
                                 final isBeyondWindow = date.isAfter(bookingWindowEnd);
-                                final availableForDate = _availableByDate[dateKey] ?? 0;
+                                final isClosed = dayInfo?.isClosed == true;
+                                final availableForDate = dayInfo?.availableCount ?? 0;
                                 final inBookingWindow = !isPast && !isBeyondWindow;
-                                final hasOpenSlots = availableForDate > 0;
+                                final hasOpenSlots = !isClosed && availableForDate > 0;
+                                final isHolidayClosed = dayInfo?.closureStatus == 'closed_holiday';
+
+                                Color fill;
+                                Color textColor;
+                                Border? border;
+                                if (isSelected) {
+                                  fill = isClosed ? _closedHolidayFill : const Color(0xFFA99941);
+                                  textColor = Colors.white;
+                                  border = isClosed
+                                      ? Border.all(color: const Color(0xFFFF8A80), width: 1.5)
+                                      : null;
+                                } else if (isPast || isBeyondWindow) {
+                                  fill = Colors.white12;
+                                  textColor = Colors.white38;
+                                  border = Border.all(color: Colors.white12);
+                                } else if (isClosed) {
+                                  fill = isHolidayClosed ? _closedHolidayFill : _closedWeeklyFill;
+                                  textColor = isHolidayClosed ? _closedHolidayText : Colors.white54;
+                                  border = Border.all(
+                                    color: isHolidayClosed
+                                        ? const Color(0x66DC5050)
+                                        : Colors.white12,
+                                  );
+                                } else if (hasOpenSlots) {
+                                  fill = Colors.white;
+                                  textColor = Colors.black;
+                                } else {
+                                  fill = const Color(0xFF2A2A2A);
+                                  textColor = Colors.white70;
+                                }
 
                                 return GestureDetector(
-                                  onTap: inBookingWindow
-                                      ? () {
-                                          setState(() => _selectedDate = date);
-                                          _fetchSlotCount();
-                                        }
-                                      : (isPast
-                                          ? null
-                                          : () {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                const SnackBar(
-                                                  content: Text('You can book up to $_bookingWindowDays days in advance.'),
-                                                ),
-                                              );
-                                            }),
+                                  onTap: () => _onDayTapped(
+                                    date: date,
+                                    inBookingWindow: inBookingWindow,
+                                    isPast: isPast,
+                                    isBeyondWindow: isBeyondWindow,
+                                    dayInfo: dayInfo,
+                                  ),
                                   child: Container(
                                     decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? const Color(0xFFA99941)
-                                          : (inBookingWindow
-                                              ? (hasOpenSlots ? Colors.white : const Color(0xFF2A2A2A))
-                                              : Colors.white12),
+                                      color: fill,
                                       borderRadius: BorderRadius.circular(8),
-                                      border: !inBookingWindow ? Border.all(color: Colors.white12) : null,
+                                      border: border,
                                     ),
                                     child: Center(
                                       child: Text(
                                         day.toString(),
                                         style: TextStyle(
-                                          color: isSelected
-                                              ? Colors.white
-                                              : (inBookingWindow
-                                                  ? (hasOpenSlots ? Colors.black : Colors.white70)
-                                                  : Colors.white38),
+                                          color: textColor,
                                           fontWeight: FontWeight.bold,
                                           fontSize: width < 360 ? 12 : 14,
+                                          decoration: isClosed && !isPast ? TextDecoration.lineThrough : null,
+                                          decorationColor: textColor.withOpacity(0.7),
                                         ),
                                       ),
                                     ),
@@ -348,6 +486,17 @@ class _CalendarPageState extends State<CalendarPage> {
                     },
                   ),
                   const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 6,
+                    children: const [
+                      _LegendDot(color: Colors.white, label: 'Open'),
+                      _LegendDot(color: Color(0xFF3A1F1F), label: 'Closed', borderColor: Color(0x66DC5050)),
+                      _LegendDot(color: Color(0xFF2A2A2A), label: 'Fully booked'),
+                      _LegendDot(color: Colors.white12, label: 'Unavailable'),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -357,14 +506,14 @@ class _CalendarPageState extends State<CalendarPage> {
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: takenColor,
+                              color: _selectedIsClosed ? _closedHolidayText : usageColor,
                               shape: BoxShape.circle,
                             ),
                           ),
                           const SizedBox(width: 8),
-                          const Text(
-                            'Slots taken',
-                            style: TextStyle(color: Colors.white70, fontSize: 12),
+                          Text(
+                            _selectedIsClosed ? 'Shop closed' : 'Slot availability',
+                            style: const TextStyle(color: Colors.white70, fontSize: 12),
                           ),
                         ],
                       ),
@@ -374,9 +523,12 @@ class _CalendarPageState extends State<CalendarPage> {
                               height: 16,
                               child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                             )
-                          : Text(
-                              _loadingMonthAvailability ? 'Checking dates...' : slotsTakenLabel,
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                          : Flexible(
+                              child: Text(
+                                _loadingMonthAvailability ? 'Checking dates...' : slotsSummaryLabel,
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
                             ),
                     ],
                   ),
@@ -385,6 +537,7 @@ class _CalendarPageState extends State<CalendarPage> {
             ),
             const SizedBox(height: 24),
             Container(
+              width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -393,79 +546,150 @@ class _CalendarPageState extends State<CalendarPage> {
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.white, width: 1),
+                border: Border.all(
+                  color: _selectedIsClosed ? const Color(0x66DC5050) : Colors.white,
+                  width: 1,
+                ),
               ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Slots taken for ${_formatDate(_selectedDate)}',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  _loadingSlots
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : Text(slotsTakenLabel, style: TextStyle(color: takenColor, fontWeight: FontWeight.bold)),
-                ],
-              ),
+              child: _loadingSlots
+                  ? const Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      ),
+                    )
+                  : _selectedIsClosed
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Closed on ${_formatDate(_selectedDate)}',
+                              style: const TextStyle(
+                                color: _closedHolidayText,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _selectedClosureMessage.isNotEmpty
+                                  ? _selectedClosureMessage
+                                  : "We're closed this day.",
+                              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                            ),
+                            if (_selectedClosureReason.isNotEmpty &&
+                                !_selectedClosureMessage.contains(_selectedClosureReason)) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                _selectedClosureReason,
+                                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                              ),
+                            ],
+                          ],
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Selected: ${_formatDate(_selectedDate)}',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _totalSlots > 0
+                                  ? '$slotsBooked of $_totalSlots slots booked'
+                                  : 'No slots for this date',
+                              style: TextStyle(
+                                color: usageColor,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _totalSlots > 0
+                                  ? '$slotsOpen of $_totalSlots still available with ${_barberNameLabel()}'
+                                  : 'Pick another date to continue.',
+                              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
+                            ),
+                          ],
+                        ),
             ),
             const SizedBox(height: 32),
             ElevatedButton(
-              onPressed: _continuing
+              onPressed: (_continuing || _selectedIsClosed || _availableSlots <= 0)
                   ? null
                   : () async {
                       setState(() => _continuing = true);
-                final today = DateTime.now();
-                final minDate = DateTime(today.year, today.month, today.day);
-                final maxDate = minDate.add(Duration(days: _bookingWindowDays - 1));
-                if (_selectedDate.isBefore(minDate)) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please select a valid date.')),
-                  );
-                  if (mounted) {
-                    setState(() => _continuing = false);
-                  }
-                  return;
-                }
-                if (_selectedDate.isAfter(maxDate)) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('You can only book within the next $_bookingWindowDays days.')),
-                  );
-                  if (mounted) {
-                    setState(() => _continuing = false);
-                  }
-                  return;
-                }
-                if (_availableSlots <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('No open times left on this date. Please pick another date.')),
-                  );
-                  if (mounted) {
-                    setState(() => _continuing = false);
-                  }
-                  return;
-                }
-                final slotResult = await Navigator.of(context).push<bool>(
-                  MaterialPageRoute(
-                    builder: (_) => TimeSlotPage(
-                      barberId: widget.barberId,
-                      barberName: widget.barberName,
-                      selectedDate: _selectedDate,
-                      rescheduleAppointmentId: widget.rescheduleAppointmentId,
-                      reschedulesRemaining: widget.reschedulesRemaining,
-                    ),
-                  ),
-                );
-                if (mounted) {
-                  setState(() => _continuing = false);
-                }
-                if (widget.rescheduleAppointmentId != null &&
-                    slotResult == true &&
-                    context.mounted) {
-                  Navigator.of(context).pop(true);
-                }
-              },
+                      final today = DateTime.now();
+                      final minDate = DateTime(today.year, today.month, today.day);
+                      final maxDate = minDate.add(Duration(days: _bookingWindowDays - 1));
+                      if (_selectedDate.isBefore(minDate)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Please select a valid date.')),
+                        );
+                        if (mounted) {
+                          setState(() => _continuing = false);
+                        }
+                        return;
+                      }
+                      if (_selectedDate.isAfter(maxDate)) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('You can only book within the next $_bookingWindowDays days.')),
+                        );
+                        if (mounted) {
+                          setState(() => _continuing = false);
+                        }
+                        return;
+                      }
+                      if (_selectedIsClosed) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              _selectedClosureMessage.isNotEmpty
+                                  ? _selectedClosureMessage
+                                  : "We're closed this day.",
+                            ),
+                          ),
+                        );
+                        if (mounted) {
+                          setState(() => _continuing = false);
+                        }
+                        return;
+                      }
+                      if (_availableSlots <= 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('No open times left on this date. Please pick another date.')),
+                        );
+                        if (mounted) {
+                          setState(() => _continuing = false);
+                        }
+                        return;
+                      }
+                      final slotResult = await Navigator.of(context).push<bool>(
+                        MaterialPageRoute(
+                          builder: (_) => TimeSlotPage(
+                            barberId: widget.barberId,
+                            barberName: widget.barberName,
+                            selectedDate: _selectedDate,
+                            rescheduleAppointmentId: widget.rescheduleAppointmentId,
+                            reschedulesRemaining: widget.reschedulesRemaining,
+                          ),
+                        ),
+                      );
+                      if (mounted) {
+                        setState(() => _continuing = false);
+                      }
+                      if (widget.rescheduleAppointmentId != null &&
+                          slotResult == true &&
+                          context.mounted) {
+                        Navigator.of(context).pop(true);
+                      }
+                    },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
+                disabledBackgroundColor: Colors.white24,
                 minimumSize: const Size.fromHeight(56),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 8,
@@ -477,12 +701,12 @@ class _CalendarPageState extends State<CalendarPage> {
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                     )
-                  : const Text(
-                      'Continue',
+                  : Text(
+                      _selectedIsClosed ? 'Closed — pick another date' : 'Continue',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 16,
-                        color: Colors.black,
+                        color: (_selectedIsClosed || _availableSlots <= 0) ? Colors.white54 : Colors.black,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -492,6 +716,14 @@ class _CalendarPageState extends State<CalendarPage> {
         ),
       ),
     );
+  }
+
+  Color _slotUsageColor(int booked, int total) {
+    if (total <= 0) return Colors.white70;
+    final ratio = booked / total;
+    if (ratio >= 0.8) return const Color(0xFFFF8A80);
+    if (ratio >= 0.5) return const Color(0xFFFFD54F);
+    return const Color(0xFF81C784);
   }
 
   String _formatDate(DateTime date) {
@@ -612,6 +844,38 @@ class _CalendarPageState extends State<CalendarPage> {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({
+    required this.color,
+    required this.label,
+    this.borderColor,
+  });
+
+  final Color color;
+  final String label;
+  final Color? borderColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
+            border: Border.all(color: borderColor ?? Colors.white24),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+      ],
     );
   }
 }
