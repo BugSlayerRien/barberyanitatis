@@ -1,5 +1,5 @@
 /**
- * Shared UI: loading overlay, toasts, confirm/message dialogs (no browser alert/confirm).
+ * Shared UI: loading overlay, button loading, region loading, toasts, confirm/message dialogs.
  */
 (function initPortalUi(global) {
   let loadingCount = 0;
@@ -26,7 +26,7 @@
       overlay.innerHTML = `
         <div class="app-loading-card" role="status" aria-live="polite">
           <div class="app-loading-spinner" aria-hidden="true"></div>
-          <p class="app-loading-text">Loading…</p>
+          <p class="app-loading-text">Loading...</p>
         </div>
       `;
       document.body.appendChild(overlay);
@@ -34,7 +34,7 @@
     loadingCount += 1;
     const textEl = overlay.querySelector(".app-loading-text");
     if (textEl) {
-      textEl.textContent = message || "Loading…";
+      textEl.textContent = message || "Loading...";
     }
     overlay.hidden = false;
     overlay.setAttribute("aria-hidden", "false");
@@ -45,6 +45,7 @@
     const overlay = document.getElementById("app-loading");
     if (overlay && loadingCount === 0) {
       overlay.hidden = true;
+      overlay.setAttribute("aria-hidden", "true");
     }
   }
 
@@ -55,6 +56,84 @@
     if (overlay) {
       overlay.hidden = true;
       overlay.setAttribute("aria-hidden", "true");
+    }
+  }
+
+  async function runWithLoading(message, fn) {
+    showLoading(message || "Please wait...");
+    try {
+      return await fn();
+    } finally {
+      hideLoading();
+    }
+  }
+
+  async function withButtonLoading(button, fn, options) {
+    const opts = options || {};
+    if (typeof fn !== "function") {
+      return undefined;
+    }
+    if (!(button instanceof HTMLElement)) {
+      return fn();
+    }
+    if (button.dataset.loading === "1") {
+      return undefined;
+    }
+
+    const originalHtml = button.innerHTML;
+    const wasDisabled = button.disabled;
+    button.dataset.loading = "1";
+    button.disabled = true;
+    button.classList.add("is-loading");
+    button.setAttribute("aria-busy", "true");
+    if (opts.label) {
+      button.innerHTML = `<span class="btn-spinner" aria-hidden="true"></span><span>${opts.label}</span>`;
+    } else {
+      button.insertAdjacentHTML("afterbegin", '<span class="btn-spinner" aria-hidden="true"></span>');
+    }
+
+    try {
+      return await fn();
+    } finally {
+      button.dataset.loading = "0";
+      button.disabled = wasDisabled;
+      button.classList.remove("is-loading");
+      button.removeAttribute("aria-busy");
+      button.innerHTML = originalHtml;
+    }
+  }
+
+  function setRegionLoading(element, isLoading, message) {
+    if (!(element instanceof HTMLElement)) return;
+    let cover = element.querySelector(":scope > .region-loading");
+    if (isLoading) {
+      element.classList.add("is-region-loading");
+      element.setAttribute("aria-busy", "true");
+      if (!cover) {
+        cover = document.createElement("div");
+        cover.className = "region-loading";
+        cover.innerHTML = `
+          <div class="region-loading-inner" role="status">
+            <div class="btn-spinner" aria-hidden="true"></div>
+            <span class="region-loading-text"></span>
+          </div>
+        `;
+        if (getComputedStyle(element).position === "static") {
+          element.style.position = "relative";
+        }
+        element.appendChild(cover);
+      }
+      const textEl = cover.querySelector(".region-loading-text");
+      if (textEl) {
+        textEl.textContent = message || "Loading...";
+      }
+      cover.hidden = false;
+    } else {
+      element.classList.remove("is-region-loading");
+      element.removeAttribute("aria-busy");
+      if (cover) {
+        cover.hidden = true;
+      }
     }
   }
 
@@ -159,7 +238,7 @@
   async function fetchJson(url, payload, loadingMessage) {
     const useLoading = loadingMessage !== false;
     if (useLoading) {
-      showLoading(loadingMessage || "Please wait…");
+      showLoading(loadingMessage || "Please wait...");
     }
 
     const controller = new AbortController();
@@ -203,6 +282,9 @@
     showLoading,
     hideLoading,
     resetLoading,
+    runWithLoading,
+    withButtonLoading,
+    setRegionLoading,
     toast,
     confirmDialog,
     messageDialog,

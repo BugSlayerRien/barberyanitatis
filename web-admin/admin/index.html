@@ -382,51 +382,119 @@
 
         <section id="settings-view" hidden>
           <div class="section-title">System Settings</div>
-          <div class="settings-layout">
-            <div class="card settings-panel">
-              <h3>Email notifications</h3>
-              <div class="form-grid">
-                <label>Enable email notifications
-                  <input type="checkbox" id="setting-email" />
-                </label>
-                <label>Notification from email
-                  <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" />
-                </label>
-                <label>Test notification email
-                  <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" />
-                </label>
-              </div>
-              <div class="settings-actions">
-                <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
-                <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
+          <p class="meta settings-intro">Configure supported notification options and review live system status. Secrets and provider keys stay on the server.</p>
+
+          <div class="settings-desk" id="settings-desk">
+            <div class="settings-group">
+              <div class="settings-group-label">Operations</div>
+              <div class="settings-layout settings-layout-ops">
+                <div class="card settings-panel is-editable">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>Notifications</h3>
+                      <p class="meta settings-panel-sub">Editable · persisted in system settings</p>
+                    </div>
+                    <span class="settings-badge" id="settings-notif-badge">—</span>
+                  </div>
+                  <div class="settings-editable-block">
+                    <div class="form-grid settings-form">
+                      <label class="settings-toggle">Enable email notification processing
+                        <input type="checkbox" id="setting-email" />
+                      </label>
+                      <label>Sender / from email
+                        <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" autocomplete="off" />
+                      </label>
+                      <label>Test notification email
+                        <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" autocomplete="off" />
+                      </label>
+                    </div>
+                    <div class="settings-actions">
+                      <button class="btn" id="settings-save" type="button">Save notification settings</button>
+                      <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
+                      <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
+                    </div>
+                  </div>
+                  <div class="settings-status-block">
+                    <div class="settings-block-label">Notification coverage</div>
+                    <div class="settings-kv" id="settings-notif-meta" aria-live="polite"></div>
+                    <p class="meta settings-footnote" id="settings-notif-footnote"></p>
+                  </div>
+                </div>
+
+                <div class="card settings-panel is-action">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>Backup &amp; data</h3>
+                      <p class="meta settings-panel-sub">Manual export only</p>
+                    </div>
+                    <span class="settings-badge muted">Manual</span>
+                  </div>
+                  <div class="settings-kv" id="settings-backup-meta"></div>
+                  <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Automatic scheduled backups are not implemented.</p>
+                  <div class="settings-actions">
+                    <button class="btn secondary" id="settings-download-backup" type="button">Create &amp; download backup</button>
+                  </div>
+                </div>
               </div>
             </div>
 
-            <div class="card settings-panel">
-              <h3>Security</h3>
-              <div class="form-grid">
-                <label>Require MFA for staff accounts
-                  <input type="checkbox" id="setting-mfa" />
-                </label>
-                <label>Automatic database backups
-                  <input type="checkbox" id="setting-backup" />
-                </label>
-              </div>
-              <div class="settings-actions">
-                <button class="btn secondary" id="settings-download-backup" type="button">Download backup</button>
-              </div>
-            </div>
+            <div class="settings-group">
+              <div class="settings-group-label">Configuration &amp; status</div>
+              <div class="settings-layout settings-layout-status">
+                <div class="card settings-panel is-readonly">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>Security</h3>
+                      <p class="meta settings-panel-sub">Read-only status</p>
+                    </div>
+                    <span class="settings-badge muted">Read-only</span>
+                  </div>
+                  <div class="settings-kv" id="settings-security-meta"></div>
+                  <p class="meta settings-footnote">Staff MFA enforcement and admin-editable password policies are not implemented in this build. API keys and database credentials are never shown here.</p>
+                </div>
 
-            <div class="card settings-panel">
-              <h3>Shop hours</h3>
-              <p class="meta" style="margin: 0 0 10px;">Weekly hours, breaks, holidays, and slot duration are configured on the operating schedule page.</p>
-              <button class="btn secondary" data-jump="schedule" type="button">Open Operating Schedule</button>
-            </div>
+                <div class="card settings-panel is-readonly">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>AI configuration</h3>
+                      <p class="meta settings-panel-sub">Server / .env controlled</p>
+                    </div>
+                    <span class="settings-badge" id="settings-ai-badge">—</span>
+                  </div>
+                  <div class="settings-kv" id="settings-ai-meta"></div>
+                  <div class="settings-actions">
+                    <button class="btn secondary" id="settings-refresh-ai" type="button">Refresh AI status</button>
+                  </div>
+                </div>
 
-            <div class="card settings-panel">
-              <h3>Save changes</h3>
-              <p class="meta" style="margin: 0 0 10px;">Apply notification and security toggles above.</p>
-              <button class="btn" id="settings-save" type="button">Save settings</button>
+                <div class="card settings-panel is-readonly">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>Operating schedule</h3>
+                      <p class="meta settings-panel-sub">Summary · managed separately</p>
+                    </div>
+                    <span class="settings-badge muted">Summary</span>
+                  </div>
+                  <div class="settings-kv" id="settings-schedule-meta"></div>
+                  <div class="settings-actions">
+                    <button class="btn" data-jump="schedule" type="button">Manage operating schedule</button>
+                  </div>
+                </div>
+
+                <div class="card settings-panel is-readonly">
+                  <div class="settings-panel-head">
+                    <div>
+                      <h3>System information</h3>
+                      <p class="meta settings-panel-sub">Health &amp; environment</p>
+                    </div>
+                    <span class="settings-badge" id="settings-system-badge">—</span>
+                  </div>
+                  <div class="settings-kv" id="settings-system-meta"></div>
+                  <div class="settings-actions">
+                    <button class="btn secondary" id="settings-refresh-all" type="button">Refresh status</button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </section>

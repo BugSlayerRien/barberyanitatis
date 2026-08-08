@@ -73,6 +73,243 @@ function settings_payload(array $map): array
     ];
 }
 
+/**
+ * @return array<string, mixed>
+ */
+function settings_schedule_summary(PDO $pdo): array
+{
+    $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    try {
+        $cfg = function_exists('shop_schedule_config') ? shop_schedule_config(true) : [
+            'slot_minutes' => 60,
+            'appointment_minutes' => 60,
+            'walkin_minutes' => 35,
+            'timezone' => function_exists('shop_timezone') ? shop_timezone() : 'Asia/Manila',
+        ];
+
+        $weekly = $pdo->query(
+            'SELECT day_of_week, is_closed, open_time, close_time
+             FROM shop_weekly_hours
+             ORDER BY day_of_week'
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        $byDow = [];
+        foreach ($weekly as $row) {
+            $byDow[(int)$row['day_of_week']] = $row;
+        }
+        $openDays = [];
+        foreach ([1, 2, 3, 4, 5, 6, 0] as $dow) {
+            $row = $byDow[$dow] ?? null;
+            if ($row === null || !empty($row['is_closed'])) {
+                continue;
+            }
+            $openDays[] = $dayNames[$dow] . ' '
+                . substr((string)$row['open_time'], 0, 5) . '-'
+                . substr((string)$row['close_time'], 0, 5);
+        }
+
+        $upcomingClosures = (int)$pdo->query(
+            "SELECT COUNT(*) FROM shop_closed_dates WHERE closed_date >= CURRENT_DATE"
+        )->fetchColumn();
+
+        $breakCount = (int)$pdo->query('SELECT COUNT(*) FROM shop_break_windows')->fetchColumn();
+
+        return [
+            'available' => true,
+            'openDaysSummary' => $openDays !== []
+                ? implode(' · ', $openDays)
+                : ($weekly === [] ? 'Weekly hours not configured yet.' : 'No open days configured.'),
+            'breakCount' => $breakCount,
+            'upcomingClosures' => $upcomingClosures,
+            'timezone' => (string)($cfg['timezone'] ?? (function_exists('shop_timezone') ? shop_timezone() : 'Asia/Manila')),
+            'slotMinutes' => (int)($cfg['slot_minutes'] ?? 60),
+            'appointmentMinutes' => (int)($cfg['appointment_minutes'] ?? 60),
+            'walkinMinutes' => (int)($cfg['walkin_minutes'] ?? 35),
+        ];
+    } catch (Throwable $e) {
+        return [
+            'available' => false,
+            'error' => 'Could not load schedule summary.',
+            'openDaysSummary' => '',
+            'breakCount' => 0,
+            'upcomingClosures' => 0,
+        ];
+    }
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function settings_backup_info(): array
+{
+    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
+    $latest = null;
+    if (is_dir($dir)) {
+        $files = glob($dir . DIRECTORY_SEPARATOR . 'tatis_backup_*.json') ?: [];
+        rsort($files);
+        if ($files !== []) {
+            $path = $files[0];
+            $latest = [
+                'fileName' => basename($path),
+                'modifiedAt' => date('c', (int)filemtime($path)),
+                'sizeBytes' => (int)filesize($path),
+            ];
+        }
+    }
+
+    return [
+        'manualBackupSupported' => true,
+        'automaticBackupImplemented' => false,
+        'latest' => $latest,
+        'note' => 'Manual JSON backups are supported. Automatic scheduled backups are not implemented.',
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function settings_notification_meta(PDO $pdo): array
+{
+    $pending = 0;
+    try {
+        $pending = (int)$pdo->query(
+            'SELECT COUNT(*) FROM notifications WHERE is_sent = FALSE'
+        )->fetchColumn();
+    } catch (Throwable $e) {
+        $pending = 0;
+    }
+
+    return [
+        'pendingQueueCount' => $pending,
+        'inAppEvents' => [
+            'appointmentConfirmation' => true,
+            'appointmentReminderEmail' => false,
+            'cancellation' => true,
+            'reschedule' => true,
+            'payment' => true,
+        ],
+        'notes' => [
+            'In-app notifications are created for bookings, cancellations, reschedules, and payments.',
+            'Dedicated email reminder scheduling is not implemented.',
+            'Queue processing marks pending notification rows as sent; outbound SMTP is only attempted for the test email action via PHP mail().',
+        ],
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function settings_system_info(PDO $pdo): array
+{
+    $dbOk = true;
+    try {
+        $pdo->query('SELECT 1');
+    } catch (Throwable $e) {
+        $dbOk = false;
+    }
+
+    $env = strtolower(trim((string)(
+        getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? getenv('ENVIRONMENT') ?: ($_ENV['ENVIRONMENT'] ?? 'development'))
+    )));
+    if ($env === '') {
+        $env = 'development';
+    }
+
+    $version = trim((string)(getenv('APP_VERSION') ?: ($_ENV['APP_VERSION'] ?? '')));
+    if ($version === '') {
+        $version = '1.0.0';
+    }
+
+    return [
+        'applicationVersion' => $version,
+        'environment' => $env,
+        'apiStatus' => 'ok',
+        'databaseStatus' => $dbOk ? 'ok' : 'error',
+        'phpVersion' => PHP_VERSION,
+        'checkedAt' => date('c'),
+        'capabilities' => [
+            'emailNotificationsToggle' => true,
+            'testEmail' => true,
+            'notificationQueueMarkSent' => true,
+            'staffMfaEnforced' => false,
+            'automaticBackups' => false,
+            'manualBackupDownload' => true,
+            'aiProviderEditableInUi' => false,
+        ],
+    ];
+}
+
+/**
+ * @return array<string, mixed>
+ */
+function settings_ai_status_safe(): array
+{
+    // Inline lightweight status (no secrets) — mirrors ai_status.php try-on block.
+    $get = static function (string $key, string $default = '') {
+        $v = getenv($key);
+        if ($v === false || $v === '') {
+            $v = $_ENV[$key] ?? $default;
+        }
+        return trim((string)$v);
+    };
+    $configured = static function (string ...$keys) use ($get): bool {
+        foreach ($keys as $key) {
+            $v = $get($key);
+            if ($v !== '' && $v !== 'REPLACE_WITH_GEMINI_KEY' && !str_starts_with($v, 'REPLACE_')) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    $provider = strtolower($get('AI_TRYON_PROVIDER'));
+    if (!in_array($provider, ['gemini', 'grok', 'replicate'], true)) {
+        if ($configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY')) {
+            $provider = 'gemini';
+        } elseif ($configured('XAI_API_KEY')) {
+            $provider = 'grok';
+        } elseif ($configured('REPLICATE_API_TOKEN')) {
+            $provider = 'replicate';
+        } else {
+            $provider = 'none';
+        }
+    }
+
+    $model = match ($provider) {
+        'gemini' => $get('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
+        'grok' => $get('GROK_IMAGE_MODEL', 'grok-imagine-image'),
+        'replicate' => ($m = $get('REPLICATE_MODEL')) !== '' ? $m : 'replicate',
+        default => 'n/a',
+    };
+
+    $limitRaw = $get('AI_TRYON_STYLE_LIMIT', '3');
+    $limit = ctype_digit($limitRaw) ? (int)$limitRaw : 3;
+    $unlimited = in_array(strtolower($get('AI_TRYON_UNLIMITED')), ['1', 'true', 'yes', 'on'], true);
+
+    $providerOk = match ($provider) {
+        'gemini' => $configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY'),
+        'grok' => $configured('XAI_API_KEY'),
+        'replicate' => $configured('REPLICATE_API_TOKEN'),
+        default => false,
+    };
+
+    return [
+        'provider' => $provider,
+        'model' => $model,
+        'configured' => $providerOk,
+        'styleLimit' => $limit,
+        'unlimited' => $unlimited,
+        'availableProviders' => [
+            'gemini' => $configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY'),
+            'grok' => $configured('XAI_API_KEY'),
+            'replicate' => $configured('REPLICATE_API_TOKEN'),
+        ],
+        'editableInAdminUi' => false,
+        'note' => 'Provider and models are controlled by server .env. API keys are never exposed here.',
+    ];
+}
+
 function export_table_csv(PDO $pdo, string $table): string
 {
     $allowed = [
@@ -199,7 +436,15 @@ try {
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     if ($method === 'GET') {
-        json_response(['settings' => settings_payload(load_settings_map($pdo))]);
+        $map = load_settings_map($pdo);
+        json_response([
+            'settings' => settings_payload($map),
+            'notifications' => settings_notification_meta($pdo),
+            'schedule' => settings_schedule_summary($pdo),
+            'backup' => settings_backup_info(),
+            'ai' => settings_ai_status_safe(),
+            'system' => settings_system_info($pdo),
+        ]);
     }
 
     if ($method !== 'POST') {
@@ -211,16 +456,22 @@ try {
 
     if ($action === 'update') {
         // Shop hours are managed via operating_schedule.php (shop_weekly_hours).
+        // MFA and automatic backups are not enforced by the application — do not
+        // accept UI writes that imply those features work. Flags remain readable.
         upsert_setting($pdo, 'email_notifications_enabled', !empty($input['emailNotificationsEnabled']) ? '1' : '0', 'Boolean', 'notifications');
-        upsert_setting($pdo, 'auto_backup_enabled', !empty($input['autoBackupEnabled']) ? '1' : '0', 'Boolean', 'backup');
-        upsert_setting($pdo, 'force_mfa', !empty($input['forceMfa']) ? '1' : '0', 'Boolean', 'security');
         if (!empty($input['notificationFromEmail'])) {
             upsert_setting($pdo, 'notification_from_email', trim((string)$input['notificationFromEmail']), 'String', 'notifications');
         }
 
+        $map = load_settings_map($pdo);
         json_response([
             'message' => 'Settings saved.',
-            'settings' => settings_payload(load_settings_map($pdo)),
+            'settings' => settings_payload($map),
+            'notifications' => settings_notification_meta($pdo),
+            'schedule' => settings_schedule_summary($pdo),
+            'backup' => settings_backup_info(),
+            'ai' => settings_ai_status_safe(),
+            'system' => settings_system_info($pdo),
         ]);
     }
 
@@ -264,10 +515,19 @@ try {
     if ($action === 'processnotifications') {
         $map = load_settings_map($pdo);
         if (($map['email_notifications_enabled'] ?? '0') !== '1') {
-            json_response(['message' => 'Email notifications are disabled in settings.', 'processed' => 0]);
+            json_response([
+                'message' => 'Email notifications are disabled in settings.',
+                'processed' => 0,
+                'note' => 'Enable email notifications to process the pending queue.',
+            ]);
         }
         $processed = queue_pending_notifications($pdo, 100);
-        json_response(['message' => "Marked {$processed} notification(s) as sent.", 'processed' => $processed]);
+        json_response([
+            'message' => "Marked {$processed} pending notification(s) as sent.",
+            'processed' => $processed,
+            'note' => 'This marks DB rows as sent. It does not deliver SMTP email for appointment events.',
+            'notifications' => settings_notification_meta($pdo),
+        ]);
     }
 
     if ($action === 'importservicescsv') {
