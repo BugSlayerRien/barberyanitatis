@@ -778,6 +778,58 @@ canvas {
   background: #4a1a1a;
 }
 
+.btn.is-loading,
+.btn:disabled {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-top-color: currentColor;
+  animation: spin 0.7s linear infinite;
+}
+
+.is-region-loading {
+  pointer-events: none;
+}
+
+.region-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  background: rgba(8, 10, 14, 0.45);
+  border-radius: inherit;
+}
+
+.region-loading[hidden] {
+  display: none !important;
+}
+
+.region-loading-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  background: var(--panel);
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.region-loading-inner .btn-spinner {
+  margin-right: 0;
+}
+
 .app-loading {
   position: fixed;
   inset: 0;
@@ -911,6 +963,8 @@ canvas {
   gap: 4px;
   width: 100%;
   max-width: none;
+  position: relative;
+  min-height: 120px;
 }
 
 .cal-weekday {
@@ -1023,24 +1077,124 @@ canvas {
   outline: 2px solid var(--gold);
 }
 
-/* Admin settings — grouped panels */
+/* Admin settings - control desk layout */
+.settings-intro {
+  margin: -4px 0 16px;
+  max-width: 72ch;
+}
+
+.settings-desk {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.settings-group-label {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa3b2);
+}
+
 .settings-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 12px;
-  align-items: start;
+  align-items: stretch;
+}
+
+.settings-layout-ops {
+  grid-template-columns: minmax(0, 1.55fr) minmax(260px, 0.9fr);
+}
+
+.settings-layout-status {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.settings-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .settings-panel h3 {
-  margin: 0 0 10px;
-  font-size: 14px;
+  margin: 0;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text);
   letter-spacing: 0;
 }
 
+.settings-panel-sub {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.settings-panel.is-editable {
+  border-color: rgba(212, 175, 55, 0.35);
+  box-shadow: inset 3px 0 0 rgba(212, 175, 55, 0.7);
+}
+
+.settings-panel.is-action {
+  box-shadow: inset 3px 0 0 rgba(90, 160, 255, 0.55);
+}
+
+.settings-panel.is-readonly {
+  box-shadow: inset 3px 0 0 rgba(255, 255, 255, 0.12);
+}
+
+.settings-editable-block {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.settings-status-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.settings-block-label {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa3b2);
+}
+
+.settings-help {
+  margin: 0 0 12px;
+}
+
+.settings-footnote {
+  margin: 10px 0 0;
+}
+
+.settings-form {
+  grid-template-columns: 1fr;
+}
+
 .settings-panel .form-grid {
   grid-template-columns: 1fr;
+}
+
+.settings-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .settings-actions {
@@ -1048,6 +1202,95 @@ canvas {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted, #9aa3b2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
+}
+
+.settings-badge.ok {
+  color: #8fd49a;
+  border-color: rgba(143, 212, 154, 0.35);
+  background: rgba(143, 212, 154, 0.08);
+}
+
+.settings-badge.warn {
+  color: #e0b35a;
+  border-color: rgba(224, 179, 90, 0.35);
+  background: rgba(224, 179, 90, 0.08);
+}
+
+.settings-badge.muted {
+  opacity: 0.9;
+}
+
+.settings-kv {
+  display: grid;
+  gap: 0;
+  margin-top: 2px;
+}
+
+.settings-kv-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.95fr) minmax(0, 1.05fr);
+  gap: 10px;
+  align-items: start;
+  padding: 7px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settings-kv-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.settings-kv-row span {
+  color: var(--muted, #9aa3b2);
+  font-size: 12px;
+}
+
+.settings-kv-row strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.settings-status-ok { color: #8fd49a !important; }
+.settings-status-warn { color: #e0b35a !important; }
+.settings-status-muted { color: var(--muted, #9aa3b2) !important; font-weight: 500 !important; }
+
+.settings-desk.is-loading .settings-panel {
+  opacity: 0.72;
+}
+
+@media (max-width: 980px) {
+  .settings-layout-ops,
+  .settings-layout-status {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .settings-kv-row {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .settings-toggle {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 
 /* Receptionist barber directory */

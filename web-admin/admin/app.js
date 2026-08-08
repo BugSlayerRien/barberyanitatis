@@ -113,6 +113,24 @@ async function confirmAction(message, options = {}) {
   return false;
 }
 
+async function runWithLoading(message, fn) {
+  if (window.PortalUi?.runWithLoading) {
+    return window.PortalUi.runWithLoading(message, fn);
+  }
+  return fn();
+}
+
+async function withButtonLoading(button, fn, options = {}) {
+  if (window.PortalUi?.withButtonLoading) {
+    return window.PortalUi.withButtonLoading(button, fn, options);
+  }
+  return fn();
+}
+
+function setRegionLoading(element, isLoading, message) {
+  window.PortalUi?.setRegionLoading?.(element, isLoading, message);
+}
+
 function getStoredUser() {
   try {
     const userRaw = sessionStorage.getItem("user");
@@ -196,43 +214,43 @@ async function saveProfileEdits() {
   const fullName = nameInput.value.trim();
   const email = emailInput.value.trim();
   if (!fullName || !email) {
-    toast("Name and email are required.");
+    toast("Name and email are required.", "error");
     return;
   }
 
   const profile = state.currentUser || getStoredUser();
-  try {
-    const response = await fetch(resolveApiUrl("staff_profile.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "updateProfile",
-        staffID: Number(profile.id),
-        fullName,
-        email,
-        role: String(profile.role || "admin").toLowerCase(),
-      }),
-    });
+  const saveBtn = document.getElementById("profile-dialog-save");
+  await withButtonLoading(saveBtn, async () => {
+    try {
+      const response = await fetch(resolveApiUrl("staff_profile.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "updateProfile",
+          staffID: Number(profile.id),
+          fullName,
+          email,
+          role: String(profile.role || "admin").toLowerCase(),
+        }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) throw new Error(data.error || "Profile update failed");
 
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Profile update failed");
-    }
-
-    if (data?.user) {
-      sessionStorage.setItem("user", JSON.stringify(data.user));
-      if (Array.isArray(data.user.roles)) {
-        sessionStorage.setItem("roles", JSON.stringify(data.user.roles));
+      if (data?.user) {
+        sessionStorage.setItem("user", JSON.stringify(data.user));
+        if (Array.isArray(data.user.roles)) {
+          sessionStorage.setItem("roles", JSON.stringify(data.user.roles));
+        }
       }
-    }
 
-    renderProfileChip();
-    state.profileEditMode = false;
-    renderProfileDialogContent();
-    toast("Profile updated.", "success");
-  } catch (error) {
-    toast(error.message || "Profile update failed", "error");
-  }
+      renderProfileChip();
+      state.profileEditMode = false;
+      renderProfileDialogContent();
+      toast("Profile updated.", "success");
+    } catch (error) {
+      toast(error.message || "Profile update failed", "error");
+    }
+  }, { label: "Saving..." });
 }
 
 function setLastUpdated() {
@@ -473,20 +491,24 @@ async function loadAiStatus() {
 
     const scanEnabled = Boolean(data?.scan?.enabled);
     const tryonConfigured = Boolean(data?.tryon?.configured);
-    const probeCode = data?.tryon?.probe?.httpCode ?? "-";
+    const tryonProvider = data?.tryon?.provider || "-";
+    const tryonModel = data?.tryon?.model || "-";
+    const styleLimit = data?.tryon?.unlimited
+      ? "Unlimited"
+      : (data?.tryon?.styleLimit != null ? String(data.tryon.styleLimit) : "-");
 
-    badge.textContent = scanEnabled ? "AI: Online" : "AI: Limited";
-    badge.className = `badge ${scanEnabled ? "status-ok" : "status-warn"}`;
+    badge.textContent = tryonConfigured || scanEnabled ? "AI: Online" : "AI: Limited";
+    badge.className = `badge ${tryonConfigured || scanEnabled ? "status-ok" : "status-warn"}`;
 
     panel.innerHTML = `
       <div class="card gradient">
-        <h4>Face Scan AI</h4>
-        <p class="meta">Provider: ${data?.scan?.provider || "-"} • Model: ${data?.scan?.model || "-"}</p>
-        <div class="tag ${scanEnabled ? "success" : "warning"}">${scanEnabled ? "Enabled" : "Disabled"}</div>
+        <h4>Chat / Scan AI</h4>
+        <p class="meta">Provider: ${data?.scan?.provider || "-"} | Model: ${data?.scan?.model || "-"}</p>
+        <div class="tag ${scanEnabled ? "success" : "warning"}">${scanEnabled ? "Configured" : "Not Configured"}</div>
       </div>
       <div class="card gradient">
         <h4>Try-On AI</h4>
-        <p class="meta">Provider: ${data?.tryon?.provider || "-"} • Probe: ${probeCode}</p>
+        <p class="meta">Provider: ${tryonProvider} | Model: ${tryonModel} | Limit: ${styleLimit}</p>
         <div class="tag ${tryonConfigured ? "success" : "warning"}">${tryonConfigured ? "Configured" : "Not Configured"}</div>
       </div>
     `;
@@ -1027,9 +1049,9 @@ async function deleteAccount(type, id) {
 function formatServiceChannel(channel) {
   const value = String(channel || "appointment").toLowerCase();
   if (value === "walk_in" || value === "walkin" || value === "regular") {
-    return "Regular (kiosk) — ₱100";
+    return "Regular (kiosk) - ₱100";
   }
-  return "Exclusive (appointments) — ₱500";
+  return "Exclusive (appointments) - ₱500";
 }
 
 function openServiceEditor(existing) {
@@ -1069,7 +1091,7 @@ function openServiceEditor(existing) {
     </label>
     <label>Channel
       <select class="select" id="se-channel">
-        <option value="walk_in" ${channel === "walk_in" ? "selected" : ""}>Regular (kiosk) — walk-in</option>
+        <option value="walk_in" ${channel === "walk_in" ? "selected" : ""}>Regular (kiosk) - walk-in</option>
         <option value="appointment" ${channel !== "walk_in" ? "selected" : ""}>Exclusive (appointments)</option>
       </select>
     </label>
@@ -1705,7 +1727,7 @@ function renderAnalyticsKpis(metrics) {
     { title: "Total Customers", value: String(kpis.totalCustomers ?? 0) },
     {
       title: "Average Rating",
-      value: kpis.averageRating == null ? "—" : Number(kpis.averageRating).toFixed(2),
+      value: kpis.averageRating == null ? "-" : Number(kpis.averageRating).toFixed(2),
       meta: kpis.ratingCount ? `${kpis.ratingCount} rating(s) in period` : "From barber profiles / feedback",
     },
   ];
@@ -1878,7 +1900,7 @@ function renderBarberTable(metrics) {
   if (empty) empty.hidden = true;
 
   tbody.innerHTML = rows.map((row) => {
-    const rating = row.avgRating == null ? "—" : Number(row.avgRating).toFixed(2);
+    const rating = row.avgRating == null ? "-" : Number(row.avgRating).toFixed(2);
     const cancelNoShow = `${Number(row.cancelled || 0)} / ${Number(row.noShow || 0)}`;
     return `<tr>
       <td>${escapeAnalyticsText(row.barberName)}</td>
@@ -1963,7 +1985,7 @@ function renderAnalyticsDashboard(data) {
   renderAiBrief(data?.summary, data?.aiInsights);
 }
 
-async function loadAnalytics(period = state.analyticsPeriod || "30d") {
+async function loadAnalytics(period = state.analyticsPeriod || "30d", options = {}) {
   state.analyticsPeriod = period;
   document.querySelectorAll(".analytics-period-btn").forEach((btn) => {
     btn.classList.toggle("is-active", btn.dataset.period === period);
@@ -1971,6 +1993,8 @@ async function loadAnalytics(period = state.analyticsPeriod || "30d") {
 
   const summaryEl = document.getElementById("analytics-summary");
   if (summaryEl) summaryEl.textContent = "Loading insights…";
+  const panel = document.getElementById("analytics-view");
+  if (options.showRegion) setRegionLoading(panel, true, "Loading analytics...");
 
   try {
     const response = await fetch(resolveApiUrl(`admin_analytics.php?period=${encodeURIComponent(period)}`));
@@ -1988,19 +2012,22 @@ async function loadAnalytics(period = state.analyticsPeriod || "30d") {
     }
     const grid = document.getElementById("analytics-kpi-grid");
     if (grid) grid.innerHTML = '<div class="card"><h3>Error</h3><div class="meta">Could not load analytics metrics.</div></div>';
+  } finally {
+    if (options.showRegion) setRegionLoading(panel, false);
   }
 }
 
 function bindAnalyticsControls() {
   document.querySelectorAll(".analytics-period-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const period = btn.dataset.period || "30d";
-      loadAnalytics(period);
+      await withButtonLoading(btn, () => loadAnalytics(period, { showRegion: true }), { label: "Loading..." });
     });
   });
 
-  document.getElementById("analytics-refresh")?.addEventListener("click", () => {
-    loadAnalytics(state.analyticsPeriod || "30d");
+  document.getElementById("analytics-refresh")?.addEventListener("click", async (event) => {
+    const btn = event.currentTarget;
+    await withButtonLoading(btn, () => loadAnalytics(state.analyticsPeriod || "30d", { showRegion: true }), { label: "Refreshing..." });
   });
 
   document.querySelectorAll(".analytics-trend-btn").forEach((btn) => {
@@ -2033,23 +2060,190 @@ async function renderAiInsights(metrics, summary) {
   });
 }
 
-async function loadSettings() {
+async function loadSettings(options = {}) {
+  const desk = document.getElementById("settings-desk");
+  const showRegion = options.showRegion !== false;
+  if (showRegion) setRegionLoading(desk, true, "Loading settings...");
   try {
     const response = await fetch(resolveApiUrl("admin_settings.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
-    const settings = data.settings ?? {};
-    document.getElementById("setting-email").checked = settings.emailNotificationsEnabled === 1;
-    document.getElementById("setting-mfa").checked = settings.forceMfa === 1;
-    document.getElementById("setting-backup").checked = settings.autoBackupEnabled === 1;
-    const fromEmail = document.getElementById("setting-from-email");
-    if (fromEmail) {
-      fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
-    }
+    applySettingsPayload(data);
+    return data;
   } catch (_) {
-    // no-op
+    const systemMeta = document.getElementById("settings-system-meta");
+    if (systemMeta) {
+      systemMeta.innerHTML = `<div class="settings-kv-row"><span>Status</span><strong class="settings-status-warn">Unavailable</strong></div>`;
+    }
+    const systemBadge = document.getElementById("settings-system-badge");
+    if (systemBadge) {
+      systemBadge.textContent = "Error";
+      systemBadge.className = "settings-badge warn";
+    }
+    return null;
+  } finally {
+    if (showRegion) setRegionLoading(desk, false);
   }
 }
+
+function settingsEscape(value) {
+  return String(value ?? "").replace(/[&<>"]/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+  }[ch]));
+}
+
+function settingsKvRows(rows) {
+  return rows
+    .map(([label, value, tone]) => {
+      const cls = tone ? ` class="settings-status-${tone}"` : "";
+      return `<div class="settings-kv-row"><span>${settingsEscape(label)}</span><strong${cls}>${settingsEscape(value)}</strong></div>`;
+    })
+    .join("");
+}
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function formatSettingsDate(iso) {
+  if (!iso) return "Never";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString();
+}
+
+function applySettingsPayload(data) {
+  const settings = data.settings ?? {};
+  const notifications = data.notifications ?? {};
+  const schedule = data.schedule ?? {};
+  const backup = data.backup ?? {};
+  const ai = data.ai ?? {};
+  const system = data.system ?? {};
+
+  const emailEl = document.getElementById("setting-email");
+  if (emailEl) emailEl.checked = settings.emailNotificationsEnabled === 1 || settings.emailNotificationsEnabled === true;
+
+  const fromEmail = document.getElementById("setting-from-email");
+  if (fromEmail) {
+    fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
+  }
+
+  const pending = Number(notifications.pendingQueueCount ?? 0);
+  const notifBadge = document.getElementById("settings-notif-badge");
+  if (notifBadge) {
+    notifBadge.textContent = pending > 0 ? `${pending} pending` : "Ready";
+    notifBadge.className = `settings-badge ${pending > 0 ? "warn" : "ok"}`;
+  }
+
+  const events = notifications.inAppEvents || {};
+  const notifMeta = document.getElementById("settings-notif-meta");
+  if (notifMeta) {
+    notifMeta.innerHTML = settingsKvRows([
+      ["Pending queue", String(pending)],
+      ["Appointment confirmations (in-app)", events.appointmentConfirmation ? "Supported" : "Not available", events.appointmentConfirmation ? "ok" : "muted"],
+      ["Cancellation notices (in-app)", events.cancellation ? "Supported" : "Not available", events.cancellation ? "ok" : "muted"],
+      ["Reschedule notices (in-app)", events.reschedule ? "Supported" : "Not available", events.reschedule ? "ok" : "muted"],
+      ["Payment notices (in-app)", events.payment ? "Supported" : "Not available", events.payment ? "ok" : "muted"],
+      ["Scheduled reminder emails", events.appointmentReminderEmail ? "Supported" : "Not implemented", events.appointmentReminderEmail ? "ok" : "muted"],
+    ]);
+  }
+
+  const notifFoot = document.getElementById("settings-notif-footnote");
+  if (notifFoot) {
+    const notes = Array.isArray(notifications.notes) ? notifications.notes : [];
+    notifFoot.textContent = notes[0] || "Queue processing marks pending rows as sent; test email uses PHP mail() when available.";
+  }
+
+  const securityMeta = document.getElementById("settings-security-meta");
+  if (securityMeta) {
+    securityMeta.innerHTML = settingsKvRows([
+      ["Staff MFA enforcement", "Not implemented", "muted"],
+      ["Password policy (admin-configurable)", "Not available", "muted"],
+      ["Signup password rules (app)", "Enforced in mobile signup", "ok"],
+      ["Secrets in admin UI", "Never exposed", "ok"],
+    ]);
+  }
+
+  const provider = String(ai.provider || "none");
+  const aiConfigured = Boolean(ai.configured);
+  const aiBadge = document.getElementById("settings-ai-badge");
+  if (aiBadge) {
+    aiBadge.textContent = aiConfigured ? "Configured" : "Not configured";
+    aiBadge.className = `settings-badge ${aiConfigured ? "ok" : "warn"}`;
+  }
+
+  const available = ai.availableProviders || {};
+  const availableLabel = ["gemini", "grok", "replicate"]
+    .map((name) => `${name}${available[name] ? "*" : ""}`)
+    .join(", ");
+
+  const aiMeta = document.getElementById("settings-ai-meta");
+  if (aiMeta) {
+    aiMeta.innerHTML = settingsKvRows([
+      ["Try-on provider", provider === "none" ? "None" : provider, aiConfigured ? "ok" : "warn"],
+      ["Image model", ai.model || "n/a"],
+      ["Hairstyle generation limit", ai.unlimited ? "Unlimited" : String(ai.styleLimit ?? "-")],
+      ["Keys configured (*)", availableLabel || "-"],
+      ["Editable in admin UI", "No - server .env only", "muted"],
+    ]);
+  }
+
+  const scheduleMeta = document.getElementById("settings-schedule-meta");
+  if (scheduleMeta) {
+    if (schedule.available === false) {
+      scheduleMeta.innerHTML = settingsKvRows([
+        ["Status", schedule.error || "Unavailable", "warn"],
+      ]);
+    } else {
+      scheduleMeta.innerHTML = settingsKvRows([
+        ["Regular hours", schedule.openDaysSummary || "-"],
+        ["Upcoming closures / special dates", String(schedule.upcomingClosures ?? 0)],
+        ["Break windows", String(schedule.breakCount ?? 0)],
+        ["Timezone", schedule.timezone || "-"],
+        ["Slot / appointment / walk-in", `${schedule.slotMinutes ?? "-"} / ${schedule.appointmentMinutes ?? "-"} / ${schedule.walkinMinutes ?? "-"} min`],
+      ]);
+    }
+  }
+
+  const latest = backup.latest;
+  const backupMeta = document.getElementById("settings-backup-meta");
+  if (backupMeta) {
+    backupMeta.innerHTML = settingsKvRows([
+      ["Manual backup", backup.manualBackupSupported ? "Available" : "Unavailable", backup.manualBackupSupported ? "ok" : "warn"],
+      ["Automatic backups", backup.automaticBackupImplemented ? "Enabled" : "Not implemented", backup.automaticBackupImplemented ? "ok" : "muted"],
+      ["Last successful backup", latest ? formatSettingsDate(latest.modifiedAt) : "None yet"],
+      ["Latest file", latest ? `${latest.fileName} (${formatBytes(latest.sizeBytes)})` : "-"],
+    ]);
+  }
+
+  const dbOk = String(system.databaseStatus || "").toLowerCase() === "ok";
+  const systemBadge = document.getElementById("settings-system-badge");
+  if (systemBadge) {
+    systemBadge.textContent = dbOk ? "Healthy" : "Check required";
+    systemBadge.className = `settings-badge ${dbOk ? "ok" : "warn"}`;
+  }
+
+  const systemMeta = document.getElementById("settings-system-meta");
+  if (systemMeta) {
+    systemMeta.innerHTML = settingsKvRows([
+      ["Application version", system.applicationVersion || "-"],
+      ["Environment", system.environment || "-"],
+      ["API status", system.apiStatus || "ok", "ok"],
+      ["Database status", system.databaseStatus || "-", dbOk ? "ok" : "warn"],
+      ["AI provider", provider, aiConfigured ? "ok" : "warn"],
+      ["PHP runtime", system.phpVersion || "-"],
+      ["Last health check", formatSettingsDate(system.checkedAt)],
+    ]);
+  }
+}
+
+
 
 const SCHEDULE_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
 const SCHEDULE_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -2134,7 +2328,7 @@ function renderScheduleClosedDates() {
   list.innerHTML = dates.map((item) => `
     <div class="row-wrap" style="gap: 12px;">
       <strong style="width: 110px;">${item.date}</strong>
-      <span class="meta">${escapeScheduleText(item.reason) || "—"}</span>
+      <span class="meta">${escapeScheduleText(item.reason) || "-"}</span>
       <button class="btn secondary schedule-closed-remove" data-date="${item.date}" type="button">Remove</button>
     </div>`).join("");
 
@@ -2186,11 +2380,11 @@ function renderScheduleCalDayDetail(day) {
   if (day.status === "open") {
     const booked = Number(day.bookedAppointments || 0);
     const bookedText = booked > 0 ? ` · ${booked} appointment(s) booked` : "";
-    detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Open ${day.openTime}–${day.closeTime}. `
+    detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> - Open ${day.openTime}–${day.closeTime}. `
       + `${day.bookableSlotCount} bookable slot(s)${bookedText}.`;
     return;
   }
-  detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Closed. ${escapeScheduleText(day.reason)}`;
+  detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> - Closed. ${escapeScheduleText(day.reason)}`;
 }
 
 function renderScheduleCalendar() {
@@ -2199,7 +2393,7 @@ function renderScheduleCalendar() {
   const cal = state.scheduleCalendar;
   if (!grid || !cal) return;
 
-  if (label) label.textContent = cal.monthLabel || "—";
+  if (label) label.textContent = cal.monthLabel || "-";
 
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const firstDay = new Date(cal.year, cal.month - 1, 1).getDay();
@@ -2252,6 +2446,8 @@ async function loadScheduleCalendar(year, month) {
   const now = new Date();
   const y = year ?? now.getFullYear();
   const m = month ?? now.getMonth() + 1;
+  const grid = document.getElementById("schedule-calendar-grid");
+  setRegionLoading(grid, true, "Loading calendar...");
   try {
     const data = await scheduleApi({ action: "calendarMonth", year: y, month: m });
     state.scheduleCalendar = data;
@@ -2261,6 +2457,8 @@ async function loadScheduleCalendar(year, month) {
     renderScheduleCalendar();
   } catch (error) {
     toast(error.message, "error");
+  } finally {
+    setRegionLoading(grid, false);
   }
 }
 
@@ -2283,19 +2481,25 @@ async function loadOperatingSchedule() {
 }
 
 async function refreshAll() {
-  window.PortalUi?.resetLoading?.();
-  await Promise.all([
-    loadDashboard(),
-    loadUsers(),
-    loadAudit(),
-    loadAnalytics(),
-    loadServices(),
-    loadHaircuts(),
-    loadSettings(),
-    loadOperatingSchedule(),
-    loadAiStatus(),
-  ]);
-  setLastUpdated();
+  window.PortalUi?.showLoading?.("Loading control desk...");
+  try {
+    await Promise.all([
+      loadDashboard(),
+      loadUsers(),
+      loadAudit(),
+      loadAnalytics(),
+      loadServices(),
+      loadHaircuts(),
+      loadSettings({ showRegion: false }),
+      loadOperatingSchedule(),
+      loadAiStatus(),
+    ]);
+    setLastUpdated();
+  } catch (_) {
+    toast("Some dashboard data failed to load.", "error");
+  } finally {
+    window.PortalUi?.resetLoading?.();
+  }
 }
 
 document.addEventListener("click", async (event) => {
@@ -2493,161 +2697,204 @@ document.getElementById("audit-export")?.addEventListener("click", () => {
   downloadCsv("audit-events.csv", filtered);
 });
 
-document.getElementById("settings-save")?.addEventListener("click", async () => {
-  try {
-    const payload = {
-      action: "update",
-      emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
-      forceMfa: document.getElementById("setting-mfa").checked ? 1 : 0,
-      autoBackupEnabled: document.getElementById("setting-backup").checked ? 1 : 0,
-      notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
-    };
-    const response = await fetch(resolveApiUrl("admin_settings.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Save failed");
+document.getElementById("settings-save")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  await withButtonLoading(btn, async () => {
+    try {
+      const payload = {
+        action: "update",
+        emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
+        notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
+      };
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || "Save failed");
+      }
+      applySettingsPayload(data);
+      toast(data.message || "Settings saved.", "success");
+    } catch (error) {
+      toast(error.message || "Save failed", "error");
     }
-    toast("Settings saved.");
-  } catch (error) {
-    toast(error.message || "Save failed");
-  }
+  }, { label: "Saving..." });
 });
 
 document.querySelectorAll("[data-export]").forEach((button) => {
   button.addEventListener("click", async () => {
     const table = button.getAttribute("data-export");
-    try {
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "exportCsv", table }),
-      });
-      if (!response.ok) throw new Error("Export failed");
-      const data = await response.json();
-      const blob = new Blob([data.csv || ""], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${table}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      toast(error.message || "Export failed");
-    }
+    await withButtonLoading(button, async () => {
+      try {
+        const response = await fetch(resolveApiUrl("admin_settings.php"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "exportCsv", table }),
+        });
+        if (!response.ok) throw new Error("Export failed");
+        const data = await response.json();
+        const blob = new Blob([data.csv || ""], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${table}.csv`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast("Export downloaded.", "success");
+      } catch (error) {
+        toast(error.message || "Export failed", "error");
+      }
+    }, { label: "Exporting..." });
   });
 });
 
-document.getElementById("services-import")?.addEventListener("click", async () => {
+document.getElementById("services-import")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
   const input = document.getElementById("services-csv");
   if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
-    toast("Select a CSV file first.");
+    toast("Select a CSV file first.", "error");
     return;
   }
   const file = input.files[0];
   const text = await file.text();
-  try {
-    const response = await fetch(resolveApiUrl("admin_settings.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "importServicesCsv", csvText: text }),
-    });
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || "Import failed");
+  await withButtonLoading(btn, async () => {
+    try {
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "importServicesCsv", csvText: text }),
+      });
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || "Import failed");
+      }
+      toast("Import complete.", "success");
+      await loadServices();
+    } catch (error) {
+      toast(error.message || "Import failed", "error");
     }
-    toast("Import complete.");
-    await loadServices();
-  } catch (error) {
-    toast(error.message || "Import failed");
-  }
+  }, { label: "Importing..." });
 });
 
-document.getElementById("settings-test-email")?.addEventListener("click", async () => {
+document.getElementById("settings-test-email")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
   const email = document.getElementById("setting-test-email")?.value?.trim() || "";
   if (!email) {
-    toast("Enter a test email address first.");
+    toast("Enter a test email address first.", "error");
     return;
   }
-  try {
-    const response = await fetch(resolveApiUrl("admin_settings.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "sendTestEmail", email }),
-    });
-    const data = await parseJsonResponse(response);
-    if (!response.ok) {
-      throw new Error(data.error || data.message || "Test email failed");
+  await withButtonLoading(btn, async () => {
+    try {
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "sendTestEmail", email }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || data.message || "Test email failed");
+      }
+      toast(data.message || "Test email sent.", "success");
+    } catch (error) {
+      toast(error.message || "Test email failed", "error");
     }
-    toast(data.message || "Test email sent.");
-  } catch (error) {
-    toast(error.message || "Test email failed");
-  }
+  }, { label: "Sending..." });
 });
 
-document.getElementById("settings-process-notifications")?.addEventListener("click", async () => {
-  try {
-    const response = await fetch(resolveApiUrl("admin_settings.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "processNotifications" }),
-    });
-    const data = await parseJsonResponse(response);
-    if (!response.ok) {
-      throw new Error(data.error || data.message || "Queue processing failed");
+document.getElementById("settings-process-notifications")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  await withButtonLoading(btn, async () => {
+    try {
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "processNotifications" }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || data.message || "Queue processing failed");
+      }
+      if (data.note) toast(data.note, "info");
+      toast(data.message || "Notifications processed.", "success");
+      await loadSettings({ showRegion: false });
+    } catch (error) {
+      toast(error.message || "Queue processing failed", "error");
     }
-    toast(data.message || "Notifications processed.");
-  } catch (error) {
-    toast(error.message || "Queue processing failed");
-  }
+  }, { label: "Processing..." });
 });
 
-document.getElementById("settings-download-backup")?.addEventListener("click", async () => {
-  try {
-    const response = await fetch(resolveApiUrl("admin_settings.php"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "downloadBackup" }),
-    });
-    const data = await parseJsonResponse(response);
-    if (!response.ok) {
-      throw new Error(data.error || "Backup failed");
+document.getElementById("settings-download-backup")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  const confirmed = await confirmAction("Create a JSON database backup and download it now?", {
+    title: "Create backup",
+    confirmLabel: "Create & download",
+  });
+  if (!confirmed) return;
+  await withButtonLoading(btn, async () => {
+    try {
+      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "downloadBackup" }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || "Backup failed");
+      }
+      const blob = new Blob([JSON.stringify(data.backup ?? {}, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.fileName || `tatis_backup_${Date.now()}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(data.message || "Backup downloaded.", "success");
+      await loadSettings({ showRegion: false });
+    } catch (error) {
+      toast(error.message || "Backup failed", "error");
     }
-    const blob = new Blob([JSON.stringify(data.backup ?? {}, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = data.fileName || `tatis_backup_${Date.now()}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast(data.message || "Backup downloaded.");
-  } catch (error) {
-    toast(error.message || "Backup failed");
-  }
+  }, { label: "Creating backup..." });
 });
 
-document.getElementById("schedule-cal-prev")?.addEventListener("click", () => {
+document.getElementById("settings-refresh-all")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  await withButtonLoading(btn, async () => {
+    await loadSettings();
+    toast("Settings status refreshed.", "success");
+  }, { label: "Refreshing..." });
+});
+
+document.getElementById("settings-refresh-ai")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
+  await withButtonLoading(btn, async () => {
+    await loadSettings({ showRegion: false });
+    await loadAiStatus();
+    toast("AI status refreshed.", "success");
+  }, { label: "Refreshing..." });
+});
+
+document.getElementById("schedule-cal-prev")?.addEventListener("click", async (event) => {
   const cal = state.scheduleCalendar;
   if (!cal) return;
   let y = cal.year;
   let m = cal.month - 1;
   if (m < 1) { m = 12; y -= 1; }
-  loadScheduleCalendar(y, m);
+  await withButtonLoading(event.currentTarget, () => loadScheduleCalendar(y, m));
 });
 
-document.getElementById("schedule-cal-next")?.addEventListener("click", () => {
+document.getElementById("schedule-cal-next")?.addEventListener("click", async (event) => {
   const cal = state.scheduleCalendar;
   if (!cal) return;
   let y = cal.year;
   let m = cal.month + 1;
   if (m > 12) { m = 1; y += 1; }
-  loadScheduleCalendar(y, m);
+  await withButtonLoading(event.currentTarget, () => loadScheduleCalendar(y, m));
 });
 
-document.getElementById("schedule-save-weekly")?.addEventListener("click", async () => {
+document.getElementById("schedule-save-weekly")?.addEventListener("click", async (event) => {
+  const btn = event.currentTarget;
   const rows = document.querySelectorAll("#schedule-weekly [data-schedule-day]");
   const days = Array.from(rows).map((row) => ({
     dayOfWeek: Number(row.getAttribute("data-schedule-day")),
@@ -2655,18 +2902,20 @@ document.getElementById("schedule-save-weekly")?.addEventListener("click", async
     openTime: row.querySelector(".schedule-day-open")?.value || "09:00",
     closeTime: row.querySelector(".schedule-day-close")?.value || "20:00",
   }));
-  try {
-    const data = await scheduleApi({ action: "updateWeekly", days });
-    state.schedule = data.schedule;
-    renderSchedule();
-    toast("Weekly hours saved.", "success");
-    showScheduleWarnings(data.warnings);
-    if (state.scheduleCalendar) {
-      loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+  await withButtonLoading(btn, async () => {
+    try {
+      const data = await scheduleApi({ action: "updateWeekly", days });
+      state.schedule = data.schedule;
+      renderSchedule();
+      toast("Weekly hours saved.", "success");
+      showScheduleWarnings(data.warnings);
+      if (state.scheduleCalendar) {
+        await loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+      }
+    } catch (error) {
+      toast(error.message, "error");
     }
-  } catch (error) {
-    toast(error.message, "error");
-  }
+  }, { label: "Saving..." });
 });
 
 document.getElementById("schedule-break-add")?.addEventListener("click", () => {
@@ -2691,7 +2940,7 @@ document.getElementById("schedule-break-add")?.addEventListener("click", () => {
   toast("Break added. Click Save breaks to apply.", "info");
 });
 
-document.getElementById("schedule-save-breaks")?.addEventListener("click", async () => {
+document.getElementById("schedule-save-breaks")?.addEventListener("click", async (event) => {
   if (!state.schedule) return;
   const breaks = (state.schedule.breaks || []).map((item) => ({
     dayOfWeek: item.dayOfWeek,
@@ -2699,77 +2948,87 @@ document.getElementById("schedule-save-breaks")?.addEventListener("click", async
     endTime: item.endTime,
     label: item.label,
   }));
-  try {
-    const data = await scheduleApi({ action: "updateBreaks", breaks });
-    state.schedule = data.schedule;
-    renderSchedule();
-    toast("Break windows saved.", "success");
-  } catch (error) {
-    toast(error.message, "error");
-  }
+  await withButtonLoading(event.currentTarget, async () => {
+    try {
+      const data = await scheduleApi({ action: "updateBreaks", breaks });
+      state.schedule = data.schedule;
+      renderSchedule();
+      toast("Break windows saved.", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  }, { label: "Saving..." });
 });
 
-document.getElementById("schedule-closed-add")?.addEventListener("click", async () => {
+document.getElementById("schedule-closed-add")?.addEventListener("click", async (event) => {
   const date = document.getElementById("schedule-closed-date")?.value || "";
   const reason = document.getElementById("schedule-closed-reason")?.value?.trim() || "";
   if (!date) {
     toast("Pick a date first.", "error");
     return;
   }
-  try {
-    const data = await scheduleApi({ action: "addClosedDate", date, reason });
-    state.schedule = data.schedule;
-    renderSchedule();
-    toast("Closed date added.", "success");
-    showScheduleWarnings(data.warnings);
-    if (state.scheduleCalendar) {
-      loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+  await withButtonLoading(event.currentTarget, async () => {
+    try {
+      const data = await scheduleApi({ action: "addClosedDate", date, reason });
+      state.schedule = data.schedule;
+      renderSchedule();
+      toast("Closed date added.", "success");
+      showScheduleWarnings(data.warnings);
+      if (state.scheduleCalendar) {
+        await loadScheduleCalendar(state.scheduleCalendar.year, state.scheduleCalendar.month);
+      }
+    } catch (error) {
+      toast(error.message, "error");
     }
-  } catch (error) {
-    toast(error.message, "error");
-  }
+  }, { label: "Adding..." });
 });
 
-document.getElementById("schedule-save-slots")?.addEventListener("click", async () => {
+document.getElementById("schedule-save-slots")?.addEventListener("click", async (event) => {
   const slotMinutes = Number(document.getElementById("schedule-slot-minutes")?.value || 0);
   const walkinMinutes = Number(document.getElementById("schedule-walkin-minutes")?.value || 0);
-  try {
-    const data = await scheduleApi({
-      action: "updateSlotSettings",
-      slotMinutes,
-      appointmentMinutes: slotMinutes,
-      walkinMinutes,
-    });
-    state.schedule = data.schedule;
-    renderSchedule();
-    toast("Slot settings saved.", "success");
-  } catch (error) {
-    toast(error.message, "error");
-  }
+  await withButtonLoading(event.currentTarget, async () => {
+    try {
+      const data = await scheduleApi({
+        action: "updateSlotSettings",
+        slotMinutes,
+        appointmentMinutes: slotMinutes,
+        walkinMinutes,
+      });
+      state.schedule = data.schedule;
+      renderSchedule();
+      toast("Slot settings saved.", "success");
+    } catch (error) {
+      toast(error.message, "error");
+    }
+  }, { label: "Saving..." });
 });
 
-document.getElementById("schedule-preview-btn")?.addEventListener("click", async () => {
+document.getElementById("schedule-preview-btn")?.addEventListener("click", async (event) => {
   const date = document.getElementById("schedule-preview-date")?.value || "";
   const result = document.getElementById("schedule-preview-result");
   if (!date || !result) {
     toast("Pick a date to preview.", "error");
     return;
   }
-  try {
-    const data = await scheduleApi({ action: "previewSlots", date });
-    if (data.isClosed) {
-      result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> — Shop is closed.`;
-      return;
+  await withButtonLoading(event.currentTarget, async () => {
+    try {
+      const data = await scheduleApi({ action: "previewSlots", date });
+      if (data.isClosed) {
+        result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> - Shop is closed.`;
+        return;
+      }
+      const slotLabels = (data.slots || []).map((slot) => slot.label).join(", ") || "No bookable slots.";
+      const breakText = (data.breaks || []).map((b) => `${b.startTime}-${b.endTime}`).join(", ") || "None";
+      result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> - Open ${data.openTime}-${data.closeTime} · Breaks: ${breakText}<br />Bookable slots: ${slotLabels}`;
+    } catch (error) {
+      toast(error.message, "error");
     }
-    const slotLabels = (data.slots || []).map((slot) => slot.label).join(", ") || "No bookable slots.";
-    const breakText = (data.breaks || []).map((b) => `${b.startTime}–${b.endTime}`).join(", ") || "None";
-    result.innerHTML = `<strong>${data.dayName}, ${data.date}</strong> — Open ${data.openTime}–${data.closeTime} · Breaks: ${breakText}<br />Bookable slots: ${slotLabels}`;
-  } catch (error) {
-    toast(error.message, "error");
-  }
+  }, { label: "Previewing..." });
 });
 
-document.getElementById("refresh-all")?.addEventListener("click", refreshAll);
+document.getElementById("refresh-all")?.addEventListener("click", async (event) => {
+  await withButtonLoading(event.currentTarget, () => refreshAll(), { label: "Refreshing..." });
+});
 
 document.getElementById("global-search")?.addEventListener("input", (event) => {
   const value = String(event.target.value || "");

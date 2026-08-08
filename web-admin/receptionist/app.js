@@ -50,6 +50,20 @@ const confirmAction = (message, options = {}) =>
     danger: Boolean(options.danger),
   }) ?? Promise.resolve(false);
 
+async function runWithLoading(message, fn) {
+  if (ui()?.runWithLoading) return ui().runWithLoading(message, fn);
+  return fn();
+}
+
+async function withButtonLoading(button, fn, options = {}) {
+  if (ui()?.withButtonLoading) return ui().withButtonLoading(button, fn, options);
+  return fn();
+}
+
+function setRegionLoading(element, isLoading, message) {
+  ui()?.setRegionLoading?.(element, isLoading, message);
+}
+
 function showView(view) {
   navButtons.forEach((button) => button.classList.toggle("active", button.dataset.view === view));
   Object.values(views).forEach((section) => section.setAttribute("hidden", ""));
@@ -209,29 +223,36 @@ async function saveProfileEdits() {
   }
 
   const profile = state.currentUser || getStoredUser();
-  try {
-    const data = await postJson(apiUrl("staff_profile.php"), {
-      action: "updateProfile",
-      staffID: Number(profile.id),
-      fullName,
-      email,
-      role: String(profile.role || "receptionist").toLowerCase(),
-    });
+  const saveBtn = document.getElementById("profile-dialog-save");
+  await withButtonLoading(saveBtn, async () => {
+    try {
+      const data = await postJson(
+        apiUrl("staff_profile.php"),
+        {
+          action: "updateProfile",
+          staffID: Number(profile.id),
+          fullName,
+          email,
+          role: String(profile.role || "receptionist").toLowerCase(),
+        },
+        "Saving profile...",
+      );
 
-    if (data?.user) {
-      sessionStorage.setItem("user", JSON.stringify(data.user));
-      if (Array.isArray(data.user.roles)) {
-        sessionStorage.setItem("roles", JSON.stringify(data.user.roles));
+      if (data?.user) {
+        sessionStorage.setItem("user", JSON.stringify(data.user));
+        if (Array.isArray(data.user.roles)) {
+          sessionStorage.setItem("roles", JSON.stringify(data.user.roles));
+        }
       }
-    }
 
-    renderProfileChip();
-    state.profileEditMode = false;
-    renderProfileDialogContent();
-    toast("Profile updated.", "success");
-  } catch (error) {
-    toast(error.message || "Profile update failed", "error");
-  }
+      renderProfileChip();
+      state.profileEditMode = false;
+      renderProfileDialogContent();
+      toast("Profile updated.", "success");
+    } catch (error) {
+      toast(error.message || "Profile update failed", "error");
+    }
+  }, { label: "Saving..." });
 }
 
 function renderStats(stats) {
@@ -1054,16 +1075,19 @@ async function loadBarberLeaveCalendar(year, month) {
   if (state.leaveCalBarberId) {
     payload.barberID = Number(state.leaveCalBarberId);
   }
+  const grid = document.getElementById("leave-calendar-grid");
+  setRegionLoading(grid, true, "Loading calendar...");
   try {
     const [data] = await Promise.all([
-      postJson(apiUrl("barber_schedule.php"), payload),
+      postJson(apiUrl("barber_schedule.php"), payload, false),
       loadShopScheduleCalendar(y, m),
     ]);
     state.leaveCalendar = data;
     renderBarberLeaveCalendar();
   } catch (_) {
-    const grid = document.getElementById("leave-calendar-grid");
     if (grid) grid.innerHTML = '<div class="meta">Could not load leave calendar.</div>';
+  } finally {
+    setRegionLoading(grid, false);
   }
 }
 
@@ -1090,7 +1114,7 @@ async function loadDashboard(showOverlay = false) {
     const data = await postJson(
       apiUrl("receptionist.php"),
       { action: "dashboard" },
-      showOverlay ? "Loading dashboard…" : false,
+      showOverlay ? "Loading dashboard..." : false,
     );
     state.appointments = data.appointments ?? [];
     state.walkins = data.walkins ?? [];
@@ -1157,12 +1181,19 @@ function exportAppointmentsCsv() {
   URL.revokeObjectURL(url);
 }
 
-async function refreshAll() {
+async function refreshAll(button) {
   const updated = document.getElementById("last-updated");
   if (updated) updated.textContent = "Updating…";
-  await loadDashboard(false);
-  const now = new Date();
-  await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
+  const run = async () => {
+    await loadDashboard(false);
+    const now = new Date();
+    await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
+  };
+  if (button) {
+    await withButtonLoading(button, () => runWithLoading("Refreshing desk...", run), { label: "Refreshing..." });
+  } else {
+    await runWithLoading("Refreshing desk...", run);
+  }
 }
 
 document.addEventListener("click", async (event) => {
@@ -1201,19 +1232,21 @@ document.addEventListener("click", async (event) => {
     const queueId = Number(target.dataset.queueId || "0");
     const ok = await confirmAction(`Start service for ${name}?`, { confirmLabel: "Start" });
     if (!ok) return;
-    try {
-      if (queueId > 0) {
-        await postJson(
-          apiUrl("receptionist.php"),
-          { action: "updateWalkinStatus", queueID: queueId, status: "InProgress" },
-          "Starting service…",
-        );
+    await withButtonLoading(target, async () => {
+      try {
+        if (queueId > 0) {
+          await postJson(
+            apiUrl("receptionist.php"),
+            { action: "updateWalkinStatus", queueID: queueId, status: "InProgress" },
+            "Starting service...",
+          );
+        }
+        toast("Walk-in started.", "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to start walk-in", "error");
       }
-      toast("Walk-in started.", "success");
-      loadDashboard();
-    } catch (error) {
-      toast(error.message || "Unable to start walk-in", "error");
-    }
+    }, { label: "Starting..." });
     return;
   }
 
@@ -1224,25 +1257,27 @@ document.addEventListener("click", async (event) => {
     const queueId = Number(target.dataset.queueId || "0");
     const ok = await confirmAction(`Mark ${name} as completed?`, { confirmLabel: "Complete" });
     if (!ok) return;
-    try {
-      if (kind === "walkin" && queueId > 0) {
-        await postJson(
-          apiUrl("receptionist.php"),
-          { action: "updateWalkinStatus", queueID: queueId, status: "Completed" },
-          "Completing…",
-        );
-      } else if (appointmentId > 0) {
-        await postJson(
-          apiUrl("receptionist.php"),
-          { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Completed" },
-          "Completing…",
-        );
+    await withButtonLoading(target, async () => {
+      try {
+        if (kind === "walkin" && queueId > 0) {
+          await postJson(
+            apiUrl("receptionist.php"),
+            { action: "updateWalkinStatus", queueID: queueId, status: "Completed" },
+            "Completing…",
+          );
+        } else if (appointmentId > 0) {
+          await postJson(
+            apiUrl("receptionist.php"),
+            { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Completed" },
+            "Completing…",
+          );
+        }
+        toast("Marked as completed.", "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to complete", "error");
       }
-      toast("Marked as completed.", "success");
-      loadDashboard();
-    } catch (error) {
-      toast(error.message || "Unable to complete", "error");
-    }
+    }, { label: "Completing..." });
     return;
   }
 
@@ -1256,41 +1291,50 @@ document.addEventListener("click", async (event) => {
       danger: true,
     });
     if (!ok) return;
-    try {
-      if (kind === "walkin" && queueId > 0) {
-        await postJson(
-          apiUrl("receptionist.php"),
-          { action: "updateWalkinStatus", queueID: queueId, status: "Cancelled" },
-          "Cancelling…",
-        );
-      } else if (appointmentId > 0) {
-        await postJson(
-          apiUrl("receptionist.php"),
-          { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Cancelled" },
-          "Cancelling…",
-        );
+    await withButtonLoading(target, async () => {
+      try {
+        if (kind === "walkin" && queueId > 0) {
+          await postJson(
+            apiUrl("receptionist.php"),
+            { action: "updateWalkinStatus", queueID: queueId, status: "Cancelled" },
+            "Cancelling…",
+          );
+        } else if (appointmentId > 0) {
+          await postJson(
+            apiUrl("receptionist.php"),
+            { action: "updateAppointmentStatus", appointmentID: appointmentId, status: "Cancelled" },
+            "Cancelling…",
+          );
+        }
+        toast("Removed from tracking.", "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to cancel", "error");
       }
-      toast("Removed from tracking.", "success");
-      loadDashboard();
-    } catch (error) {
-      toast(error.message || "Unable to cancel", "error");
-    }
+    }, { label: "Cancelling..." });
     return;
   }
 
   const appointmentId = target.dataset.appointmentId;
   const appointmentStatus = target.dataset.status;
   if (appointmentId && appointmentStatus) {
-    try {
-      await postJson(apiUrl("receptionist.php"), {
-        action: "updateAppointmentStatus",
-        appointmentID: Number(appointmentId),
-        status: appointmentStatus,
-      });
-      loadDashboard();
-    } catch (error) {
-      toast(error.message || "Unable to update appointment", "error");
-    }
+    await withButtonLoading(target, async () => {
+      try {
+        await postJson(
+          apiUrl("receptionist.php"),
+          {
+            action: "updateAppointmentStatus",
+            appointmentID: Number(appointmentId),
+            status: appointmentStatus,
+          },
+          "Updating appointment...",
+        );
+        toast(`Appointment marked ${appointmentStatus}.`, "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to update appointment", "error");
+      }
+    }, { label: "Updating..." });
     return;
   }
 
@@ -1298,25 +1342,32 @@ document.addEventListener("click", async (event) => {
   const walkinStatus = target.dataset.walkinStatus;
   const walkinAction = target.dataset.walkinAction;
   if (walkinId && (walkinStatus || walkinAction)) {
-    try {
-      let status = walkinStatus;
-      let barberID = 0;
-      if (walkinAction === "assign") {
-        const select = document.querySelector(`[data-walkin-barber="${walkinId}"]`);
-        barberID = select ? Number(select.value) : 0;
-        status = barberID > 0 ? "Assigned" : "Waiting";
-      }
+    await withButtonLoading(target, async () => {
+      try {
+        let status = walkinStatus;
+        let barberID = 0;
+        if (walkinAction === "assign") {
+          const select = document.querySelector(`[data-walkin-barber="${walkinId}"]`);
+          barberID = select ? Number(select.value) : 0;
+          status = barberID > 0 ? "Assigned" : "Waiting";
+        }
 
-      await postJson(apiUrl("receptionist.php"), {
-        action: "updateWalkinStatus",
-        queueID: Number(walkinId),
-        status,
-        barberID,
-      });
-      loadDashboard();
-    } catch (error) {
-      toast(error.message || "Unable to update walk-in", "error");
-    }
+        await postJson(
+          apiUrl("receptionist.php"),
+          {
+            action: "updateWalkinStatus",
+            queueID: Number(walkinId),
+            status,
+            barberID,
+          },
+          "Updating walk-in...",
+        );
+        toast("Walk-in updated.", "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to update walk-in", "error");
+      }
+    }, { label: "Updating..." });
   }
 });
 
@@ -1326,39 +1377,43 @@ walkinForm?.addEventListener("submit", async (event) => {
 
   const serviceIDs = Array.from(walkinServices.selectedOptions).map((option) => option.value);
   const barberID = walkinBarber.value ? Number(walkinBarber.value) : 0;
+  const submitBtn = walkinForm.querySelector('button[type="submit"]');
 
-  try {
-    await postJson(
-      apiUrl("receptionist.php"),
-      { action: "createWalkin", serviceIDs, barberID },
-      "Adding walk-in…",
-    );
-    walkinForm.reset();
-    toast("Walk-in added.", "success");
-    loadDashboard();
-  } catch (error) {
-    walkinError.textContent = error.message || "Unable to add walk-in.";
-  }
+  await withButtonLoading(submitBtn, async () => {
+    try {
+      await postJson(
+        apiUrl("receptionist.php"),
+        { action: "createWalkin", serviceIDs, barberID },
+        "Adding walk-in...",
+      );
+      walkinForm.reset();
+      toast("Walk-in added.", "success");
+      await loadDashboard(false);
+    } catch (error) {
+      walkinError.textContent = error.message || "Unable to add walk-in.";
+      toast(error.message || "Unable to add walk-in.", "error");
+    }
+  }, { label: "Adding..." });
 });
 
-refreshButton?.addEventListener("click", () => refreshAll());
+refreshButton?.addEventListener("click", (event) => refreshAll(event.currentTarget));
 
-document.getElementById("leave-cal-prev")?.addEventListener("click", () => {
+document.getElementById("leave-cal-prev")?.addEventListener("click", async (event) => {
   const cal = state.leaveCalendar;
   if (!cal) return;
   let y = cal.year;
   let m = cal.month - 1;
   if (m < 1) { m = 12; y -= 1; }
-  loadBarberLeaveCalendar(y, m);
+  await withButtonLoading(event.currentTarget, () => loadBarberLeaveCalendar(y, m));
 });
 
-document.getElementById("leave-cal-next")?.addEventListener("click", () => {
+document.getElementById("leave-cal-next")?.addEventListener("click", async (event) => {
   const cal = state.leaveCalendar;
   if (!cal) return;
   let y = cal.year;
   let m = cal.month + 1;
   if (m > 12) { m = 1; y += 1; }
-  loadBarberLeaveCalendar(y, m);
+  await withButtonLoading(event.currentTarget, () => loadBarberLeaveCalendar(y, m));
 });
 
 document.getElementById("leave-cal-barber-filter")?.addEventListener("change", (event) => {
@@ -1442,10 +1497,12 @@ async function init() {
   ui()?.resetLoading?.();
   showView("dashboard");
   renderProfileChip();
-  await loadOptions();
-  await loadDashboard(false);
-  const now = new Date();
-  await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
+  await runWithLoading("Loading receptionist desk...", async () => {
+    await loadOptions();
+    await loadDashboard(false);
+    const now = new Date();
+    await loadBarberLeaveCalendar(now.getFullYear(), now.getMonth() + 1);
+  });
   startTrackingAutoRefresh();
   startTrackingProgressTicker();
 }

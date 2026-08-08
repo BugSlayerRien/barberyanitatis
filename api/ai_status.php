@@ -1,76 +1,125 @@
 <?php
-// AI Status API (reports configuration health)
+// AI Status API — configuration health only (never returns secrets).
 
 declare(strict_types=1);
+
 require_once __DIR__ . '/db.php';
 
-$scanProvider = strtolower(trim((string)(getenv('AI_PROVIDER') ?: ($_ENV['AI_PROVIDER'] ?? $_SERVER['AI_PROVIDER'] ?? 'gemini'))));
-$geminiModel = (string)(getenv('GEMINI_MODEL') ?: ($_ENV['GEMINI_MODEL'] ?? $_SERVER['GEMINI_MODEL'] ?? 'gemini-2.5-flash-lite'));
-$imagenModel = (string)(getenv('IMAGEN_MODEL') ?: ($_ENV['IMAGEN_MODEL'] ?? $_SERVER['IMAGEN_MODEL'] ?? 'imagen-3'));
-$scanKey = trim((string)(getenv('AI_API_KEY') ?: ($_ENV['AI_API_KEY'] ?? $_SERVER['AI_API_KEY'] ?? '')));
-$scanEnabled = $scanProvider === 'gemini' && $scanKey !== '' && $scanKey !== 'REPLACE_WITH_GEMINI_KEY';
-
-$tryonProvider = strtolower(trim((string)(getenv('FREE_TRYON_PROVIDER') ?: ($_ENV['FREE_TRYON_PROVIDER'] ?? $_SERVER['FREE_TRYON_PROVIDER'] ?? 'facechain'))));
-$instantIdEndpoint = trim((string)(getenv('INSTANTID_ENDPOINT') ?: ($_ENV['INSTANTID_ENDPOINT'] ?? $_SERVER['INSTANTID_ENDPOINT'] ?? '')));
-$fooocusEndpoint = trim((string)(getenv('FREE_TRYON_FOOOCUS_ENDPOINT') ?: ($_ENV['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FOOOCUS_ENDPOINT'] ?? 'https://fc.aitianhu.space/api/v1/generation/generate-image')));
-$facechainEndpoint = trim((string)(getenv('FREE_TRYON_FACECHAIN_ENDPOINT') ?: ($_ENV['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? $_SERVER['FREE_TRYON_FACECHAIN_ENDPOINT'] ?? 'https://facechain-plus.hf.space/api/predict')));
-$hfImageModel = trim((string)(getenv('HF_IMAGE_MODEL') ?: ($_ENV['HF_IMAGE_MODEL'] ?? $_SERVER['HF_IMAGE_MODEL'] ?? 'stabilityai/stable-diffusion-xl-base-1.0')));
-$hfInferenceEndpoint = $hfImageModel !== '' ? 'https://api-inference.huggingface.co/models/' . rawurlencode($hfImageModel) : '';
-$hfToken = trim((string)(getenv('HF_TOKEN') ?: ($_ENV['HF_TOKEN'] ?? $_SERVER['HF_TOKEN'] ?? '')));
-
-function probe_endpoint(string $url): array
+function env_str(string $key, string $default = ''): string
 {
-    if ($url === '') {
-        return ['ok' => false, 'httpCode' => 0];
+    $value = getenv($key);
+    if ($value === false || $value === '') {
+        $value = $_ENV[$key] ?? $_SERVER[$key] ?? $default;
     }
 
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_TIMEOUT => 10,
-    ]);
-    curl_exec($ch);
-    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    return ['ok' => $code >= 200 && $code < 500, 'httpCode' => $code];
+    return trim((string)$value);
 }
 
-$tryonConfigured = $tryonProvider === 'instantid'
-    ? $instantIdEndpoint !== ''
-    : ($tryonProvider === 'fooocus'
-        ? $fooocusEndpoint !== ''
-        : ($tryonProvider === 'huggingface'
-            ? $hfImageModel !== ''
-            : $facechainEndpoint !== ''));
+function key_configured(string ...$keys): bool
+{
+    foreach ($keys as $key) {
+        $value = env_str($key);
+        if ($value !== '' && $value !== 'REPLACE_WITH_GEMINI_KEY' && !str_starts_with($value, 'REPLACE_')) {
+            return true;
+        }
+    }
 
-$tryonProbe = $tryonProvider === 'instantid'
-    ? probe_endpoint($instantIdEndpoint)
-    : ($tryonProvider === 'fooocus'
-        ? probe_endpoint($fooocusEndpoint)
-        : ($tryonProvider === 'huggingface'
-            ? probe_endpoint($hfInferenceEndpoint)
-            : probe_endpoint($facechainEndpoint)));
+    return false;
+}
+
+$geminiModel = env_str('GEMINI_MODEL', 'gemini-2.5-flash-lite');
+$geminiImageModel = env_str('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image');
+$grokImageModel = env_str('GROK_IMAGE_MODEL', 'grok-imagine-image');
+$replicateModel = env_str('REPLICATE_MODEL', '');
+
+$chatConfigured = key_configured('GEMINI_API_KEY', 'AI_API_KEY');
+
+$tryonProvider = strtolower(env_str('AI_TRYON_PROVIDER'));
+if (!in_array($tryonProvider, ['gemini', 'grok', 'replicate'], true)) {
+    if (key_configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY')) {
+        $tryonProvider = 'gemini';
+    } elseif (key_configured('XAI_API_KEY')) {
+        $tryonProvider = 'grok';
+    } elseif (key_configured('REPLICATE_API_TOKEN')) {
+        $tryonProvider = 'replicate';
+    } else {
+        $tryonProvider = 'none';
+    }
+}
+
+$providerConfigured = match ($tryonProvider) {
+    'gemini' => key_configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY'),
+    'grok' => key_configured('XAI_API_KEY'),
+    'replicate' => key_configured('REPLICATE_API_TOKEN'),
+    default => false,
+};
+
+$imageModel = match ($tryonProvider) {
+    'gemini' => $geminiImageModel,
+    'grok' => $grokImageModel,
+    'replicate' => $replicateModel !== '' ? $replicateModel : 'replicate (configured)',
+    default => 'n/a',
+};
+
+$styleLimitRaw = env_str('AI_TRYON_STYLE_LIMIT', '3');
+$styleLimit = ctype_digit($styleLimitRaw) ? (int)$styleLimitRaw : 3;
+$unlimited = in_array(strtolower(env_str('AI_TRYON_UNLIMITED')), ['1', 'true', 'yes', 'on'], true);
+$allowFallback = in_array(strtolower(env_str('AI_TRYON_ALLOW_FALLBACK')), ['1', 'true', 'yes', 'on'], true);
+
+$aiServiceUrl = env_str('AI_SERVICE_URL');
+$aiServiceOk = null;
+$aiServiceHttp = 0;
+if ($aiServiceUrl !== '') {
+    $probeUrl = rtrim($aiServiceUrl, '/') . '/';
+    $ch = curl_init($probeUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 4,
+        CURLOPT_FOLLOWLOCATION => true,
+    ]);
+    curl_exec($ch);
+    $aiServiceHttp = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $aiServiceOk = $aiServiceHttp > 0 && $aiServiceHttp < 500;
+}
 
 json_response([
-    'ok' => $scanEnabled || $tryonConfigured,
+    'ok' => $providerConfigured || $chatConfigured,
+    // Backward-compatible "scan" block for the admin overview panel.
     'scan' => [
-        'provider' => $scanProvider,
+        'provider' => 'gemini',
         'model' => $geminiModel,
-        'enabled' => $scanEnabled,
-        'configured' => $scanKey !== '' && $scanKey !== 'REPLACE_WITH_GEMINI_KEY',
+        'enabled' => $chatConfigured,
+        'configured' => $chatConfigured,
     ],
     'tryon' => [
         'provider' => $tryonProvider,
-        'model' => $imagenModel,
-        'configured' => $tryonConfigured,
-        'instantIdEndpoint' => $instantIdEndpoint,
-        'fooocusEndpoint' => $fooocusEndpoint,
-        'facechainEndpoint' => $facechainEndpoint,
-        'hfImageModel' => $hfImageModel,
-        'hfInferenceEndpoint' => $hfInferenceEndpoint,
-        'hfTokenSet' => $hfToken !== '',
-        'probe' => $tryonProbe,
+        'model' => $imageModel,
+        'configured' => $providerConfigured,
+        'styleLimit' => $styleLimit,
+        'unlimited' => $unlimited,
+        'allowFallback' => $allowFallback,
+        'availableProviders' => [
+            'gemini' => key_configured('GEMINI_IMAGE_API_KEY', 'AI_API_KEY', 'GEMINI_API_KEY'),
+            'grok' => key_configured('XAI_API_KEY'),
+            'replicate' => key_configured('REPLICATE_API_TOKEN'),
+        ],
+        'source' => 'AI_TRYON_PROVIDER / server .env (read-only)',
+        // Overview expects probe.httpCode — report sidecar reachability when configured.
+        'probe' => [
+            'ok' => $aiServiceOk === true || ($aiServiceUrl === '' && $providerConfigured),
+            'httpCode' => $aiServiceUrl !== '' ? $aiServiceHttp : ($providerConfigured ? 200 : 0),
+        ],
+    ],
+    'chat' => [
+        'provider' => 'gemini',
+        'model' => $geminiModel,
+        'configured' => $chatConfigured,
+    ],
+    'aiService' => [
+        'configured' => $aiServiceUrl !== '',
+        'reachable' => $aiServiceOk,
+        'httpCode' => $aiServiceHttp,
+        'note' => 'Sidecar used for face analysis when running. URL is not exposed.',
     ],
 ]);
