@@ -41,20 +41,43 @@ class _AuthPageState extends State<AuthPage> {
   final TextEditingController _phone = TextEditingController();
   final TextEditingController _regPass = TextEditingController();
   final TextEditingController _confirm = TextEditingController();
+  final FocusNode _regPassFocus = FocusNode();
 
   bool _obscureLogin = true;
   bool _obscureReg1 = true;
   bool _obscureReg2 = true;
-  bool _rememberMe = false;
+  bool _passwordFieldFocused = false;
+
+  static final RegExp _passwordUpper = RegExp(r'[A-Z]');
+  static final RegExp _passwordLower = RegExp(r'[a-z]');
+  static final RegExp _passwordDigit = RegExp(r'\d');
+  static final RegExp _passwordSpecial =
+      RegExp(r'[!@#$%^&*()_+\-=\[\]{};:,.<>?]');
 
   @override
   void initState() {
     super.initState();
+    _regPass.addListener(_onRegisterPasswordFieldsChanged);
+    _confirm.addListener(_onRegisterPasswordFieldsChanged);
+    _regPassFocus.addListener(_onRegPassFocusChanged);
     unawaited(_resumeIfAlreadySignedIn());
+  }
+
+  void _onRegisterPasswordFieldsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _onRegPassFocusChanged() {
+    if (!mounted) return;
+    setState(() => _passwordFieldFocused = _regPassFocus.hasFocus);
   }
 
   @override
   void dispose() {
+    _regPass.removeListener(_onRegisterPasswordFieldsChanged);
+    _confirm.removeListener(_onRegisterPasswordFieldsChanged);
+    _regPassFocus.removeListener(_onRegPassFocusChanged);
+    _regPassFocus.dispose();
     _loginUser.dispose();
     _loginPass.dispose();
     _firstName.dispose();
@@ -442,11 +465,14 @@ class _AuthPageState extends State<AuthPage> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
       backgroundColor: Colors.black,
+      resizeToAvoidBottomInset: true,
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottomInset),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
@@ -572,50 +598,25 @@ class _AuthPageState extends State<AuthPage> {
                   onPressed: () =>
                       setState(() => _obscureLogin = !_obscureLogin))),
         ),
-        const SizedBox(height: 12),
-        // Remember me and Forgot password — pinned to opposite sides
-        Row(
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SizedBox(
-                  width: 24,
-                  height: 24,
-                  child: Checkbox(
-                    value: _rememberMe,
-                    onChanged: (value) =>
-                        setState(() => _rememberMe = value ?? false),
-                    side: const BorderSide(color: Colors.white54),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    visualDensity: VisualDensity.compact,
-                  ),
-                ),
-                const SizedBox(width: 6),
-                const Text(
-                  'Remember me',
-                  style: TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ],
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: TextButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
+              );
+            },
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            const Spacer(),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
-                );
-              },
-              style: TextButton.styleFrom(
-                padding: EdgeInsets.zero,
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              child: const Text(
-                'Forgot password?',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
+            child: const Text(
+              'Forgot password?',
+              style: TextStyle(color: Colors.white70, fontSize: 12),
             ),
-          ],
+          ),
         ),
         const SizedBox(height: 16),
         ElevatedButton(
@@ -720,16 +721,20 @@ class _AuthPageState extends State<AuthPage> {
         const SizedBox(height: 12),
         TextField(
             controller: _regPass,
+            focusNode: _regPassFocus,
             obscureText: _obscureReg1,
             style: const TextStyle(color: Colors.white),
             decoration: _fieldDecoration('Enter your password',
-                helperText: 'Min 8 chars, 1 uppercase, 1 lowercase, 1 number, 1 special (!@#\$%^&*)',
                 suffix: IconButton(
                     icon: Icon(
                         _obscureReg1 ? Icons.visibility_off : Icons.visibility,
                         color: Colors.white70),
                     onPressed: () =>
                         setState(() => _obscureReg1 = !_obscureReg1)))),
+        if (_shouldShowPasswordRequirements) ...[
+          const SizedBox(height: 8),
+          _buildPasswordRequirementsChecklist(_regPass.text),
+        ],
         const SizedBox(height: 12),
         TextField(
             controller: _confirm,
@@ -742,12 +747,26 @@ class _AuthPageState extends State<AuthPage> {
                         color: Colors.white70),
                     onPressed: () =>
                         setState(() => _obscureReg2 = !_obscureReg2)))),
+        if (_showConfirmMismatchMessage) ...[
+          const SizedBox(height: 6),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Passwords do not match.',
+              style: TextStyle(color: Color(0xFFFF8A80), fontSize: 12),
+            ),
+          ),
+        ],
         const SizedBox(height: 18),
         ElevatedButton(
-          onPressed: _isLoading ? null : _register,
+          onPressed: (_isLoading || !_canSubmitRegisterPassword)
+              ? null
+              : _register,
           style: ElevatedButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: Colors.black,
+              disabledBackgroundColor: Colors.white24,
+              disabledForegroundColor: Colors.white54,
               minimumSize: const Size.fromHeight(48)),
           child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT',
               style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -814,33 +833,95 @@ class _AuthPageState extends State<AuthPage> {
     return false;
   }
 
+  bool get _shouldShowPasswordRequirements =>
+      _passwordFieldFocused || _regPass.text.isNotEmpty;
+
+  bool get _showConfirmMismatchMessage =>
+      _confirm.text.isNotEmpty && _regPass.text != _confirm.text;
+
+  bool get _canSubmitRegisterPassword {
+    final password = _regPass.text;
+    return _isPasswordValid(password) &&
+        _confirm.text.isNotEmpty &&
+        password == _confirm.text;
+  }
+
+  Map<String, bool> _passwordRequirementStates(String password) {
+    return {
+      'At least 8 characters': password.length >= 8,
+      'One uppercase letter': _passwordUpper.hasMatch(password),
+      'One lowercase letter': _passwordLower.hasMatch(password),
+      'One number': _passwordDigit.hasMatch(password),
+      'One special character': _passwordSpecial.hasMatch(password),
+    };
+  }
+
+  bool _isPasswordValid(String password) {
+    final states = _passwordRequirementStates(password);
+    return states.values.every((met) => met);
+  }
+
+  Widget _buildPasswordRequirementsChecklist(String password) {
+    final states = _passwordRequirementStates(password);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final entry in states.entries)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 1.5),
+              child: Row(
+                children: [
+                  Icon(
+                    entry.value ? Icons.check_circle : Icons.radio_button_unchecked,
+                    size: 14,
+                    color: entry.value
+                        ? const Color(0xFF81C784)
+                        : Colors.white38,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      entry.key,
+                      style: TextStyle(
+                        color: entry.value ? Colors.white70 : Colors.white38,
+                        fontSize: 11,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   String? _getPasswordValidationError(String password) {
-    // Check minimum length
     if (password.length < 8) {
       return 'Password must be at least 8 characters long.';
     }
-    
-    // Check for uppercase letter
-    if (!password.contains(RegExp(r'[A-Z]'))) {
+    if (!_passwordUpper.hasMatch(password)) {
       return 'Password must contain at least one uppercase letter (A-Z).';
     }
-    
-    // Check for lowercase letter
-    if (!password.contains(RegExp(r'[a-z]'))) {
+    if (!_passwordLower.hasMatch(password)) {
       return 'Password must contain at least one lowercase letter (a-z).';
     }
-    
-    // Check for number
-    if (!password.contains(RegExp(r'\d'))) {
+    if (!_passwordDigit.hasMatch(password)) {
       return 'Password must contain at least one number (0-9).';
     }
-    
-    // Check for special character
-    if (!password.contains(RegExp(r'[!@#$%^&*()_+\-=\[\]{};:,.<>?]'))) {
+    if (!_passwordSpecial.hasMatch(password)) {
       return 'Password must contain at least one special character (!@#\$%^&*).';
     }
-    
-    return null;  // Valid password
+    return null;
   }
 
   String _readableLoginError(Object error, {required String email}) {

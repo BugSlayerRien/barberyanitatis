@@ -500,6 +500,20 @@ try {
         $today = shop_today();
         $days = [];
 
+        $bookedStmt = $pdo->prepare(
+            "SELECT appointment_date::text AS appointment_date, COUNT(*)::int AS booked_count
+             FROM appointments
+             WHERE appointment_date >= :start
+               AND appointment_date < :end
+               AND status IN ('Scheduled', 'CheckedIn', 'InProgress', 'Completed')
+             GROUP BY appointment_date"
+        );
+        $bookedStmt->execute([':start' => $monthStart, ':end' => $monthEnd]);
+        $bookedMap = [];
+        foreach ($bookedStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $bookedMap[(string)$row['appointment_date']] = (int)$row['booked_count'];
+        }
+
         for ($day = 1; $day <= $daysInMonth; $day++) {
             $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
             $dow = shop_weekday($date) ?? 0;
@@ -519,6 +533,7 @@ try {
 
             $closed = $status !== 'open';
             $slots = $closed ? [] : shop_default_slot_times($date);
+            $bookedCount = (int)($bookedMap[$date] ?? 0);
 
             $days[] = [
                 'date' => $date,
@@ -530,6 +545,7 @@ try {
                 'openTime' => $closed ? null : substr(shop_open_time($date), 0, 5),
                 'closeTime' => $closed ? null : substr(shop_close_time($date), 0, 5),
                 'bookableSlotCount' => count($slots),
+                'bookedAppointments' => $bookedCount,
             ];
         }
 

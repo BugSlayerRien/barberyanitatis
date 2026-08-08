@@ -14,6 +14,7 @@ require_once __DIR__ . '/payment_recording.php';
  *   weekly: array<int, array{is_closed: bool, open: string, close: string}>,
  *   breaks: list<array{day: ?int, start: string, end: string}>,
  *   closed_dates: array<string, true>,
+ *   closed_date_reasons: array<string, string>,
  *   slot_minutes: int, appointment_minutes: int, walkin_minutes: int, timezone: string
  * }
  */
@@ -33,6 +34,7 @@ function shop_schedule_config(bool $refresh = false): array
         'weekly' => $weekly,
         'breaks' => [['day' => null, 'start' => '12:00:00', 'end' => '13:00:00']],
         'closed_dates' => [],
+        'closed_date_reasons' => [],
         'slot_minutes' => 60,
         'appointment_minutes' => 60,
         'walkin_minutes' => 35,
@@ -71,9 +73,22 @@ function shop_schedule_config(bool $refresh = false): array
             ], $breakRows);
 
             $closedRows = $pdo->query(
-                "SELECT closed_date FROM shop_closed_dates WHERE closed_date >= CURRENT_DATE - INTERVAL '7 day'"
-            )->fetchAll(PDO::FETCH_COLUMN);
-            $config['closed_dates'] = array_fill_keys(array_map('strval', $closedRows), true);
+                "SELECT closed_date, reason FROM shop_closed_dates
+                 WHERE closed_date >= CURRENT_DATE - INTERVAL '1 year'
+                   AND closed_date <= CURRENT_DATE + INTERVAL '1 year'"
+            )->fetchAll(PDO::FETCH_ASSOC);
+            $closedDates = [];
+            $closedReasons = [];
+            foreach ($closedRows as $row) {
+                $closedDate = (string)($row['closed_date'] ?? '');
+                if ($closedDate === '') {
+                    continue;
+                }
+                $closedDates[$closedDate] = true;
+                $closedReasons[$closedDate] = trim((string)($row['reason'] ?? ''));
+            }
+            $config['closed_dates'] = $closedDates;
+            $config['closed_date_reasons'] = $closedReasons;
         }
 
         $settingRows = $pdo->query(
@@ -233,6 +248,56 @@ function shop_close_time(?string $date = null): string
 function shop_is_closed_date(string $date): bool
 {
     return shop_day_hours($date)['is_closed'];
+}
+
+/**
+ * Closure status for calendars / customer messaging.
+ *
+ * @return array{
+ *   isClosed: bool,
+ *   status: 'open'|'closed_weekly'|'closed_holiday',
+ *   reason: string,
+ *   customerMessage: string
+ * }
+ */
+function shop_closure_details(string $date): array
+{
+    static $dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    $cfg = shop_schedule_config();
+    $dow = shop_weekday($date) ?? 0;
+
+    if (isset($cfg['closed_dates'][$date])) {
+        $raw = trim((string)($cfg['closed_date_reasons'][$date] ?? ''));
+        $reason = $raw !== '' ? $raw : 'Holiday / special closure';
+        $customerMessage = $raw !== ''
+            ? "We're closed — {$raw}."
+            : "We're closed this day.";
+
+        return [
+            'isClosed' => true,
+            'status' => 'closed_holiday',
+            'reason' => $reason,
+            'customerMessage' => $customerMessage,
+        ];
+    }
+
+    if (!empty($cfg['weekly'][$dow]['is_closed'])) {
+        $dayName = $dayNames[$dow] ?? 'this weekday';
+
+        return [
+            'isClosed' => true,
+            'status' => 'closed_weekly',
+            'reason' => 'Closed every ' . $dayName,
+            'customerMessage' => "We're closed every {$dayName}.",
+        ];
+    }
+
+    return [
+        'isClosed' => false,
+        'status' => 'open',
+        'reason' => '',
+        'customerMessage' => '',
+    ];
 }
 
 function shop_slot_duration_minutes(): int

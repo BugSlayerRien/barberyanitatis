@@ -2014,8 +2014,10 @@ function renderScheduleCalDayDetail(day) {
     return;
   }
   if (day.status === "open") {
+    const booked = Number(day.bookedAppointments || 0);
+    const bookedText = booked > 0 ? ` · ${booked} appointment(s) booked` : "";
     detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Open ${day.openTime}–${day.closeTime}. `
-      + `${day.bookableSlotCount} bookable slot(s).`;
+      + `${day.bookableSlotCount} bookable slot(s)${bookedText}.`;
     return;
   }
   detail.innerHTML = `<strong>${day.dayName}, ${day.date}</strong> — Closed. ${escapeScheduleText(day.reason)}`;

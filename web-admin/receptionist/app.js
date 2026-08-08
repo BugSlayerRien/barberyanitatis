@@ -11,6 +11,7 @@ const state = {
   profileEditMode: false,
   pagination: {},
   leaveCalendar: null,
+  scheduleCalendar: null,
   leaveCalSelected: null,
   leaveCalBarberId: "",
 };
@@ -904,19 +905,53 @@ function escapeLeaveText(value) {
   return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 }
 
+function scheduleDayByDate(date) {
+  const days = state.scheduleCalendar?.days || [];
+  return days.find((day) => day.date === date) || null;
+}
+
+function isBusyScheduleDay(day) {
+  if (!day || day.status !== "open") return false;
+  const booked = Number(day.bookedAppointments || 0);
+  const capacity = Number(day.bookableSlotCount || 0);
+  if (booked >= 8) return true;
+  if (capacity > 0 && booked / capacity >= 0.6) return true;
+  return false;
+}
+
 function renderLeaveCalDayDetail(date, byDate) {
   const detail = document.getElementById("leave-cal-day-detail");
   if (!detail) return;
-  if (!date || !byDate || !byDate[date]?.length) {
-    detail.innerHTML = date
-      ? `<strong>${date}</strong> — No approved leave on this day.`
-      : "Select a day to see barbers on leave.";
+  if (!date) {
+    detail.innerHTML = "Select a day to see closures, leave, and booking activity.";
     return;
   }
-  const rows = byDate[date]
-    .map((entry) => `<li><strong>${escapeLeaveText(entry.barberName)}</strong>${entry.note ? ` — ${escapeLeaveText(entry.note)}` : ""}</li>`)
-    .join("");
-  detail.innerHTML = `<strong>${date}</strong><ul style="margin: 8px 0 0; padding-left: 18px;">${rows}</ul>`;
+
+  const scheduleDay = scheduleDayByDate(date);
+  const leaveEntries = (byDate && byDate[date]) || [];
+  const parts = [`<strong>${date}</strong>`];
+
+  if (scheduleDay && scheduleDay.status !== "open") {
+    parts.push(`Shop closed. ${escapeLeaveText(scheduleDay.reason || "Closed.")}`);
+  } else if (scheduleDay) {
+    const booked = Number(scheduleDay.bookedAppointments || 0);
+    parts.push(
+      `Open ${escapeLeaveText(scheduleDay.openTime)}–${escapeLeaveText(scheduleDay.closeTime)}`
+      + ` · ${booked} appointment(s) booked`
+      + (isBusyScheduleDay(scheduleDay) ? " (busy day)" : ""),
+    );
+  }
+
+  if (leaveEntries.length) {
+    const rows = leaveEntries
+      .map((entry) => `<li><strong>${escapeLeaveText(entry.barberName)}</strong>${entry.note ? ` — ${escapeLeaveText(entry.note)}` : ""}</li>`)
+      .join("");
+    parts.push(`Barbers on leave:<ul style="margin: 8px 0 0; padding-left: 18px;">${rows}</ul>`);
+  } else {
+    parts.push("No approved leave on this day.");
+  }
+
+  detail.innerHTML = parts.join("<br />");
 }
 
 function renderBarberLeaveCalendar() {
@@ -945,10 +980,39 @@ function renderBarberLeaveCalendar() {
     const entries = byDate[date] || [];
     const hasLeave = entries.length > 0;
     const selected = state.leaveCalSelected === date;
+    const scheduleDay = scheduleDayByDate(date);
+    const busy = isBusyScheduleDay(scheduleDay);
+
+    let statusClass = "cal-open";
+    if (scheduleDay?.isPast) {
+      statusClass = "cal-past";
+    } else if (scheduleDay?.status === "closed_holiday") {
+      statusClass = "cal-closed-holiday";
+    } else if (scheduleDay?.status === "closed_weekly") {
+      statusClass = "cal-closed-weekly";
+    }
+
+    const extra = [
+      hasLeave ? "cal-has-leave" : "",
+      busy ? "cal-busy" : "",
+      selected ? "cal-selected" : "",
+    ].filter(Boolean).join(" ");
+
+    const titleParts = [];
+    if (scheduleDay && scheduleDay.status !== "open") {
+      titleParts.push(scheduleDay.reason || "Closed");
+    } else if (scheduleDay) {
+      titleParts.push(`Open ${scheduleDay.openTime}–${scheduleDay.closeTime}`);
+      if (Number(scheduleDay.bookedAppointments || 0) > 0) {
+        titleParts.push(`${scheduleDay.bookedAppointments} booked`);
+      }
+    }
+    if (hasLeave) titleParts.push(`${entries.length} on leave`);
+
     const badge = hasLeave ? `<span class="meta" style="font-size:9px;display:block;">${entries.length}</span>` : "";
     cells.push(
-      `<button type="button" class="cal-day cal-open${hasLeave ? " cal-has-leave" : ""}${selected ? " cal-selected" : ""}" `
-      + `data-date="${date}">${day}${badge}</button>`
+      `<button type="button" class="cal-day ${statusClass}${extra ? ` ${extra}` : ""}" `
+      + `data-date="${date}" title="${escapeLeaveText(titleParts.join(" · "))}">${day}${badge}</button>`
     );
   }
 
@@ -969,6 +1033,19 @@ function renderBarberLeaveCalendar() {
   }
 }
 
+async function loadShopScheduleCalendar(year, month) {
+  try {
+    const data = await postJson(apiUrl("operating_schedule.php"), {
+      action: "calendarMonth",
+      year,
+      month,
+    });
+    state.scheduleCalendar = data;
+  } catch (_) {
+    state.scheduleCalendar = null;
+  }
+}
+
 async function loadBarberLeaveCalendar(year, month) {
   const now = new Date();
   const y = year ?? now.getFullYear();
@@ -978,7 +1055,10 @@ async function loadBarberLeaveCalendar(year, month) {
     payload.barberID = Number(state.leaveCalBarberId);
   }
   try {
-    const data = await postJson(apiUrl("barber_schedule.php"), payload);
+    const [data] = await Promise.all([
+      postJson(apiUrl("barber_schedule.php"), payload),
+      loadShopScheduleCalendar(y, m),
+    ]);
     state.leaveCalendar = data;
     renderBarberLeaveCalendar();
   } catch (_) {

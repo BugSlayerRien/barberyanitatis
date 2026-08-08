@@ -328,6 +328,7 @@ try {
         $minBookable = shop_earliest_bookable_slot_start();
         $minDate = $minBookable->format('Y-m-d');
         $minTime = $minBookable->format('H:i:s');
+        $daysInMonth = (int)date('t', strtotime($startDate));
 
         $stmt = $pdo->prepare(
             "SELECT slot_date, COUNT(*) AS available_count
@@ -351,13 +352,51 @@ try {
             ':min_date' => $minDate,
             ':min_time' => $minTime,
         ]);
-        $rows = $stmt->fetchAll();
+        $availableMap = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $availableMap[(string)$row['slot_date']] = (int)$row['available_count'];
+        }
+
+        $bookedStmt = $pdo->prepare(
+            "SELECT slot_date, COUNT(*) AS booked_count
+             FROM time_slots
+             WHERE barber_id = :barber_id
+               AND LOWER(status) = 'booked'
+               AND slot_date >= :start_date
+               AND slot_date < :end_date
+               AND EXTRACT(MINUTE FROM slot_time) = 0
+               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
+               AND EXTRACT(HOUR FROM slot_time) <> 12
+             GROUP BY slot_date"
+        );
+        $bookedStmt->execute([
+            ':barber_id' => $barberID,
+            ':start_date' => $startDate,
+            ':end_date' => $endDate,
+        ]);
+        $bookedMap = [];
+        foreach ($bookedStmt->fetchAll() as $row) {
+            $bookedMap[(string)$row['slot_date']] = (int)$row['booked_count'];
+        }
 
         $availability = [];
-        foreach ($rows as $row) {
+        for ($day = 1; $day <= $daysInMonth; $day++) {
+            $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
+            $closure = shop_closure_details($date);
+            $availableCount = $closure['isClosed'] ? 0 : (int)($availableMap[$date] ?? 0);
+            $bookedCount = (int)($bookedMap[$date] ?? 0);
+            $defaultTotal = $closure['isClosed'] ? 0 : count(shop_default_slot_times($date));
+            $totalSlots = max($defaultTotal, $availableCount + $bookedCount);
+
             $availability[] = [
-                'slotDate' => (string)$row['slot_date'],
-                'availableCount' => (int)$row['available_count'],
+                'slotDate' => $date,
+                'availableCount' => $availableCount,
+                'bookedCount' => $bookedCount,
+                'totalSlots' => $totalSlots,
+                'isClosed' => $closure['isClosed'],
+                'closureStatus' => $closure['status'],
+                'closureReason' => $closure['reason'],
+                'closureMessage' => $closure['customerMessage'],
             ];
         }
 
@@ -455,7 +494,28 @@ try {
     }
     unset($slot);
 
-    json_response(['slots' => $merged]);
+    $closure = shop_closure_details($slotDate);
+    $bookedCount = 0;
+    $availableCount = 0;
+    foreach ($merged as $slot) {
+        $status = strtolower((string)($slot['status'] ?? ''));
+        if ($status === 'booked') {
+            $bookedCount++;
+        } elseif (!empty($slot['isBookable'])) {
+            $availableCount++;
+        }
+    }
+
+    json_response([
+        'slots' => $closure['isClosed'] ? [] : $merged,
+        'isClosed' => $closure['isClosed'],
+        'closureStatus' => $closure['status'],
+        'closureReason' => $closure['reason'],
+        'closureMessage' => $closure['customerMessage'],
+        'availableCount' => $closure['isClosed'] ? 0 : $availableCount,
+        'bookedCount' => $bookedCount,
+        'totalSlots' => $closure['isClosed'] ? 0 : count($merged),
+    ]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
 } catch (Throwable $e) {
