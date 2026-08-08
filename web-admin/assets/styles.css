@@ -611,6 +611,82 @@ table.table {
   color: var(--text);
 }
 
+.analytics-period-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.analytics-period-btn.is-active,
+.analytics-trend-btn.is-active {
+  background: rgba(169, 153, 65, 0.25);
+  border-color: rgba(169, 153, 65, 0.55);
+  color: #f5e6a8;
+}
+
+.analytics-chart-wrap {
+  position: relative;
+  height: 220px;
+  width: 100%;
+}
+
+.analytics-kpi-grid .card h3,
+.analytics-kpi-grid h3 {
+  font-size: 12px;
+}
+
+.analytics-stack {
+  display: grid;
+  gap: 8px;
+}
+
+.analytics-stack-item {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 12px;
+}
+
+.analytics-stack-item strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.analytics-ops-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.analytics-ops-kpis .ops-pill {
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.analytics-ops-kpis .ops-pill .label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.analytics-ops-kpis .ops-pill .value {
+  font-size: 18px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  .analytics-chart-wrap {
+    height: 200px;
+  }
+}
+
 .ai-action-item {
   border: 1px solid rgba(0, 170, 255, 0.25);
   border-radius: 10px;

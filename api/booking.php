@@ -581,12 +581,8 @@ try {
         }
 
         $favoriteBarber = null;
-        $feedbackTableExists = (int)$pdo->query(
-            "SELECT COUNT(*) FROM information_schema.tables
-             WHERE table_schema = current_schema() AND table_name = 'barber_feedback'"
-        )->fetchColumn() > 0;
-
-        if ($feedbackTableExists) {
+        // Avoid information_schema on every home load (slow on some hosts).
+        try {
             $favStmt = $pdo->prepare(
                 "SELECT b.barber_id, b.full_name, b.specialty, b.profile_image,
                         ROUND(AVG(bf.rating)::numeric, 1) AS avg_rating,
@@ -612,6 +608,9 @@ try {
                     'source' => 'customer_ratings',
                 ];
             }
+        } catch (Throwable $e) {
+            // barber_feedback may not exist yet — fall through to most-booked.
+            $favoriteBarber = null;
         }
 
         if ($favoriteBarber === null) {

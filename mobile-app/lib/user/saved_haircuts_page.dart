@@ -144,7 +144,7 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Your Saved Haircuts',
+                'Saved Haircuts',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 24,
@@ -204,61 +204,6 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
                 },
               ),
               const SizedBox(height: 24),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white10),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white10,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Icon(
-                        Icons.favorite,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Book Your Favorite',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Tap on any hairstyle to view details and book an appointment',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                              height: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -288,22 +233,22 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
 
   Widget _buildPreviewImage(String imageUrl) {
     if (imageUrl.isEmpty) {
-      return Container(color: const Color(0xFF111111));
+      return Container(color: Colors.white);
     }
     if (imageUrl.startsWith('assets/')) {
-      return OverlayPreviewImage(assetPath: imageUrl, fit: BoxFit.cover);
+      return OverlayPreviewImage(assetPath: imageUrl, fit: BoxFit.contain);
     }
     if (kIsWeb) {
       return _buildWebImage(imageUrl);
     }
     return Image.network(
       imageUrl,
-      fit: BoxFit.cover,
+      fit: BoxFit.contain,
       filterQuality: FilterQuality.high,
       errorBuilder: (_, __, ___) {
         return OverlayPreviewImage(
           assetPath: OverlayRegistry.sample.front,
-          fit: BoxFit.cover,
+          fit: BoxFit.contain,
         );
       },
     );
@@ -324,15 +269,15 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
       future: _fetchWebImageBytes(url),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Container(color: const Color(0xFF111111));
+          return Container(color: Colors.white);
         }
         if (!snapshot.hasData) {
           return OverlayPreviewImage(
             assetPath: OverlayRegistry.sample.front,
-            fit: BoxFit.cover,
+            fit: BoxFit.contain,
           );
         }
-        return Image.memory(snapshot.data!, fit: BoxFit.cover);
+        return Image.memory(snapshot.data!, fit: BoxFit.contain);
       },
     );
   }
@@ -366,7 +311,7 @@ class _HaircutCard extends StatelessWidget {
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: Colors.white, width: 1),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.2),
@@ -387,19 +332,8 @@ class _HaircutCard extends StatelessWidget {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
+                    Container(color: Colors.white),
                     imageBuilder(imageUrl),
-                    Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.3),
-                            Colors.transparent,
-                          ],
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
