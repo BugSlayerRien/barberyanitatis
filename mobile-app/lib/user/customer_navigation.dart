@@ -36,7 +36,7 @@ void openCustomerTab(BuildContext context, CustomerTab tab) {
       break;
     case CustomerTab.scanner:
       navigator.push(
-        MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+        MaterialPageRoute(builder: (_) => const AiFaceScanPage(startFresh: false)),
       );
       break;
   }

@@ -15,6 +15,7 @@ import 'kiosk/kiosk_home_page.dart';
 import 'package:app_links/app_links.dart';
 import 'user/payment_result_page.dart';
 import 'user/scanner/overlay_asset_cache.dart';
+import 'app_orientation.dart';
 
 // --- 1. Define Custom Colors ---
 const Color kGoldColor = Color(0xFFA99941);
@@ -25,6 +26,11 @@ const String _appMode = String.fromEnvironment('APP_MODE', defaultValue: 'custom
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (_appMode == 'kiosk') {
+    await AppOrientation.lockForKiosk();
+  } else {
+    await AppOrientation.lockForCustomer();
+  }
   await ApiConfig.ensureInitialized();
   if (kIsWeb) {
     // Use path-based routing so OAuth fragments (#access_token=...) are not

@@ -536,87 +536,61 @@ class _CalendarPageState extends State<CalendarPage> {
               ),
             ),
             const SizedBox(height: 24),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [const Color(0xFF1A1A1A), const Color(0xFF252525)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
+            if (_loadingSlots || _selectedIsClosed)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: _selectedIsClosed ? const Color(0x66DC5050) : Colors.white,
+                    width: 1,
+                  ),
                 ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: _selectedIsClosed ? const Color(0x66DC5050) : Colors.white,
-                  width: 1,
-                ),
-              ),
-              child: _loadingSlots
-                  ? const Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                      ),
-                    )
-                  : _selectedIsClosed
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Closed on ${_formatDate(_selectedDate)}',
-                              style: const TextStyle(
-                                color: _closedHolidayText,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                              ),
+                child: _loadingSlots
+                    ? const Center(
+                        child: SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        ),
+                      )
+                    : Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Closed on ${_formatDate(_selectedDate)}',
+                            style: const TextStyle(
+                              color: _closedHolidayText,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _selectedClosureMessage.isNotEmpty
-                                  ? _selectedClosureMessage
-                                  : "We're closed this day.",
-                              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
-                            ),
-                            if (_selectedClosureReason.isNotEmpty &&
-                                !_selectedClosureMessage.contains(_selectedClosureReason)) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                _selectedClosureReason,
-                                style: const TextStyle(color: Colors.white54, fontSize: 12),
-                              ),
-                            ],
-                          ],
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Selected: ${_formatDate(_selectedDate)}',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _totalSlots > 0
-                                  ? '$slotsBooked of $_totalSlots slots booked'
-                                  : 'No slots for this date',
-                              style: TextStyle(
-                                color: usageColor,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _selectedClosureMessage.isNotEmpty
+                                ? _selectedClosureMessage
+                                : "We're closed this day.",
+                            style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                          ),
+                          if (_selectedClosureReason.isNotEmpty &&
+                              !_selectedClosureMessage.contains(_selectedClosureReason)) ...[
                             const SizedBox(height: 4),
                             Text(
-                              _totalSlots > 0
-                                  ? '$slotsOpen of $_totalSlots still available with ${_barberNameLabel()}'
-                                  : 'Pick another date to continue.',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.35),
+                              _selectedClosureReason,
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
                             ),
                           ],
-                        ),
-            ),
-            const SizedBox(height: 32),
+                        ],
+                      ),
+              ),
+            if (_loadingSlots || _selectedIsClosed) const SizedBox(height: 32),
+            if (!_loadingSlots && !_selectedIsClosed) const SizedBox(height: 8),
             ElevatedButton(
               onPressed: (_continuing || _selectedIsClosed || _availableSlots <= 0)
                   ? null

@@ -10,6 +10,7 @@ import 'barber_selection_page.dart';
 import 'booking_guard.dart';
 import 'customer_navigation.dart';
 import 'dashboard_page.dart';
+import 'hair_compatibility.dart';
 import 'profile_page.dart';
 import 'ai_face_scan_page.dart';
 import 'feature_flags.dart';
@@ -615,6 +616,20 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         height: 1.5,
                       ),
                     ),
+                    Builder(
+                      builder: (_) {
+                        final compat =
+                            HairCompatibility.evaluateStyleMap(widget.style);
+                        if (compat == null) return const SizedBox.shrink();
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 14),
+                          child: HairCompatibilityBadge(
+                            result: compat,
+                            compact: false,
+                          ),
+                        );
+                      },
+                    ),
                     if ((widget.style['details']?.toString().trim().isNotEmpty ?? false)) ...[
                       const SizedBox(height: 12),
                       Text(
@@ -642,6 +657,17 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('This haircut cannot be booked yet. Please choose another style.')),
                           );
+                          return;
+                        }
+
+                        final compat =
+                            HairCompatibility.evaluateStyleMap(widget.style);
+                        final mayProceed =
+                            await HairCompatibility.confirmBookingIfNeeded(
+                          context,
+                          compat,
+                        );
+                        if (!mayProceed || !context.mounted) {
                           return;
                         }
 

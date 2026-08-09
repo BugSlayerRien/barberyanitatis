@@ -8,6 +8,7 @@ import 'ai_funnel_service.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
 import 'customer_navigation.dart';
+import 'hair_compatibility.dart';
 import 'saved_haircuts_page.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
@@ -411,6 +412,18 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                         ),
                       ),
                     ),
+                    Builder(
+                      builder: (_) {
+                        final compat = HairCompatibility.evaluateStyleMap(style);
+                        if (compat == null) return const SizedBox.shrink();
+                        return Positioned(
+                          left: 6,
+                          right: 6,
+                          bottom: 6,
+                          child: HairCompatibilityBadge(result: compat),
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -656,39 +669,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       return;
     }
 
-    final userHairTexture = (UserSession.lastScan?['hairTexture']?.toString() ?? '').trim().toLowerCase();
-    final styleHairTexture = (style['hairTexture']?.toString() ?? '').trim().toLowerCase();
-    final isMismatch = userHairTexture.isNotEmpty && styleHairTexture.isNotEmpty && userHairTexture != styleHairTexture;
-
-    if (isMismatch) {
-      final proceed = await showDialog<bool>(
-            context: context,
-            builder: (dialogContext) {
-              return AlertDialog(
-                backgroundColor: const Color(0xFF1A1A1A),
-                title: const Text('Texture mismatch', style: TextStyle(color: Colors.white)),
-                content: Text(
-                  'Your current hair looks ${UserSession.lastScan?['hairTexture']?.toString() ?? 'different'} and this cut is best for ${style['hairTexture']?.toString() ?? 'another texture'}. It can still work, but styling may be needed.',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(false),
-                    child: const Text('Pick another', style: TextStyle(color: Colors.white70)),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(true),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.white),
-                    child: const Text('Use anyway', style: TextStyle(color: Colors.black)),
-                  ),
-                ],
-              );
-            },
-          ) ??
-          false;
-      if (!proceed) {
-        return;
-      }
+    final compat = HairCompatibility.evaluateStyleMap(style);
+    final mayProceed =
+        await HairCompatibility.confirmBookingIfNeeded(context, compat);
+    if (!mayProceed || !context.mounted) {
+      return;
     }
 
     final userId = UserSession.userId;
@@ -700,12 +685,15 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     }
 
     if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You already have an active appointment.')),
       );
       openCustomerTab(context, CustomerTab.appointments);
       return;
     }
+
+    if (!context.mounted) return;
 
     UserSession.selectedVariantId = variantId;
     UserSession.selectedStyleName = style['name']?.toString();

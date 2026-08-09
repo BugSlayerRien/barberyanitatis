@@ -32,7 +32,140 @@ class UserSession {
   static List<Map<String, dynamic>> lastRecommendations = [];
   static UserCalibration? _cachedUserCalibration;
 
+  /// Snapshot of the latest *completed* scan (captures, analysis, recs, previews).
+  /// Survives leaving results and opening AI Scan entry without "New scan".
+  static Map<String, dynamic>? _completedScanSnapshot;
+
   static UserCalibration? get userCalibration => _cachedUserCalibration;
+
+  static Map<String, dynamic>? get completedScanSummary {
+    final snap = _completedScanSnapshot;
+    if (snap == null) return null;
+    final scan = snap['lastScan'];
+    if (scan is Map<String, dynamic>) return scan;
+    if (scan is Map) return Map<String, dynamic>.from(scan);
+    return null;
+  }
+
+  static String? get completedScanSessionId =>
+      _completedScanSnapshot?['activeScanSessionId']?.toString();
+
+  static bool get hasCompletedScanResults {
+    final caps = _completedScanSnapshot?['captures'];
+    return caps is Map && caps.isNotEmpty;
+  }
+
+  /// Analysis map used for Library compatibility + Home chips.
+  static Map<String, dynamic>? get scanForCompatibility {
+    if (lastScan != null) return lastScan;
+    return completedScanSummary;
+  }
+
+  static Map<String, String>? _stringMapOrNull(dynamic raw) {
+    if (raw is! Map) return null;
+    return raw.map((k, v) => MapEntry(k.toString(), v?.toString() ?? ''));
+  }
+
+  /// Persist the current in-memory session as the latest completed scan.
+  static void commitCompletedScan() {
+    if (lastScan == null) return;
+    final captures = capturedFaceImages;
+    if (captures == null || captures.isEmpty) return;
+
+    _completedScanSnapshot = {
+      'lastScan': Map<String, dynamic>.from(lastScan!),
+      'captures': Map<String, String>.from(captures),
+      'recommendations': lastRecommendations
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(),
+      'activeScanSessionId': activeScanSessionId ?? lastScan!['scanSessionId'],
+      'selectedPreviewImages': selectedPreviewImages == null
+          ? null
+          : Map<String, String>.from(selectedPreviewImages!),
+      'customerPreviewImages': customerPreviewImages == null
+          ? null
+          : Map<String, String>.from(customerPreviewImages!),
+      'selectedVariantId': selectedVariantId,
+      'selectedStyleName': selectedStyleName,
+      'selectedServiceId': selectedServiceId,
+      'selectedEstimatedMinutes': selectedEstimatedMinutes,
+      'hasRecentRecommendations': hasRecentRecommendations,
+    };
+  }
+
+  /// Restore completed scan into live session fields. Returns false if none.
+  static bool restoreCompletedScan() {
+    final snap = _completedScanSnapshot;
+    if (snap == null) return false;
+
+    final caps = _stringMapOrNull(snap['captures']);
+    if (caps == null || caps.isEmpty) return false;
+
+    final scanRaw = snap['lastScan'];
+    lastScan = scanRaw is Map ? Map<String, dynamic>.from(scanRaw) : null;
+    capturedFaceImages = caps;
+    activeScanSessionId =
+        snap['activeScanSessionId']?.toString() ?? lastScan?['scanSessionId']?.toString();
+
+    final recs = snap['recommendations'];
+    if (recs is List) {
+      lastRecommendations = recs
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
+    } else {
+      lastRecommendations = [];
+    }
+    hasRecentRecommendations =
+        snap['hasRecentRecommendations'] == true || lastRecommendations.isNotEmpty;
+
+    selectedPreviewImages = _stringMapOrNull(snap['selectedPreviewImages']);
+    customerPreviewImages = _stringMapOrNull(snap['customerPreviewImages']);
+    selectedVariantId = snap['selectedVariantId'] is int
+        ? snap['selectedVariantId'] as int
+        : int.tryParse('${snap['selectedVariantId'] ?? ''}');
+    selectedStyleName = snap['selectedStyleName']?.toString();
+    selectedServiceId = snap['selectedServiceId'] is int
+        ? snap['selectedServiceId'] as int
+        : int.tryParse('${snap['selectedServiceId'] ?? ''}');
+    selectedEstimatedMinutes = snap['selectedEstimatedMinutes'] is int
+        ? snap['selectedEstimatedMinutes'] as int
+        : int.tryParse('${snap['selectedEstimatedMinutes'] ?? ''}');
+    return true;
+  }
+
+  /// Clears working/in-progress scan fields but keeps [_completedScanSnapshot].
+  static void beginNewScanWorkingState() {
+    selectedStyleName = null;
+    selectedVariantId = null;
+    selectedServiceId = null;
+    selectedEstimatedMinutes = null;
+    selectedPreviewImages = null;
+    customerPreviewImages = null;
+    capturedFaceImages = null;
+    captureFaceRects = null;
+    activeScanSessionId = null;
+    hasRecentRecommendations = false;
+    lastRecommendations = [];
+    lastScan = null;
+  }
+
+  /// Before capturing a new full scan while a completed session may still be live.
+  static void prepareNewCaptureSessionKeepingCompleted() {
+    if (_completedScanSnapshot == null &&
+        lastScan != null &&
+        capturedFaceImages != null &&
+        capturedFaceImages!.isNotEmpty) {
+      commitCompletedScan();
+    }
+    beginNewScanWorkingState();
+  }
+
+  /// After discarding an in-progress capture, put completed results back on session.
+  static void discardInProgressAndRestoreCompleted() {
+    beginNewScanWorkingState();
+    restoreCompletedScan();
+  }
 
   static Future<String?> loadPreferredHairTexture() async {
     if (preferredHairTexture != null && preferredHairTexture!.trim().isNotEmpty) {
@@ -149,7 +282,6 @@ class UserSession {
     return activeScanSessionId!;
   }
 
-  /// Clears scan/booking selection state without signing out.
   static Future<List<int>> loadLastRecommendedVariantIds({int? userId}) async {
     final prefs = await SharedPreferences.getInstance();
     final key = '${_lastRecommendedVariantsKey}_${userId ?? UserSession.userId ?? 0}';
@@ -167,7 +299,33 @@ class UserSession {
     await prefs.setStringList(key, unique);
   }
 
-  static void resetScanState() {
+  /// Full clear of working + completed scan state (explicit discard / settings / logout).
+  ///
+  /// When [preserveCompatibility] is true, keeps a lightweight [lastScan]
+  /// summary only (no captures) for Library badges.
+  static void resetScanState({bool preserveCompatibility = false}) {
+    Map<String, dynamic>? summary;
+    if (preserveCompatibility) {
+      summary = scanForCompatibility;
+      if (summary != null) {
+        summary = {
+          'userId': summary['userId'],
+          'scanSessionId': summary['scanSessionId'],
+          'faceShape': summary['faceShape'],
+          'hairTexture': summary['hairTexture'],
+          'hairLength': summary['hairLength'],
+          'hairLengthLevel': summary['hairLengthLevel'],
+          'analysisProvider': summary['analysisProvider'],
+          'hairTextureScore': summary['hairTextureScore'],
+          'scanSucceeded': summary['scanSucceeded'],
+          'noHairDetected': summary['noHairDetected'],
+          'hairColor': summary['hairColor'],
+        };
+      }
+    }
+
+    _completedScanSnapshot = null;
+
     selectedStyleName = null;
     selectedVariantId = null;
     selectedServiceId = null;
@@ -178,8 +336,8 @@ class UserSession {
     captureFaceRects = null;
     activeScanSessionId = null;
     hasRecentRecommendations = false;
-    lastScan = null;
     lastRecommendations = [];
+    lastScan = summary;
   }
 
   static Future<void> clear() async {
@@ -199,6 +357,7 @@ class UserSession {
     hasRecentRecommendations = false;
     lastScan = null;
     lastRecommendations = [];
+    _completedScanSnapshot = null;
     preferredHairTexture = null;
     _cachedUserCalibration = null;
     final prefs = await SharedPreferences.getInstance();
