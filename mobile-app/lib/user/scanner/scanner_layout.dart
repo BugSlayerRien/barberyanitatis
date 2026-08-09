@@ -11,7 +11,8 @@ class ScannerLayout {
     if (kIsWeb || isPortrait) {
       return (media.size.height * 0.62).clamp(360.0, 640.0);
     }
-    return (media.size.height * 0.72).clamp(280.0, 480.0);
+    // Landscape (kiosk): use most of the shorter dimension for a wide preview.
+    return (media.size.height * 0.78).clamp(240.0, 520.0);
   }
 
   static Widget previewFrame({

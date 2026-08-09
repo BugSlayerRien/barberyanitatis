@@ -104,7 +104,11 @@ class _SettingsPageState extends State<SettingsPage> {
                     UserSession.resetScanState();
                     if (!context.mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Scan preferences cleared.')),
+                      const SnackBar(
+                        content: Text(
+                          'Scan preferences cleared. Library compatibility badges are hidden until your next successful scan.',
+                        ),
+                      ),
                     );
                   },
                 ),

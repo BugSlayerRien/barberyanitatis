@@ -6,6 +6,7 @@ import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../app_navigator.dart';
+import '../app_orientation.dart';
 import '../user/api_config.dart';
 import '../user/auth_bootstrap.dart';
 import '../user/payment_result_page.dart';
@@ -16,6 +17,7 @@ import 'kiosk_theme.dart';
 /// Boots the walk-in kiosk shell (shared with standalone `kiosk/` project).
 Future<void> runKioskApp() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await AppOrientation.lockForKiosk();
   await ApiConfig.ensureInitialized();
   if (kIsWeb) {
     setUrlStrategy(PathUrlStrategy());

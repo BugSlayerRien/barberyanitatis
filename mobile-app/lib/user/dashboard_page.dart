@@ -438,36 +438,68 @@ class _DashboardPageState extends State<DashboardPage>
     return captures != null && captures.isNotEmpty;
   }
 
-  void _openFaceScan() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
-    );
+  void _openFaceScan({bool startFresh = false}) {
+    if (startFresh) {
+      UserSession.beginNewScanWorkingState();
+    }
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => AiFaceScanPage(startFresh: startFresh),
+          ),
+        )
+        .then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   void _openLastScanResults() {
+    if (!UserSession.restoreCompletedScan()) {
+      final liveCaptures = UserSession.capturedFaceImages;
+      final liveScan = UserSession.lastScan;
+      if (liveCaptures == null || liveCaptures.isEmpty || liveScan == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No completed scan to view yet. Start a new scan first.'),
+          ),
+        );
+        return;
+      }
+      UserSession.commitCompletedScan();
+    }
+
     final captures = UserSession.capturedFaceImages;
+    final scan = UserSession.lastScan ?? {};
     if (captures == null || captures.isEmpty) {
-      _openFaceScan();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Scan photos are unavailable. Please run a new scan.'),
+        ),
+      );
       return;
     }
-    final scan = UserSession.lastScan ?? {};
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => FaceScanResultsPage(
-          captures: Map<String, String>.from(captures),
-          faceShape: scan['faceShape']?.toString() ?? 'oval',
-          hairTexture: scan['hairTexture']?.toString() ??
-              UserSession.preferredHairTexture ??
-              'Straight',
-          hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
-          hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
-          analysisProvider: scan['analysisProvider']?.toString(),
-          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
-          noHairDetected: scan['noHairDetected'] == true,
-          hairColorLabel: scan['hairColor']?.toString(),
-        ),
-      ),
-    );
+
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (_) => FaceScanResultsPage(
+              captures: Map<String, String>.from(captures),
+              faceShape: scan['faceShape']?.toString() ?? 'oval',
+              hairTexture: scan['hairTexture']?.toString() ??
+                  UserSession.preferredHairTexture ??
+                  'Straight',
+              hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
+              hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
+              analysisProvider: scan['analysisProvider']?.toString(),
+              hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
+              noHairDetected: scan['noHairDetected'] == true,
+              hairColorLabel: scan['hairColor']?.toString(),
+            ),
+          ),
+        )
+        .then((_) {
+      if (mounted) setState(() {});
+    });
   }
 
   bool get _canQuickBook {
@@ -884,9 +916,14 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Widget _buildScanSessionCard() {
-    final scan = UserSession.lastScan;
-    final hasScan =
-        UserSession.hasRecentRecommendations || _hasActiveScanSession;
+    final scan = UserSession.completedScanSummary ?? UserSession.lastScan;
+    final hasScanSummary = scan != null &&
+        ((scan['hairTexture']?.toString().trim().isNotEmpty ?? false) ||
+            (scan['faceShape']?.toString().trim().isNotEmpty ?? false));
+    final hasScan = UserSession.hasCompletedScanResults ||
+        UserSession.hasRecentRecommendations ||
+        _hasActiveScanSession ||
+        hasScanSummary;
 
     if (!hasScan) {
       return Container(
@@ -933,7 +970,7 @@ class _DashboardPageState extends State<DashboardPage>
             Align(
               alignment: Alignment.centerRight,
               child: OutlinedButton(
-                onPressed: _openFaceScan,
+                onPressed: () => _openFaceScan(startFresh: true),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
                   side: const BorderSide(color: Colors.white38),
@@ -1009,7 +1046,7 @@ class _DashboardPageState extends State<DashboardPage>
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: _openFaceScan,
+                  onPressed: () => _openFaceScan(startFresh: true),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white,
                     foregroundColor: Colors.black,
@@ -1533,18 +1570,19 @@ class _ScanChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF222222),
+        color: const Color(0xFF0A0A0A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: Colors.white38),
       ),
       child: Text(
         label,
         style: const TextStyle(
           fontFamily: _DashboardPageState._fontFamily,
-          color: Colors.white70,
+          color: Colors.white,
           fontSize: 11,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );

@@ -42,6 +42,7 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
 import '../kiosk/kiosk_barber_page.dart';
 import '../kiosk/kiosk_session.dart';
+import '../app_orientation.dart';
 
 class AiFaceScanPage extends StatefulWidget {
   final Map<String, dynamic>? presetRecommendation;
@@ -51,6 +52,9 @@ class AiFaceScanPage extends StatefulWidget {
   final bool livePreviewOnly;
   /// Walk-in kiosk: no bottom nav; routes to kiosk queue after style pick.
   final bool kioskMode;
+  /// When true, clears working scan state and starts a fresh capture session.
+  /// Completed scan snapshot is kept until a new scan is committed.
+  final bool startFresh;
 
   const AiFaceScanPage({
     super.key,
@@ -59,6 +63,7 @@ class AiFaceScanPage extends StatefulWidget {
     this.captureSummary,
     this.livePreviewOnly = false,
     this.kioskMode = false,
+    this.startFresh = false,
   });
 
   @override
@@ -258,6 +263,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Reinforce mode orientation when entering the scanner.
+    if (widget.kioskMode) {
+      unawaited(AppOrientation.lockForKiosk());
+    } else {
+      unawaited(AppOrientation.lockForCustomer());
+    }
     _attachmentEngine = createAttachmentEngine(AttachmentEngineMode.auto);
     if (widget.livePreviewOnly && !kEnableLiveScanner) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -330,8 +341,41 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    // Full 3-angle scan: never reuse a previous guest's captures or recommendations.
-    UserSession.resetScanState();
+    if (widget.startFresh) {
+      UserSession.beginNewScanWorkingState();
+    } else {
+      final existing = UserSession.capturedFaceImages;
+      final resumePartial =
+          existing != null && existing.isNotEmpty && existing.length < 3;
+
+      if (resumePartial) {
+        await _primeHairTextureHint();
+        if (!mounted) return;
+        const angles = ['front', 'right', 'left'];
+        var stage = 0;
+        for (var i = 0; i < angles.length; i++) {
+          if (!existing.containsKey(angles[i])) {
+            stage = i;
+            break;
+          }
+          stage = i + 1;
+        }
+        if (stage >= angles.length) {
+          stage = angles.length - 1;
+        }
+        setState(() {
+          _consentAccepted = true;
+          _consentLoading = false;
+          _needsStaging = true;
+          _stagingComplete = false;
+          _stageIndex = stage;
+          _capturedImages = Map<String, String>.from(existing);
+        });
+        return;
+      }
+      // Opening AI Scan with a completed session: do not wipe it.
+    }
+
     await _primeHairTextureHint();
 
     if (!mounted) return;
@@ -344,6 +388,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _capturedImages = {};
       _capturedFaceRects.clear();
     });
+    if (consented) {
+      _prepareWorkingSessionForCapture();
+    }
+  }
+
+  /// When the customer proceeds into capture after browsing entry, start a new
+  /// working session without destroying the completed snapshot.
+  void _prepareWorkingSessionForCapture() {
+    if (widget.livePreviewOnly || widget.previewOnly || widget.kioskMode) {
+      return;
+    }
+    if (widget.startFresh) {
+      return;
+    }
+    final completedId = UserSession.completedScanSessionId;
+    final liveId = UserSession.activeScanSessionId;
+    final liveIsCompleted = UserSession.hasCompletedScanResults &&
+        liveId != null &&
+        completedId != null &&
+        liveId == completedId;
+    final liveHasCompletedCaptures = UserSession.capturedFaceImages != null &&
+        UserSession.capturedFaceImages!.length >= 3 &&
+        UserSession.lastScan != null;
+    if (liveIsCompleted || liveHasCompletedCaptures || liveId == completedId) {
+      UserSession.prepareNewCaptureSessionKeepingCompleted();
+    } else if (UserSession.activeScanSessionId == null &&
+        UserSession.hasCompletedScanResults) {
+      UserSession.prepareNewCaptureSessionKeepingCompleted();
+    }
   }
 
   Future<void> _primeHairTextureHint() async {
@@ -1772,6 +1845,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       setState(() => _stagingComplete = true);
     }
 
+    // Ensure uploads go to a fresh session when leaving a completed one behind.
+    _prepareWorkingSessionForCapture();
     final scanSessionId = UserSession.ensureScanSessionId();
     try {
       await FaceScanService.uploadCaptures(
@@ -1819,12 +1894,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         setState(() => _hairTexture = analyzedHairTexture);
       }
       UserSession.lastScan = {
+        'userId': UserSession.userId,
+        'scanSessionId': scanSessionId,
         'faceShape': analyzedFaceShape,
         'hairTexture': analyzedHairTexture,
         'hairLength': hairLengthLabel,
         'hairLengthLevel': hairLengthLevel,
         'analysisProvider': analysisProvider,
         'hairTextureScore': hairTextureScore,
+        'scanSucceeded': true,
         'noHairDetected': noHairDetected,
         'hairColor': hairColorLabel,
         'pythonTopStyles': pythonTopStyles,
@@ -1841,12 +1919,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         );
       }
       UserSession.lastScan = {
+        'userId': UserSession.userId,
+        'scanSessionId': scanSessionId,
         'faceShape': analyzedFaceShape,
         'hairTexture': analyzedHairTexture,
         'hairLength': hairLengthLabel,
         'hairLengthLevel': hairLengthLevel,
         'analysisProvider': 'fallback',
         'hairTextureScore': 0.0,
+        'scanSucceeded': false,
         'noHairDetected': false,
         'hairColor': '',
         'pythonTopStyles': <dynamic>[],
@@ -1960,7 +2041,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     if (!leave || !mounted) {
       return;
     }
-    UserSession.resetScanState();
+    UserSession.discardInProgressAndRestoreCompleted();
     unawaited(_releaseScannerResources());
     // Always return to dashboard so back never leaves an empty navigator route.
     navigateToCustomerHome(context);
@@ -1989,6 +2070,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   Widget _buildStagingUI() {
     final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
     final progress = (_stageIndex + (_goodPositionFrames / 12.0)) / _stages.length;
+    final camera = kIsWeb
+        ? _buildStagingWebCamera(currentStage)
+        : _buildStagingCameraView(currentStage);
 
     return PopScope(
       canPop: widget.kioskMode,
@@ -1998,46 +2082,97 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         }
       },
       child: Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
-      appBar: AppTopBar(
-        showBack: true,
-        showCustomerActions: !widget.kioskMode,
-        onBack: () => unawaited(_popScanner()),
+        backgroundColor: const Color(0xFF0A0A0A),
+        appBar: AppTopBar(
+          showBack: true,
+          showCustomerActions: !widget.kioskMode,
+          onBack: () => unawaited(_popScanner()),
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: EdgeInsets.all(widget.kioskMode ? 16 : 20),
+            child: widget.kioskMode
+                ? _buildKioskLandscapeStaging(
+                    camera: camera,
+                    progress: progress,
+                  )
+                : _buildPortraitStaging(
+                    camera: camera,
+                    progress: progress,
+                  ),
+          ),
+        ),
+        bottomNavigationBar: widget.kioskMode
+            ? null
+            : AppBottomNavBar(
+                currentIndex: 2,
+                onTap: _onScannerBottomNav,
+              ),
       ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
+    );
+  }
+
+  Widget _buildPortraitStaging({
+    required Widget camera,
+    required double progress,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'We will capture three angles of your face for the best preview.',
+          style: TextStyle(color: Colors.white70, fontSize: 13),
+        ),
+        const SizedBox(height: 18),
+        LinearProgressIndicator(
+          value: progress.clamp(0.0, 1.0),
+          minHeight: 8,
+          backgroundColor: Colors.white12,
+          color: Colors.white,
+        ),
+        const SizedBox(height: 18),
+        Expanded(child: camera),
+        const SizedBox(height: 14),
+        _stageStatusRow(vertical: false),
+      ],
+    );
+  }
+
+  /// Landscape kiosk: camera on the left, stage checklist on the right.
+  Widget _buildKioskLandscapeStaging({
+    required Widget camera,
+    required double progress,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 3,
+          child: camera,
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          flex: 2,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
                 'We will capture three angles of your face for the best preview.',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
+                style: TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 12),
               LinearProgressIndicator(
                 value: progress.clamp(0.0, 1.0),
                 minHeight: 8,
                 backgroundColor: Colors.white12,
                 color: Colors.white,
               ),
-              const SizedBox(height: 18),
-              Expanded(
-                child: kIsWeb ? _buildStagingWebCamera(currentStage) : _buildStagingCameraView(currentStage),
-              ),
-              const SizedBox(height: 14),
-              _stageStatusRow(),
+              const SizedBox(height: 16),
+              Expanded(child: _stageStatusRow(vertical: true)),
             ],
           ),
         ),
-      ),
-      bottomNavigationBar: widget.kioskMode
-          ? null
-          : AppBottomNavBar(
-              currentIndex: 2,
-              onTap: _onScannerBottomNav,
-            ),
-      ),
+      ],
     );
   }
 
@@ -2210,9 +2345,26 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
-  Widget _stageStatusRow() {
-    // Always reserve three equal columns so capturing Front (and showing
-    // thumbnails) cannot shrink the status cards or leave a gap on the right.
+  Widget _stageStatusRow({bool vertical = false}) {
+    if (vertical) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (var i = 0; i < _stages.length; i++) ...[
+            if (i > 0) const SizedBox(height: 10),
+            Expanded(
+              child: _stageLandscapeTile(
+                stage: _stages[i],
+                index: i,
+              ),
+            ),
+          ],
+        ],
+      );
+    }
+
+    // Portrait: always reserve three equal columns so capturing Front cannot
+    // shrink the status cards or leave a gap on the right.
     return LayoutBuilder(
       builder: (context, constraints) {
         const gap = 8.0;
@@ -2259,6 +2411,107 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           ],
         );
       },
+    );
+  }
+
+  Widget _stageLandscapeTile({
+    required _CaptureStage stage,
+    required int index,
+  }) {
+    final captured = _capturedImages.containsKey(stage.keyName);
+    final active = index == _stageIndex;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: captured
+            ? const Color(0xFF1B1B1B)
+            : active
+                ? const Color(0xFF18120A)
+                : const Color(0xFF101010),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: captured
+              ? Colors.white.withOpacity(0.6)
+              : active
+                  ? Colors.white24
+                  : Colors.white12,
+          width: active ? 1.5 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 88,
+              child: _stageThumbnailSlot(stage),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        stage.icon,
+                        size: 20,
+                        color: captured ? Colors.white : Colors.white70,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          stage.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    captured
+                        ? 'Captured'
+                        : active
+                            ? stage.hint
+                            : 'Pending',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: captured
+                          ? const Color(0xFF8FD49A)
+                          : active
+                              ? Colors.white70
+                              : Colors.white54,
+                      fontSize: 12,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              captured
+                  ? '✓'
+                  : active
+                      ? '...'
+                      : '',
+              style: TextStyle(
+                color: captured ? Colors.white : Colors.white54,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2458,6 +2711,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                         ? () async {
                             await FaceScanService.saveConsent();
                             if (!mounted) return;
+                            _prepareWorkingSessionForCapture();
                             setState(() => _consentAccepted = true);
                           }
                         : null,

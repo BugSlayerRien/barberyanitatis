@@ -112,8 +112,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
     _restoreCachedPreviewsFromSession();
-    UserSession.lastRecommendations = [];
-    UserSession.hasRecentRecommendations = false;
+    // Keep restored recommendations until the reload finishes / replaces them.
     _loadRecommendations();
   }
 
@@ -137,9 +136,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     setState(() => _hairTexture = normalized);
     UserSession.lastScan = {
       ...?UserSession.lastScan,
+      'userId': UserSession.userId,
       'hairTexture': normalized,
       'analysisProvider': 'manual',
+      // Keep prior scanSucceeded — manual tweak is only usable after a real AI scan.
     };
+    UserSession.commitCompletedScan();
     await _loadRecommendations(preserveSelection: true);
   }
 
@@ -153,7 +155,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         backgroundColor: const Color(0xFF141414),
         title: const Text('Leave scan?', style: TextStyle(color: Colors.white)),
         content: const Text(
-          'Your current capture session will be discarded. You will need to scan again for fresh recommendations.',
+          'You can leave and return later via View results on Home. Your completed scan stays available.',
           style: TextStyle(color: Colors.white70, height: 1.4),
         ),
         actions: [
@@ -176,7 +178,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     if (!leave || !mounted) {
       return;
     }
-    UserSession.resetScanState();
+    if (UserSession.capturedFaceImages == null ||
+        UserSession.capturedFaceImages!.isEmpty) {
+      UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
+    }
+    UserSession.commitCompletedScan();
     Navigator.of(context).pop();
   }
 
@@ -374,8 +380,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       }
     });
 
+    final priorSucceeded = UserSession.lastScan?['scanSucceeded'] == true ||
+        (_analysisProvider?.toLowerCase() == 'ai-service');
     UserSession.lastScan = {
       ...?UserSession.lastScan,
+      'userId': UserSession.userId,
       'faceShape': _faceShape,
       'hairTexture': _hairTexture,
       'hairLength': widget.hairLengthLabel,
@@ -384,9 +393,15 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       'hairColor': _hairColorLabel,
       'analysisProvider': _analysisProvider,
       'hairTextureScore': _hairTextureScore,
+      'scanSucceeded': priorSucceeded,
     };
     UserSession.lastRecommendations = List<Map<String, dynamic>>.from(topPicks);
     UserSession.hasRecentRecommendations = topPicks.isNotEmpty;
+    if (UserSession.capturedFaceImages == null ||
+        UserSession.capturedFaceImages!.isEmpty) {
+      UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
+    }
+    UserSession.commitCompletedScan();
   }
 
   Future<void> _openLivePreview() async {
@@ -758,6 +773,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         UserSession.selectedStyleName = _selectedStyleName;
         UserSession.selectedPreviewImages = urls;
         UserSession.customerPreviewImages = urls;
+        UserSession.commitCompletedScan();
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Showing saved preview for this style.'),
@@ -812,6 +828,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       UserSession.selectedStyleName = _selectedStyleName;
       UserSession.selectedPreviewImages = urls;
       UserSession.customerPreviewImages = urls;
+      UserSession.commitCompletedScan();
       final quota = FaceScanService.quotaFromResponse(data);
       if (fromCache) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1061,8 +1078,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               currentIndex: 2,
               onTap: (index) {
                 if (index == 0) {
-                  // Leaving results entirely — discard in-memory scan UI state.
-                  UserSession.resetScanState();
+                  if (UserSession.capturedFaceImages == null ||
+                      UserSession.capturedFaceImages!.isEmpty) {
+                    UserSession.capturedFaceImages =
+                        Map<String, String>.from(widget.captures);
+                  }
+                  UserSession.commitCompletedScan();
                   Navigator.of(context).pushReplacement(
                     MaterialPageRoute(builder: (_) => const DashboardPage()),
                   );
@@ -1072,8 +1093,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                     MaterialPageRoute(builder: (_) => const AppointmentsPage()),
                   );
                 } else if (index == 2) {
-                  Navigator.of(context).pushReplacement(
-                    MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const AiFaceScanPage(startFresh: false),
+                    ),
                   );
                 } else if (index == 3) {
                   Navigator.of(context).push(
