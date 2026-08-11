@@ -1,0 +1,8 @@
+# Exclude local secrets and junk from the API image
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+*.md
+_diag_*

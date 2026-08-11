@@ -1,0 +1,19 @@
+# Optional Render blueprint (you can also create services in the dashboard)
+services:
+  - type: web
+    name: tatis-php-api
+    runtime: docker
+    rootDir: api
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /ai_status.php
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: API_INSECURE_SSL
+        value: "false"
+      - key: PASSWORD_RESET_DEBUG_TOKEN
+        value: "false"
+      # Set these in the Render dashboard (do not commit secrets):
+      # DB_URL, GEMINI_API_KEY, AI_API_KEY, GEMINI_MODEL,
+      # XAI_API_KEY, AI_TRYON_PROVIDER, AI_SERVICE_URL, REPLICATE_API_TOKEN, ...
