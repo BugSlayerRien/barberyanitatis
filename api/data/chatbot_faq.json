@@ -1,42 +1,351 @@
-[
-  {
-    "id": "hours",
-    "keywords": ["hour", "hours", "open", "close", "closing", "opening", "schedule", "time"],
-    "answer": "Tati's Barbershop hours depend on the day and barber availability. Check the booking screen for live open slots, or ask the front desk when you arrive for a walk-in."
-  },
-  {
-    "id": "walkin",
-    "keywords": ["walk-in", "walk in", "walkin", "queue", "no appointment", "without appointment"],
-    "answer": "Walk-ins are welcome. Use the kiosk or receptionist queue for regular or exclusive services. You'll see your place in line and when a barber can start."
-  },
-  {
-    "id": "appointment",
-    "keywords": ["book", "booking", "appointment", "reserve", "schedule online"],
-    "answer": "Book from the app: pick a barber, service, date, and time slot. After a face scan you can attach your chosen style preview to the appointment."
-  },
-  {
-    "id": "face_scan",
-    "keywords": ["face scan", "scan", "camera", "three angle", "3 angle", "capture", "ai preview"],
-    "answer": "The face scan captures front, left, and right photos. We analyze your face shape and hair length, then you can tap a style to generate an AI preview (this uses credits and may take a few minutes)."
-  },
-  {
-    "id": "hair_texture",
-    "keywords": ["straight", "wavy", "curly", "hair texture", "hair type"],
-    "answer": "Set your hair texture in profile (Straight, Wavy, or Curly). Recommendations and the library filter styles to match your texture."
-  },
-  {
-    "id": "payment",
-    "keywords": ["pay", "payment", "gcash", "price", "cost", "fee", "how much"],
-    "answer": "Service prices are shown when you select a haircut and barber. Complete payment in the app flow after choosing your slot."
-  },
-  {
-    "id": "cancel",
-    "keywords": ["cancel", "reschedule", "change appointment", "postpone"],
-    "answer": "Open Appointments, tap Reschedule on a paid booking, and pick a new date and time (up to 3 times, at least 24 hours before your appointment). Your old slot opens for others. Cancel from the same screen if needed."
-  },
-  {
-    "id": "location",
-    "keywords": ["where", "address", "location", "map", "directions"],
-    "answer": "Visit Tati's Barbershop at our shop location shown in your booking confirmation or shop signage."
-  }
-]
+{
+  "faqs": [
+    {
+      "id": "booking_001",
+      "category": "appointments",
+      "question": "How do I book an appointment?",
+      "keywords": [
+        "book",
+        "booking",
+        "appointment",
+        "schedule",
+        "schedule haircut",
+        "schedule a haircut",
+        "reserve",
+        "make an appointment",
+        "set up",
+        "pick a time",
+        "choose a barber",
+        "book a barber"
+      ],
+      "answer": "To book an appointment, open Appointments, choose your preferred haircut or service, select a barber, pick an available date on the calendar, then choose a time slot and confirm your booking."
+    },
+    {
+      "id": "booking_002",
+      "category": "appointments",
+      "question": "How do I cancel an appointment?",
+      "keywords": [
+        "cancel",
+        "cancellation",
+        "cancel appointment",
+        "remove booking",
+        "delete appointment",
+        "call off"
+      ],
+      "answer": "Open Appointments, tap the appointment you want to cancel, and use the cancel option on the detail screen. Cancellation rules may apply depending on payment and timing, so check the confirmation message before you confirm."
+    },
+    {
+      "id": "booking_003",
+      "category": "appointments",
+      "question": "How do I reschedule an appointment?",
+      "keywords": [
+        "reschedule",
+        "change date",
+        "change time",
+        "move appointment",
+        "postpone",
+        "different day",
+        "new slot",
+        "rebook"
+      ],
+      "answer": "Open Appointments, tap Reschedule on a paid booking, then choose a new date and available time slot. You can reschedule up to 3 times, and changes must be made at least 24 hours before your appointment. Your previous slot becomes available for others."
+    },
+    {
+      "id": "booking_004",
+      "category": "appointments",
+      "question": "What do appointment statuses mean?",
+      "keywords": [
+        "status",
+        "pending",
+        "confirmed",
+        "completed",
+        "cancelled",
+        "appointment state",
+        "where is my booking"
+      ],
+      "answer": "Appointment statuses show where your booking is in the process: pending or awaiting payment, confirmed after payment, completed after your visit, or cancelled if the booking was removed. Check Appointments for the latest status and details."
+    },
+    {
+      "id": "payment_001",
+      "category": "payment",
+      "question": "How does payment work?",
+      "keywords": [
+        "pay",
+        "payment",
+        "gcash",
+        "price",
+        "cost",
+        "fee",
+        "how much",
+        "checkout",
+        "paid",
+        "billing"
+      ],
+      "answer": "Service prices appear when you choose a haircut and barber during booking. Complete payment in the app after selecting your time slot. Your appointment is confirmed once payment succeeds."
+    },
+    {
+      "id": "services_001",
+      "category": "services",
+      "question": "What haircuts and services are available?",
+      "keywords": [
+        "haircut",
+        "service",
+        "services",
+        "style",
+        "fade",
+        "trim",
+        "what do you offer",
+        "menu",
+        "options"
+      ],
+      "answer": "Browse the Library or start booking to see available haircuts and services. Each style includes details, photos, and compatibility hints based on your face scan when available."
+    },
+    {
+      "id": "barbers_001",
+      "category": "barbers",
+      "question": "How do I choose a barber?",
+      "keywords": [
+        "barber",
+        "barbers",
+        "stylist",
+        "who cuts",
+        "pick barber",
+        "select barber",
+        "which barber"
+      ],
+      "answer": "During booking, you can choose from available barbers and see open time slots for each one. Pick the barber and schedule that work best for you before confirming payment."
+    },
+    {
+      "id": "hours_001",
+      "category": "hours",
+      "question": "What are your operating hours?",
+      "keywords": [
+        "hour",
+        "hours",
+        "open",
+        "close",
+        "closing",
+        "opening",
+        "schedule",
+        "time",
+        "when open",
+        "shop hours"
+      ],
+      "answer": "Operating hours depend on the day, barber availability, and shop closures. The booking calendar shows live open dates and slots. For same-day questions, ask the front desk when you arrive."
+    },
+    {
+      "id": "walkin_001",
+      "category": "walkins",
+      "question": "Do you accept walk-ins?",
+      "keywords": [
+        "walk-in",
+        "walk in",
+        "walkin",
+        "queue",
+        "no appointment",
+        "without appointment",
+        "drop in",
+        "just come in"
+      ],
+      "answer": "Walk-ins are welcome when capacity allows. Use the kiosk or reception queue for regular or exclusive services. You can see your place in line and when a barber can start."
+    },
+    {
+      "id": "ai_scan_001",
+      "category": "ai_face_scan",
+      "question": "How does AI Face Scan work?",
+      "keywords": [
+        "face scan",
+        "ai scan",
+        "scan",
+        "camera",
+        "three angle",
+        "3 angle",
+        "capture",
+        "front left right",
+        "analyze face"
+      ],
+      "answer": "AI Face Scan captures front, left, and right photos of your face. The app analyzes your face shape and hair length, then uses that to improve style recommendations and AI previews."
+    },
+    {
+      "id": "ai_recommend_001",
+      "category": "ai_recommendations",
+      "question": "How do haircut recommendations work?",
+      "keywords": [
+        "recommend",
+        "recommendation",
+        "recommended",
+        "suggest",
+        "suggestion",
+        "best style",
+        "what suits me",
+        "face shape",
+        "compatibility"
+      ],
+      "answer": "After a successful face scan, the app recommends styles that fit your face shape and hair texture. Library cards and booking show Recommended, Possible, or Not Recommended badges so you can choose confidently."
+    },
+    {
+      "id": "ai_preview_001",
+      "category": "ai_preview",
+      "question": "How do AI hairstyle previews work?",
+      "keywords": [
+        "ai preview",
+        "try on",
+        "try-on",
+        "preview",
+        "generate preview",
+        "see on me",
+        "virtual haircut",
+        "grok",
+        "how will it look"
+      ],
+      "answer": "After your face scan, tap a hairstyle to generate an AI preview of how it may look on you. Generation can take a little time. Previously generated previews for the same style are reused so you do not need to generate again."
+    },
+    {
+      "id": "ai_preview_002",
+      "category": "ai_preview",
+      "question": "Are there limits on AI preview generation?",
+      "keywords": [
+        "limit",
+        "limits",
+        "quota",
+        "how many previews",
+        "how many ai previews",
+        "how many",
+        "generation limit",
+        "try on limit",
+        "preview cap",
+        "free previews",
+        "previews"
+      ],
+      "answer": "AI preview generation has a limit on how many different styles you can generate per scan session. Regenerating or viewing a preview you already created for the same style does not use an extra generation."
+    },
+    {
+      "id": "library_001",
+      "category": "library",
+      "question": "What is the hairstyle Library?",
+      "keywords": [
+        "library",
+        "catalog",
+        "browse styles",
+        "hairstyle list",
+        "style library",
+        "all haircuts",
+        "gallery"
+      ],
+      "answer": "The Library is where you browse all available hairstyles with photos and descriptions. Search by name and use compatibility badges from your latest face scan to find styles that suit you."
+    },
+    {
+      "id": "favorites_001",
+      "category": "favorites",
+      "question": "How do Saved Haircuts work?",
+      "keywords": [
+        "saved",
+        "favorite",
+        "favorites",
+        "saved haircuts",
+        "bookmark",
+        "like",
+        "heart",
+        "saved styles"
+      ],
+      "answer": "When you save a hairstyle from the Library or detail page, it appears under Saved Haircuts. Open it anytime to review styles you liked before booking or generating a preview."
+    },
+    {
+      "id": "notifications_001",
+      "category": "notifications",
+      "question": "How do notifications work?",
+      "keywords": [
+        "notification",
+        "notifications",
+        "alert",
+        "alerts",
+        "reminder",
+        "bell",
+        "mark read",
+        "updates"
+      ],
+      "answer": "Notifications keep you updated on appointments, booking changes, and important app messages. Open the bell icon in the top bar to view them and mark all as read when you are caught up."
+    },
+    {
+      "id": "account_001",
+      "category": "account",
+      "question": "How do I update my profile?",
+      "keywords": [
+        "profile",
+        "account",
+        "edit profile",
+        "update profile",
+        "full name",
+        "phone",
+        "gender",
+        "hair texture",
+        "photo",
+        "picture"
+      ],
+      "answer": "Open Profile from the menu or top bar. You can update your name, phone, gender, hair texture, and profile photo, then tap Save Changes. Hair texture helps personalize recommendations."
+    },
+    {
+      "id": "account_002",
+      "category": "account",
+      "question": "I have password or sign-in problems",
+      "keywords": [
+        "password",
+        "login",
+        "log in",
+        "sign in",
+        "signin",
+        "forgot password",
+        "reset password",
+        "cannot login",
+        "locked out",
+        "account access"
+      ],
+      "answer": "If you cannot sign in, use the password reset option on the login screen or sign in again with Google if your account is linked. For persistent account issues, contact shop staff or support with the email on your account."
+    },
+    {
+      "id": "hair_texture_001",
+      "category": "account",
+      "question": "Why does hair texture matter?",
+      "keywords": [
+        "straight",
+        "wavy",
+        "curly",
+        "hair texture",
+        "hair type",
+        "texture setting"
+      ],
+      "answer": "Set your hair texture in Profile as Straight, Wavy, or Curly. Recommendations and Library filtering use this to show styles that work better with your natural hair."
+    },
+    {
+      "id": "location_001",
+      "category": "general",
+      "question": "Where is the barbershop located?",
+      "keywords": [
+        "where",
+        "address",
+        "location",
+        "map",
+        "directions",
+        "find shop",
+        "how to get there"
+      ],
+      "answer": "Visit Tati's Barbershop at the location shown on your booking confirmation, shop signage, or front desk. Ask staff if you need directions when you arrive."
+    },
+    {
+      "id": "help_001",
+      "category": "general",
+      "question": "What can you help me with?",
+      "keywords": [
+        "help",
+        "support",
+        "what can you do",
+        "how does this work",
+        "guide",
+        "assist",
+        "questions about app",
+        "how to use"
+      ],
+      "answer": "I can help with booking, rescheduling, payments, barbers, walk-ins, hours, AI Face Scan, hairstyle recommendations, AI previews, the Library, Saved Haircuts, notifications, and your profile. Ask me anything about the app."
+    }
+  ]
+}
