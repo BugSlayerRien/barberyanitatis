@@ -382,7 +382,7 @@ class _AppTopBarState extends State<AppTopBar> {
             )
           : null,
       titleSpacing: 0,
-      leadingWidth: widget.showBack ? 300 : 260,
+      leadingWidth: widget.showBack ? 120 : 72,
       leading: Row(
         children: [
           if (widget.showBack)
@@ -394,21 +394,6 @@ class _AppTopBarState extends State<AppTopBar> {
           Image.asset(
             'assets/images/TATIS.png',
             height: 42,
-          ),
-          const SizedBox(width: 8),
-          const Flexible(
-            child: Text(
-              'Barberya ni Tatis',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontFamily: 'CenturyGothic',
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                letterSpacing: 0.2,
-              ),
-            ),
           ),
         ],
       ),

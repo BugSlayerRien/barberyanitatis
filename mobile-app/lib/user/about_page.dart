@@ -59,7 +59,7 @@ class AboutPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Owner — Francis Vasallo',
+            'Owner — Francis Carlo Vasallo',
             style: TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold, fontSize: 15),
           ),
           SizedBox(height: 8),
