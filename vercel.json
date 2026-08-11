@@ -1,0 +1,9 @@
+{
+  "rewrites": [
+    { "source": "/", "destination": "/web-admin/login.html" },
+    { "source": "/login.html", "destination": "/web-admin/login.html" },
+    { "source": "/admin/(.*)", "destination": "/web-admin/admin/$1" },
+    { "source": "/receptionist/(.*)", "destination": "/web-admin/receptionist/$1" },
+    { "source": "/assets/(.*)", "destination": "/web-admin/assets/$1" }
+  ]
+}
