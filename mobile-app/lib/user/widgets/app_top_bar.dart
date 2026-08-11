@@ -11,6 +11,8 @@ class AppTopBar extends StatefulWidget implements PreferredSizeWidget {
   final VoidCallback? onBack;
   final VoidCallback? onProfileTap;
   final VoidCallback? onNotificationsTap;
+  /// Opaque bar for pages where content scrolls under the header (e.g. detail).
+  final bool solidBackground;
 
   const AppTopBar({
     super.key,
@@ -19,6 +21,7 @@ class AppTopBar extends StatefulWidget implements PreferredSizeWidget {
     this.onBack,
     this.onProfileTap,
     this.onNotificationsTap,
+    this.solidBackground = false,
   });
 
   @override
@@ -122,6 +125,25 @@ class _AppTopBarState extends State<AppTopBar> {
     }
   }
 
+  Future<bool> _markAllNotificationsRead() async {
+    if (UserSession.userId == null) {
+      return false;
+    }
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'markAllRead',
+          'userID': UserSession.userId,
+        }),
+      );
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> _deleteNotification(int notificationID) async {
     if (UserSession.userId == null || notificationID <= 0) {
       return false;
@@ -189,6 +211,39 @@ class _AppTopBarState extends State<AppTopBar> {
                               ),
                             ),
                           ),
+                          if (notifications.any(
+                            (n) => (n['isRead'] as bool?) != true,
+                          ))
+                            TextButton(
+                              onPressed: () async {
+                                final ok = await _markAllNotificationsRead();
+                                if (!context.mounted) return;
+                                if (ok) {
+                                  setDialogState(() {
+                                    for (final n in notifications) {
+                                      n['isRead'] = true;
+                                    }
+                                  });
+                                  setState(() => _unreadCount = 0);
+                                } else {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Could not mark all notifications as read.',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
+                              child: const Text(
+                                'Mark all as read',
+                                style: TextStyle(
+                                  color: Color(0xFFA99941),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
                           IconButton(
                             icon: const Icon(Icons.close, color: Colors.white70),
                             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -315,8 +370,17 @@ class _AppTopBarState extends State<AppTopBar> {
   @override
   Widget build(BuildContext context) {
     return AppBar(
-      backgroundColor: Colors.transparent,
+      backgroundColor:
+          widget.solidBackground ? const Color(0xFF0A0A0A) : Colors.transparent,
       elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      bottom: widget.solidBackground
+          ? const PreferredSize(
+              preferredSize: Size.fromHeight(1),
+              child: Divider(height: 1, thickness: 1, color: Colors.white12),
+            )
+          : null,
       titleSpacing: 0,
       leadingWidth: widget.showBack ? 300 : 260,
       leading: Row(
