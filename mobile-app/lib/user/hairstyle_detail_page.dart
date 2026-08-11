@@ -515,9 +515,9 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
-      extendBodyBehindAppBar: true,
       appBar: AppTopBar(
         showBack: true,
+        solidBackground: true,
         onBack: () => Navigator.of(context).pop(),
         onProfileTap: () {
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));

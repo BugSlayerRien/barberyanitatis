@@ -52,7 +52,7 @@ function resolve_notification_recipient(array $input): array
 
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? 'list'));
-$allowedActions = ['list', 'markRead', 'delete', 'unreadCount'];
+$allowedActions = ['list', 'markRead', 'markAllRead', 'delete', 'unreadCount'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -103,6 +103,25 @@ try {
         }
 
         json_response(['message' => 'Notification marked as read']);
+    }
+
+    if ($action === 'markAllRead') {
+        $stmt = $pdo->prepare(
+            "UPDATE notifications
+             SET is_read = TRUE
+             WHERE recipient_type = :recipient_type
+               AND recipient_id = :recipient_id
+               AND is_read = FALSE"
+        );
+        $stmt->execute([
+            ':recipient_type' => $recipientType,
+            ':recipient_id' => $recipientId,
+        ]);
+
+        json_response([
+            'message' => 'All notifications marked as read',
+            'updatedCount' => $stmt->rowCount(),
+        ]);
     }
 
     if ($action === 'delete') {

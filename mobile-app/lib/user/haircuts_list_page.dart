@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 
@@ -45,6 +46,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   bool _loading = true;
   bool _searchLoading = false;
   String? _error;
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -55,8 +57,21 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      _runSearch('');
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      _runSearch(trimmed);
+    });
   }
 
   Future<void> _runSearch(String query) async {
@@ -207,6 +222,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                     ? IconButton(
                         icon: const Icon(Icons.clear, color: Colors.white54),
                         onPressed: () {
+                          _searchDebounce?.cancel();
                           _searchController.clear();
                           _runSearch('');
                         },
@@ -225,21 +241,8 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
               ),
               textInputAction: TextInputAction.search,
               onSubmitted: _runSearch,
-              onChanged: (v) {
-                if (v.trim().isEmpty && _searchQuery.isNotEmpty) {
-                  _runSearch('');
-                }
-              },
+              onChanged: _onSearchChanged,
             ),
-            if (_searchController.text.trim().isNotEmpty && !_searchLoading)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: () => _runSearch(_searchController.text),
-                  icon: const Icon(Icons.search, size: 18),
-                  label: const Text('Search library'),
-                ),
-              ),
             const SizedBox(height: 12),
 
             if (!inSearch)
