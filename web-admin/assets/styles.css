@@ -67,7 +67,7 @@ body {
 }
 
 .brand-badge-logo {
-  background-image: url("../../mobile-app/assets/images/TATIS.png");
+  background-image: url("./images/TATIS.png");
   background-size: contain;
   background-repeat: no-repeat;
   background-position: center;
