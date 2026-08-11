@@ -173,7 +173,7 @@ function replicate_view_angle_hints(): array
 
 function replicate_absolute_path_from_relative(string $relativePath): string
 {
-    return dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
+    return api_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
 }
 
 /**

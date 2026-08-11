@@ -95,7 +95,7 @@ function invalidate_stale_previews_for_session(PDO $pdo, string $scanSessionId):
 
 function face_scan_upload_root(): string
 {
-    return dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'face_scans';
+    return api_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'face_scans';
 }
 
 function ensure_scan_session_row(
@@ -775,7 +775,7 @@ try {
             json_response(['error' => 'Capture not found for this session'], 404);
         }
 
-        $absolutePath = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim((string)$capture['file_path'], '/'));
+        $absolutePath = api_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim((string)$capture['file_path'], '/'));
         if (!is_readable($absolutePath)) {
             json_response(['error' => 'Capture file is not readable'], 500);
         }

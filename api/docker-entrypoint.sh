@@ -35,4 +35,12 @@ ENV_FILE="/var/www/.env"
 chown www-data:www-data "${ENV_FILE}" 2>/dev/null || true
 chmod 640 "${ENV_FILE}" 2>/dev/null || true
 
+# Ensure writable dirs exist even if the image layer was overridden
+mkdir -p /var/www/html/uploads/face_scans \
+         /var/www/html/uploads/profiles \
+         /var/www/html/uploads/barbers \
+         /var/www/html/storage/backups
+chown -R www-data:www-data /var/www/html/uploads /var/www/html/storage 2>/dev/null || true
+chmod -R 775 /var/www/html/uploads /var/www/html/storage 2>/dev/null || true
+
 exec "$@"

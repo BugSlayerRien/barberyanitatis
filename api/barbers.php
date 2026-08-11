@@ -25,7 +25,7 @@ function save_barber_profile_image(int $barberId, string $base64): string
         throw new InvalidArgumentException('Invalid profile image data');
     }
 
-    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'barbers';
+    $dir = api_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'barbers';
     if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
         throw new RuntimeException('Could not create barber upload directory');
     }

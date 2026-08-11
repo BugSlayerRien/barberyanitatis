@@ -17,8 +17,10 @@ COPY . /var/www/html/
 RUN mkdir -p /var/www/html/uploads/face_scans \
         /var/www/html/uploads/profiles \
         /var/www/html/uploads/barbers \
+        /var/www/html/storage \
     && chown -R www-data:www-data /var/www/html \
-    && chmod -R 775 /var/www/html/uploads
+    && chmod -R 775 /var/www/html/uploads /var/www/html/storage \
+    && printf 'display_errors=Off\nlog_errors=On\n' > /usr/local/etc/php/conf.d/zzz-production.ini
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

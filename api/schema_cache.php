@@ -4,16 +4,36 @@ declare(strict_types=1);
 
 /**
  * Skip expensive idempotent schema/maintenance work on most requests.
- * Uses a small marker file under storage/ with a TTL (default 1 hour).
+ * Uses a small marker file under a writable cache dir with a TTL (default 1 hour).
  */
 function schema_cache_dir(): string
 {
-    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage';
-    if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved;
     }
 
-    return $dir;
+    // Prefer api/storage (writable in Docker docroot). Fall back to system temp.
+    $candidates = [
+        __DIR__ . DIRECTORY_SEPARATOR . 'storage',
+        rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'tatis_schema_cache',
+    ];
+
+    foreach ($candidates as $dir) {
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        if (is_dir($dir) && is_writable($dir)) {
+            $resolved = $dir;
+
+            return $resolved;
+        }
+    }
+
+    // Last resort: memory-only markers still work via schema_cache_should_run statics.
+    $resolved = $candidates[0];
+
+    return $resolved;
 }
 
 function schema_cache_marker_path(string $key): string
@@ -35,7 +55,12 @@ function schema_cache_is_fresh(string $key, int $ttlSeconds = 3600): bool
 
 function schema_cache_mark_fresh(string $key): void
 {
-    touch(schema_cache_marker_path($key));
+    $path = schema_cache_marker_path($key);
+    $dir = dirname($path);
+    if (!is_dir($dir) || !is_writable($dir)) {
+        return;
+    }
+    @touch($path);
 }
 
 function schema_cache_should_run(string $key, int $ttlSeconds = 3600): bool

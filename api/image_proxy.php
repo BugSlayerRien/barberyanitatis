@@ -24,7 +24,7 @@ if (!$allowed) {
     json_response(['error' => 'Invalid path'], 400);
 }
 
-$root = dirname(__DIR__);
+$root = api_project_root();
 $relative = ltrim($path, '/');
 $fullPath = $root . '/' . $relative;
 
