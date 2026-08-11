@@ -16,6 +16,7 @@ import 'user_session.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/shimmer_skeleton.dart';
 
 class SavedHaircutsPage extends StatefulWidget {
   const SavedHaircutsPage({super.key});
@@ -161,12 +162,7 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
                 future: _favoritesFuture,
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 48),
-                      child: Center(
-                        child: CircularProgressIndicator(color: Colors.white),
-                      ),
-                    );
+                    return _buildSavedHaircutsSkeleton();
                   }
 
                   final items = snapshot.data ?? [];
@@ -227,6 +223,64 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
             showAppMenuSheet(context);
           }
         },
+      ),
+    );
+  }
+
+  Widget _buildSavedHaircutsSkeleton() {
+    return AppShimmer(
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.85,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: 4,
+        itemBuilder: (_, __) => Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white, width: 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(12),
+                    topRight: Radius.circular(12),
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => AppShimmerBox(
+                      width: constraints.maxWidth,
+                      height: constraints.maxHeight,
+                      borderRadius: 0,
+                    ),
+                  ),
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppShimmerBox(width: 100, height: 14, borderRadius: 4),
+                    SizedBox(height: 4),
+                    AppShimmerBox(width: 80, height: 11, borderRadius: 4),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

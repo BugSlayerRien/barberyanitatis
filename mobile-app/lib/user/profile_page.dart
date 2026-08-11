@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'customer_navigation.dart';
 import 'widgets/app_top_bar.dart';
+import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
 import 'user_session.dart';
 
@@ -283,10 +284,7 @@ class _ProfilePageState extends State<ProfilePage> {
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             if (_loading)
-              const Padding(
-                padding: EdgeInsets.all(24),
-                child: CircularProgressIndicator(color: Colors.white),
-              )
+              _buildProfileSkeleton()
             else if (_error != null)
               Text(_error!, style: const TextStyle(color: Colors.white70))
             else ...[
@@ -392,6 +390,67 @@ class _ProfilePageState extends State<ProfilePage> {
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildProfileSkeleton() {
+    Widget skeletonCard({double valueWidth = 140}) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white, width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const AppShimmerBox(width: 80, height: 12, borderRadius: 4),
+            const SizedBox(height: 10),
+            AppShimmerBox(width: valueWidth, height: 14, borderRadius: 4),
+          ],
+        ),
+      );
+    }
+
+    return AppShimmer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Center(
+            child: AppShimmerBox(width: 120, height: 120, borderRadius: 60),
+          ),
+          const SizedBox(height: 24),
+          const Center(
+            child: AppShimmerBox(width: 160, height: 18, borderRadius: 6),
+          ),
+          const SizedBox(height: 10),
+          const Center(
+            child: AppShimmerBox(width: 100, height: 24, borderRadius: 12),
+          ),
+          const SizedBox(height: 18),
+          skeletonCard(valueWidth: 120),
+          const SizedBox(height: 16),
+          skeletonCard(),
+          const SizedBox(height: 16),
+          skeletonCard(valueWidth: 180),
+          const SizedBox(height: 16),
+          skeletonCard(),
+          const SizedBox(height: 16),
+          skeletonCard(),
+          const SizedBox(height: 16),
+          skeletonCard(),
+          const SizedBox(height: 16),
+          skeletonCard(valueWidth: 60),
+          const SizedBox(height: 24),
+          const AppShimmerBox(height: 50, borderRadius: 10),
+        ],
       ),
     );
   }

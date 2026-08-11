@@ -12,6 +12,7 @@ import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/face_scan_service.dart';
 import 'services/booking_draft_service.dart';
+import 'widgets/shimmer_skeleton.dart';
 
 class TimeSlotPage extends StatefulWidget {
   final int barberId;
@@ -1240,35 +1241,32 @@ Keep the total response under 24 words.
   }
 
   Widget _buildSlotsSkeleton() {
-    return Column(
-      children: [
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 3,
-            mainAxisSpacing: 10,
-            crossAxisSpacing: 10,
-            childAspectRatio: 2.7,
-          ),
-          itemCount: 9,
-          itemBuilder: (_, __) => Container(
-            decoration: BoxDecoration(
-              color: Colors.white12,
-              borderRadius: BorderRadius.circular(10),
+    return AppShimmer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              mainAxisSpacing: 10,
+              crossAxisSpacing: 10,
+              childAspectRatio: 2.7,
+            ),
+            itemCount: 9,
+            itemBuilder: (_, __) => LayoutBuilder(
+              builder: (context, constraints) => AppShimmerBox(
+                width: constraints.maxWidth,
+                height: constraints.maxHeight,
+                borderRadius: 10,
+              ),
             ),
           ),
-        ),
-        const SizedBox(height: 16),
-        Container(
-          width: double.infinity,
-          height: 14,
-          decoration: BoxDecoration(
-            color: Colors.white12,
-            borderRadius: BorderRadius.circular(6),
-          ),
-        ),
-      ],
+          const SizedBox(height: 16),
+          const AppShimmerBox(height: 14, borderRadius: 6),
+        ],
+      ),
     );
   }
 }

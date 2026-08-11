@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'time_slot_page.dart';
 import 'api_config.dart';
 import 'time_format_utils.dart';
+import 'widgets/shimmer_skeleton.dart';
 
 class CalendarPage extends StatefulWidget {
   final int barberId;
@@ -517,15 +518,13 @@ class _CalendarPageState extends State<CalendarPage> {
                           ),
                         ],
                       ),
-                      _loadingSlots
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      (_loadingSlots || _loadingMonthAvailability)
+                          ? const AppShimmer(
+                              child: AppShimmerBox(width: 100, height: 12, borderRadius: 6),
                             )
                           : Flexible(
                               child: Text(
-                                _loadingMonthAvailability ? 'Checking dates...' : slotsSummaryLabel,
+                                slotsSummaryLabel,
                                 textAlign: TextAlign.right,
                                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
                               ),
@@ -553,11 +552,14 @@ class _CalendarPageState extends State<CalendarPage> {
                   ),
                 ),
                 child: _loadingSlots
-                    ? const Center(
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    ? const AppShimmer(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            AppShimmerBox(width: 180, height: 14, borderRadius: 6),
+                            SizedBox(height: 8),
+                            AppShimmerBox(width: 240, height: 12, borderRadius: 6),
+                          ],
                         ),
                       )
                     : Column(
@@ -733,90 +735,56 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Widget _buildCalendarSkeleton() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 240,
-            height: 14,
-            decoration: BoxDecoration(
-              color: Colors.white12,
-              borderRadius: BorderRadius.circular(6),
-            ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: Colors.white, width: 1),
-            ),
-            child: Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  height: 22,
-                  decoration: BoxDecoration(
-                    color: Colors.white12,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+    return AppShimmer(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const AppShimmerBox(width: 240, height: 14, borderRadius: 6),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                const SizedBox(height: 16),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 7,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1.2,
-                  ),
-                  itemCount: 35,
-                  itemBuilder: (_, __) => Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white12,
-                      borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white, width: 1),
+              ),
+              child: Column(
+                children: [
+                  const AppShimmerBox(width: double.infinity, height: 22, borderRadius: 8),
+                  const SizedBox(height: 16),
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 7,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1.2,
+                    ),
+                    itemCount: 35,
+                    itemBuilder: (_, __) => LayoutBuilder(
+                      builder: (context, constraints) => AppShimmerBox(
+                        width: constraints.maxWidth,
+                        height: constraints.maxHeight,
+                        borderRadius: 8,
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  width: double.infinity,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: Colors.white12,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  const AppShimmerBox(width: double.infinity, height: 14, borderRadius: 6),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            width: double.infinity,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white12,
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-          const SizedBox(height: 32),
-          Container(
-            width: double.infinity,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white12,
-              borderRadius: BorderRadius.circular(12),
-            ),
-          ),
-        ],
+            const SizedBox(height: 24),
+            const AppShimmerBox(width: double.infinity, height: 56, borderRadius: 12),
+          ],
+        ),
       ),
     );
   }

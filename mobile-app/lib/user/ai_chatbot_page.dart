@@ -29,6 +29,11 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
         isUser: false,
       ),
     );
+    _preloadFaq();
+  }
+
+  Future<void> _preloadFaq() async {
+    await AiChatbotService.ensureFaqLoaded();
   }
 
   @override
@@ -46,10 +51,27 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
 
     setState(() {
       _messages.add(_ChatMessage(text: text, isUser: true));
-      _sending = true;
       _inputController.clear();
     });
     _scrollToBottom();
+
+    await AiChatbotService.ensureFaqLoaded();
+    final localFaq = AiChatbotService.matchLocalFaq(text);
+    if (localFaq != null) {
+      setState(() {
+        _messages.add(
+          _ChatMessage(
+            text: localFaq.answer,
+            isUser: false,
+            sourceLabel: 'FAQ',
+          ),
+        );
+      });
+      _scrollToBottom();
+      return;
+    }
+
+    setState(() => _sending = true);
 
     try {
       final history = _messages
@@ -58,7 +80,7 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
           .map((m) => {'text': m.text, 'isUser': m.isUser})
           .toList();
 
-      final data = await AiChatbotService.sendMessage(
+      final data = await AiChatbotService.requestGeminiFallback(
         message: text,
         history: history,
       );
@@ -69,13 +91,9 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
       setState(() {
         _messages.add(
           _ChatMessage(
-            text: reply.isNotEmpty
-                ? reply
-                : 'I could not generate a response. Please try again.',
+            text: reply.isNotEmpty ? reply : AiChatbotService.safeFallbackReply,
             isUser: false,
-            sourceLabel: source == 'faq'
-                ? 'FAQ'
-                : (source == 'gemini' ? 'AI' : null),
+            sourceLabel: source == 'gemini' ? 'AI' : null,
           ),
         );
       });
@@ -83,7 +101,7 @@ class _AiChatbotPageState extends State<AiChatbotPage> {
       setState(() {
         _messages.add(
           _ChatMessage(
-            text: 'Something went wrong. Check your connection and try again.\n$e',
+            text: AiChatbotService.safeFallbackReply,
             isUser: false,
           ),
         );
