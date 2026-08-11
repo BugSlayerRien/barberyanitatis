@@ -35,7 +35,7 @@ function face_scan_preview_file_exists(string $relativeUrl): bool
     if ($relativeUrl === '') {
         return false;
     }
-    $root = dirname(__DIR__);
+    $root = api_project_root();
     $fullPath = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativeUrl, '/'));
     return is_file($fullPath) && filesize($fullPath) > 0;
 }

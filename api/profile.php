@@ -57,7 +57,7 @@ function save_profile_image_file(int $userId, string $base64): string
         throw new InvalidArgumentException('Invalid profile image data');
     }
 
-    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'profiles';
+    $dir = api_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'profiles';
     if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
         throw new RuntimeException('Could not create profile upload directory');
     }

@@ -204,7 +204,7 @@ function ai_service_curl_file(string $absolutePath, string $uploadName)
  */
 function ai_service_absolute_capture_paths(array $relativePaths): array
 {
-    $root = dirname(__DIR__);
+    $root = api_project_root();
     $out = [];
     foreach (['front', 'left', 'right'] as $angle) {
         $rel = $relativePaths[$angle] ?? null;

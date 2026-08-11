@@ -143,7 +143,7 @@ function settings_schedule_summary(PDO $pdo): array
  */
 function settings_backup_info(): array
 {
-    $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
+    $dir = api_project_root() . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
     $latest = null;
     if (is_dir($dir)) {
         $files = glob($dir . DIRECTORY_SEPARATOR . 'tatis_backup_*.json') ?: [];
@@ -487,7 +487,7 @@ try {
             json_response(['error' => 'Unable to build backup'], 500);
         }
 
-        $dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
+        $dir = api_project_root() . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
         if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
             json_response(['error' => 'Unable to create backup directory'], 500);
         }

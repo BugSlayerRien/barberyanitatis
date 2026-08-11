@@ -26,6 +26,35 @@ function api_curl_ssl_options(): array
     ];
 }
 
+/**
+ * Project root for uploads/storage.
+ * Local monorepo: parent of api/. Docker flat docroot: the api directory itself.
+ */
+function api_project_root(): string
+{
+    static $root = null;
+    if ($root !== null) {
+        return $root;
+    }
+
+    $here = __DIR__;
+    $parent = dirname($here);
+
+    if (
+        is_dir($parent . DIRECTORY_SEPARATOR . 'web-admin')
+        || is_dir($parent . DIRECTORY_SEPARATOR . 'mobile-app')
+        || is_dir($parent . DIRECTORY_SEPARATOR . 'uploads')
+    ) {
+        $root = $parent;
+
+        return $root;
+    }
+
+    $root = $here;
+
+    return $root;
+}
+
 function load_project_env(): void
 {
     static $loaded = false;
@@ -34,8 +63,20 @@ function load_project_env(): void
     }
     $loaded = true;
 
-    $envFile = dirname(__DIR__) . DIRECTORY_SEPARATOR . '.env';
-    if (!is_readable($envFile)) {
+    // Local: repo-root/.env. Docker entrypoint: /var/www/.env (parent of docroot).
+    $candidates = [
+        dirname(__DIR__) . DIRECTORY_SEPARATOR . '.env',
+        api_project_root() . DIRECTORY_SEPARATOR . '.env',
+        __DIR__ . DIRECTORY_SEPARATOR . '.env',
+    ];
+    $envFile = null;
+    foreach ($candidates as $candidate) {
+        if (is_readable($candidate)) {
+            $envFile = $candidate;
+            break;
+        }
+    }
+    if ($envFile === null) {
         return;
     }
 
