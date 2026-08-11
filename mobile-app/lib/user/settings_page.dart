@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'change_password_page.dart';
+import 'faq_library_page.dart';
+import 'privacy_data_page.dart';
 import 'profile_page.dart';
+import 'session_logout.dart';
 import 'user_session.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -15,6 +19,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _appointmentReminders = true;
   bool _promotionAlerts = false;
   bool _loadingPrefs = true;
+  bool _loggingOut = false;
 
   @override
   void initState() {
@@ -35,6 +40,43 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _savePref(String key, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(key, value);
+  }
+
+  Future<void> _confirmLogout() async {
+    if (_loggingOut) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text('Confirm logout', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you sure you want to log out?',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
+            child: const Text('Log out', style: TextStyle(color: Color(0xFFE74C3C))),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _loggingOut = true);
+    try {
+      await SessionLogout.perform(context);
+    } finally {
+      if (mounted) {
+        setState(() => _loggingOut = false);
+      }
+    }
   }
 
   @override
@@ -66,6 +108,24 @@ class _SettingsPageState extends State<SettingsPage> {
                     );
                   },
                 ),
+                _settingsTile(
+                  icon: Icons.lock_outline,
+                  title: 'Change password',
+                  subtitle: 'Update your account password',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const ChangePasswordPage()),
+                    );
+                  },
+                ),
+                _settingsTile(
+                  icon: Icons.info_outline,
+                  title: 'Signed in as',
+                  subtitle: UserSession.email?.isNotEmpty == true
+                      ? UserSession.email!
+                      : 'Customer account',
+                  onTap: null,
+                ),
                 const SizedBox(height: 20),
                 _sectionTitle('Notifications'),
                 _switchTile(
@@ -87,14 +147,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   },
                 ),
                 const SizedBox(height: 20),
-                _sectionTitle('App'),
+                _sectionTitle('AI & Data'),
                 _settingsTile(
-                  icon: Icons.info_outline,
-                  title: 'Signed in as',
-                  subtitle: UserSession.email?.isNotEmpty == true
-                      ? UserSession.email!
-                      : 'Customer account',
-                  onTap: null,
+                  icon: Icons.privacy_tip_outlined,
+                  title: 'Privacy & Data',
+                  subtitle: 'How account, booking, and scan data are used',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const PrivacyDataPage()),
+                    );
+                  },
                 ),
                 _settingsTile(
                   icon: Icons.refresh,
@@ -111,6 +173,37 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     );
                   },
+                ),
+                const SizedBox(height: 20),
+                _sectionTitle('Support'),
+                _settingsTile(
+                  icon: Icons.help_outline,
+                  title: 'Help & FAQ',
+                  subtitle: 'Booking, payments, AI scan, account help',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const FaqLibraryPage()),
+                    );
+                  },
+                ),
+                const SizedBox(height: 20),
+                _sectionTitle('Session'),
+                _settingsTile(
+                  icon: Icons.logout,
+                  title: 'Log out',
+                  subtitle: 'Sign out of this device',
+                  onTap: _loggingOut ? null : _confirmLogout,
+                  destructive: true,
+                  trailing: _loggingOut
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Color(0xFFE74C3C),
+                          ),
+                        )
+                      : null,
                 ),
               ],
             ),
@@ -132,7 +225,12 @@ class _SettingsPageState extends State<SettingsPage> {
     required String title,
     required String subtitle,
     VoidCallback? onTap,
+    bool destructive = false,
+    Widget? trailing,
   }) {
+    final accent = destructive ? const Color(0xFFE74C3C) : const Color(0xFFA99941);
+    final titleColor = destructive ? const Color(0xFFE74C3C) : Colors.white;
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
@@ -149,19 +247,25 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             child: Row(
               children: [
-                Icon(icon, color: const Color(0xFFA99941)),
+                Icon(icon, color: accent),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      Text(title, style: TextStyle(color: titleColor, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
                       Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
                     ],
                   ),
                 ),
-                if (onTap != null) const Icon(Icons.chevron_right, color: Colors.white38),
+                if (trailing != null)
+                  trailing
+                else if (onTap != null)
+                  Icon(
+                    Icons.chevron_right,
+                    color: destructive ? const Color(0xFFE74C3C).withValues(alpha: 0.7) : Colors.white38,
+                  ),
               ],
             ),
           ),

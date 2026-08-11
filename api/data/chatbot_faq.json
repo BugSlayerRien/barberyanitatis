@@ -66,6 +66,64 @@
       "answer": "Appointment statuses show where your booking is in the process: pending or awaiting payment, confirmed after payment, completed after your visit, or cancelled if the booking was removed. Check Appointments for the latest status and details."
     },
     {
+      "id": "booking_005",
+      "category": "appointments",
+      "question": "How far ahead can I book?",
+      "keywords": [
+        "how far",
+        "booking window",
+        "advance booking",
+        "days ahead",
+        "future date",
+        "how soon",
+        "earliest",
+        "latest date"
+      ],
+      "answer": "You can book within the shop's booking window shown on the calendar. Past dates and dates beyond the allowed window are disabled. Pick any open date with available slots inside that range."
+    },
+    {
+      "id": "booking_006",
+      "category": "appointments",
+      "question": "Why is a date grayed out or unavailable?",
+      "keywords": [
+        "grayed out",
+        "unavailable date",
+        "no slots",
+        "closed day",
+        "cannot select date",
+        "disabled date",
+        "fully booked"
+      ],
+      "answer": "Dates can be unavailable if they are in the past, outside the booking window, marked closed (weekly rest day or holiday), or have no open time slots left. Choose another date with open availability on the calendar."
+    },
+    {
+      "id": "booking_007",
+      "category": "appointments",
+      "question": "How many times can I reschedule?",
+      "keywords": [
+        "how many reschedule",
+        "reschedule limit",
+        "3 times",
+        "reschedules remaining",
+        "change again"
+      ],
+      "answer": "Paid appointments can usually be rescheduled up to 3 times, and each change must be made at least 24 hours before the appointment. The app shows how many reschedules you have left when you tap Reschedule."
+    },
+    {
+      "id": "booking_008",
+      "category": "appointments",
+      "question": "Where can I see my upcoming appointments?",
+      "keywords": [
+        "upcoming",
+        "my appointments",
+        "view booking",
+        "appointment list",
+        "scheduled appointments",
+        "where is my appointment"
+      ],
+      "answer": "Open the Appointments section to see your upcoming, completed, and cancelled bookings. Tap any appointment for details, reschedule options, or status information."
+    },
+    {
       "id": "payment_001",
       "category": "payment",
       "question": "How does payment work?",
@@ -82,6 +140,48 @@
         "billing"
       ],
       "answer": "Service prices appear when you choose a haircut and barber during booking. Complete payment in the app after selecting your time slot. Your appointment is confirmed once payment succeeds."
+    },
+    {
+      "id": "payment_002",
+      "category": "payment",
+      "question": "When do I pay for my appointment?",
+      "keywords": [
+        "when to pay",
+        "pay first",
+        "before appointment",
+        "payment step",
+        "after booking",
+        "pay now"
+      ],
+      "answer": "Payment happens in the booking flow after you pick your barber, date, and time slot. Once payment succeeds, your appointment is confirmed. Check Appointments if you are unsure whether a booking is still awaiting payment."
+    },
+    {
+      "id": "payment_003",
+      "category": "payment",
+      "question": "What if my payment failed?",
+      "keywords": [
+        "payment failed",
+        "failed payment",
+        "not paid",
+        "transaction failed",
+        "pay again",
+        "payment error"
+      ],
+      "answer": "If payment fails, your appointment may stay pending or unconfirmed. Try again from the booking or payment screen, check your GCash or payment method, and confirm network connection. If money was deducted but the booking is still pending, contact shop staff with your email and payment reference."
+    },
+    {
+      "id": "payment_004",
+      "category": "payment",
+      "question": "Can I see the price before I book?",
+      "keywords": [
+        "see price",
+        "price before book",
+        "service price",
+        "how much is",
+        "rates",
+        "pricing"
+      ],
+      "answer": "Yes. Prices are shown when you select a haircut or service and continue through booking with a barber. Review the amount on the payment step before you confirm."
     },
     {
       "id": "services_001",
@@ -101,6 +201,34 @@
       "answer": "Browse the Library or start booking to see available haircuts and services. Each style includes details, photos, and compatibility hints based on your face scan when available."
     },
     {
+      "id": "services_002",
+      "category": "services",
+      "question": "What is the difference between regular and exclusive services?",
+      "keywords": [
+        "regular",
+        "exclusive",
+        "premium",
+        "vip",
+        "service type",
+        "difference"
+      ],
+      "answer": "Regular services cover standard haircuts available through normal booking or walk-in queues. Exclusive or VIP-style services may use a different shop location or channel. Check Contact in the app for the premium and VIP addresses, and ask reception if you are unsure which service type to choose."
+    },
+    {
+      "id": "services_003",
+      "category": "services",
+      "question": "How long does a haircut usually take?",
+      "keywords": [
+        "how long",
+        "duration",
+        "minutes",
+        "service time",
+        "how much time",
+        "appointment length"
+      ],
+      "answer": "Service duration depends on the haircut or service you choose. The booking flow shows estimated time for the selected service so you can plan your visit. Arrive a little early so your slot can start on time."
+    },
+    {
       "id": "barbers_001",
       "category": "barbers",
       "question": "How do I choose a barber?",
@@ -114,6 +242,32 @@
         "which barber"
       ],
       "answer": "During booking, you can choose from available barbers and see open time slots for each one. Pick the barber and schedule that work best for you before confirming payment."
+    },
+    {
+      "id": "barbers_002",
+      "category": "barbers",
+      "question": "Can I book the same barber again?",
+      "keywords": [
+        "same barber",
+        "favorite barber",
+        "book again",
+        "preferred barber",
+        "my barber"
+      ],
+      "answer": "Yes. When you book again, select the same barber from the barber list if they have open slots on your preferred date. Availability depends on that barber's schedule."
+    },
+    {
+      "id": "barbers_003",
+      "category": "barbers",
+      "question": "Why does my preferred barber have no available slots?",
+      "keywords": [
+        "no available slots",
+        "barber full",
+        "barber unavailable",
+        "no time",
+        "fully booked barber"
+      ],
+      "answer": "A barber may have no open slots if they are fully booked, off that day, or outside operating hours. Try another date, or choose a different available barber for the same service."
     },
     {
       "id": "hours_001",
@@ -134,6 +288,19 @@
       "answer": "Operating hours depend on the day, barber availability, and shop closures. The booking calendar shows live open dates and slots. For same-day questions, ask the front desk when you arrive."
     },
     {
+      "id": "hours_002",
+      "category": "hours",
+      "question": "Are you open on holidays?",
+      "keywords": [
+        "holiday",
+        "holidays",
+        "closed holiday",
+        "open on holiday",
+        "special closure"
+      ],
+      "answer": "Some holidays are marked closed on the booking calendar. If a date shows as closed, choose another open day. For last-minute holiday hours, contact the shop through Facebook, Messenger, or the front desk."
+    },
+    {
       "id": "walkin_001",
       "category": "walkins",
       "question": "Do you accept walk-ins?",
@@ -148,6 +315,19 @@
         "just come in"
       ],
       "answer": "Walk-ins are welcome when capacity allows. Use the kiosk or reception queue for regular or exclusive services. You can see your place in line and when a barber can start."
+    },
+    {
+      "id": "walkin_002",
+      "category": "walkins",
+      "question": "Should I book ahead or just walk in?",
+      "keywords": [
+        "book or walk in",
+        "better to book",
+        "appointment vs walk-in",
+        "reserve ahead",
+        "wait time"
+      ],
+      "answer": "Booking ahead is best when you want a specific barber, date, and time. Walk-ins work when you can wait for the next available barber. Busy days usually have shorter waits if you book in the app first."
     },
     {
       "id": "ai_scan_001",
@@ -167,6 +347,47 @@
       "answer": "AI Face Scan captures front, left, and right photos of your face. The app analyzes your face shape and hair length, then uses that to improve style recommendations and AI previews."
     },
     {
+      "id": "ai_scan_002",
+      "category": "ai_face_scan",
+      "question": "How should I take good scan photos?",
+      "keywords": [
+        "good photo",
+        "tips",
+        "lighting",
+        "how to capture",
+        "scan tips",
+        "blurry",
+        "better scan"
+      ],
+      "answer": "Use bright, even lighting, keep your face centered, remove caps or sunglasses, and hold the phone steady. Capture clear front, left, and right angles. Better photos improve face-shape analysis and preview quality."
+    },
+    {
+      "id": "ai_scan_003",
+      "category": "ai_face_scan",
+      "question": "Do I need a face scan before booking?",
+      "keywords": [
+        "need scan",
+        "required scan",
+        "book without scan",
+        "skip scan",
+        "mandatory"
+      ],
+      "answer": "No. You can book without a face scan. A successful scan unlocks better compatibility badges, recommendations, and AI hairstyle previews, but it is optional for regular booking."
+    },
+    {
+      "id": "ai_scan_004",
+      "category": "ai_face_scan",
+      "question": "Can I redo my face scan?",
+      "keywords": [
+        "redo scan",
+        "new scan",
+        "rescan",
+        "scan again",
+        "retake photos"
+      ],
+      "answer": "Yes. Open AI Face Scan and start a new scan to retake your photos. A new successful scan updates recommendations and compatibility for the Library and booking flow."
+    },
+    {
       "id": "ai_recommend_001",
       "category": "ai_recommendations",
       "question": "How do haircut recommendations work?",
@@ -182,6 +403,32 @@
         "compatibility"
       ],
       "answer": "After a successful face scan, the app recommends styles that fit your face shape and hair texture. Library cards and booking show Recommended, Possible, or Not Recommended badges so you can choose confidently."
+    },
+    {
+      "id": "ai_recommend_002",
+      "category": "ai_recommendations",
+      "question": "What do Recommended, Possible, and Not Recommended mean?",
+      "keywords": [
+        "recommended badge",
+        "possible badge",
+        "not recommended",
+        "compatibility badge",
+        "what does badge mean"
+      ],
+      "answer": "Recommended styles fit your latest scan well. Possible styles may still work with some compromise. Not Recommended styles are a weaker match for your face shape or hair traits. These are guidance only — you can still book any style you like."
+    },
+    {
+      "id": "ai_recommend_003",
+      "category": "ai_recommendations",
+      "question": "Why am I not seeing recommendations?",
+      "keywords": [
+        "no recommendations",
+        "missing badges",
+        "no compatibility",
+        "recommendations empty",
+        "scan first"
+      ],
+      "answer": "Recommendations and compatibility badges appear after a successful AI Face Scan. Complete a scan, make sure analysis finished successfully, and reopen the Library or booking flow. You can also reset scan preferences in Settings if needed, then scan again."
     },
     {
       "id": "ai_preview_001",
@@ -220,6 +467,32 @@
       "answer": "AI preview generation has a limit on how many different styles you can generate per scan session. Regenerating or viewing a preview you already created for the same style does not use an extra generation."
     },
     {
+      "id": "ai_preview_003",
+      "category": "ai_preview",
+      "question": "Why is my AI preview taking so long?",
+      "keywords": [
+        "slow preview",
+        "taking long",
+        "loading preview",
+        "preview stuck",
+        "waiting generate"
+      ],
+      "answer": "AI previews can take a short while because the image is generated on the server. Stay on the screen and wait for the result. If it fails, check your connection and try again, or open a preview you already generated for that style."
+    },
+    {
+      "id": "ai_preview_004",
+      "category": "ai_preview",
+      "question": "Can I attach a preview to my appointment?",
+      "keywords": [
+        "attach preview",
+        "bring preview",
+        "show barber",
+        "preview to booking",
+        "chosen style"
+      ],
+      "answer": "Yes. After a face scan and style preview, you can continue into booking with your chosen style so your barber can see what you liked. Keep the preview handy in your scan results or saved styles before your appointment."
+    },
+    {
       "id": "library_001",
       "category": "library",
       "question": "What is the hairstyle Library?",
@@ -233,6 +506,31 @@
         "gallery"
       ],
       "answer": "The Library is where you browse all available hairstyles with photos and descriptions. Search by name and use compatibility badges from your latest face scan to find styles that suit you."
+    },
+    {
+      "id": "library_002",
+      "category": "library",
+      "question": "How do I search for a hairstyle?",
+      "keywords": [
+        "search style",
+        "find haircut",
+        "search library",
+        "look for fade",
+        "filter styles"
+      ],
+      "answer": "Open the Library and use the search box to type a style name or keyword. Results update as you type so you can quickly find fades, crops, or other cuts in the catalog."
+    },
+    {
+      "id": "library_003",
+      "category": "library",
+      "question": "Can I book a style directly from the Library?",
+      "keywords": [
+        "book from library",
+        "library to booking",
+        "choose style then book",
+        "book this style"
+      ],
+      "answer": "Yes. Open a hairstyle from the Library, review the details, then continue to booking to pick a barber, date, and time. If you scanned your face, compatibility badges can help you choose first."
     },
     {
       "id": "favorites_001",
@@ -251,6 +549,19 @@
       "answer": "When you save a hairstyle from the Library or detail page, it appears under Saved Haircuts. Open it anytime to review styles you liked before booking or generating a preview."
     },
     {
+      "id": "favorites_002",
+      "category": "favorites",
+      "question": "How do I remove a saved haircut?",
+      "keywords": [
+        "unsave",
+        "remove favorite",
+        "remove saved",
+        "unlike",
+        "delete saved haircut"
+      ],
+      "answer": "Open the hairstyle detail for a saved style and turn off the save or favorite option. It will no longer appear in Saved Haircuts. You can save it again later if you change your mind."
+    },
+    {
       "id": "notifications_001",
       "category": "notifications",
       "question": "How do notifications work?",
@@ -265,6 +576,19 @@
         "updates"
       ],
       "answer": "Notifications keep you updated on appointments, booking changes, and important app messages. Open the bell icon in the top bar to view them and mark all as read when you are caught up."
+    },
+    {
+      "id": "notifications_002",
+      "category": "notifications",
+      "question": "How do I turn appointment reminders on or off?",
+      "keywords": [
+        "reminder settings",
+        "turn off reminders",
+        "promotion alerts",
+        "notification settings",
+        "settings notifications"
+      ],
+      "answer": "Open Settings, then use the Notifications switches for appointment reminders and promotions or offers. Your choices are saved on this device."
     },
     {
       "id": "account_001",
@@ -317,6 +641,31 @@
       "answer": "Set your hair texture in Profile as Straight, Wavy, or Curly. Recommendations and Library filtering use this to show styles that work better with your natural hair."
     },
     {
+      "id": "account_003",
+      "category": "account",
+      "question": "How do I change my password?",
+      "keywords": [
+        "change password",
+        "update password",
+        "new password",
+        "password settings"
+      ],
+      "answer": "Open Settings, then Account, and tap Change password. Enter your current password, choose a new password that meets the requirements, confirm it, and save. Social-only accounts may need password reset or Google sign-in instead."
+    },
+    {
+      "id": "account_004",
+      "category": "account",
+      "question": "How do I log out?",
+      "keywords": [
+        "log out",
+        "logout",
+        "sign out",
+        "signout",
+        "end session"
+      ],
+      "answer": "Open Settings, scroll to Session, and tap Log out. Confirm when asked. You will return to the login screen. Logging out does not delete your account or booking history."
+    },
+    {
       "id": "location_001",
       "category": "general",
       "question": "Where is the barbershop located?",
@@ -329,7 +678,7 @@
         "find shop",
         "how to get there"
       ],
-      "answer": "Visit Tati's Barbershop at the location shown on your booking confirmation, shop signage, or front desk. Ask staff if you need directions when you arrive."
+      "answer": "For premium haircuts, visit Kalsadang Luma, Pantubig, Bulacan. For VIP clients and exclusive haircuts, go to Bartolome Sr. St Pantubig, San Rafael, Philippines, 3008. Full details are also in Contact in the app menu."
     },
     {
       "id": "help_001",
@@ -346,6 +695,33 @@
         "how to use"
       ],
       "answer": "I can help with booking, rescheduling, payments, barbers, walk-ins, hours, AI Face Scan, hairstyle recommendations, AI previews, the Library, Saved Haircuts, notifications, and your profile. Ask me anything about the app."
+    },
+    {
+      "id": "general_002",
+      "category": "general",
+      "question": "How can I contact the shop?",
+      "keywords": [
+        "contact",
+        "facebook",
+        "messenger",
+        "call",
+        "message shop",
+        "reach out"
+      ],
+      "answer": "Open Contact from the app menu for shop addresses. You can also message Barberya ni Tatis on Facebook or Messenger. For booking help in person, ask the receptionist at the shop."
+    },
+    {
+      "id": "general_003",
+      "category": "general",
+      "question": "Where is Help and FAQ in the app?",
+      "keywords": [
+        "help and faq",
+        "faq library",
+        "settings help",
+        "find faq",
+        "help page"
+      ],
+      "answer": "Open Settings, then Support, and tap Help & FAQ to browse the FAQ Library by category or search. For live chat-style help, use the floating chatbot button on main customer screens."
     }
   ]
 }

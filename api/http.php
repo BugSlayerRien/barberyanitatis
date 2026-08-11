@@ -55,9 +55,12 @@ function load_project_env(): void
         $value = trim($value);
         $value = trim($value, "'\"");
 
-        if ($key !== '' && getenv($key) === false) {
+        if ($key !== '') {
+            // Project .env must win over stale Apache/Windows process env
+            // (e.g. an old GEMINI_MODEL left on the service after .env was updated).
             putenv($key . '=' . $value);
             $_ENV[$key] = $value;
+            $_SERVER[$key] = $value;
         }
     }
 }

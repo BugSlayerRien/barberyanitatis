@@ -16,6 +16,7 @@ $allowedActions = [
     'forgotPassword',
     'verifyResetToken',
     'resetPassword',
+    'changePassword',
     'checkEmailExists',
     'resolveAccount',
 ];
@@ -27,6 +28,27 @@ if (!in_array($action, $allowedActions, true)) {
 function is_valid_email(string $email): bool
 {
     return filter_var($email, FILTER_VALIDATE_EMAIL) !== false;
+}
+
+/** App password policy (matches mobile registration). Returns error message or null. */
+function validate_password_policy(string $password): ?string
+{
+    if (strlen($password) < 8) {
+        return 'Password must be at least 8 characters long.';
+    }
+    if (!preg_match('/[A-Z]/', $password)) {
+        return 'Password must contain at least one uppercase letter (A-Z).';
+    }
+    if (!preg_match('/[a-z]/', $password)) {
+        return 'Password must contain at least one lowercase letter (a-z).';
+    }
+    if (!preg_match('/\d/', $password)) {
+        return 'Password must contain at least one number (0-9).';
+    }
+    if (!preg_match('/[!@#$%^&*]/', $password)) {
+        return 'Password must contain at least one special character (!@#$%^&*).';
+    }
+    return null;
 }
 
 function sanitize_full_name(string $fullName, string $emailFallback): string
@@ -619,6 +641,80 @@ try {
         }
 
         json_response(['message' => 'Password has been reset successfully. You can now sign in.']);
+    }
+
+    if ($action === 'changePassword') {
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $userId = (int)($input['userId'] ?? 0);
+        $currentPassword = (string)($input['currentPassword'] ?? '');
+        $newPassword = (string)($input['newPassword'] ?? '');
+        $confirmPassword = (string)($input['confirmPassword'] ?? '');
+
+        if ($currentPassword === '' || $newPassword === '' || $confirmPassword === '') {
+            json_response(['error' => 'Current password, new password, and confirmation are required.'], 422);
+        }
+        if ($newPassword !== $confirmPassword) {
+            json_response(['error' => 'New password and confirmation do not match.'], 422);
+        }
+        if ($currentPassword === $newPassword) {
+            json_response(['error' => 'New password must be different from your current password.'], 422);
+        }
+
+        $policyError = validate_password_policy($newPassword);
+        if ($policyError !== null) {
+            json_response(['error' => $policyError], 422);
+        }
+
+        $customer = null;
+        if ($userId > 0) {
+            $byId = $pdo->prepare(
+                'SELECT user_id, email, password_hash, full_name
+                 FROM users
+                 WHERE user_id = :user_id AND is_active = TRUE
+                 LIMIT 1'
+            );
+            $byId->execute([':user_id' => $userId]);
+            $customer = $byId->fetch() ?: null;
+        }
+
+        if ($customer === null && $email !== '' && is_valid_email($email)) {
+            $byEmail = $pdo->prepare(
+                'SELECT user_id, email, password_hash, full_name
+                 FROM users
+                 WHERE lower(email) = lower(:email) AND is_active = TRUE
+                 LIMIT 1'
+            );
+            $byEmail->execute([':email' => $email]);
+            $customer = $byEmail->fetch() ?: null;
+        }
+
+        if ($customer === null) {
+            json_response(['error' => 'Account not found.'], 404);
+        }
+
+        $storedHash = trim((string)($customer['password_hash'] ?? ''));
+        if ($storedHash === '' || str_starts_with($storedHash, '__auth_via_supabase__')) {
+            json_response([
+                'error' => 'This account uses Google or social sign-in and does not have a local password to change. Use Forgot password if you want an email/password login, or manage sign-in through your Google account.',
+                'code' => 'OAUTH_ONLY',
+            ], 400);
+        }
+
+        if (!password_verify($currentPassword, $storedHash)) {
+            json_response(['error' => 'Current password is incorrect.', 'code' => 'WRONG_PASSWORD'], 401);
+        }
+
+        $passwordHash = password_hash($newPassword, PASSWORD_BCRYPT);
+        update_account_password($pdo, 'customer', (int)$customer['user_id'], $passwordHash);
+
+        json_response([
+            'message' => 'Password updated successfully.',
+            'user' => [
+                'userID' => (int)$customer['user_id'],
+                'email' => (string)$customer['email'],
+                'fullName' => (string)($customer['full_name'] ?? ''),
+            ],
+        ]);
     }
 
     if ($action === 'checkEmailExists') {

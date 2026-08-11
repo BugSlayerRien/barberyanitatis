@@ -3,22 +3,44 @@
 
 declare(strict_types=1);
 
+function ai_env_get(string $key, string $default = ''): string
+{
+    // Prefer $_ENV / $_SERVER (updated by load_project_env) over getenv().
+    // On Windows + Apache, getenv() can keep stale process-start values even after putenv().
+    if (array_key_exists($key, $_ENV) && is_scalar($_ENV[$key])) {
+        $fromEnv = trim((string)$_ENV[$key]);
+        if ($fromEnv !== '') {
+            return $fromEnv;
+        }
+    }
+    if (array_key_exists($key, $_SERVER) && is_scalar($_SERVER[$key])) {
+        $fromServer = trim((string)$_SERVER[$key]);
+        if ($fromServer !== '') {
+            return $fromServer;
+        }
+    }
+
+    $fromGetenv = getenv($key);
+    if ($fromGetenv !== false && trim((string)$fromGetenv) !== '') {
+        return trim((string)$fromGetenv);
+    }
+
+    return $default;
+}
+
 function ai_gemini_api_key(): string
 {
-    return trim((string)(
-        getenv('AI_API_KEY')
-        ?: ($_ENV['AI_API_KEY'] ?? $_SERVER['AI_API_KEY'] ?? '')
-        ?: getenv('GEMINI_API_KEY')
-        ?: ($_ENV['GEMINI_API_KEY'] ?? $_SERVER['GEMINI_API_KEY'] ?? '')
-    ));
+    $key = ai_env_get('AI_API_KEY');
+    if ($key !== '') {
+        return $key;
+    }
+    return ai_env_get('GEMINI_API_KEY');
 }
 
 function ai_gemini_model(): string
 {
-    return trim((string)(
-        getenv('GEMINI_MODEL')
-        ?: ($_ENV['GEMINI_MODEL'] ?? $_SERVER['GEMINI_MODEL'] ?? 'gemini-2.5-flash-lite')
-    ));
+    $model = ai_env_get('GEMINI_MODEL');
+    return $model !== '' ? $model : 'gemini-2.5-flash-lite';
 }
 
 function ai_gemini_enabled(): bool

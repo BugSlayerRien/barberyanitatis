@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../about_page.dart';
-import '../auth_page.dart';
 import '../contact_page.dart';
 import '../settings_page.dart';
+import '../session_logout.dart';
 
 Future<void> showAppMenuSheet(BuildContext context) async {
   await showModalBottomSheet<void>(
@@ -66,10 +66,7 @@ Future<void> showAppMenuSheet(BuildContext context) async {
                   ),
                 );
                 if (confirmed == true && context.mounted) {
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const AuthPage()),
-                    (route) => false,
-                  );
+                  await SessionLogout.perform(context);
                 }
               },
             ),
