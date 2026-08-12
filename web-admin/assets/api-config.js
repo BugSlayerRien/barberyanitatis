@@ -66,3 +66,19 @@ async function parseJsonResponse(response) {
     );
   }
 }
+
+/** Retry transient network failures (Render cold start, connection reset). */
+async function fetchWithRetry(url, options = {}, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts - 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 2000 * (attempt + 1)));
+      }
+    }
+  }
+  throw lastError || new Error("Network request failed");
+}
