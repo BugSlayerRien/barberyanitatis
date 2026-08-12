@@ -58,7 +58,7 @@ function showView(view) {
 }
 
 navButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", async () => {
     const view = button.dataset.view;
     if (view === "logout") {
       sessionStorage.clear();
@@ -66,6 +66,9 @@ navButtons.forEach((button) => {
       return;
     }
     showView(view);
+    if (view === "schedule") {
+      await ensureScheduleViewReady();
+    }
   });
 });
 
@@ -1247,12 +1250,12 @@ function renderHaircuts() {
 }
 
 async function fetchHaircutDetail(hairstyleId) {
-  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "get", hairstyleID: hairstyleId }),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await parseJsonResponse(response);
   if (!response.ok) {
     throw new Error(data.error || "Failed to load haircut");
   }
@@ -2254,12 +2257,12 @@ function escapeScheduleText(value) {
 }
 
 async function scheduleApi(payload) {
-  const response = await fetch(resolveApiUrl("operating_schedule.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("operating_schedule.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const data = await response.json().catch(() => ({}));
+  const data = await parseJsonResponse(response);
   if (!response.ok) {
     throw new Error(data.error || "Schedule API error");
   }
@@ -2469,15 +2472,26 @@ function showScheduleWarnings(warnings) {
 
 async function loadOperatingSchedule() {
   try {
-    const response = await fetch(resolveApiUrl("operating_schedule.php"));
+    const response = await fetchWithRetry(resolveApiUrl("operating_schedule.php"));
     if (!response.ok) throw new Error("API error");
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     state.schedule = data.schedule;
     renderSchedule();
     const now = new Date();
     await loadScheduleCalendar(now.getFullYear(), now.getMonth() + 1);
-  } catch (_) {
-    // no-op
+  } catch (error) {
+    toast(error?.message || "Could not load operating schedule", "error");
+  }
+}
+
+async function ensureScheduleViewReady() {
+  if (!state.schedule) {
+    await loadOperatingSchedule();
+    return;
+  }
+  if (!state.scheduleCalendar) {
+    const now = new Date();
+    await loadScheduleCalendar(now.getFullYear(), now.getMonth() + 1);
   }
 }
 
@@ -2492,7 +2506,6 @@ async function refreshAll() {
       loadServices(),
       loadHaircuts(),
       loadSettings({ showRegion: false }),
-      loadOperatingSchedule(),
       loadAiStatus(),
     ]);
     setLastUpdated();
