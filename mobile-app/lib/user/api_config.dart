@@ -3,10 +3,14 @@ import 'dart:io';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 
-/// Resolves where the PHP API lives (XAMPP) for web vs emulator vs physical phone.
+/// Resolves where the PHP API lives (XAMPP local vs production Render).
 class ApiConfig {
   static const String _apiPath = '/barberyanitatis/tatis_barbershop/api';
   static const String webBaseUrl = 'http://localhost$_apiPath';
+
+  /// Production Render API. Build with:
+  /// `flutter run --dart-define=API_BASE_URL=https://barberyanitatis.onrender.com`
+  static const String productionBaseUrl = 'https://barberyanitatis.onrender.com';
 
   /// PC Wi‑Fi IPv4 from `ipconfig` (override: `--dart-define=LAN_HOST=192.168.1.x`).
   /// Update this whenever your PC's LAN IP changes (router DHCP).

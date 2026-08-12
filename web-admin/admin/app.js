@@ -523,14 +523,15 @@ async function loadDashboard() {
   try {
     const response = await fetch(resolveApiUrl("admin_dashboard.php"));
     if (!response.ok) throw new Error("API error");
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     state.activities = data.activities ?? [];
     renderStats(data.stats ?? []);
     renderActivities(state.activities);
-  } catch (_) {
+  } catch (error) {
     state.activities = [];
     renderStats([]);
     renderActivities([]);
+    toast(error?.message || "Failed to load dashboard", "error");
   }
 }
 
