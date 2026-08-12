@@ -40,6 +40,6 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     errorBox.textContent =
       error?.message ||
-      "Unable to connect to the server. Open the portal through http://localhost/.../web-admin/login.html (not as a local file).";
+      "Unable to connect to the server. If this is the live portal, wait a minute and try again (the API may be waking up). Locally, open http://localhost/.../web-admin/login.html (not as a file:// URL).";
   }
 });

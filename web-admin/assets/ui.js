@@ -242,7 +242,7 @@
     }
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 45000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 90000);
 
     try {
       const response = await fetch(url, {
