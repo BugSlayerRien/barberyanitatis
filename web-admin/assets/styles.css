@@ -67,10 +67,12 @@ body {
 }
 
 .brand-badge-logo {
+  background-color: #111;
   background-image: url("./images/TATIS.png");
-  background-size: contain;
+  background-size: 85%;
   background-repeat: no-repeat;
   background-position: center;
+  flex-shrink: 0;
 }
 
 .brand h1 {

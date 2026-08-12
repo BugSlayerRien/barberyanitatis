@@ -667,9 +667,9 @@ function renderUserTables() {
 
 async function loadUsers() {
   try {
-    const response = await fetch(resolveApiUrl("admin_users.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_users.php"));
     if (!response.ok) throw new Error("API error");
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     state.users = {
       customers: data.customers ?? [],
       barbers: data.barbers ?? [],
@@ -683,7 +683,7 @@ async function loadUsers() {
 }
 
 async function updateUser(payload) {
-  const response = await fetch(resolveApiUrl("admin_users.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_users.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -695,7 +695,7 @@ async function updateUser(payload) {
 }
 
 async function assignPortalRole(payload) {
-  const response = await fetch(resolveApiUrl("admin_users.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_users.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -962,7 +962,13 @@ async function saveAccountEditor() {
       dialog.close();
       state.accountEditor = null;
     } catch (error) {
-      toast(error.message || "Create failed");
+      const msg = error?.message || "Create failed";
+      toast(
+        msg === "Failed to fetch"
+          ? "Could not reach the API (Render may be waking up). Wait ~30s and try Save again."
+          : msg,
+        "error",
+      );
     }
     return;
   }
