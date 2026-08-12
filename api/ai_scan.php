@@ -678,12 +678,12 @@ try {
     if ($action === 'rankByFeatures') {
         $usedIds = [];
         $deduped = dedupe_variant_rows($recommendations, $usedIds);
-        json_response([
-            'message' => 'Live recommendations ready',
-            'userID' => $userID,
-            'faceShape' => $faceShape,
-            'hairTexture' => $hairTexture,
-            'hairDensity' => $hairDensity,
+    json_response([
+        'message' => 'Live recommendations ready',
+        'userID' => $userID,
+        'faceShape' => $faceShape,
+        'hairTexture' => $hairTexture,
+        'hairDensity' => $hairDensity,
             'libraryCatalogSize' => overlay_library_catalog_size(),
             'libraryOnly' => true,
             'recommendations' => $deduped,
@@ -715,12 +715,12 @@ try {
             'hairDensity' => $hairDensity,
             'libraryCatalogSize' => overlay_library_catalog_size(),
             'libraryOnly' => true,
-            'recommendations' => $recommendations,
+        'recommendations' => $recommendations,
             'topPicks' => $insights['topPicks'],
             'categories' => $insights['categories'],
             'aiSummary' => $insights['aiSummary'],
             'aiPowered' => (bool)($insights['aiPowered'] ?? false),
-        ]);
+    ]);
     }
 
     json_response(['error' => 'Invalid action'], 400);
