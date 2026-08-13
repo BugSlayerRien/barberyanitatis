@@ -61,3 +61,61 @@ curl -s -o NUL -w "%{http_code}\n" -X OPTIONS https://barberyanitatis.onrender.c
 ```
 
 OPTIONS should return **204**. GET ai_status should return **200**.
+
+---
+
+## Phase 2 — Mobile app + kiosk (next)
+
+Web admin is live. Point the Flutter apps at Render for real-device testing.
+
+### Run against production API
+
+From `mobile-app/`:
+
+```powershell
+# Interactive dev run (phone/emulator)
+.\scripts\run_production.ps1
+
+# Release APK
+.\scripts\build_apk_production.ps1
+```
+
+Equivalent manual command:
+
+```bash
+flutter run --dart-define=USE_PRODUCTION_API=true
+```
+
+Kiosk uses the same `ApiConfig` via the `tatis_barbershop` package — same flags apply.
+
+### Mobile test checklist
+
+1. Login / register (customer)
+2. Browse services & barbers
+3. Book appointment (time slots)
+4. Face scan / AI try-on (needs sidecar + Gemini keys on Render)
+5. Payment flow (PayMongo keys if enabled)
+6. Barber / receptionist roles if applicable
+
+First API call after idle may take ~1 minute (cold start).
+
+### Render disk for uploads (recommended)
+
+Without a disk, profile photos and face scans **disappear on redeploy**.
+
+1. Render → PHP service → **Disks** → Add disk, mount path **`/var/data`**, 1 GB+
+2. Redeploy API (entrypoint symlinks `/var/data/uploads` and `/var/data/storage`)
+3. Re-test profile image upload from mobile or admin
+
+### Security done in Phase 2 code
+
+- Time-slot AI advice now calls **`chatbot.php`** on the server (no Gemini key in the app).
+- Rotate any API key that was ever in git or frontend JS.
+
+### Still manual / later
+
+- Google OAuth redirect URLs for production mobile web
+- PayMongo live keys
+- App store / Play Store release builds
+- Haircut overlay PNG upload in admin (needs mobile assets in API image or object storage)
+

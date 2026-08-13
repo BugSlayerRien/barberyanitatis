@@ -10,6 +10,11 @@ services:
     plan: free
     # Free plan sleeps when idle; first request after sleep can take 30–90s ("cold start").
     healthCheckPath: /ai_status.php
+    # Optional persistent disk (Dashboard → Disks → mount path /var/data):
+    # disk:
+    #   name: tatis-uploads
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: APP_ENV
         value: production

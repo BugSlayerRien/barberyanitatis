@@ -35,6 +35,20 @@ ENV_FILE="/var/www/.env"
 chown www-data:www-data "${ENV_FILE}" 2>/dev/null || true
 chmod 640 "${ENV_FILE}" 2>/dev/null || true
 
+# Optional Render persistent disk: attach in dashboard, mount path /var/data
+# Keeps uploads + backups across redeploys.
+if [ -d /var/data ]; then
+  mkdir -p /var/data/uploads/face_scans \
+           /var/data/uploads/profiles \
+           /var/data/uploads/barbers \
+           /var/data/storage/backups
+  rm -rf /var/www/html/uploads /var/www/html/storage 2>/dev/null || true
+  ln -sfn /var/data/uploads /var/www/html/uploads
+  ln -sfn /var/data/storage /var/www/html/storage
+  chown -R www-data:www-data /var/data 2>/dev/null || true
+  chmod -R 775 /var/data/uploads /var/data/storage 2>/dev/null || true
+fi
+
 # Ensure writable dirs exist even if the image layer was overridden
 mkdir -p /var/www/html/uploads/face_scans \
          /var/www/html/uploads/profiles \

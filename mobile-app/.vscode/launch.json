@@ -13,13 +13,13 @@
       ]
     },
     {
-      "name": "Flutter (Gemini Chatbot)",
+      "name": "Flutter (Production API)",
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
       "cwd": "${workspaceFolder}/tatis_barbershop/mobile-app",
       "toolArgs": [
-        "--dart-define=GEMINI_CHATBOT_API_KEY=AQ.Ab8RN6KlvnR-121WQ5uxMLL8cMZN7yWFg8-319S1KXo169ZEBQ"
+        "--dart-define=USE_PRODUCTION_API=true"
       ]
     }
   ]
