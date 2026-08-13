@@ -8,9 +8,15 @@ class ApiConfig {
   static const String _apiPath = '/barberyanitatis/tatis_barbershop/api';
   static const String webBaseUrl = 'http://localhost$_apiPath';
 
-  /// Production Render API. Build with:
-  /// `flutter run --dart-define=API_BASE_URL=https://barberyanitatis.onrender.com`
+  /// Production Render API. Build with either:
+  /// `flutter run --dart-define=USE_PRODUCTION_API=true`
+  /// or `flutter run --dart-define=API_BASE_URL=https://barberyanitatis.onrender.com`
   static const String productionBaseUrl = 'https://barberyanitatis.onrender.com';
+
+  /// When true (release/testing against live API), uses [productionBaseUrl]
+  /// unless [API_BASE_URL] is set explicitly.
+  static const bool useProductionApi =
+      bool.fromEnvironment('USE_PRODUCTION_API', defaultValue: false);
 
   /// PC Wi‑Fi IPv4 from `ipconfig` (override: `--dart-define=LAN_HOST=192.168.1.x`).
   /// Update this whenever your PC's LAN IP changes (router DHCP).
@@ -45,6 +51,13 @@ class ApiConfig {
   }
 
   static String _resolveBaseUrlSync() {
+    const configured = String.fromEnvironment('API_BASE_URL', defaultValue: '');
+    if (configured.isNotEmpty) {
+      return configured;
+    }
+    if (useProductionApi) {
+      return productionBaseUrl;
+    }
     if (kIsWeb) {
       return webBaseUrl;
     }
@@ -61,6 +74,9 @@ class ApiConfig {
     const configured = String.fromEnvironment('API_BASE_URL', defaultValue: '');
     if (configured.isNotEmpty) {
       return configured;
+    }
+    if (useProductionApi) {
+      return productionBaseUrl;
     }
     if (kIsWeb) {
       return webBaseUrl;

@@ -41,9 +41,6 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   static const double _shopLatitude = 14.5995;
   static const double _shopLongitude = 120.9842;
   static const int _appointmentDurationMinutes = 60;
-  static const String _aiApiKey =
-      'REMOVED_GEMINI_KEY';
-  static const String _aiModelName = 'gemini-2.5-flash';
 
   String? _selectedTime;
   bool _loading = true;
@@ -344,7 +341,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     required List<Map<String, dynamic>> allSlots,
     required Map<String, dynamic> recommendedSlot,
   }) async {
-    if (availableSlots.isEmpty || !_aiApiKey.isNotEmpty) {
+    if (availableSlots.isEmpty) {
       return null;
     }
 
@@ -386,23 +383,12 @@ Keep the total response under 24 words.
 
     try {
       final response = await http.post(
-        Uri.parse(
-          'https://generativelanguage.googleapis.com/v1beta/models/$_aiModelName:generateContent?key=$_aiApiKey',
-        ),
+        Uri.parse('${ApiConfig.baseUrl}/chatbot.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'contents': [
-            {
-              'parts': [
-                {'text': prompt}
-              ]
-            }
-          ],
-          'generationConfig': {
-            'temperature': 0.3,
-            'topP': 0.9,
-            'maxOutputTokens': 120,
-          }
+          'message': prompt,
+          'skipFaq': true,
+          'history': <Map<String, dynamic>>[],
         }),
       );
 
@@ -411,17 +397,7 @@ Keep the total response under 24 words.
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final candidates = data['candidates'] as List<dynamic>? ?? const [];
-      if (candidates.isEmpty) {
-        return null;
-      }
-      final first = candidates.first as Map<String, dynamic>;
-      final content = first['content'] as Map<String, dynamic>? ?? const {};
-      final parts = content['parts'] as List<dynamic>? ?? const [];
-      if (parts.isEmpty) {
-        return null;
-      }
-      final text = (parts.first as Map<String, dynamic>)['text']?.toString().trim();
+      final text = data['reply']?.toString().trim();
       if (text == null || text.isEmpty) {
         return null;
       }
