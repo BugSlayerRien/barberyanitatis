@@ -1,4 +1,6 @@
-# Optional Render blueprint (you can also create services in the dashboard)
+# Optional Render blueprint (you can also create services in the dashboard).
+# Secrets must be set in the Render dashboard — do not put real keys here.
+
 services:
   - type: web
     name: tatis-php-api
@@ -6,6 +8,7 @@ services:
     rootDir: api
     dockerfilePath: ./Dockerfile
     plan: free
+    # Free plan sleeps when idle; first request after sleep can take 30–90s ("cold start").
     healthCheckPath: /ai_status.php
     envVars:
       - key: APP_ENV
@@ -14,6 +17,23 @@ services:
         value: "false"
       - key: PASSWORD_RESET_DEBUG_TOKEN
         value: "false"
-      # Set these in the Render dashboard (do not commit secrets):
-      # DB_URL, GEMINI_API_KEY, AI_API_KEY, GEMINI_MODEL,
-      # XAI_API_KEY, AI_TRYON_PROVIDER, AI_SERVICE_URL, REPLICATE_API_TOKEN, ...
+      # Required / recommended (set in dashboard):
+      # DB_URL
+      # GEMINI_API_KEY (or AI_API_KEY), GEMINI_MODEL
+      # AI_TRYON_PROVIDER, XAI_API_KEY / GEMINI_IMAGE_API_KEY / REPLICATE_API_TOKEN
+      # AI_SERVICE_URL=https://<your-sidecar>.onrender.com
+      # GOOGLE_ALLOWED_CLIENT_IDS, PASSWORD_RESET_BASE_URL, PASSWORD_RESET_MAIL_FROM
+
+  - type: web
+    name: tatis-ai-sidecar
+    runtime: python
+    rootDir: ai-service
+    plan: free
+    healthCheckPath: /health
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      # Set in dashboard if used by sidecar:
+      # REPLICATE_API_TOKEN, REPLICATE_FLUX_MODEL

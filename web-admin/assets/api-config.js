@@ -3,8 +3,14 @@
  *
  * Production default: https://barberyanitatis.onrender.com
  * Override anytime: window.API_BASE_URL = 'https://...'; or localStorage API_BASE_URL
+ *
+ * Cold start (plain English): free Render servers sleep after idle time.
+ * The first request wakes them (often 30–90s). During wake-up the browser
+ * may show "Failed to fetch". Retrying after a short wait usually works.
  */
 const DEFAULT_PRODUCTION_API_BASE = "https://barberyanitatis.onrender.com";
+const API_FETCH_TIMEOUT_MS = 90000;
+const API_RETRY_ATTEMPTS = 3;
 
 function getApiBaseUrl() {
   const fromWindow =
@@ -52,6 +58,18 @@ function resolveApiUrl(fileName) {
   return `../api/${clean}`;
 }
 
+function friendlyNetworkError(error) {
+  const name = error && error.name ? String(error.name) : "";
+  const message = error && error.message ? String(error.message) : "";
+  if (name === "AbortError") {
+    return "The API took too long to respond. On free Render it may be waking up — wait about a minute and try again.";
+  }
+  if (/failed to fetch|networkerror|load failed|network request failed/i.test(message)) {
+    return "Could not reach the API. If you just opened the portal, wait ~30–60s (server waking up) then retry.";
+  }
+  return message || "Network request failed";
+}
+
 async function parseJsonResponse(response) {
   const raw = await response.text();
   if (!raw) {
@@ -67,18 +85,59 @@ async function parseJsonResponse(response) {
   }
 }
 
-/** Retry transient network failures (Render cold start, connection reset). */
-async function fetchWithRetry(url, options = {}, attempts = 3) {
+/**
+ * fetch with timeout + retries for Render cold starts / dropped connections.
+ */
+async function fetchWithRetry(url, options = {}, attempts = API_RETRY_ATTEMPTS) {
   let lastError = null;
+
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const controller = new AbortController();
+    const externalSignal = options.signal;
+    const onExternalAbort = () => controller.abort();
+    if (externalSignal) {
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", onExternalAbort, { once: true });
+      }
+    }
+
+    const timeoutId = window.setTimeout(() => controller.abort(), API_FETCH_TIMEOUT_MS);
+
     try {
-      return await fetch(url, options);
+      const response = await fetch(url, {
+        ...options,
+        signal: controller.signal,
+      });
+      return response;
     } catch (error) {
       lastError = error;
       if (attempt < attempts - 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2000 * (attempt + 1)));
+        await new Promise((resolve) => window.setTimeout(resolve, 2500 * (attempt + 1)));
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (externalSignal) {
+        externalSignal.removeEventListener("abort", onExternalAbort);
       }
     }
   }
-  throw lastError || new Error("Network request failed");
+
+  throw new Error(friendlyNetworkError(lastError));
+}
+
+/** Fire-and-forget wake so the first real click is less likely to fail. */
+function wakeApiServer() {
+  const base = getApiBaseUrl();
+  if (!base) {
+    return;
+  }
+  fetchWithRetry(`${base}/ai_status.php`, { method: "GET", cache: "no-store" }, 2).catch(() => {});
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("DOMContentLoaded", () => {
+    wakeApiServer();
+  });
 }

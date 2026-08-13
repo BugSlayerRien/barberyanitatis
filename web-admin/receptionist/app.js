@@ -105,7 +105,8 @@ async function postJson(url, payload, loadingMessage = false) {
   if (ui()?.fetchJson) {
     return ui().fetchJson(url, payload, loadingMessage);
   }
-  const response = await fetch(url, {
+  const doFetch = typeof fetchWithRetry === "function" ? fetchWithRetry : fetch;
+  const response = await doFetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
