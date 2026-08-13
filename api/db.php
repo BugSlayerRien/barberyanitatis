@@ -8,6 +8,14 @@ require_once __DIR__ . '/http.php';
 if (PHP_SAPI !== 'cli') {
     load_project_env();
     apply_api_cors_headers();
+
+    // Browsers on Vercel (cross-origin) send OPTIONS before JSON POSTs.
+    // Endpoints that only allow GET/POST must still answer OPTIONS with 204 + CORS,
+    // or the browser blocks the real request as "Failed to fetch".
+    if (strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'OPTIONS') {
+        http_response_code(204);
+        exit;
+    }
 }
 
 /**

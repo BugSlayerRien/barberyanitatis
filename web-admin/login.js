@@ -7,9 +7,13 @@ form.addEventListener("submit", async (event) => {
 
   const email = document.getElementById("email").value.trim();
   const password = document.getElementById("password").value;
+  const submitBtn = form.querySelector('button[type="submit"]');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+  }
 
   try {
-    const response = await fetch(resolveApiUrl("auth.php"), {
+    const response = await fetchWithRetry(resolveApiUrl("auth.php"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action: "login", email, password }),
@@ -41,5 +45,9 @@ form.addEventListener("submit", async (event) => {
     errorBox.textContent =
       error?.message ||
       "Unable to connect to the server. If this is the live portal, wait a minute and try again (the API may be waking up). Locally, open http://localhost/.../web-admin/login.html (not as a file:// URL).";
+  } finally {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+    }
   }
 });

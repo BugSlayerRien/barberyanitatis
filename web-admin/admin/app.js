@@ -32,9 +32,6 @@ const state = {
   pagination: {},
 };
 
-const CHATBOT_API_KEY = "AQ.Ab8RN6KlvnR-121WQ5uxMLL8cMZN7yWFg8-319S1KXo169ZEBQ";
-const CHATBOT_MODEL = "gemini-2.5-flash";
-
 const DEFAULT_PAGE_SIZE = 5;
 const PAGE_SIZE_BY_KEY = {
   "activity-list": 5,
@@ -225,7 +222,7 @@ async function saveProfileEdits() {
   const saveBtn = document.getElementById("profile-dialog-save");
   await withButtonLoading(saveBtn, async () => {
     try {
-      const response = await fetch(resolveApiUrl("staff_profile.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("staff_profile.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -488,7 +485,7 @@ async function loadAiStatus() {
   if (!panel || !badge) return;
 
   try {
-    const response = await fetch(resolveApiUrl("ai_status.php"));
+    const response = await fetchWithRetry(resolveApiUrl("ai_status.php"));
     if (!response.ok) throw new Error("Unable to fetch AI status");
     const data = await response.json();
 
@@ -524,7 +521,7 @@ async function loadAiStatus() {
 
 async function loadDashboard() {
   try {
-    const response = await fetch(resolveApiUrl("admin_dashboard.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_dashboard.php"));
     if (!response.ok) throw new Error("API error");
     const data = await parseJsonResponse(response);
     state.activities = data.activities ?? [];
@@ -1152,7 +1149,7 @@ async function saveServiceEditor() {
 }
 
 async function saveService(action, payload) {
-  const response = await fetch(resolveApiUrl("admin_services.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_services.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
@@ -1198,7 +1195,7 @@ function renderServices() {
 
 async function loadServices() {
   try {
-    const response = await fetch(resolveApiUrl("admin_services.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_services.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.services = data.services ?? [];
@@ -1216,7 +1213,7 @@ function overlayPreviewUrl(assetPath) {
 
 async function loadHaircuts() {
   try {
-    const response = await fetch(resolveApiUrl("admin_hairstyles.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.haircuts = data.hairstyles ?? [];
@@ -1269,7 +1266,7 @@ async function fetchHaircutDetail(hairstyleId) {
 }
 
 async function saveHaircut(action, payload) {
-  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
@@ -1282,7 +1279,7 @@ async function saveHaircut(action, payload) {
 }
 
 async function saveVariant(action, payload) {
-  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, ...payload }),
@@ -1303,7 +1300,7 @@ async function uploadHaircutOverlay(hairstyleId, view, file, overlayFolder) {
   if (overlayFolder) {
     form.append("overlayFolder", overlayFolder);
   }
-  const response = await fetch(resolveApiUrl("admin_hairstyles.php"), {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
     method: "POST",
     body: form,
   });
@@ -1653,7 +1650,7 @@ function renderAudit() {
 
 async function loadAudit() {
   try {
-    const response = await fetch(resolveApiUrl("admin_audit.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_audit.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     state.audit = data.events ?? [];
@@ -2007,7 +2004,7 @@ async function loadAnalytics(period = state.analyticsPeriod || "30d", options = 
   if (options.showRegion) setRegionLoading(panel, true, "Loading analytics...");
 
   try {
-    const response = await fetch(resolveApiUrl(`admin_analytics.php?period=${encodeURIComponent(period)}`));
+    const response = await fetchWithRetry(resolveApiUrl(`admin_analytics.php?period=${encodeURIComponent(period)}`));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     if (data.error) throw new Error(data.error);
@@ -2075,7 +2072,7 @@ async function loadSettings(options = {}) {
   const showRegion = options.showRegion !== false;
   if (showRegion) setRegionLoading(desk, true, "Loading settings...");
   try {
-    const response = await fetch(resolveApiUrl("admin_settings.php"));
+    const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"));
     if (!response.ok) throw new Error("API error");
     const data = await response.json();
     applySettingsPayload(data);
@@ -2726,7 +2723,7 @@ document.getElementById("settings-save")?.addEventListener("click", async (event
         emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
         notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
       };
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -2748,7 +2745,7 @@ document.querySelectorAll("[data-export]").forEach((button) => {
     const table = button.getAttribute("data-export");
     await withButtonLoading(button, async () => {
       try {
-        const response = await fetch(resolveApiUrl("admin_settings.php"), {
+        const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "exportCsv", table }),
@@ -2781,7 +2778,7 @@ document.getElementById("services-import")?.addEventListener("click", async (eve
   const text = await file.text();
   await withButtonLoading(btn, async () => {
     try {
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "importServicesCsv", csvText: text }),
@@ -2807,7 +2804,7 @@ document.getElementById("settings-test-email")?.addEventListener("click", async 
   }
   await withButtonLoading(btn, async () => {
     try {
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "sendTestEmail", email }),
@@ -2827,7 +2824,7 @@ document.getElementById("settings-process-notifications")?.addEventListener("cli
   const btn = event.currentTarget;
   await withButtonLoading(btn, async () => {
     try {
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "processNotifications" }),
@@ -2854,7 +2851,7 @@ document.getElementById("settings-download-backup")?.addEventListener("click", a
   if (!confirmed) return;
   await withButtonLoading(btn, async () => {
     try {
-      const response = await fetch(resolveApiUrl("admin_settings.php"), {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "downloadBackup" }),

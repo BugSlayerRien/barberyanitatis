@@ -241,15 +241,13 @@
       showLoading(loadingMessage || "Please wait...");
     }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 90000);
-
     try {
-      const response = await fetch(url, {
+      const doFetch =
+        typeof global.fetchWithRetry === "function" ? global.fetchWithRetry : global.fetch;
+      const response = await doFetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
-        signal: controller.signal,
       });
       const raw = await response.text();
       let data = {};
@@ -267,11 +265,12 @@
       return data;
     } catch (error) {
       if (error && error.name === "AbortError") {
-        throw new Error("Request timed out. Check your connection and try again.");
+        throw new Error(
+          "Request timed out. On free Render the API may be waking up — wait about a minute and try again."
+        );
       }
       throw error;
     } finally {
-      window.clearTimeout(timeoutId);
       if (useLoading) {
         hideLoading();
       }
