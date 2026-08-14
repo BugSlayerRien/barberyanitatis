@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 
 import '../user/widgets/app_top_bar.dart';
+import '../user/widgets/shimmer_skeleton.dart';
 import '../user/api_config.dart';
 import '../user/user_session.dart';
 
@@ -18,7 +19,7 @@ class BarberProfilePage extends StatefulWidget {
 }
 
 class _BarberProfilePageState extends State<BarberProfilePage> {
-  bool _loadingRating = false;
+  bool _loading = true;
   bool _savingImage = false;
   String _rating = '5.0';
   int _ratingCount = 0;
@@ -31,48 +32,87 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
     _loadBarberProfile();
   }
 
+  String _barberImageField(Map<String, dynamic>? barber) {
+    if (barber == null) {
+      return '';
+    }
+    final raw = barber['profile_image'] ?? barber['profileImage'] ?? '';
+    final value = raw.toString().trim();
+    if (value.isEmpty || value.toLowerCase() == 'null') {
+      return '';
+    }
+    return value;
+  }
+
+  /// Serve relative uploads through the existing PHP proxy so Android/iOS
+  /// can load files Apache may not expose the same way as Flutter web.
+  String _displayImageUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      return '';
+    }
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return ApiConfig.resolveImageUrl(trimmed);
+    }
+    final path = trimmed.startsWith('/') ? trimmed : '/$trimmed';
+    return '${ApiConfig.baseUrl}/image_proxy.php?path=${Uri.encodeComponent(path)}';
+  }
+
   Future<void> _loadBarberProfile() async {
     final barberId = UserSession.userId;
-    if (barberId == null || barberId <= 0) {
+    final email = (UserSession.email ?? '').trim();
+    if ((barberId == null || barberId <= 0) && email.isEmpty) {
+      setState(() => _loading = false);
       return;
     }
 
-    setState(() => _loadingRating = true);
+    setState(() => _loading = true);
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'detail', 'barberID': barberId}),
+        body: jsonEncode({
+          'action': 'detail',
+          'barberID': barberId ?? 0,
+          'email': email,
+        }),
       );
       if (!mounted) {
         return;
       }
       if (response.statusCode != 200 || response.body.isEmpty) {
+        setState(() => _loading = false);
         return;
       }
 
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final barber = data['barber'] as Map<String, dynamic>?;
       final ratingValue = barber?['rating'];
+      final resolvedId = barber?['barber_id'] is int
+          ? barber!['barber_id'] as int
+          : int.tryParse('${barber?['barber_id'] ?? ''}');
+      if (resolvedId != null && resolvedId > 0) {
+        UserSession.userId = resolvedId;
+      }
       setState(() {
         if (ratingValue != null) {
           _rating = (double.tryParse(ratingValue.toString()) ?? 5.0).toStringAsFixed(2);
         }
         _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
-        _profileImageUrl = barber?['profile_image']?.toString() ?? '';
+        _profileImageUrl = _barberImageField(barber);
+        _loading = false;
       });
     } catch (_) {
-      // Keep fallback values on errors.
-    } finally {
       if (mounted) {
-        setState(() => _loadingRating = false);
+        setState(() => _loading = false);
       }
     }
   }
 
   Future<void> _pickAndUploadPhoto() async {
     final barberId = UserSession.userId;
-    if (barberId == null || barberId <= 0) {
+    final email = (UserSession.email ?? '').trim();
+    if ((barberId == null || barberId <= 0) && email.isEmpty) {
       return;
     }
 
@@ -91,7 +131,6 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
       _pickedImage = image;
       _savingImage = true;
     });
-
     try {
       final bytes = await image.readAsBytes();
       final response = await http.post(
@@ -99,7 +138,8 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'action': 'updateProfileImage',
-          'barberID': barberId,
+          'barberID': barberId ?? 0,
+          'email': email,
           'profileImageBase64': base64Encode(bytes),
         }),
       );
@@ -119,8 +159,23 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
         return;
       }
 
+      final saved = (data['profileImage'] ?? data['profile_image'])?.toString().trim() ?? '';
+      if (saved.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo saved on disk, but the profile path was not stored.')),
+        );
+        return;
+      }
+
+      final savedBarberId = data['barberID'] is int
+          ? data['barberID'] as int
+          : int.tryParse('${data['barberID'] ?? ''}');
+      if (savedBarberId != null && savedBarberId > 0) {
+        UserSession.userId = savedBarberId;
+      }
+
       setState(() {
-        _profileImageUrl = data['profileImage']?.toString() ?? _profileImageUrl;
+        _profileImageUrl = saved;
         _pickedImage = null;
       });
       ScaffoldMessenger.of(context).showSnackBar(
@@ -148,16 +203,24 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
       return Image.file(File(_pickedImage!.path), fit: BoxFit.cover);
     }
     if (_profileImageUrl.isNotEmpty) {
+      final url = _displayImageUrl(_profileImageUrl);
       return Image.network(
-        ApiConfig.resolveImageUrl(_profileImageUrl),
+        url,
+        key: ValueKey(url),
         fit: BoxFit.cover,
         errorBuilder: (_, __, ___) => Center(
-          child: Text(initials, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+          child: Text(
+            initials,
+            style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+          ),
         ),
       );
     }
     return Center(
-      child: Text(initials, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold)),
+      child: Text(
+        initials,
+        style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
+      ),
     );
   }
 
@@ -188,60 +251,107 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Stack(
-              alignment: Alignment.bottomRight,
-              children: [
-                Container(
+            if (_loading)
+              _buildProfileSkeleton()
+            else ...[
+              GestureDetector(
+                onTap: _savingImage ? null : _pickAndUploadPhoto,
+                child: Container(
                   width: 120,
                   height: 120,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 2),
-                    color: const Color(0xFF1A1A1A),
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+                    ),
                   ),
-                  clipBehavior: Clip.antiAlias,
-                  child: _savingImage
-                      ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : _avatarWidget(initials),
-                ),
-                IconButton(
-                  style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFFA99941),
-                    foregroundColor: Colors.black,
+                  child: ClipOval(
+                    child: _savingImage
+                        ? const Center(
+                            child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                          )
+                        : _avatarWidget(initials),
                   ),
-                  onPressed: _savingImage ? null : _pickAndUploadPhoto,
-                  icon: const Icon(Icons.camera_alt, size: 18),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: _savingImage ? null : _pickAndUploadPhoto,
-              child: const Text('Change profile photo', style: TextStyle(color: Color(0xFFA99941))),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              fullName.isNotEmpty ? fullName : 'Barber',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              email.isNotEmpty ? email : 'No email available',
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-            const SizedBox(height: 18),
-            _infoCard('Role', roleText),
-            const SizedBox(height: 16),
-            _infoCard(
-              'Current Rating',
-              _loadingRating
-                  ? 'Loading...'
-                  : '$_rating (${_ratingCount} ${_ratingCount == 1 ? 'rating' : 'ratings'})',
-            ),
-            const SizedBox(height: 16),
-            _infoCard('Account ID', '${UserSession.userId ?? '-'}'),
+              ),
+              const SizedBox(height: 24),
+              Text(
+                fullName.isNotEmpty ? fullName : 'Barber',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                email.isNotEmpty ? email : 'No email available',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 18),
+              _infoCard('Role', roleText),
+              const SizedBox(height: 16),
+              _infoCard(
+                'Current Rating',
+                '$_rating ($_ratingCount ${_ratingCount == 1 ? 'rating' : 'ratings'})',
+              ),
+              const SizedBox(height: 16),
+              _infoCard('Account ID', '${UserSession.userId ?? '-'}'),
+            ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildProfileSkeleton() {
+    Widget skeletonCard({double valueWidth = 140}) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white, width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const AppShimmerBox(width: 80, height: 12, borderRadius: 4),
+            const SizedBox(height: 10),
+            AppShimmerBox(width: valueWidth, height: 14, borderRadius: 4),
+          ],
+        ),
+      );
+    }
+
+    return AppShimmer(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Center(
+            child: AppShimmerBox(width: 120, height: 120, borderRadius: 60),
+          ),
+          const SizedBox(height: 24),
+          const Center(
+            child: AppShimmerBox(width: 160, height: 18, borderRadius: 6),
+          ),
+          const SizedBox(height: 10),
+          const Center(
+            child: AppShimmerBox(width: 180, height: 13, borderRadius: 4),
+          ),
+          const SizedBox(height: 18),
+          skeletonCard(),
+          const SizedBox(height: 16),
+          skeletonCard(valueWidth: 120),
+          const SizedBox(height: 16),
+          skeletonCard(valueWidth: 60),
+        ],
       ),
     );
   }
@@ -264,7 +374,10 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
         children: [
           Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           const SizedBox(height: 10),
-          Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+          ),
         ],
       ),
     );
