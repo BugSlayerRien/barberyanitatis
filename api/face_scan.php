@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/replicate_helper.php';
 require_once __DIR__ . '/ai_gemini_image_helper.php';
 require_once __DIR__ . '/ai_tryon_provider.php';
@@ -168,18 +169,11 @@ function save_jpeg_capture(string $scanSessionId, string $angle, string $base64)
         throw new InvalidArgumentException("Invalid JPEG for angle {$angle}");
     }
 
-    $dir = face_scan_upload_root() . DIRECTORY_SEPARATOR . preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId);
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        throw new RuntimeException('Unable to create upload directory');
-    }
+    $session = preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId);
+    $relative = 'uploads/face_scans/' . $session . '/' . $angle . '.jpg';
+    storage_put_bytes($relative, $bytes, 'image/jpeg');
 
-    $filename = $angle . '.jpg';
-    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (file_put_contents($fullPath, $bytes) === false) {
-        throw new RuntimeException("Unable to write {$filename}");
-    }
-
-    return 'uploads/face_scans/' . basename($dir) . '/' . $filename;
+    return $relative;
 }
 
 function save_preview_bytes(string $scanSessionId, int $variantId, string $angle, string $bytes): string
@@ -201,19 +195,13 @@ function save_preview_bytes(string $scanSessionId, int $variantId, string $angle
         }
     }
 
-    $dir = face_scan_upload_root() . DIRECTORY_SEPARATOR . preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId) . DIRECTORY_SEPARATOR . 'previews';
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        throw new RuntimeException('Unable to create preview directory');
-    }
-
+    $session = preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId);
     $variantPart = $variantId > 0 ? ('v' . $variantId . '_') : '';
     $filename = $variantPart . $angle . '.jpg';
-    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (file_put_contents($fullPath, $bytes) === false) {
-        throw new RuntimeException("Unable to write preview {$filename}");
-    }
+    $relative = 'uploads/face_scans/' . $session . '/previews/' . $filename;
+    storage_put_bytes($relative, $bytes, 'image/jpeg');
 
-    return 'uploads/face_scans/' . basename(dirname($dir)) . '/previews/' . $filename;
+    return $relative;
 }
 
 function save_jpeg_preview(string $scanSessionId, string $angle, string $base64): string
@@ -232,19 +220,14 @@ function save_jpeg_preview(string $scanSessionId, string $angle, string $base64)
         }
     }
 
-    $dir = face_scan_upload_root() . DIRECTORY_SEPARATOR . preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId) . DIRECTORY_SEPARATOR . 'previews';
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        throw new RuntimeException('Unable to create preview directory');
-    }
-
+    $session = preg_replace('/[^a-zA-Z0-9_\-]/', '', $scanSessionId);
     $ext = is_valid_jpeg_bytes($bytes) ? 'jpg' : 'png';
     $filename = $angle . '.' . $ext;
-    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (file_put_contents($fullPath, $bytes) === false) {
-        throw new RuntimeException("Unable to write preview {$filename}");
-    }
+    $relative = 'uploads/face_scans/' . $session . '/previews/' . $filename;
+    $mime = $ext === 'png' ? 'image/png' : 'image/jpeg';
+    storage_put_bytes($relative, $bytes, $mime);
 
-    return 'uploads/face_scans/' . basename(dirname($dir)) . '/previews/' . $filename;
+    return $relative;
 }
 
 try {

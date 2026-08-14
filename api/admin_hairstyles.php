@@ -4,6 +4,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
 
 const ADMIN_OVERLAY_MAX_BYTES = 5 * 1024 * 1024;
@@ -367,17 +368,31 @@ function handle_upload_overlay(PDO $pdo): void
         }
     );
 
-    $dir = mobile_app_overlay_root() . '/' . $folder;
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        json_response(['error' => 'Could not create overlay directory'], 500);
+    $bytes = file_get_contents($file['tmp_name']);
+    if ($bytes === false || $bytes === '') {
+        json_response(['error' => 'Could not read overlay file'], 500);
     }
 
+    $dir = mobile_app_overlay_root() . '/' . $folder;
     $dest = $dir . '/' . $filename;
-    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+    $assetPath = 'assets/images/overlays/' . $folder . '/' . $filename;
+    $wroteLocal = false;
+    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+        if (storage_driver() !== 'supabase') {
+            json_response(['error' => 'Could not create overlay directory'], 500);
+        }
+    } else {
+        $wroteLocal = file_put_contents($dest, $bytes) !== false;
+        if (!$wroteLocal && storage_driver() !== 'supabase') {
+            json_response(['error' => 'Could not save overlay file'], 500);
+        }
+    }
+
+    if (storage_driver() === 'supabase') {
+        storage_put_bytes($assetPath, $bytes, 'image/png');
+    } elseif (!$wroteLocal) {
         json_response(['error' => 'Could not save overlay file'], 500);
     }
-
-    $assetPath = 'assets/images/overlays/' . $folder . '/' . $filename;
     $column = match (strtolower($view)) {
         'front' => 'front_view_url',
         'left', 'side' => 'side_view_url',

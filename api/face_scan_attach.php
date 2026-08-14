@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+require_once __DIR__ . '/storage.php';
+
 function ensure_face_scan_preview_storage(PDO $pdo): void
 {
     $pdo->exec(
@@ -31,13 +33,7 @@ function ensure_face_scan_preview_storage(PDO $pdo): void
 
 function face_scan_preview_file_exists(string $relativeUrl): bool
 {
-    $relativeUrl = trim($relativeUrl);
-    if ($relativeUrl === '') {
-        return false;
-    }
-    $root = api_project_root();
-    $fullPath = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativeUrl, '/'));
-    return is_file($fullPath) && filesize($fullPath) > 0;
+    return storage_exists($relativeUrl);
 }
 
 /**
