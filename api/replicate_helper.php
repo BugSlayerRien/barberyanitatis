@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Ported from backend-replicate/api.py — server-side only (REPLICATE_API_TOKEN in .env).
  */
 
+require_once __DIR__ . '/storage.php';
+
 function replicate_curl_set($ch, array $options): void
 {
     curl_setopt_array($ch, $options + api_curl_ssl_options());
@@ -173,7 +175,16 @@ function replicate_view_angle_hints(): array
 
 function replicate_absolute_path_from_relative(string $relativePath): string
 {
-    return api_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
+    $relativePath = trim($relativePath);
+    if ($relativePath === '') {
+        return '';
+    }
+
+    try {
+        return storage_ensure_readable_file($relativePath);
+    } catch (Throwable $e) {
+        return api_project_root() . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim($relativePath, '/'));
+    }
 }
 
 /**

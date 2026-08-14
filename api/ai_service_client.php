@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Set AI_SERVICE_URL in .env (e.g. http://127.0.0.1:8000).
  */
 
+require_once __DIR__ . '/storage.php';
+
 function ai_service_base_url(): string
 {
     $url = trim((string)(getenv('AI_SERVICE_URL') ?: ($_ENV['AI_SERVICE_URL'] ?? '')));
@@ -204,14 +206,18 @@ function ai_service_curl_file(string $absolutePath, string $uploadName)
  */
 function ai_service_absolute_capture_paths(array $relativePaths): array
 {
-    $root = api_project_root();
     $out = [];
     foreach (['front', 'left', 'right'] as $angle) {
         $rel = $relativePaths[$angle] ?? null;
         if ($rel === null || $rel === '') {
             continue;
         }
-        $out[$angle] = $root . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim((string)$rel, '/'));
+        try {
+            $out[$angle] = storage_ensure_readable_file((string)$rel);
+        } catch (Throwable $e) {
+            $out[$angle] = api_project_root() . DIRECTORY_SEPARATOR
+                . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, ltrim((string)$rel, '/'));
+        }
     }
 
     return $out;

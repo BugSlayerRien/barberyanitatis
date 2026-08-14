@@ -1,8 +1,10 @@
 <?php
-// Image proxy for Flutter web (adds CORS headers and serves local assets/uploads)
+// Image proxy for Flutter web (adds CORS headers and serves local assets/uploads).
+// Phase 2: if an uploads/ object is missing on disk, stream it from Storage.
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/storage.php';
 
 $path = isset($_GET['path']) ? trim((string)$_GET['path']) : '';
 if ($path === '') {
@@ -35,15 +37,29 @@ if (!is_file($fullPath) && (strpos($relative, 'assets/') === 0)) {
     }
 }
 
-if (!is_file($fullPath)) {
-    json_response(['error' => 'File not found'], 404);
+$sendCors = static function (): void {
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, OPTIONS');
+    header('Access-Control-Allow-Headers: Origin, Content-Type, Accept');
+    header('X-Content-Type-Options: nosniff');
+};
+
+if (is_file($fullPath)) {
+    $mime = function_exists('mime_content_type') ? mime_content_type($fullPath) : 'application/octet-stream';
+    $sendCors();
+    header('Content-Type: ' . ($mime ?: 'application/octet-stream'));
+    readfile($fullPath);
+    exit;
 }
 
-$mime = function_exists('mime_content_type') ? mime_content_type($fullPath) : 'application/octet-stream';
-header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: GET, OPTIONS');
-header('Access-Control-Allow-Headers: Origin, Content-Type, Accept');
-header('X-Content-Type-Options: nosniff');
-header('Content-Type: ' . ($mime ?: 'application/octet-stream'));
-readfile($fullPath);
-exit;
+if (strpos($relative, 'uploads/') === 0) {
+    $bytes = storage_get_bytes($relative);
+    if ($bytes !== null && $bytes !== '') {
+        $sendCors();
+        header('Content-Type: ' . storage_mime_from_path($relative));
+        echo $bytes;
+        exit;
+    }
+}
+
+json_response(['error' => 'File not found'], 404);

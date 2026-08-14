@@ -214,12 +214,19 @@ function build_user_payload(string $accountType, array $row): array
     ];
 }
 
+function password_hash_matches(array $row, string $password): bool
+{
+    $hash = (string)($row['password_hash'] ?? '');
+
+    return $hash !== '' && password_verify($password, $hash);
+}
+
 function find_account_by_email(PDO $pdo, string $email): ?array
 {
     $staffStmt = $pdo->prepare(
         'SELECT staff_id, full_name, email, role
          FROM staff_users
-         WHERE email = :email AND is_active = TRUE
+         WHERE lower(email) = lower(:email) AND is_active = TRUE
          LIMIT 1'
     );
     $staffStmt->execute([':email' => $email]);
@@ -231,7 +238,7 @@ function find_account_by_email(PDO $pdo, string $email): ?array
     $barberStmt = $pdo->prepare(
         'SELECT barber_id, full_name, email
          FROM barbers
-         WHERE email = :email AND is_active = TRUE
+         WHERE lower(email) = lower(:email) AND is_active = TRUE
          LIMIT 1'
     );
     $barberStmt->execute([':email' => $email]);
@@ -408,21 +415,6 @@ try {
         );
         $staffStmt->execute([':email' => $email]);
         $staff = $staffStmt->fetch();
-        if ($staff && !empty($staff['password_hash']) && password_verify($password, (string)$staff['password_hash'])) {
-            json_response(['message' => 'Login successful', 'user' => build_user_payload('staff', $staff)]);
-        }
-
-        $userStmt = $pdo->prepare(
-            'SELECT user_id, full_name, email, password_hash
-             FROM users
-             WHERE lower(email) = lower(:email) AND is_active = TRUE
-             LIMIT 1'
-        );
-        $userStmt->execute([':email' => $email]);
-        $user = $userStmt->fetch();
-        if ($user && !empty($user['password_hash']) && password_verify($password, (string)$user['password_hash'])) {
-            json_response(['message' => 'Login successful', 'user' => build_user_payload('customer', $user)]);
-        }
 
         $barberStmt = $pdo->prepare(
             'SELECT barber_id, full_name, email, password_hash
@@ -432,8 +424,29 @@ try {
         );
         $barberStmt->execute([':email' => $email]);
         $barber = $barberStmt->fetch();
-        if ($barber && !empty($barber['password_hash']) && password_verify($password, (string)$barber['password_hash'])) {
-            json_response(['message' => 'Login successful', 'user' => build_user_payload('barber', $barber)]);
+
+        $userStmt = $pdo->prepare(
+            'SELECT user_id, full_name, email, password_hash
+             FROM users
+             WHERE lower(email) = lower(:email) AND is_active = TRUE
+             LIMIT 1'
+        );
+        $userStmt->execute([':email' => $email]);
+        $user = $userStmt->fetch();
+
+        // Identity is which table the email lives in (users has no role column).
+        // Staff > barber > customer — same order as find_account_by_email / Google.
+        // A promoted customer still has an active users row, so customer must not win first.
+        if ($staff && password_hash_matches($staff, $password)) {
+            json_response(['message' => 'Login successful', 'user' => build_user_payload('staff', $staff)]);
+        }
+
+        if ($barber) {
+            if (password_hash_matches($barber, $password) || ($user && password_hash_matches($user, $password))) {
+                json_response(['message' => 'Login successful', 'user' => build_user_payload('barber', $barber)]);
+            }
+        } elseif ($user && password_hash_matches($user, $password)) {
+            json_response(['message' => 'Login successful', 'user' => build_user_payload('customer', $user)]);
         }
 
         if ($staff) {
@@ -443,6 +456,16 @@ try {
                     : 'Invalid email or password.',
                 'code' => empty($staff['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
                 'accountType' => 'staff',
+            ], 401);
+        }
+
+        if ($barber) {
+            json_response([
+                'error' => empty($barber['password_hash'])
+                    ? 'This barber account has no app password yet. Set password_hash in the barbers table, or sign in with barber@tatis.local / Barber123! (demo).'
+                    : 'Invalid email or password.',
+                'code' => empty($barber['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
+                'accountType' => 'barber',
             ], 401);
         }
 
@@ -458,16 +481,6 @@ try {
                 'error' => 'Invalid email or password.',
                 'code' => 'WRONG_PASSWORD',
                 'accountType' => 'customer',
-            ], 401);
-        }
-
-        if ($barber) {
-            json_response([
-                'error' => empty($barber['password_hash'])
-                    ? 'This barber account has no app password yet. Set password_hash in the barbers table, or sign in with barber@tatis.local / Barber123! (demo).'
-                    : 'Invalid email or password.',
-                'code' => empty($barber['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
-                'accountType' => 'barber',
             ], 401);
         }
 
