@@ -9,7 +9,7 @@ require_once __DIR__ . '/storage.php';
 require_method('POST');
 
 $input = get_json_input();
-$action = $input['action'] ?? 'list';
+$action = trim((string)($input['action'] ?? 'list'));
 
 if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage'], true)) {
     json_response(['error' => 'Invalid action'], 400);
@@ -31,6 +31,36 @@ function save_barber_profile_image(int $barberId, string $base64): string
     storage_put_bytes($relative, $bytes, 'image/jpeg');
 
     return $relative;
+}
+
+function find_active_barber_id(PDO $pdo, int $barberID, string $email): int
+{
+    // Email is the logged-in identity. Resolve it first so a colliding
+    // users.user_id / session ID cannot UPDATE a different barbers row
+    // (file written, target profile_image left empty).
+    if ($email !== '') {
+        $stmt = $pdo->prepare(
+            'SELECT barber_id FROM barbers WHERE lower(email) = lower(?) AND is_active = TRUE LIMIT 1'
+        );
+        $stmt->execute([$email]);
+        $id = (int)($stmt->fetchColumn() ?: 0);
+        if ($id > 0) {
+            return $id;
+        }
+    }
+
+    if ($barberID > 0) {
+        $stmt = $pdo->prepare(
+            'SELECT barber_id FROM barbers WHERE barber_id = ? AND is_active = TRUE LIMIT 1'
+        );
+        $stmt->execute([$barberID]);
+        $id = (int)($stmt->fetchColumn() ?: 0);
+        if ($id > 0) {
+            return $id;
+        }
+    }
+
+    return 0;
 }
 
 function ensure_barber_feedback_table(PDO $pdo): void
@@ -124,47 +154,55 @@ try {
     }
 
     if ($action === 'updateProfileImage') {
-        $barberID = (int)($input['barberID'] ?? 0);
+        $barberID = (int)($input['barberID'] ?? $input['barberId'] ?? $input['userID'] ?? 0);
+        $email = strtolower(trim((string)($input['email'] ?? '')));
         $imageBase64 = trim((string)($input['profileImageBase64'] ?? $input['profile_image_base64'] ?? ''));
-        if ($barberID <= 0 || $imageBase64 === '') {
+        if ($imageBase64 === '') {
             json_response(['error' => 'Invalid barberID or image data'], 422);
         }
 
-        $existsStmt = $pdo->prepare(
-            'SELECT barber_id FROM barbers WHERE barber_id = :barber_id AND is_active = TRUE'
-        );
-        $existsStmt->execute([':barber_id' => $barberID]);
-        if (!$existsStmt->fetch()) {
+        $resolvedBarberID = find_active_barber_id($pdo, $barberID, $email);
+        if ($resolvedBarberID <= 0) {
             json_response(['error' => 'Barber not found'], 404);
         }
 
-        $path = save_barber_profile_image($barberID, $imageBase64);
+        $path = save_barber_profile_image($resolvedBarberID, $imageBase64);
         $updateStmt = $pdo->prepare(
-            'UPDATE barbers SET profile_image = :profile_image WHERE barber_id = :barber_id'
+            'UPDATE barbers SET profile_image = ? WHERE barber_id = ?'
         );
-        $updateStmt->execute([
-            ':profile_image' => $path,
-            ':barber_id' => $barberID,
-        ]);
+        $updateStmt->execute([$path, $resolvedBarberID]);
+
+        $verifyStmt = $pdo->prepare(
+            'SELECT barber_id, profile_image FROM barbers WHERE barber_id = ? LIMIT 1'
+        );
+        $verifyStmt->execute([$resolvedBarberID]);
+        $updated = $verifyStmt->fetch(PDO::FETCH_ASSOC);
+        $storedPath = trim((string)($updated['profile_image'] ?? ''));
+        if ($storedPath !== $path) {
+            json_response(['error' => 'Unable to save profile image path'], 500);
+        }
 
         json_response([
             'message' => 'Profile image updated',
-            'profileImage' => $path,
+            'profileImage' => $storedPath,
+            'barberID' => (int)$updated['barber_id'],
         ]);
     }
 
     if ($action === 'detail') {
-        $barberID = (int)($input['barberID'] ?? 0);
-        if ($barberID <= 0) {
-            json_response(['error' => 'Invalid barberID'], 422);
+        $barberID = (int)($input['barberID'] ?? $input['barberId'] ?? $input['userID'] ?? 0);
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $resolvedBarberID = find_active_barber_id($pdo, $barberID, $email);
+        if ($resolvedBarberID <= 0) {
+            json_response(['error' => 'Barber not found'], 404);
         }
 
         $stmt = $pdo->prepare(
             'SELECT barber_id, full_name, specialty, years_experience, rating, profile_image, bio
              FROM barbers
-             WHERE barber_id = :barber_id AND is_active = TRUE'
+             WHERE barber_id = ? AND is_active = TRUE'
         );
-        $stmt->execute([':barber_id' => $barberID]);
+        $stmt->execute([$resolvedBarberID]);
         $barber = $stmt->fetch();
         if (!$barber) {
             json_response(['error' => 'Barber not found'], 404);
@@ -173,13 +211,13 @@ try {
         $todayStmt = $pdo->prepare(
             "SELECT COUNT(*) FROM appointments WHERE barber_id = :barber_id AND appointment_date = CURRENT_DATE"
         );
-        $todayStmt->execute([':barber_id' => $barberID]);
+        $todayStmt->execute([':barber_id' => $resolvedBarberID]);
         $todayCount = (int)$todayStmt->fetchColumn();
 
         $ratingCountStmt = $pdo->prepare(
             'SELECT COUNT(DISTINCT user_id)::int AS rating_count FROM barber_feedback WHERE barber_id = :barber_id'
         );
-        $ratingCountStmt->execute([':barber_id' => $barberID]);
+        $ratingCountStmt->execute([':barber_id' => $resolvedBarberID]);
         $ratingCount = (int)($ratingCountStmt->fetchColumn() ?: 0);
 
         json_response([
@@ -208,4 +246,6 @@ try {
     });
 } catch (PDOException $e) {
     json_response(db_error_response_payload($e), 500);
+} catch (Throwable $e) {
+    json_response(['error' => $e->getMessage()], 500);
 }
