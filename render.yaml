@@ -28,6 +28,8 @@ services:
       # AI_TRYON_PROVIDER, XAI_API_KEY / GEMINI_IMAGE_API_KEY / REPLICATE_API_TOKEN
       # AI_SERVICE_URL=https://<your-sidecar>.onrender.com
       # GOOGLE_ALLOWED_CLIENT_IDS, PASSWORD_RESET_BASE_URL, PASSWORD_RESET_MAIL_FROM
+      # STORAGE_DRIVER=local (default) or supabase
+      # SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_STORAGE_PUBLIC_BUCKET=tatis-public
 
   - type: web
     name: tatis-ai-sidecar
