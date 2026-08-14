@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/barber_channel.php';
+require_once __DIR__ . '/storage.php';
 
 require_method('POST');
 
@@ -25,18 +26,11 @@ function save_barber_profile_image(int $barberId, string $base64): string
         throw new InvalidArgumentException('Invalid profile image data');
     }
 
-    $dir = api_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'barbers';
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        throw new RuntimeException('Could not create barber upload directory');
-    }
-
     $filename = 'barber_' . $barberId . '_' . time() . '.jpg';
-    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (file_put_contents($fullPath, $bytes) === false) {
-        throw new RuntimeException('Could not save barber profile image');
-    }
+    $relative = 'uploads/barbers/' . $filename;
+    storage_put_bytes($relative, $bytes, 'image/jpeg');
 
-    return 'uploads/barbers/' . $filename;
+    return $relative;
 }
 
 function ensure_barber_feedback_table(PDO $pdo): void

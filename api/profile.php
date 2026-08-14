@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/storage.php';
 
 require_method('POST');
 
@@ -57,18 +58,11 @@ function save_profile_image_file(int $userId, string $base64): string
         throw new InvalidArgumentException('Invalid profile image data');
     }
 
-    $dir = api_project_root() . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'profiles';
-    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
-        throw new RuntimeException('Could not create profile upload directory');
-    }
-
     $filename = 'user_' . $userId . '_' . time() . '.jpg';
-    $fullPath = $dir . DIRECTORY_SEPARATOR . $filename;
-    if (file_put_contents($fullPath, $bytes) === false) {
-        throw new RuntimeException('Could not save profile image');
-    }
+    $relative = 'uploads/profiles/' . $filename;
+    storage_put_bytes($relative, $bytes, 'image/jpeg');
 
-    return 'uploads/profiles/' . $filename;
+    return $relative;
 }
 
 function fetch_profile_row(PDO $pdo, int $userID): ?array
