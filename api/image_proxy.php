@@ -52,7 +52,7 @@ if (is_file($fullPath)) {
     exit;
 }
 
-if (strpos($relative, 'uploads/') === 0) {
+if (strpos($relative, 'uploads/') === 0 || strpos($relative, 'assets/images/overlays/') === 0) {
     $bytes = storage_get_bytes($relative);
     if ($bytes !== null && $bytes !== '') {
         $sendCors();

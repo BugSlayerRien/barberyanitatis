@@ -42,8 +42,8 @@ Endpoints that only checked GET/POST used to return **405**, which the browser r
 ## Production blockers / follow-ups
 
 1. **Free Render sleep** — cold starts; consider always-on or a keep-alive ping.
-2. **Uploads not persistent** — Docker filesystem is ephemeral; attach a Render disk for `uploads/` (and optionally `storage/`) or use object storage.
-3. **Haircut overlay PNGs** — admin overlay upload expects `mobile-app/assets/...`, which is **not** in the API Docker image. Overlay **upload** will fail in production until assets are packaged or stored elsewhere. Metadata edit still works.
+2. **Uploads not persistent** — Docker filesystem is ephemeral. Production cutover uses **Supabase Storage** (`STORAGE_DRIVER=supabase` on Render). XAMPP stays `STORAGE_DRIVER=local`.
+3. **Haircut overlay PNGs** — catalog PNGs were backfilled to `tatis-public`. New admin overlay uploads go to Storage when Render uses `STORAGE_DRIVER=supabase`.
 4. **Secrets** — keep keys only in Render / local `.env`. Never commit `.env`. Rotate any key that was ever committed to git or embedded in frontend JS.
 5. **Mobile / kiosk** — still need `--dart-define=API_BASE_URL=https://barberyanitatis.onrender.com` for production builds.
 6. **PASSWORD_RESET_*** / Google client IDs** — set if those features are used in production.
@@ -99,13 +99,37 @@ Kiosk uses the same `ApiConfig` via the `tatis_barbershop` package — same flag
 
 First API call after idle may take ~1 minute (cold start).
 
-### Render disk for uploads (recommended)
+### Render disk for uploads (optional after Storage cutover)
 
-Without a disk, profile photos and face scans **disappear on redeploy**.
+With `STORAGE_DRIVER=supabase`, new images live in Supabase buckets. A Render disk at `/var/data` is optional (JSON backups / leftover local files).
 
-1. Render → PHP service → **Disks** → Add disk, mount path **`/var/data`**, 1 GB+
-2. Redeploy API (entrypoint symlinks `/var/data/uploads` and `/var/data/storage`)
-3. Re-test profile image upload from mobile or admin
+---
+
+## Phase 5 — Production storage cutover
+
+Do **not** set `STORAGE_DRIVER=supabase` in local `.env`.
+
+**On Render (PHP API), set:**
+
+| Variable | Value |
+|----------|--------|
+| `STORAGE_DRIVER` | `supabase` |
+| `SUPABASE_URL` | `https://<project>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_ROLE` | service role (server only) |
+| `SUPABASE_STORAGE_PUBLIC_BUCKET` | `tatis-public` |
+| `SUPABASE_STORAGE_SCANS_BUCKET` | `tatis-scans` |
+
+Then **redeploy the PHP service** so `docker-entrypoint.sh` writes those into `/var/www/.env`.
+
+**Smoke after wake (production API, local app still `STORAGE_DRIVER=local`):**
+
+1. Change a customer profile photo → file in `tatis-public/uploads/profiles/...`; DB still `uploads/profiles/...`
+2. Change a barber photo → `tatis-public/uploads/barbers/...`
+3. Face scan + try-on → `tatis-scans/uploads/face_scans/...`
+4. Admin overlay upload → `tatis-public/assets/images/overlays/...`
+5. Logout/login and appointment details still show photos
+
+Local XAMPP: `flutter run` without `USE_PRODUCTION_API` still writes to disk.
 
 ### Security done in Phase 2 code
 
@@ -117,5 +141,5 @@ Without a disk, profile photos and face scans **disappear on redeploy**.
 - Google OAuth redirect URLs for production mobile web
 - PayMongo live keys
 - App store / Play Store release builds
-- Haircut overlay PNG upload in admin (needs mobile assets in API image or object storage)
+- Haircut overlay PNG upload in admin (needs `STORAGE_DRIVER=supabase` on Render after Phase 5)
 
