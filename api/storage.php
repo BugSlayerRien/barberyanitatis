@@ -41,6 +41,16 @@ function storage_env(string $key, string $default = ''): string
     return $default;
 }
 
+function storage_service_role_key(): string
+{
+    $key = storage_env('SUPABASE_SERVICE_ROLE_KEY');
+    if ($key !== '') {
+        return $key;
+    }
+
+    return storage_env('SUPABASE_SERVICE_ROLE');
+}
+
 function storage_driver(): string
 {
     $raw = strtolower(storage_env('STORAGE_DRIVER', 'local'));
@@ -123,7 +133,7 @@ function storage_put_local(string $relativePath, string $bytes): void
 function storage_put_supabase(string $relativePath, string $bytes, string $mime): void
 {
     $base = rtrim(storage_env('SUPABASE_URL'), '/');
-    $key = storage_env('SUPABASE_SERVICE_ROLE_KEY');
+    $key = storage_service_role_key();
     $bucket = storage_bucket_for_path($relativePath);
     if ($base === '' || $key === '') {
         throw new RuntimeException('Supabase storage is not configured (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)');
@@ -161,7 +171,7 @@ function storage_put_supabase(string $relativePath, string $bytes, string $mime)
 function storage_remote_configured(): bool
 {
     return rtrim(storage_env('SUPABASE_URL'), '/') !== ''
-        && storage_env('SUPABASE_SERVICE_ROLE_KEY') !== '';
+        && storage_service_role_key() !== '';
 }
 
 function storage_local_full_path(string $relativePath): string
@@ -202,7 +212,7 @@ function storage_public_url(string $relativePath): string
 
 function storage_supabase_request(string $relativePath, bool $headOnly): array
 {
-    $key = storage_env('SUPABASE_SERVICE_ROLE_KEY');
+    $key = storage_service_role_key();
     $url = storage_supabase_object_url($relativePath);
     $ch = curl_init($url);
     $opts = [
