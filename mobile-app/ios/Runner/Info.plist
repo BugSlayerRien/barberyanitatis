@@ -45,5 +45,39 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>Tatis uses the camera for AI face scanning and haircut preview.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Tatis uses your photo library so you can choose a profile picture.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tatis talks to your local XAMPP API on the same Wi‑Fi during development.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>io.supabase.flutter</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>io.supabase.flutter</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>tatisapp.payment-return</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>tatisapp</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>
