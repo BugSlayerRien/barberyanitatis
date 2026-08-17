@@ -16,29 +16,127 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/http.php';
 
+function storage_unquote(string $value): string
+{
+    $value = trim($value);
+    $value = stripslashes($value);
+    $value = trim($value);
+    $value = trim($value, "\"'");
+    $value = preg_replace('/^[\x{201C}\x{201D}\x{2018}\x{2019}]+/u', '', $value) ?? $value;
+    $value = preg_replace('/[\x{201C}\x{201D}\x{2018}\x{2019}]+$/u', '', $value) ?? $value;
+
+    return trim($value);
+}
+
 function storage_env(string $key, string $default = ''): string
 {
     load_project_env();
 
     if (array_key_exists($key, $_ENV) && is_scalar($_ENV[$key])) {
-        $fromEnv = trim((string)$_ENV[$key]);
+        $fromEnv = storage_unquote((string)$_ENV[$key]);
         if ($fromEnv !== '') {
             return $fromEnv;
         }
     }
     if (array_key_exists($key, $_SERVER) && is_scalar($_SERVER[$key])) {
-        $fromServer = trim((string)$_SERVER[$key]);
+        $fromServer = storage_unquote((string)$_SERVER[$key]);
         if ($fromServer !== '') {
             return $fromServer;
         }
     }
 
     $fromGetenv = getenv($key);
-    if ($fromGetenv !== false && trim((string)$fromGetenv) !== '') {
-        return trim((string)$fromGetenv);
+    if ($fromGetenv !== false && storage_unquote((string)$fromGetenv) !== '') {
+        return storage_unquote((string)$fromGetenv);
     }
 
-    return $default;
+    return storage_unquote($default);
+}
+
+/**
+ * Origin for Storage REST (https://<ref>.supabase.co).
+ * Render/dotenv often leave wrapping quotes, which libcurl rejects as:
+ * "URL rejected: Port number was not a decimal number between 0 and 65535".
+ * Also recovers a project URL if DB_URL was pasted into SUPABASE_URL.
+ */
+function storage_normalize_supabase_url(string $raw): string
+{
+    $raw = storage_unquote($raw);
+    if ($raw === '') {
+        return '';
+    }
+
+    $raw = preg_replace('#^(https://)+#i', 'https://', $raw) ?? $raw;
+    $raw = preg_replace('#^(http://)+#i', 'http://', $raw) ?? $raw;
+    if (str_starts_with(strtolower($raw), 'jdbc:')) {
+        $raw = substr($raw, 5);
+    }
+
+    $parts = parse_url($raw);
+    if ($parts === false) {
+        throw new RuntimeException('SUPABASE_URL is malformed');
+    }
+
+    $scheme = strtolower((string)($parts['scheme'] ?? ''));
+    $host = strtolower((string)($parts['host'] ?? ''));
+    $user = (string)($parts['user'] ?? '');
+
+    // https://https://ref.supabase.co → host "https", path "//ref.supabase.co"
+    if ($host === 'http' || $host === 'https') {
+        $nested = preg_replace('#^/+#', '', str_replace('\\', '/', (string)($parts['path'] ?? '')));
+        if ($nested !== '') {
+            return storage_normalize_supabase_url('https://' . $nested);
+        }
+    }
+
+    if (
+        in_array($scheme, ['postgres', 'postgresql'], true)
+        || str_contains($host, 'pooler.supabase.com')
+        || str_contains($host, 'pooler.supabase.co')
+    ) {
+        $ref = storage_project_ref_from_db_parts($user, $host);
+        if ($ref === '') {
+            throw new RuntimeException(
+                'SUPABASE_URL is a database connection string. Set it to https://<project-ref>.supabase.co, not DB_URL.'
+            );
+        }
+
+        return 'https://' . $ref . '.supabase.co';
+    }
+
+    if (($scheme === 'http' || $scheme === 'https') && $host !== '') {
+        if (preg_match('/^db\.([a-z0-9]+)\.supabase\.co$/', $host, $matches) === 1) {
+            return 'https://' . $matches[1] . '.supabase.co';
+        }
+        $origin = ($scheme === 'http' ? 'http' : 'https') . '://' . $host;
+        $port = $parts['port'] ?? null;
+        if (is_int($port) && $port > 0 && $port <= 65535 && !in_array($port, [80, 443, 5432, 6543], true)) {
+            $origin .= ':' . $port;
+        }
+
+        return $origin;
+    }
+
+    throw new RuntimeException(
+        'SUPABASE_URL must be the project URL https://<project-ref>.supabase.co (no extra quotes).'
+    );
+}
+
+function storage_project_ref_from_db_parts(string $user, string $host): string
+{
+    if (preg_match('/^postgres\.([a-z0-9]+)$/i', $user, $matches) === 1) {
+        return strtolower($matches[1]);
+    }
+    if (preg_match('/^db\.([a-z0-9]+)\.supabase\.co$/i', $host, $matches) === 1) {
+        return strtolower($matches[1]);
+    }
+
+    return '';
+}
+
+function storage_supabase_base_url(): string
+{
+    return storage_normalize_supabase_url(storage_env('SUPABASE_URL'));
 }
 
 function storage_service_role_key(): string
@@ -132,7 +230,7 @@ function storage_put_local(string $relativePath, string $bytes): void
 
 function storage_put_supabase(string $relativePath, string $bytes, string $mime): void
 {
-    $base = rtrim(storage_env('SUPABASE_URL'), '/');
+    $base = storage_supabase_base_url();
     $key = storage_service_role_key();
     $bucket = storage_bucket_for_path($relativePath);
     if ($base === '' || $key === '') {
@@ -170,8 +268,12 @@ function storage_put_supabase(string $relativePath, string $bytes, string $mime)
 
 function storage_remote_configured(): bool
 {
-    return rtrim(storage_env('SUPABASE_URL'), '/') !== ''
-        && storage_service_role_key() !== '';
+    try {
+        return storage_supabase_base_url() !== ''
+            && storage_service_role_key() !== '';
+    } catch (RuntimeException $e) {
+        return false;
+    }
 }
 
 function storage_local_full_path(string $relativePath): string
@@ -184,7 +286,7 @@ function storage_local_full_path(string $relativePath): string
 
 function storage_supabase_object_url(string $relativePath): string
 {
-    $base = rtrim(storage_env('SUPABASE_URL'), '/');
+    $base = storage_supabase_base_url();
     $bucket = storage_bucket_for_path($relativePath);
     $encodedKey = implode('/', array_map('rawurlencode', explode('/', $relativePath)));
 
@@ -197,7 +299,11 @@ function storage_supabase_object_url(string $relativePath): string
 function storage_public_url(string $relativePath): string
 {
     $relativePath = storage_normalize_relative_path($relativePath);
-    $base = rtrim(storage_env('SUPABASE_URL'), '/');
+    try {
+        $base = storage_supabase_base_url();
+    } catch (RuntimeException $e) {
+        return '';
+    }
     if ($base === '') {
         return '';
     }
