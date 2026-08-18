@@ -40,8 +40,9 @@ class FaceDetectorService {
           performanceMode: FaceDetectorMode.fast,
           enableLandmarks: true,
           enableContours: true,
-          enableClassification: true,
+          enableClassification: false,
           enableTracking: true,
+          minFaceSize: 0.07,
         ),
       );
       _initialized = true;

@@ -26,6 +26,9 @@ import 'scanner/overlay_models.dart';
 import 'scanner/overlay_registry.dart';
 import 'scanner/overlay_asset_cache.dart';
 import 'scanner/scanner_layout.dart';
+import 'scanner/camera_preview_cover.dart';
+import 'scanner/face_preview_mapping.dart';
+import 'scanner/staging_face_validation.dart';
 import 'scanner/attachment_engine.dart';
 import 'scanner/face_detector_service_stub.dart'
     if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
@@ -87,6 +90,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   
   double? _currentHeadYaw;
   Rect? _currentFaceRect;
+  Size? _stagingViewSize;
+  String? _lastStagingLog;
 
   static const List<_CaptureStage> _stages = [
     _CaptureStage(
@@ -95,7 +100,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hint: 'Face the camera straight ahead and keep still.',
       icon: Icons.face,
       requiredYaw: 0,
-      yawTolerance: 10,
+      yawTolerance: 22,
     ),
     _CaptureStage(
       keyName: 'right',
@@ -103,7 +108,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hint: 'Turn your face to the right (about 45 degrees).',
       icon: Icons.turn_right,
       requiredYaw: -45,
-      yawTolerance: 15,
+      yawTolerance: 28,
     ),
     _CaptureStage(
       keyName: 'left',
@@ -111,7 +116,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hint: 'Turn your face to the left (about 45 degrees).',
       icon: Icons.turn_left,
       requiredYaw: 45,
-      yawTolerance: 15,
+      yawTolerance: 28,
     ),
   ];
 
@@ -595,7 +600,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       debugPrint('[AiFaceScan] Initializing camera controller...');
       final controller = CameraController(
         front,
-        ResolutionPreset.low,
+        ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: defaultTargetPlatform == TargetPlatform.android
             ? ImageFormatGroup.nv21
@@ -1630,42 +1635,102 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     _overlayHoldUntil = now.add(_overlayHoldAfterProcessDuration);
   }
 
+  bool get _stagingUsesFrontCamera =>
+      _camera?.description.lensDirection == CameraLensDirection.front;
+
+  Rect _normalizeStagingFace(DetectedFaceFrame frame) {
+    final rotated = FacePreviewMapping.normalizeBoundingBox(
+      boundingBox: frame.boundingBox,
+      imageSize: frame.imageSize,
+      sensorOrientation: _camera?.description.sensorOrientation ?? 90,
+      mirrorX: _stagingUsesFrontCamera,
+    );
+    return _stagingViewportFace(rotated);
+  }
+
+  Rect _stagingViewportFace(Rect sourceNorm) {
+    final view = _stagingViewSize;
+    final preview = _camera?.value.previewSize;
+    if (view == null || preview == null || preview.width <= 0 || preview.height <= 0) {
+      return sourceNorm;
+    }
+    return FacePreviewMapping.sourceToCoverViewport(
+      face: sourceNorm,
+      sourceAspect: preview.height / preview.width,
+      viewport: view,
+    );
+  }
+
+  void _logStaging(String message) {
+    if (_lastStagingLog == message) {
+      return;
+    }
+    _lastStagingLog = message;
+    debugPrint('[ScanStaging] $message');
+  }
+
   Future<void> _processStagingFrame(DetectedFaceFrame? frame, CameraImage image) async {
     if (frame == null) {
+      _logStaging('no_face');
       setState(() {
         _currentFaceRect = null;
         _isGoodPosition = false;
-        _goodPositionFrames = 0;
+        _goodPositionFrames =
+            (_goodPositionFrames - StagingFaceValidation.missDecay)
+                .clamp(0, StagingFaceValidation.holdFrames);
         _status = 'Face not detected. Keep your face visible.';
       });
       return;
     }
 
-    final normalized = Rect.fromLTWH(
-      (frame.boundingBox.left / frame.imageSize.width).clamp(0.0, 1.0),
-      (frame.boundingBox.top / frame.imageSize.height).clamp(0.0, 1.0),
-      (frame.boundingBox.width / frame.imageSize.width).clamp(0.0, 1.0),
-      (frame.boundingBox.height / frame.imageSize.height).clamp(0.0, 1.0),
-    );
-
+    final normalized = _normalizeStagingFace(frame);
+    // Pose uses raw ML Kit yaw. BBox is mirrored to match CameraPreview.
+    final yaw = frame.headEulerAngleY;
     final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
-    final isGood = _isFaceWellPositioned(normalized, frame.headEulerAngleY, stage.requiredYaw, stage.yawTolerance);
+    final isGood = StagingFaceValidation.isWellPositioned(
+      face: normalized,
+      yaw: yaw,
+      requiredYaw: stage.requiredYaw,
+      tolerance: stage.yawTolerance,
+      kioskMode: widget.kioskMode,
+    );
+    final rejectReason = isGood
+        ? ''
+        : StagingFaceValidation.rejectReason(
+            face: normalized,
+            yaw: yaw,
+            requiredYaw: stage.requiredYaw,
+            tolerance: stage.yawTolerance,
+            fallbackHint: stage.hint,
+            kioskMode: widget.kioskMode,
+          );
+
+    _logStaging(
+      isGood
+          ? 'accepted yaw=${yaw?.toStringAsFixed(1)} area=${(normalized.width * normalized.height).toStringAsFixed(3)}'
+          : 'rejected $rejectReason yaw=${yaw?.toStringAsFixed(1)} '
+              'area=${(normalized.width * normalized.height).toStringAsFixed(3)} '
+              'c=${normalized.center.dx.toStringAsFixed(2)},${normalized.center.dy.toStringAsFixed(2)}',
+    );
 
     setState(() {
       _currentFaceRect = normalized;
       _isGoodPosition = isGood;
-      _currentHeadYaw = frame.headEulerAngleY;
-      
+      _currentHeadYaw = yaw;
+
       if (isGood) {
         _goodPositionFrames++;
-        _status = '${stage.label} - Hold position! ${(12 - _goodPositionFrames).clamp(0, 12)} frames left';
+        _status =
+            '${stage.label} - Hold still ${(StagingFaceValidation.holdFrames - _goodPositionFrames).clamp(0, StagingFaceValidation.holdFrames)}';
       } else {
-        _goodPositionFrames = 0;
-        _status = stage.hint;
+        _goodPositionFrames =
+            (_goodPositionFrames - StagingFaceValidation.missDecay)
+                .clamp(0, StagingFaceValidation.holdFrames);
+        _status = rejectReason.isNotEmpty ? rejectReason : stage.hint;
       }
     });
 
-    if (_goodPositionFrames >= 12) {
+    if (_goodPositionFrames >= StagingFaceValidation.holdFrames) {
       await _captureCurrent(image);
     }
   }
@@ -1674,38 +1739,61 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     // Web staging uses the web camera controller to capture frames
     final tracked = _webCamera.tracking.value;
     if (tracked.faceRect == null) {
+      _logStaging('no_face');
       setState(() {
         _currentFaceRect = null;
         _isGoodPosition = false;
-        _goodPositionFrames = 0;
+        _goodPositionFrames =
+            (_goodPositionFrames - StagingFaceValidation.missDecay)
+                .clamp(0, StagingFaceValidation.holdFrames);
         _status = 'Face not detected. Keep your face visible.';
       });
       return;
     }
 
     final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
-    final isGood = _isFaceWellPositioned(
-      tracked.faceRect!,
-      tracked.headYaw,
-      stage.requiredYaw,
-      stage.yawTolerance,
+    final isGood = StagingFaceValidation.isWellPositioned(
+      face: tracked.faceRect!,
+      yaw: tracked.headYaw,
+      requiredYaw: stage.requiredYaw,
+      tolerance: stage.yawTolerance,
+      kioskMode: widget.kioskMode,
+    );
+    final rejectReason = isGood
+        ? ''
+        : StagingFaceValidation.rejectReason(
+            face: tracked.faceRect!,
+            yaw: tracked.headYaw,
+            requiredYaw: stage.requiredYaw,
+            tolerance: stage.yawTolerance,
+            fallbackHint: stage.hint,
+            kioskMode: widget.kioskMode,
+          );
+
+    _logStaging(
+      isGood
+          ? 'accepted yaw=${tracked.headYaw?.toStringAsFixed(1)}'
+          : 'rejected $rejectReason yaw=${tracked.headYaw?.toStringAsFixed(1)}',
     );
 
     setState(() {
       _currentFaceRect = tracked.faceRect;
       _isGoodPosition = isGood;
       _currentHeadYaw = tracked.headYaw;
-      
+
       if (isGood) {
         _goodPositionFrames++;
-        _status = '${stage.label} - Hold position! ${(12 - _goodPositionFrames).clamp(0, 12)} frames left';
+        _status =
+            '${stage.label} - Hold still ${(StagingFaceValidation.holdFrames - _goodPositionFrames).clamp(0, StagingFaceValidation.holdFrames)}';
       } else {
-        _goodPositionFrames = 0;
-        _status = stage.hint;
+        _goodPositionFrames =
+            (_goodPositionFrames - StagingFaceValidation.missDecay)
+                .clamp(0, StagingFaceValidation.holdFrames);
+        _status = rejectReason.isNotEmpty ? rejectReason : stage.hint;
       }
     });
 
-    if (_goodPositionFrames >= 12) {
+    if (_goodPositionFrames >= StagingFaceValidation.holdFrames) {
       await _captureCurrentWeb();
     }
   }
@@ -1975,30 +2063,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
-  bool _isFaceWellPositioned(Rect face, double? yaw, double requiredYaw, double tolerance) {
-    final faceCenterX = face.left + (face.width / 2);
-    final faceCenterY = face.top + (face.height / 2);
-
-    final xCentered = faceCenterX >= 0.28 && faceCenterX <= 0.72;
-    final yCentered = faceCenterY >= 0.18 && faceCenterY <= 0.75;
-
-    final faceArea = face.width * face.height;
-    final minArea = widget.kioskMode ? 0.05 : 0.08;
-    const double maxArea = 0.45;
-    final bool goodSize = faceArea >= minArea && faceArea <= maxArea;
-
-    bool yawMatch;
-    if (yaw != null) {
-      yawMatch = (yaw - requiredYaw).abs() <= tolerance;
-    } else if (requiredYaw.abs() <= 5) {
-      yawMatch = true;
-    } else if (requiredYaw < 0) {
-      yawMatch = faceCenterX <= 0.58;
-    } else {
-      yawMatch = faceCenterX >= 0.42;
+  String _stagingPositionLabel() {
+    if (_isGoodPosition) {
+      final left = (StagingFaceValidation.holdFrames - _goodPositionFrames)
+          .clamp(0, StagingFaceValidation.holdFrames);
+      return 'Position good! Hold still $left';
     }
-
-    return xCentered && yCentered && goodSize && yawMatch;
+    return _status.isNotEmpty ? _status : 'Adjust position';
   }
 
   Future<void> _popScanner() async {
@@ -2069,7 +2140,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   Widget _buildStagingUI() {
     final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
-    final progress = (_stageIndex + (_goodPositionFrames / 12.0)) / _stages.length;
+    final progress = (_stageIndex + (_goodPositionFrames / StagingFaceValidation.holdFrames)) / _stages.length;
     final camera = kIsWeb
         ? _buildStagingWebCamera(currentStage)
         : _buildStagingCameraView(currentStage);
@@ -2250,9 +2321,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _isGoodPosition
-                            ? 'Position good! Hold for ${(12 - _goodPositionFrames).clamp(0, 12)} frames...'
-                            : 'Adjust position',
+                        _stagingPositionLabel(),
                         style: TextStyle(
                           color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white70,
                           fontSize: 12,
@@ -2293,10 +2362,19 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         ),
       ),
       child: Stack(
+        fit: StackFit.expand,
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(13),
-            child: CameraPreview(_camera!),
+            child: CameraPreviewCover(controller: _camera!),
+          ),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _stagingViewSize = constraints.biggest;
+                return const SizedBox.expand();
+              },
+            ),
           ),
           Positioned(
             bottom: 16,
@@ -2325,9 +2403,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _isGoodPosition
-                            ? 'Position good! Hold for ${(12 - _goodPositionFrames).clamp(0, 12)} frames...'
-                            : 'Adjust position',
+                        _stagingPositionLabel(),
                         style: TextStyle(
                           color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white70,
                           fontSize: 12,
@@ -4793,83 +4869,6 @@ class _CaptureStage {
     required this.requiredYaw,
     required this.yawTolerance,
   });
-}
-
-class _FaceOverlayPainter extends CustomPainter {
-  final Rect faceRect;
-  final bool isGoodPosition;
-  final IconData stageIcon;
-
-  _FaceOverlayPainter({
-    required this.faceRect,
-    required this.isGoodPosition,
-    required this.stageIcon,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scaleX = size.width;
-    final scaleY = size.height;
-
-    final rect = Rect.fromLTWH(
-      faceRect.left * scaleX,
-      faceRect.top * scaleY,
-      faceRect.width * scaleX,
-      faceRect.height * scaleY,
-    );
-
-    final borderPaint = Paint()
-      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
-
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(20));
-    canvas.drawRRect(rrect, borderPaint);
-
-    final cornerSize = 20.0;
-    final cornerPaint = Paint()
-      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
-
-    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left + cornerSize, rect.top), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left, rect.top + cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right - cornerSize, rect.top), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right, rect.top + cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left + cornerSize, rect.bottom), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left, rect.bottom - cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right - cornerSize, rect.bottom), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right, rect.bottom - cornerSize), cornerPaint);
-
-    if (isGoodPosition) {
-      final checkPaint = Paint()
-        ..color = const Color(0xFF4CAF50)
-        ..strokeWidth = 4
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-
-      final centerX = rect.center.dx;
-      final centerY = rect.center.dy;
-      final checkSize = 30.0;
-
-      canvas.drawLine(
-        Offset(centerX - checkSize / 2, centerY),
-        Offset(centerX, centerY + checkSize / 2),
-        checkPaint,
-      );
-      canvas.drawLine(
-        Offset(centerX, centerY + checkSize / 2),
-        Offset(centerX + checkSize / 2, centerY - checkSize / 2),
-        checkPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_FaceOverlayPainter oldDelegate) {
-    return oldDelegate.faceRect != faceRect || oldDelegate.isGoodPosition != isGoodPosition;
-  }
 }
 
 class _StatusPill extends StatelessWidget {
