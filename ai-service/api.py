@@ -23,6 +23,11 @@ _service_dir = Path(__file__).resolve().parent
 load_dotenv(_service_dir / ".env")
 load_dotenv(_service_dir.parent / ".env")
 
+# Headless Render has no GPU. Set these before importing MediaPipe so it does
+# not try to dlopen libGLESv2.so.2 at task-graph init.
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
+os.environ.setdefault("LIBGL_ALWAYS_SOFTWARE", "1")
+
 import cv2
 import httpx
 import mediapipe as mp
@@ -54,6 +59,7 @@ MODEL_URL = (
 )
 
 _face_landmarker: vision.FaceLandmarker | None = None
+_face_landmarker_unusable = False
 
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
@@ -229,12 +235,14 @@ def ensure_face_landmarker_model() -> Path:
     ) from last_error
 
 
-def get_face_landmarker() -> vision.FaceLandmarker:
-    global _face_landmarker
-    if _face_landmarker is None:
+def get_face_landmarker() -> vision.FaceLandmarker | None:
+    global _face_landmarker, _face_landmarker_unusable
+    if _face_landmarker_unusable:
+        return None
+    if _face_landmarker is not None:
+        return _face_landmarker
+    try:
         model_path = ensure_face_landmarker_model()
-        # Render (and other headless hosts) have no GPU/GLES. Default MediaPipe
-        # graphs still dlopen libGLESv2.so.2 unless CPU is forced.
         base_kwargs = {"model_asset_path": str(model_path)}
         delegate_enum = getattr(mp_tasks.BaseOptions, "Delegate", None)
         if delegate_enum is not None and hasattr(delegate_enum, "CPU"):
@@ -248,18 +256,32 @@ def get_face_landmarker() -> vision.FaceLandmarker:
             min_tracking_confidence=0.5,
         )
         _face_landmarker = vision.FaceLandmarker.create_from_options(options)
-    return _face_landmarker
+        return _face_landmarker
+    except Exception:
+        logger.exception(
+            "FaceLandmarker init failed (often missing libGLESv2.so.2 on Render). "
+            "Continuing with OpenCV-only analysis."
+        )
+        _face_landmarker_unusable = True
+        return None
 
 
 def detect_face_landmarks(rgb: np.ndarray):
     """Return normalized face landmarks for the first face, or None."""
-    if not rgb.flags["C_CONTIGUOUS"]:
-        rgb = np.ascontiguousarray(rgb)
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-    result = get_face_landmarker().detect(mp_image)
-    if not result.face_landmarks:
+    landmarker = get_face_landmarker()
+    if landmarker is None:
         return None
-    return result.face_landmarks[0]
+    try:
+        if not rgb.flags["C_CONTIGUOUS"]:
+            rgb = np.ascontiguousarray(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = landmarker.detect(mp_image)
+        if not result.face_landmarks:
+            return None
+        return result.face_landmarks[0]
+    except Exception:
+        logger.exception("FaceLandmarker detect failed")
+        return None
 
 
 VIEW_ANGLE_HINTS = {
@@ -1391,6 +1413,9 @@ def health():
         "ok": True,
         "replicate_configured": bool(REPLICATE_API_TOKEN),
         "model": REPLICATE_MODEL,
+        "face_landmarker": (
+            "unavailable" if _face_landmarker_unusable else ("ready" if _face_landmarker is not None else "lazy")
+        ),
     }
 
 
@@ -1437,9 +1462,29 @@ async def analyze_face(
             "achievable_styles": achievable,
             "top_styles": [{"key": s, "name": STYLE_NAMES.get(s, s)} for s in top_styles],
             "profiles_received": ["front", "left", "right"],
+            "landmarker": "unavailable" if _face_landmarker_unusable else "ok",
         }
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        message = str(e)
+        if "GLESv2" in message or "libGL" in message:
+            logger.exception("analyze-face GLES failure; returning safe defaults")
+            return {
+                "face_shape": "oval",
+                "hair_texture": "Wavy",
+                "hair_texture_score": 0.0,
+                "hair_length": "short",
+                "hair_length_level": 1,
+                "hair_length_score": 0.0,
+                "hair_mask_coverage": 0.0,
+                "no_hair_detected": False,
+                "hair_color": "",
+                "hair_color_rgb": None,
+                "achievable_styles": [],
+                "top_styles": [],
+                "profiles_received": ["front", "left", "right"],
+                "landmarker": "unavailable",
+            }
+        return JSONResponse(status_code=500, content={"error": message})
 
 
 @app.post("/generate")
