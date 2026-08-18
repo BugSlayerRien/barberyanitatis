@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 
 import 'face_scan_results_page.dart';
 import 'services/face_scan_service.dart';
+import 'scanner/camera_preview_cover.dart';
+import 'scanner/face_preview_mapping.dart';
+import 'scanner/staging_face_validation.dart';
 import 'scanner/face_detector_service_stub.dart'
   if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
 import 'user_session.dart';
@@ -30,7 +33,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       hint: 'Face the camera straight ahead and keep still.',
       icon: Icons.face,
       requiredYaw: 0,
-      yawTolerance: 10,
+      yawTolerance: 22,
     ),
     _CaptureStage(
       keyName: 'right',
@@ -38,7 +41,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       hint: 'Turn your face to the right (about 45 degrees).',
       icon: Icons.turn_right,
       requiredYaw: -45,
-      yawTolerance: 15,
+      yawTolerance: 28,
     ),
     _CaptureStage(
       keyName: 'left',
@@ -46,7 +49,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       hint: 'Turn your face to the left (about 45 degrees).',
       icon: Icons.turn_left,
       requiredYaw: 45,
-      yawTolerance: 15,
+      yawTolerance: 28,
     ),
   ];
 
@@ -62,6 +65,9 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
   
   double? _currentHeadYaw;
   Rect? _currentFaceRect;
+  Size? _stagingViewSize;
+  String? _lastStagingLog;
+  String _stagingStatus = 'Center your face in the guide.';
   
   Map<String, String> _capturedImages = {};
 
@@ -153,7 +159,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
 
       final controller = CameraController(
         front,
-        ResolutionPreset.low,
+        ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: defaultTargetPlatform == TargetPlatform.android
             ? ImageFormatGroup.nv21
@@ -212,45 +218,110 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
     }
   }
 
+  bool get _stagingUsesFrontCamera =>
+      _camera?.description.lensDirection == CameraLensDirection.front;
+
+  Rect _normalizeStagingFace(DetectedFaceFrame frame) {
+    final rotated = FacePreviewMapping.normalizeBoundingBox(
+      boundingBox: frame.boundingBox,
+      imageSize: frame.imageSize,
+      sensorOrientation: _camera?.description.sensorOrientation ?? 90,
+      mirrorX: _stagingUsesFrontCamera,
+    );
+    final view = _stagingViewSize;
+    final preview = _camera?.value.previewSize;
+    if (view == null || preview == null || preview.width <= 0 || preview.height <= 0) {
+      return rotated;
+    }
+    return FacePreviewMapping.sourceToCoverViewport(
+      face: rotated,
+      sourceAspect: preview.height / preview.width,
+      viewport: view,
+    );
+  }
+
+  void _logStaging(String message) {
+    if (_lastStagingLog == message) {
+      return;
+    }
+    _lastStagingLog = message;
+    debugPrint('[ScanStaging] $message');
+  }
+
+  String _stagingPositionLabel() {
+    if (_isGoodPosition) {
+      final left = (StagingFaceValidation.holdFrames - _goodPositionFrames)
+          .clamp(0, StagingFaceValidation.holdFrames);
+      return 'Position good! Hold still $left';
+    }
+    return _stagingStatus;
+  }
+
   Future<void> _processStagingFrame(
       DetectedFaceFrame? frame, CameraImage image) async {
     if (frame == null) {
+      _logStaging('no_face');
       setState(() {
         _currentHeadYaw = null;
         _currentFaceRect = null;
         _isGoodPosition = false;
-        _goodPositionFrames = 0;
+        _goodPositionFrames =
+            (_goodPositionFrames - StagingFaceValidation.missDecay)
+                .clamp(0, StagingFaceValidation.holdFrames);
+        _stagingStatus = 'Face not detected. Keep your face visible.';
       });
       return;
     }
 
-    final normalized = Rect.fromLTWH(
-      (frame.boundingBox.left / frame.imageSize.width).clamp(0.0, 1.0),
-      (frame.boundingBox.top / frame.imageSize.height).clamp(0.0, 1.0),
-      (frame.boundingBox.width / frame.imageSize.width).clamp(0.0, 1.0),
-      (frame.boundingBox.height / frame.imageSize.height).clamp(0.0, 1.0),
+    final normalized = _normalizeStagingFace(frame);
+    final yaw = frame.headEulerAngleY;
+    final stage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
+    final isGoodPosition = StagingFaceValidation.isWellPositioned(
+      face: normalized,
+      yaw: yaw,
+      requiredYaw: stage.requiredYaw,
+      tolerance: stage.yawTolerance,
+    );
+    final rejectReason = isGoodPosition
+        ? ''
+        : StagingFaceValidation.rejectReason(
+            face: normalized,
+            yaw: yaw,
+            requiredYaw: stage.requiredYaw,
+            tolerance: stage.yawTolerance,
+            fallbackHint: stage.hint,
+          );
+
+    _logStaging(
+      isGoodPosition
+          ? 'accepted yaw=${yaw?.toStringAsFixed(1)}'
+          : 'rejected $rejectReason yaw=${yaw?.toStringAsFixed(1)}',
     );
 
-    final yaw = frame.headEulerAngleY;
-    final requiredYaw = _stages[_stageIndex].requiredYaw.toDouble();
-    final yawTolerance = _stages[_stageIndex].yawTolerance.toDouble();
-
-    final isGoodPosition = _isFaceWellPositioned(normalized, yaw, requiredYaw, yawTolerance);
+    var frames = _goodPositionFrames;
+    if (isGoodPosition) {
+      frames++;
+    } else {
+      frames = (frames - StagingFaceValidation.missDecay)
+          .clamp(0, StagingFaceValidation.holdFrames);
+    }
 
     setState(() {
       _currentHeadYaw = yaw;
       _currentFaceRect = normalized;
       _isGoodPosition = isGoodPosition;
-
+      _goodPositionFrames = frames;
       if (isGoodPosition) {
-        _goodPositionFrames++;
-        if (_goodPositionFrames >= 12) {
-          _captureCurrent(image);
-        }
+        _stagingStatus =
+            '${stage.label} - Hold still ${(StagingFaceValidation.holdFrames - frames).clamp(0, StagingFaceValidation.holdFrames)}';
       } else {
-        _goodPositionFrames = 0;
+        _stagingStatus = rejectReason.isNotEmpty ? rejectReason : stage.hint;
       }
     });
+
+    if (frames >= StagingFaceValidation.holdFrames) {
+      await _captureCurrent(image);
+    }
   }
 
   Future<void> _processLivePreviewFrame(DetectedFaceFrame? frame) async {
@@ -333,23 +404,6 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       _smoothedEyeDistanceNorm = smoothedEyeDistance;
       _status = _faceSessionReady ? 'Ready! Tap "Confirm and Proceed"' : 'Position your face in the guide';
     });
-  }
-
-  bool _isFaceWellPositioned(Rect face, double? yaw, double requiredYaw, double tolerance) {
-    final faceCenterX = face.left + (face.width / 2);
-    final faceCenterY = face.top + (face.height / 2);
-    
-    final xCentered = faceCenterX >= 0.3 && faceCenterX <= 0.7;
-    final yCentered = faceCenterY >= 0.2 && faceCenterY <= 0.7;
-    
-    final faceArea = face.width * face.height;
-    const double minArea = 0.08;
-    const double maxArea = 0.4;
-    final bool goodSize = faceArea >= minArea && faceArea <= maxArea;
-    
-    final yawMatch = yaw != null && (yaw - requiredYaw).abs() <= tolerance;
-    
-    return xCentered && yCentered && goodSize && yawMatch;
   }
 
   bool _isFaceInsideScanGuide(Rect face) {
@@ -475,7 +529,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
 
   Widget _buildStagingUI() {
     final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
-    final progress = (_stageIndex + (_goodPositionFrames / 12.0)) / _stages.length;
+    final progress = (_stageIndex + (_goodPositionFrames / StagingFaceValidation.holdFrames)) / _stages.length;
     final capturedCount = _capturedImages.length;
 
     return Scaffold(
@@ -587,21 +641,20 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
         ),
       ),
       child: Stack(
+        fit: StackFit.expand,
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(13),
-            child: CameraPreview(_camera!),
+            child: CameraPreviewCover(controller: _camera!),
           ),
-          if (_currentFaceRect != null)
-            Positioned.fill(
-              child: CustomPaint(
-                painter: _FaceOverlayPainter(
-                  faceRect: _currentFaceRect!,
-                  isGoodPosition: _isGoodPosition,
-                  stageIcon: stage.icon,
-                ),
-              ),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                _stagingViewSize = constraints.biggest;
+                return const SizedBox.expand();
+              },
             ),
+          ),
           Positioned(
             bottom: 16,
             left: 16,
@@ -629,9 +682,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        _isGoodPosition
-                            ? 'Position good! Hold for ${(12 - _goodPositionFrames).clamp(0, 12)} frames...'
-                            : 'Adjust position',
+                        _stagingPositionLabel(),
                         style: TextStyle(
                           color: _isGoodPosition ? const Color(0xFF4CAF50) : Colors.white70,
                           fontSize: 12,
@@ -753,84 +804,6 @@ class _CaptureStage {
     required this.requiredYaw,
     required this.yawTolerance,
   });
-}
-
-class _FaceOverlayPainter extends CustomPainter {
-  final Rect faceRect;
-  final bool isGoodPosition;
-  final IconData stageIcon;
-
-  _FaceOverlayPainter({
-    required this.faceRect,
-    required this.isGoodPosition,
-    required this.stageIcon,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final scaleX = size.width;
-    final scaleY = size.height;
-
-    final rect = Rect.fromLTWH(
-      faceRect.left * scaleX,
-      faceRect.top * scaleY,
-      faceRect.width * scaleX,
-      faceRect.height * scaleY,
-    );
-
-    final borderPaint = Paint()
-      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 4;
-
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(20));
-    canvas.drawRRect(rrect, borderPaint);
-
-    final cornerSize = 20.0;
-    final cornerPaint = Paint()
-      ..color = isGoodPosition ? const Color(0xFF4CAF50) : const Color(0xFFFF9800)
-      ..strokeWidth = 3
-      ..style = PaintingStyle.stroke;
-
-    // Draw corner guides
-    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left + cornerSize, rect.top), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.top), Offset(rect.left, rect.top + cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right - cornerSize, rect.top), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.top), Offset(rect.right, rect.top + cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left + cornerSize, rect.bottom), cornerPaint);
-    canvas.drawLine(Offset(rect.left, rect.bottom), Offset(rect.left, rect.bottom - cornerSize), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right - cornerSize, rect.bottom), cornerPaint);
-    canvas.drawLine(Offset(rect.right, rect.bottom), Offset(rect.right, rect.bottom - cornerSize), cornerPaint);
-
-    if (isGoodPosition) {
-      final checkPaint = Paint()
-        ..color = const Color(0xFF4CAF50)
-        ..strokeWidth = 4
-        ..style = PaintingStyle.stroke
-        ..strokeCap = StrokeCap.round
-        ..strokeJoin = StrokeJoin.round;
-
-      final centerX = rect.center.dx;
-      final centerY = rect.center.dy;
-      final checkSize = 30.0;
-
-      canvas.drawLine(
-        Offset(centerX - checkSize / 2, centerY),
-        Offset(centerX, centerY + checkSize / 2),
-        checkPaint,
-      );
-      canvas.drawLine(
-        Offset(centerX, centerY + checkSize / 2),
-        Offset(centerX + checkSize / 2, centerY - checkSize / 2),
-        checkPaint,
-      );
-    }
-  }
-
-  @override
-  bool shouldRepaint(_FaceOverlayPainter oldDelegate) {
-    return oldDelegate.faceRect != faceRect || oldDelegate.isGoodPosition != isGoodPosition;
-  }
 }
 
 class _LivePreviewOverlayPainter extends CustomPainter {
