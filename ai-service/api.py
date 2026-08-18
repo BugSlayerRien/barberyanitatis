@@ -233,8 +233,14 @@ def get_face_landmarker() -> vision.FaceLandmarker:
     global _face_landmarker
     if _face_landmarker is None:
         model_path = ensure_face_landmarker_model()
+        # Render (and other headless hosts) have no GPU/GLES. Default MediaPipe
+        # graphs still dlopen libGLESv2.so.2 unless CPU is forced.
+        base_kwargs = {"model_asset_path": str(model_path)}
+        delegate_enum = getattr(mp_tasks.BaseOptions, "Delegate", None)
+        if delegate_enum is not None and hasattr(delegate_enum, "CPU"):
+            base_kwargs["delegate"] = delegate_enum.CPU
         options = vision.FaceLandmarkerOptions(
-            base_options=mp_tasks.BaseOptions(model_asset_path=str(model_path)),
+            base_options=mp_tasks.BaseOptions(**base_kwargs),
             running_mode=vision.RunningMode.IMAGE,
             num_faces=1,
             min_face_detection_confidence=0.5,
