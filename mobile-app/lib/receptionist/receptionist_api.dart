@@ -44,6 +44,8 @@ class ReceptionistApi {
             'time': row['time']?.toString() ?? '',
             'end_time': row['end_time']?.toString() ?? '',
             'duration': row['duration']?.toString() ?? '60 min',
+            'estimated_minutes': row['estimated_minutes'],
+            'checkin_time': row['checkin_time'],
             'price': row['price'] != null ? '₱${row['price']}' : '₱0',
             'status': row['status']?.toString() ?? 'Scheduled',
             'barber': row['barber']?.toString() ?? '',
@@ -131,44 +133,26 @@ class ReceptionistApi {
         continue;
       }
 
-      final start = _parseDateTime(
-        appt['appointment_date']?.toString() ?? '',
-        appt['time']?.toString() ?? '',
-      );
-
       var displayStatus = 'WAITING';
       var progress = 0.0;
-      var timeRemaining = 'Upcoming';
+      var timeRemaining = status == 'CheckedIn' ? 'Checked in' : 'Upcoming';
+      var color = const Color(0xFF2196F3);
+      final checkinRaw = appt['checkin_time']?.toString() ?? '';
+      final estimatedMinutes = _estimatedMinutesOf(appt, 60);
 
-      DateTime? end;
-      if (status == 'InProgress' || status == 'CheckedIn') {
+      if (status == 'InProgress') {
         displayStatus = 'IN PROGRESS';
-        if (start != null) {
-          end = _parseEndDateTime(appt['appointment_date']?.toString() ?? '', appt['end_time']?.toString() ?? '') ??
-              start.add(const Duration(hours: 1));
-          final totalMinutes = end.difference(start).inMinutes.clamp(1, 180);
-          final elapsed = now.difference(start).inMinutes.clamp(0, totalMinutes);
-          progress = (elapsed / totalMinutes).clamp(0.0, 1.0);
-          final mins = end.difference(now).inMinutes;
-          timeRemaining = mins > 0 ? '$mins min remaining' : 'Finishing';
-        } else {
-          progress = status == 'InProgress' ? 0.75 : 0.35;
-          timeRemaining = 'In service';
-        }
-      } else if (start != null) {
-        end = _parseEndDateTime(appt['appointment_date']?.toString() ?? '', appt['end_time']?.toString() ?? '') ??
-            start.add(const Duration(hours: 1));
-        if (!now.isBefore(start) && now.isBefore(end)) {
-          displayStatus = 'IN PROGRESS';
-          final totalMinutes = end.difference(start).inMinutes.clamp(1, 180);
-          final elapsed = now.difference(start).inMinutes.clamp(0, totalMinutes);
-          progress = (elapsed / totalMinutes).clamp(0.0, 1.0);
-          final mins = end.difference(now).inMinutes;
-          timeRemaining = mins > 0 ? '$mins min remaining' : 'Finishing';
-        } else if (!now.isBefore(end)) {
+        color = const Color(0xFF4CAF50);
+        final timed = computeServiceProgress(
+          now: now,
+          start: _parseTimestamp(checkinRaw),
+          estimatedMinutes: estimatedMinutes,
+        );
+        progress = timed['progress'] as double;
+        timeRemaining = timed['timeRemaining'] as String;
+        if (timed['overtime'] == true) {
           displayStatus = 'COMPLETING';
-          progress = 1.0;
-          timeRemaining = 'Auto-completing';
+          color = const Color(0xFFFF9800);
         }
       }
 
@@ -185,54 +169,44 @@ class ReceptionistApi {
         'schedule': '${_formatDateLabel(dateLabel)} • ${_formatTimeLabel(timeLabel)}',
         'status': displayStatus,
         'rawStatus': status,
+        'checkin_time': checkinRaw,
+        'estimated_minutes': estimatedMinutes,
         'progress': progress,
         'timeRemaining': timeRemaining,
-        'color': displayStatus == 'IN PROGRESS'
-            ? const Color(0xFF4CAF50)
-            : const Color(0xFF2196F3),
+        'color': color,
       });
     }
 
-    const walkinDuration = Duration(minutes: 35);
-
     for (final walkIn in walkIns) {
       final status = walkIn['status']?.toString() ?? 'Waiting';
-      var displayStatus = 'WAITING';
-      var progress = 0.12;
-      var timeRemaining = walkIn['waitTime']?.toString() ?? 'Waiting';
-
-      final actualStartRaw = walkIn['actual_start']?.toString() ?? '';
-      DateTime? serviceStart;
-      if (actualStartRaw.isNotEmpty) {
-        serviceStart = DateTime.tryParse(actualStartRaw.replaceFirst(' ', 'T'));
+      if (status == 'Cancelled' || status == 'Completed') {
+        continue;
       }
+
+      var displayStatus = 'WAITING';
+      var progress = 0.0;
+      var timeRemaining = walkIn['waitTime']?.toString() ?? 'Waiting';
+      var color = const Color(0xFF2196F3);
+      final actualStartRaw = walkIn['actual_start']?.toString() ?? '';
+      final estimatedMinutes = _estimatedMinutesOf(walkIn, 35);
 
       if (status == 'InProgress') {
         displayStatus = 'IN PROGRESS';
-        if (serviceStart != null) {
-          final end = serviceStart.add(walkinDuration);
-          if (!now.isBefore(end)) {
-            displayStatus = 'COMPLETING';
-            progress = 1.0;
-            timeRemaining = 'Auto-completing';
-          } else {
-            final total = walkinDuration.inMinutes;
-            final elapsed = now.difference(serviceStart).inMinutes.clamp(0, total);
-            progress = (elapsed / total).clamp(0.0, 0.95);
-            final mins = end.difference(now).inMinutes;
-            timeRemaining = mins > 0 ? '$mins min remaining' : 'Finishing';
-          }
-        } else {
-          progress = 0.35;
-          timeRemaining = 'In service';
+        color = const Color(0xFF4CAF50);
+        final timed = computeServiceProgress(
+          now: now,
+          start: _parseTimestamp(actualStartRaw),
+          estimatedMinutes: estimatedMinutes,
+        );
+        progress = timed['progress'] as double;
+        timeRemaining = timed['timeRemaining'] as String;
+        if (timed['overtime'] == true) {
+          displayStatus = 'COMPLETING';
+          color = const Color(0xFFFF9800);
         }
       } else if (status == 'Assigned') {
         displayStatus = 'READY';
-        progress = 0.25;
         timeRemaining = 'Ready — starts automatically';
-      } else if (status == 'Completed') {
-        displayStatus = 'COMPLETED';
-        progress = 1.0;
       }
 
       final queueNumber = walkIn['queue_number']?.toString() ?? '';
@@ -251,15 +225,69 @@ class ReceptionistApi {
         'status': displayStatus,
         'rawStatus': status,
         'actual_start': actualStartRaw,
+        'estimated_minutes': estimatedMinutes,
         'progress': progress,
         'timeRemaining': timeRemaining,
-        'color': displayStatus == 'IN PROGRESS'
-            ? const Color(0xFF4CAF50)
-            : const Color(0xFF2196F3),
+        'color': color,
       });
     }
 
     return items;
+  }
+
+  static Map<String, dynamic> computeServiceProgress({
+    required DateTime now,
+    DateTime? start,
+    required int estimatedMinutes,
+  }) {
+    if (start == null) {
+      return {
+        'progress': 0.0,
+        'overtime': false,
+        'timeRemaining': 'In service',
+      };
+    }
+
+    final totalSeconds = (estimatedMinutes < 1 ? 1 : estimatedMinutes) * 60;
+    final elapsedSeconds = now.difference(start).inMilliseconds / 1000.0;
+    final ratio = elapsedSeconds / totalSeconds;
+    final overtime = ratio >= 1;
+    final remainingMins = ((totalSeconds - elapsedSeconds) / 60).ceil();
+    final timeRemaining = overtime
+        ? 'Auto-completing'
+        : '${remainingMins < 0 ? 0 : remainingMins} min remaining';
+
+    return {
+      'progress': ratio.clamp(0.0, 1.0),
+      'overtime': overtime,
+      'timeRemaining': timeRemaining,
+    };
+  }
+
+  static int _estimatedMinutesOf(Map<String, dynamic> item, int fallback) {
+    final raw = item['estimated_minutes'];
+    if (raw is num && raw > 0) {
+      return raw.round();
+    }
+    final parsed = int.tryParse(raw?.toString() ?? '');
+    if (parsed != null && parsed > 0) {
+      return parsed;
+    }
+    final fromDuration = int.tryParse(
+      (item['duration']?.toString() ?? '').replaceAll(RegExp(r'[^0-9]'), ''),
+    );
+    if (fromDuration != null && fromDuration > 0) {
+      return fromDuration;
+    }
+    return fallback;
+  }
+
+  static DateTime? _parseTimestamp(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) {
+      return null;
+    }
+    return DateTime.tryParse(value.replaceFirst(' ', 'T'));
   }
 
   static String _formatDateLabel(String isoDate) {

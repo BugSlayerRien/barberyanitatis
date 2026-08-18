@@ -246,7 +246,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                   style: TextStyle(
                     color: status == 'Approved'
                         ? Colors.redAccent
-                        : status == 'Rejected'
+                        : (status == 'Rejected' || status == 'Expired')
                             ? Colors.orange
                             : _kGold,
                   ),
@@ -435,7 +435,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                               borderRadius: BorderRadius.circular(8),
                               border: isPending
                                   ? Border.all(color: _kGold, width: 2)
-                                  : (reqStatus == 'Rejected'
+                                  : (reqStatus == 'Rejected' || reqStatus == 'Expired'
                                       ? Border.all(color: Colors.orange, width: 1)
                                       : null),
                             ),

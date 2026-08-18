@@ -17,27 +17,10 @@ if (!in_array($action, $allowed, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
-function ensure_unavailability_requests_table(PDO $pdo): void
-{
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS barber_unavailability_requests (
-            request_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-            barber_id BIGINT NOT NULL,
-            request_date DATE NOT NULL,
-            note TEXT,
-            status TEXT NOT NULL DEFAULT 'Pending'
-                CHECK (status IN ('Pending', 'Approved', 'Rejected')),
-            reviewed_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-            CONSTRAINT fk_unavailability_barber FOREIGN KEY (barber_id) REFERENCES barbers(barber_id) ON DELETE CASCADE,
-            CONSTRAINT uq_unavailability_barber_date UNIQUE (barber_id, request_date)
-        )"
-    );
-}
-
 try {
     $pdo = get_db_connection();
     ensure_unavailability_requests_table($pdo);
+    expire_past_pending_leave_requests($pdo);
 
     if ($action === 'listMonth') {
         $barberID = (int)($input['barberID'] ?? 0);
@@ -197,21 +180,32 @@ try {
         }
 
         $lookup = $pdo->prepare(
-            'SELECT request_id, barber_id, request_date FROM barber_unavailability_requests WHERE request_id = :id'
+            'SELECT request_id, barber_id, request_date, status FROM barber_unavailability_requests WHERE request_id = :id'
         );
         $lookup->execute([':id' => $requestID]);
         $row = $lookup->fetch();
         if (!$row) {
             json_response(['error' => 'Request not found'], 404);
         }
+        if ((string)($row['status'] ?? '') !== 'Pending') {
+            json_response(['error' => 'Request is no longer pending'], 422);
+        }
+        if ((string)$row['request_date'] < shop_today()) {
+            json_response(['error' => 'Request date has already passed'], 422);
+        }
 
         $pdo->beginTransaction();
         $update = $pdo->prepare(
             "UPDATE barber_unavailability_requests
              SET status = :status, reviewed_at = NOW()
-             WHERE request_id = :id"
+             WHERE request_id = :id
+               AND status = 'Pending'"
         );
         $update->execute([':status' => $decision, ':id' => $requestID]);
+        if ($update->rowCount() === 0) {
+            $pdo->rollBack();
+            json_response(['error' => 'Request is no longer pending'], 422);
+        }
 
         if ($decision === 'Approved') {
             $barberId = (int)$row['barber_id'];

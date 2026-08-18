@@ -39,7 +39,7 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
   @override
   void initState() {
     super.initState();
-    _progressTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) {
         setState(() {});
       }
@@ -236,17 +236,18 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
               valueColor: AlwaysStoppedAnimation<Color>(statusColor),
             ),
           ),
-          if ((live['status'] == 'IN PROGRESS') && (live['progress'] as double) > 0) ...[
+          if ((live['status'] == 'IN PROGRESS' || live['status'] == 'COMPLETING') &&
+              (live['progress'] as double) > 0) ...[
             const SizedBox(height: 4),
             Text(
-              '${((live['progress'] as double) * 100).round()}% complete',
+              '${((live['progress'] as double) * 100).round()}% estimated',
               style: const TextStyle(color: Colors.white54, fontSize: 10),
             ),
           ],
           if (live['status'] == 'COMPLETING') ...[
             const SizedBox(height: 6),
             const Text(
-              'Auto-completing shortly — use Complete or Cancel if needed',
+              'Auto-completing shortly',
               style: TextStyle(color: Colors.white54, fontSize: 10),
             ),
           ],
@@ -283,38 +284,24 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
       };
     }
 
-    if (data['kind']?.toString() == 'walkin') {
-      final actualStartRaw = data['actual_start']?.toString() ?? '';
-      if (actualStartRaw.isNotEmpty) {
-        final serviceStart = DateTime.tryParse(actualStartRaw.replaceFirst(' ', 'T'));
-        if (serviceStart != null) {
-          const duration = Duration(minutes: 35);
-          final end = serviceStart.add(duration);
-          final now = DateTime.now();
-          if (!now.isBefore(end)) {
-            return {
-              'status': 'COMPLETING',
-              'progress': 1.0,
-              'timeRemaining': 'Auto-completing',
-            };
-          }
-          final total = duration.inMinutes;
-          final elapsed = now.difference(serviceStart).inMinutes.clamp(0, total);
-          final progress = (elapsed / total).clamp(0.0, 0.95);
-          final mins = end.difference(now).inMinutes;
-          return {
-            'status': 'IN PROGRESS',
-            'progress': progress,
-            'timeRemaining': mins > 0 ? '$mins min remaining' : 'Finishing',
-          };
-        }
-      }
-    }
-
+    final kind = data['kind']?.toString();
+    final startRaw = kind == 'walkin'
+        ? data['actual_start']?.toString() ?? ''
+        : data['checkin_time']?.toString() ?? '';
+    final estimatedRaw = data['estimated_minutes'];
+    final estimatedMinutes = estimatedRaw is num && estimatedRaw > 0
+        ? estimatedRaw.round()
+        : int.tryParse(estimatedRaw?.toString() ?? '') ?? (kind == 'walkin' ? 35 : 60);
+    final start = DateTime.tryParse(startRaw.replaceFirst(' ', 'T'));
+    final timed = ReceptionistApi.computeServiceProgress(
+      now: DateTime.now(),
+      start: start,
+      estimatedMinutes: estimatedMinutes,
+    );
     return {
-      'status': status,
-      'progress': (data['progress'] as num?)?.toDouble() ?? 0.0,
-      'timeRemaining': data['timeRemaining']?.toString() ?? 'In service',
+      'status': timed['overtime'] == true ? 'COMPLETING' : 'IN PROGRESS',
+      'progress': timed['progress'] as double,
+      'timeRemaining': timed['timeRemaining'] as String,
     };
   }
 
@@ -422,7 +409,7 @@ class _ReceptionistTrackingPageState extends State<ReceptionistTrackingPage> {
       case 'WAITING':
         return const Color(0xFF2196F3);
       case 'COMPLETING':
-        return const Color(0xFFAB47BC);
+        return const Color(0xFFFF9800);
       default:
         return kGoldColor;
     }

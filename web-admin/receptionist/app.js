@@ -414,23 +414,33 @@ function mapBarberCards(barbers, channel) {
     }));
 }
 
-function parseAppointmentDateTime(item) {
-  const date = String(item.appointment_date || "").trim();
-  const time = String(item.time || item.start_time || "").trim();
-  if (!date || !time) return null;
-  const normalized = time.length === 5 ? `${time}:00` : time;
-  const parsed = new Date(`${date}T${normalized}`);
+function parsePersistedTimestamp(raw) {
+  if (!raw) return null;
+  const normalized = String(raw).trim().replace(" ", "T");
+  if (!normalized) return null;
+  const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-const WALKIN_SERVICE_MS = 35 * 60 * 1000;
+function estimatedMinutesOf(item, fallbackMinutes) {
+  const n = Number(item.estimated_minutes);
+  if (Number.isFinite(n) && n > 0) return n;
+  const fromDuration = parseInt(String(item.duration || ""), 10);
+  if (Number.isFinite(fromDuration) && fromDuration > 0) return fromDuration;
+  return fallbackMinutes;
+}
 
-function parseWalkinStart(item) {
-  const raw = item.actual_start;
-  if (!raw) return null;
-  const normalized = String(raw).trim().replace(" ", "T");
-  const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+function estimatedTimeProgress(start, estimatedMinutes, now) {
+  const totalSeconds = Math.max(1, estimatedMinutes) * 60;
+  const elapsedSeconds = Math.max(0, (now.getTime() - start.getTime()) / 1000);
+  const ratio = elapsedSeconds / totalSeconds;
+  const overtime = ratio >= 1;
+  const remainingMins = Math.max(0, Math.ceil((totalSeconds - elapsedSeconds) / 60));
+  return {
+    progress: Math.min(1, Math.max(0, ratio)),
+    overtime,
+    timeRemaining: overtime ? "Auto-completing" : `${remainingMins} min remaining`,
+  };
 }
 
 function buildTracking(appointments, walkins) {
@@ -466,26 +476,26 @@ function buildTracking(appointments, walkins) {
       return;
     }
 
-    const start = parseAppointmentDateTime(item);
     let displayStatus = "WAITING";
     let progress = 0;
-    let timeRemaining = "Upcoming";
+    let timeRemaining = status === "CheckedIn" ? "Checked in" : "Upcoming";
+    let color = "#2196F3";
 
-    if (status === "InProgress" || status === "CheckedIn") {
+    if (status === "InProgress") {
+      const start = parsePersistedTimestamp(item.checkin_time);
+      const estimatedMinutes = estimatedMinutesOf(item, 60);
       displayStatus = "IN PROGRESS";
-      progress = status === "InProgress" ? 0.75 : 0.35;
-      timeRemaining = "In service";
-    } else if (start) {
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-      if (now >= start && now < end) {
-        displayStatus = "IN PROGRESS";
-        progress = Math.min(0.95, (now - start) / (60 * 60 * 1000));
-        const mins = Math.max(0, Math.ceil((end - now) / 60000));
-        timeRemaining = `${mins} min remaining`;
-      } else if (now >= end) {
-        displayStatus = "COMPLETING";
-        progress = 1;
-        timeRemaining = "Auto-completing";
+      color = "#4CAF50";
+      if (start) {
+        const timed = estimatedTimeProgress(start, estimatedMinutes, now);
+        progress = timed.progress;
+        timeRemaining = timed.timeRemaining;
+        if (timed.overtime) {
+          displayStatus = "COMPLETING";
+          color = "#FF9800";
+        }
+      } else {
+        timeRemaining = "In service";
       }
     }
 
@@ -503,9 +513,10 @@ function buildTracking(appointments, walkins) {
       barber: item.barber || "",
       schedule,
       status: displayStatus,
+      rawStatus: status,
       progress,
       timeRemaining,
-      color: displayStatus === "IN PROGRESS" ? "#4CAF50" : "#2196F3",
+      color,
     });
   });
 
@@ -516,36 +527,29 @@ function buildTracking(appointments, walkins) {
     }
 
     let displayStatus = "WAITING";
-    let progress = 0.12;
+    let progress = 0;
     let timeRemaining = item.waitTime || "Waiting";
-    const serviceStart = parseWalkinStart(item);
+    let color = "#2196F3";
 
     if (status === "InProgress") {
       displayStatus = "IN PROGRESS";
+      color = "#4CAF50";
+      const serviceStart = parsePersistedTimestamp(item.actual_start);
+      const estimatedMinutes = estimatedMinutesOf(item, 35);
       if (serviceStart) {
-        const end = new Date(serviceStart.getTime() + WALKIN_SERVICE_MS);
-        if (now >= serviceStart && now < end) {
-          progress = Math.min(0.95, (now - serviceStart) / WALKIN_SERVICE_MS);
-          const mins = Math.max(0, Math.ceil((end - now) / 60000));
-          timeRemaining = `${mins} min remaining`;
-        } else if (now >= end) {
+        const timed = estimatedTimeProgress(serviceStart, estimatedMinutes, now);
+        progress = timed.progress;
+        timeRemaining = timed.timeRemaining;
+        if (timed.overtime) {
           displayStatus = "COMPLETING";
-          progress = 1;
-          timeRemaining = "Auto-completing";
-        } else {
-          timeRemaining = "In service";
+          color = "#FF9800";
         }
       } else {
-        progress = 0.35;
         timeRemaining = "In service";
       }
     } else if (status === "Assigned") {
       displayStatus = "READY";
-      progress = 0.25;
       timeRemaining = "Ready — starts automatically";
-    } else if (status === "Completed") {
-      displayStatus = "COMPLETED";
-      progress = 1;
     }
 
     const queueLabel = item.queue_number ? String(item.queue_number) : "";
@@ -565,7 +569,7 @@ function buildTracking(appointments, walkins) {
       status: displayStatus,
       progress,
       timeRemaining,
-      color: displayStatus === "IN PROGRESS" ? "#4CAF50" : "#2196F3",
+      color,
     });
   });
 
@@ -740,6 +744,8 @@ function renderTracking(items, listId) {
             ? "info"
             : item.status === "IN PROGRESS"
               ? "success"
+              : item.status === "COMPLETING"
+                ? "warning"
               : item.status === "PENDING PAYMENT"
                 ? "warning"
                 : "warning"
@@ -749,7 +755,7 @@ function renderTracking(items, listId) {
         <span style="width: ${pct}%; background: ${item.color};"></span>
       </div>
       <div class="row-wrap" style="margin-top: 6px; justify-content: space-between; align-items: center;">
-        <span class="meta">${item.timeRemaining}${item.status === "IN PROGRESS" && pct > 0 ? ` • ${pct}%` : ""}${item.status === "COMPLETING" ? " • Auto-completing shortly — use Complete or Cancel if needed" : ""}</span>
+        <span class="meta">${item.timeRemaining}${item.status === "IN PROGRESS" && pct > 0 ? ` • ${pct}%` : ""}${item.status === "COMPLETING" ? " • Auto-completing shortly" : ""}</span>
         ${canCancel || canComplete ? `
           <div class="row-wrap" style="gap: 6px;">
             ${canStartWalkin ? `<button type="button" class="btn primary tracking-start" title="Start service"
@@ -1452,7 +1458,7 @@ let trackingRefreshTimer = null;
 let trackingProgressTimer = null;
 const TRACKING_REFRESH_MS_DEFAULT = 45000;
 const TRACKING_REFRESH_MS_COMPLETING = 10000;
-const TRACKING_PROGRESS_TICK_MS = 1500;
+const TRACKING_PROGRESS_TICK_MS = 1000;
 
 function refreshTrackingProgressUi() {
   const trackingView = document.getElementById("tracking-view");

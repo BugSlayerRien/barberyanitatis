@@ -229,6 +229,55 @@ function shop_today(): string
     return shop_now()->format('Y-m-d');
 }
 
+function ensure_unavailability_requests_table(PDO $pdo): void
+{
+    static $ready = false;
+    if ($ready) {
+        return;
+    }
+
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS barber_unavailability_requests (
+            request_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            barber_id BIGINT NOT NULL,
+            request_date DATE NOT NULL,
+            note TEXT,
+            status TEXT NOT NULL DEFAULT 'Pending'
+                CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Expired')),
+            reviewed_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            CONSTRAINT fk_unavailability_barber FOREIGN KEY (barber_id) REFERENCES barbers(barber_id) ON DELETE CASCADE,
+            CONSTRAINT uq_unavailability_barber_date UNIQUE (barber_id, request_date)
+        )"
+    );
+    $pdo->exec('ALTER TABLE barber_unavailability_requests DROP CONSTRAINT IF EXISTS barber_unavailability_requests_status_check');
+    try {
+        $pdo->exec(
+            "ALTER TABLE barber_unavailability_requests
+             ADD CONSTRAINT barber_unavailability_requests_status_check
+             CHECK (status IN ('Pending', 'Approved', 'Rejected', 'Expired'))"
+        );
+    } catch (Throwable $e) {
+        // Constraint already present after a concurrent request.
+    }
+    $ready = true;
+}
+
+function expire_past_pending_leave_requests(PDO $pdo): int
+{
+    ensure_unavailability_requests_table($pdo);
+    $stmt = $pdo->prepare(
+        "UPDATE barber_unavailability_requests
+         SET status = 'Expired',
+             reviewed_at = COALESCE(reviewed_at, NOW())
+         WHERE status = 'Pending'
+           AND request_date < :today"
+    );
+    $stmt->execute([':today' => shop_today()]);
+
+    return $stmt->rowCount();
+}
+
 function shop_current_time(): string
 {
     return shop_now()->format('H:i:s');
@@ -1022,13 +1071,16 @@ function auto_complete_due_walkins(PDO $pdo): int
     $duration = shop_walkin_duration_minutes();
 
     $selectStmt = $pdo->prepare(
-        "SELECT queue_id
-         FROM walkin_queue
-         WHERE status = 'InProgress'
-           AND (
-                (actual_start IS NOT NULL AND actual_start + make_interval(mins => :duration) <= NOW())
-                OR (actual_start IS NULL AND created_at + make_interval(mins => :duration) <= NOW())
-           )"
+        "SELECT wq.queue_id
+           FROM walkin_queue wq
+           LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
+           LEFT JOIN services s ON s.service_id = wsd.service_id
+          WHERE wq.status = 'InProgress'
+          GROUP BY wq.queue_id, wq.actual_start, wq.created_at
+         HAVING COALESCE(wq.actual_start, wq.created_at)
+                + make_interval(
+                    mins => COALESCE(NULLIF(SUM(s.base_duration), 0), :duration)::int
+                ) <= NOW()"
     );
     $selectStmt->execute([':duration' => $duration]);
     $rows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1063,6 +1115,7 @@ function auto_complete_due_walkins(PDO $pdo): int
  */
 function run_tracking_automation(PDO $pdo, bool $force = true): array
 {
+    expire_past_pending_leave_requests($pdo);
     $assignedWalkins = shop_assign_unassigned_walkins($pdo);
     $startedAppointments = auto_start_due_appointments($pdo);
     $startedWalkins = auto_start_due_walkins($pdo);
@@ -1136,12 +1189,34 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
     $startTs = shop_local_ts_sql('appointment_date', 'start_time');
     $endTs = shop_local_ts_sql('appointment_date', 'end_time');
 
+    $notifyStmt = $pdo->prepare(
+        "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
+         VALUES ('User', ?, 'Appointment', 'Appointment completed', ?, TRUE)"
+    );
+
     $groupStmt = $pdo->prepare(
+        "SELECT a.booking_group_id, MIN(a.appointment_id) AS lead_appointment_id,
+                MAX(a.user_id) AS user_id, MAX(a.booking_code) AS booking_code
+         FROM appointments a
+         LEFT JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+         LEFT JOIN services s ON s.service_id = ad.service_id
+         WHERE a.booking_group_id IS NOT NULL
+           AND a.status = 'InProgress'
+         GROUP BY a.booking_group_id
+         HAVING MIN(COALESCE(a.checkin_time, {$startTs}))
+              + make_interval(
+                    mins => COALESCE(NULLIF(SUM(s.base_duration), 0), (COUNT(DISTINCT a.appointment_id) * :duration))::int
+                ) <= NOW()"
+    );
+    $groupStmt->execute([':duration' => $duration]);
+    $dueGroups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $staleGroupStmt = $pdo->prepare(
         "SELECT booking_group_id, MIN(appointment_id) AS lead_appointment_id,
                 MAX(user_id) AS user_id, MAX(booking_code) AS booking_code
          FROM appointments
          WHERE booking_group_id IS NOT NULL
-           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
+           AND status IN ('Scheduled', 'CheckedIn')
          GROUP BY booking_group_id
          HAVING MAX({$startTs} + make_interval(mins => :duration)) <= NOW()
             OR MAX(
@@ -1154,15 +1229,18 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
                 END
             ) <= NOW()"
     );
-    $groupStmt->execute([':duration' => $duration]);
-    $dueGroups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
+    $staleGroupStmt->execute([':duration' => $duration]);
+    $dueGroups = array_merge($dueGroups, $staleGroupStmt->fetchAll(PDO::FETCH_ASSOC));
 
-    $notifyStmt = $pdo->prepare(
-        "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-         VALUES ('User', ?, 'Appointment', 'Appointment completed', ?, TRUE)"
-    );
-
+    $seenGroups = [];
     foreach ($dueGroups as $groupRow) {
+        $groupId = (int)($groupRow['booking_group_id'] ?? 0);
+        if ($groupId > 0) {
+            if (isset($seenGroups[$groupId])) {
+                continue;
+            }
+            $seenGroups[$groupId] = true;
+        }
         $leadId = (int)($groupRow['lead_appointment_id'] ?? 0);
         if ($leadId <= 0) {
             continue;
@@ -1182,10 +1260,27 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
     }
 
     $selectStmt = $pdo->prepare(
+        "SELECT a.appointment_id, a.user_id, a.barber_id, a.booking_code
+         FROM appointments a
+         LEFT JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+         LEFT JOIN services s ON s.service_id = ad.service_id
+         WHERE a.booking_group_id IS NULL
+           AND a.status = 'InProgress'
+         GROUP BY a.appointment_id, a.user_id, a.barber_id, a.booking_code, a.checkin_time,
+                  a.appointment_date, a.start_time
+         HAVING COALESCE(a.checkin_time, {$startTs})
+              + make_interval(
+                    mins => COALESCE(NULLIF(SUM(s.base_duration), 0), :duration)::int
+                ) <= NOW()"
+    );
+    $selectStmt->execute([':duration' => $duration]);
+    $dueRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $staleStmt = $pdo->prepare(
         "SELECT appointment_id, user_id, barber_id, booking_code
          FROM appointments
          WHERE booking_group_id IS NULL
-           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
+           AND status IN ('Scheduled', 'CheckedIn')
            AND (
                 {$startTs} + make_interval(mins => :duration) <= NOW()
                 OR (
@@ -1196,11 +1291,16 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
                 )
            )"
     );
-    $selectStmt->execute([':duration' => $duration]);
-    $dueRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
+    $staleStmt->execute([':duration' => $duration]);
+    $dueRows = array_merge($dueRows, $staleStmt->fetchAll(PDO::FETCH_ASSOC));
 
+    $seenAppointments = [];
     foreach ($dueRows as $row) {
         $appointmentId = (int)$row['appointment_id'];
+        if (isset($seenAppointments[$appointmentId])) {
+            continue;
+        }
+        $seenAppointments[$appointmentId] = true;
         try {
             if (complete_booking_unit($pdo, $appointmentId) > 0) {
                 $completedUnits++;

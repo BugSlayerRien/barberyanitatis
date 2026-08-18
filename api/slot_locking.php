@@ -880,6 +880,8 @@ function collapse_receptionist_appointments(PDO $pdo, array $rows): array
             'time' => (string)$row['time'],
             'end_time' => (string)$row['end_time'],
             'duration' => (string)($row['duration'] ?? '60 min'),
+            'estimated_minutes' => (int)($row['estimated_minutes'] ?? shop_appointment_duration_minutes()),
+            'checkin_time' => $row['checkin_time'] ?? null,
             'price' => $row['price'],
             'status' => (string)$row['status'],
             'barber' => (string)$row['barber'],
@@ -945,8 +947,21 @@ function collapse_receptionist_appointments(PDO $pdo, array $rows): array
         }
 
         $total = 0.0;
+        $estimatedMinutes = 0;
+        $checkinTime = null;
         foreach ($members as $m) {
             $total += (float)($m['price'] ?? 0);
+            $estimatedMinutes += (int)($m['estimated_minutes'] ?? 0);
+            $memberCheckin = $m['checkin_time'] ?? null;
+            if ($memberCheckin !== null && $memberCheckin !== '') {
+                $checkinRaw = (string)$memberCheckin;
+                if ($checkinTime === null || $checkinRaw < (string)$checkinTime) {
+                    $checkinTime = $checkinRaw;
+                }
+            }
+        }
+        if ($estimatedMinutes <= 0) {
+            $estimatedMinutes = count($members) * shop_appointment_duration_minutes();
         }
 
         $out[] = [
@@ -964,6 +979,8 @@ function collapse_receptionist_appointments(PDO $pdo, array $rows): array
             'end_time' => $displayEndTime,
             'time_range' => format_time_range_12h((string)$primary['time'], $displayEndTime),
             'duration' => ((int)count($members) * 60) . ' min',
+            'estimated_minutes' => $estimatedMinutes,
+            'checkin_time' => $checkinTime,
             'price' => $total,
             'status' => $status,
             'barber' => (string)$primary['barber'],
