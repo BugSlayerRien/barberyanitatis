@@ -399,11 +399,11 @@ class FaceScanService {
 
   static Map<String, String> captureFileUrls(String scanSessionId) {
     final safeId = scanSessionId.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '');
-    final base = '${ApiConfig.rootUrl}/uploads/face_scans/$safeId';
+    final prefix = 'uploads/face_scans/$safeId';
     return {
-      'frontViewUrl': '$base/front.jpg',
-      'sideViewUrl': '$base/left.jpg',
-      'backViewUrl': '$base/right.jpg',
+      'frontViewUrl': ApiConfig.resolveImageUrl('$prefix/front.jpg'),
+      'sideViewUrl': ApiConfig.resolveImageUrl('$prefix/left.jpg'),
+      'backViewUrl': ApiConfig.resolveImageUrl('$prefix/right.jpg'),
     };
   }
 
