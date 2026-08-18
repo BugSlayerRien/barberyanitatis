@@ -89,7 +89,8 @@ try {
                     a.appointment_date,
                     a.start_time AS time,
                     a.end_time,
-                    :slot_duration_select AS duration,
+                    a.checkin_time,
+                    COALESCE(NULLIF(SUM(s.base_duration), 0), :slot_duration_select)::int AS estimated_minutes,
                     SUM(ad.final_price) AS price,
                     a.status,
                     b.full_name AS barber,
@@ -116,12 +117,12 @@ try {
              ) intent ON TRUE
              WHERE a.status NOT IN (\'Cancelled\', \'NoShow\', \'Completed\')
                AND (
-                    a.status = \'PendingPayment\'
+                    a.status IN (\'PendingPayment\', \'CheckedIn\', \'InProgress\')
                     OR a.appointment_date::timestamp + a.start_time + make_interval(mins => :slot_duration_filter) > NOW()
                )
                AND b.barber_channel = \'appointment\'
              GROUP BY a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
-                      u.full_name, a.appointment_date, a.start_time, a.end_time, a.status, b.full_name, pay.status, intent.status
+                      u.full_name, a.appointment_date, a.start_time, a.end_time, a.checkin_time, a.status, b.full_name, pay.status, intent.status
              ORDER BY a.appointment_date ASC, a.start_time ASC'
         );
         $slotDuration = shop_appointment_duration_minutes();
@@ -145,6 +146,8 @@ try {
                 'time' => (string)$row['time'],
                 'end_time' => (string)$row['end_time'],
                 'duration' => shop_appointment_duration_minutes() . ' min',
+                'estimated_minutes' => (int)($row['estimated_minutes'] ?? shop_appointment_duration_minutes()),
+                'checkin_time' => $row['checkin_time'] !== null ? (string)$row['checkin_time'] : null,
                 'price' => $row['price'],
                 'status' => (string)$row['status'],
                 'barber' => (string)$row['barber'],
@@ -155,6 +158,7 @@ try {
             'SELECT wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start,
                     COALESCE(NULLIF(TRIM(wq.guest_name), \'\'), \'Walk-in #\' || RIGHT(wq.queue_number, 3)) AS name,
                     COALESCE(NULLIF(string_agg(DISTINCT s.service_name, \', \' ORDER BY s.service_name), \'\'), \'Walk-in\') AS service,
+                    COALESCE(NULLIF(SUM(s.base_duration), 0), :walkin_duration)::int AS estimated_minutes,
                     wq.wait_time_minutes,
                     wq.status,
                     b.full_name AS barber
@@ -167,6 +171,7 @@ try {
              GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
              ORDER BY wq.queue_id ASC'
         );
+        $walkinsStmt->bindValue(':walkin_duration', shop_walkin_duration_minutes(), PDO::PARAM_INT);
         $walkinsStmt->execute();
         $walkins = $walkinsStmt->fetchAll();
 
@@ -192,6 +197,8 @@ try {
                     'end_time' => (string)($row['end_time'] ?? ''),
                     'time_range' => (string)($row['time_range'] ?? ''),
                     'duration' => (string)($row['duration'] ?? '60 min'),
+                    'estimated_minutes' => (int)($row['estimated_minutes'] ?? shop_appointment_duration_minutes()),
+                    'checkin_time' => $row['checkin_time'] ?? null,
                     'price' => $row['price'],
                     'status' => (string)$row['status'],
                     'barber' => (string)$row['barber'],
@@ -208,6 +215,7 @@ try {
                     'status' => $row['status'],
                     'barber' => $row['barber'],
                     'actual_start' => $row['actual_start'] ?? null,
+                    'estimated_minutes' => (int)($row['estimated_minutes'] ?? shop_walkin_duration_minutes()),
                 ];
             }, $walkins),
             'automation' => $trackingAutomation,
@@ -225,7 +233,7 @@ try {
 
         $checkinTime = null;
         $completionTime = null;
-        if ($status === 'CheckedIn') {
+        if ($status === 'CheckedIn' || $status === 'InProgress') {
             $checkinTime = date('Y-m-d H:i:s');
         }
         if ($status === 'Completed') {
@@ -255,7 +263,7 @@ try {
             $cancelStmt = $pdo->prepare(
                 "UPDATE appointments
                  SET status = :status,
-                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     checkin_time = COALESCE(checkin_time, :checkin_time),
                      completion_time = COALESCE(:completion_time, completion_time),
                      updated_at = CURRENT_TIMESTAMP
                  WHERE booking_group_id = :group_id
@@ -285,7 +293,7 @@ try {
             $groupUpdate = $pdo->prepare(
                 "UPDATE appointments
                  SET status = :status,
-                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     checkin_time = COALESCE(checkin_time, :checkin_time),
                      completion_time = COALESCE(:completion_time, completion_time),
                      updated_at = CURRENT_TIMESTAMP
                  WHERE booking_group_id = :group_id
@@ -301,7 +309,7 @@ try {
             $stmt = $pdo->prepare(
                 'UPDATE appointments
                  SET status = :status,
-                     checkin_time = COALESCE(:checkin_time, checkin_time),
+                     checkin_time = COALESCE(checkin_time, :checkin_time),
                      completion_time = COALESCE(:completion_time, completion_time)
                  WHERE appointment_id = :appointment_id'
             );
