@@ -35,14 +35,15 @@ class _PaymentPageState extends State<PaymentPage> {
   String? _receiptRef;
   String _selectedMethod = 'gcash';
 
-  String _paymentApiRoot() {
-    final root = ApiConfig.rootUrl.replaceAll(RegExp(r'/$'), '');
-    return '$root/mobile-app';
+  String _paymongoBase() {
+    return ApiConfig.baseUrl.replaceAll(RegExp(r'/$'), '');
   }
 
   String _paymentReturnUrl(bool success) {
-    final base = _paymentApiRoot();
-    return success ? '$base/payment-success' : '$base/payment-failed';
+    final base = _paymongoBase();
+    return success
+        ? '$base/paymongo/payment-success.php'
+        : '$base/paymongo/payment-failed.php';
   }
 
   String? _extractCheckoutUrl(Map<String, dynamic> body) {
@@ -74,9 +75,9 @@ class _PaymentPageState extends State<PaymentPage> {
     try {
       // Create payment intent via backend PayMongo endpoint
       final cents = (total * 100).round();
-      final paymentRoot = _paymentApiRoot();
+      final paymentRoot = _paymongoBase();
       final createIntentResponse = await http.post(
-        Uri.parse('$paymentRoot/backend/paymongo/create-payment.php'),
+        Uri.parse('$paymentRoot/paymongo/create-payment.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'amount': cents,
@@ -174,11 +175,11 @@ class _PaymentPageState extends State<PaymentPage> {
     required String resourceType,
   }) async {
     final normalizedType = resourceType.toLowerCase();
-    final paymentRoot = _paymentApiRoot();
+    final paymentRoot = _paymongoBase();
     for (var attempt = 0; attempt < 24; attempt++) {
       try {
         final uri = Uri.parse(
-          '$paymentRoot/backend/paymongo/payment-status.php?intent_id=$id&resource_type=$normalizedType',
+          '$paymentRoot/paymongo/payment-status.php?intent_id=$id&resource_type=$normalizedType',
         );
         final response = await http.get(uri).timeout(const Duration(seconds: 5));
 

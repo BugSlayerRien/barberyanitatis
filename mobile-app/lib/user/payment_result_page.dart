@@ -57,7 +57,7 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
       for (var i = 0; i < 20; i++) {
         try {
           final uri = Uri.parse(
-            '$paymentRoot/backend/paymongo/payment-status.php?intent_id=$resourceId&resource_type=$resourceType',
+            '$paymentRoot/paymongo/payment-status.php?intent_id=$resourceId&resource_type=$resourceType',
           );
           final response = await http.get(uri).timeout(const Duration(seconds: 5));
 
@@ -145,8 +145,7 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
   }
 
   String _buildPaymentRoot() {
-    final root = ApiConfig.rootUrl.replaceAll(RegExp(r'/$'), '');
-    return '$root/mobile-app';
+    return ApiConfig.baseUrl.replaceAll(RegExp(r'/$'), '');
   }
 
   @override
