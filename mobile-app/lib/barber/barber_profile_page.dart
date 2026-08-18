@@ -44,18 +44,9 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
     return value;
   }
 
-  /// Serve relative uploads through the existing PHP proxy so Android/iOS
-  /// can load files Apache may not expose the same way as Flutter web.
+  /// Serve relative uploads through the PHP proxy (disk locally, Storage in production).
   String _displayImageUrl(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return '';
-    }
-    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-      return ApiConfig.resolveImageUrl(trimmed);
-    }
-    final path = trimmed.startsWith('/') ? trimmed : '/$trimmed';
-    return '${ApiConfig.baseUrl}/image_proxy.php?path=${Uri.encodeComponent(path)}';
+    return ApiConfig.resolveImageUrl(raw.trim());
   }
 
   Future<void> _loadBarberProfile() async {

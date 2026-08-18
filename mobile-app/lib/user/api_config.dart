@@ -107,24 +107,57 @@ class ApiConfig {
     return base.endsWith('/api') ? base.substring(0, base.length - 4) : base;
   }
 
+  static String _imageProxyUrl(String path) {
+    final cleaned = path.startsWith('/') ? path : '/$path';
+    return '$baseUrl/image_proxy.php?path=${Uri.encodeComponent(cleaned)}';
+  }
+
+  static bool _isServerUploadPath(String path) {
+    final relative = path.startsWith('/') ? path.substring(1) : path;
+    return relative.startsWith('uploads/');
+  }
+
+  /// Turns DB relative paths (and same-origin /uploads URLs) into a fetchable URL.
+  ///
+  /// Native production used `{host}/uploads/...` which 404s on Render after the
+  /// Storage cutover. `image_proxy.php` reads disk first (XAMPP unchanged), then
+  /// Supabase. Flutter `assets/` paths stay bundled on mobile.
   static String resolveImageUrl(String url) {
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      if (kIsWeb && url.startsWith(rootUrl)) {
-        final path = url.substring(rootUrl.length);
-        final cleaned = path.startsWith('/') ? path : '/$path';
-        return '$baseUrl/image_proxy.php?path=${Uri.encodeComponent(cleaned)}';
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) {
+      return trimmed;
+    }
+    if (trimmed.contains('image_proxy.php')) {
+      return trimmed;
+    }
+
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      for (final origin in <String>[rootUrl, baseUrl, productionBaseUrl]) {
+        if (origin.isEmpty || !trimmed.startsWith(origin)) {
+          continue;
+        }
+        var path = trimmed.substring(origin.length);
+        final queryAt = path.indexOf('?');
+        if (queryAt >= 0) {
+          path = path.substring(0, queryAt);
+        }
+        if (kIsWeb || _isServerUploadPath(path)) {
+          return _imageProxyUrl(path);
+        }
+        return trimmed;
       }
-      return url;
+      return trimmed;
     }
-    if (url.startsWith('/')) {
-      if (kIsWeb) {
-        return '$baseUrl/image_proxy.php?path=${Uri.encodeComponent(url)}';
-      }
-      return '$rootUrl$url';
+
+    if (!kIsWeb && trimmed.startsWith('assets/')) {
+      return trimmed;
     }
-    if (kIsWeb) {
-      return '$baseUrl/image_proxy.php?path=${Uri.encodeComponent('/$url')}';
+    if (kIsWeb || _isServerUploadPath(trimmed)) {
+      return _imageProxyUrl(trimmed);
     }
-    return '$rootUrl/$url';
+    if (trimmed.startsWith('/')) {
+      return '$rootUrl$trimmed';
+    }
+    return '$rootUrl/$trimmed';
   }
 }
