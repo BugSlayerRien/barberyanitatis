@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'face_scan_results_page.dart';
 import 'services/face_scan_service.dart';
 import 'scanner/camera_preview_cover.dart';
+import 'scanner/camera_frame_orientation.dart';
 import 'scanner/face_preview_mapping.dart';
 import 'scanner/staging_face_validation.dart';
 import 'scanner/face_detector_service_stub.dart'
@@ -197,6 +198,9 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       final frame = await _detector.processFrame(
         image,
         sensorOrientation: _camera!.description.sensorOrientation,
+        deviceOrientation:
+            CameraFrameOrientation.previewOrientation(_camera!),
+        lensDirection: _camera!.description.lensDirection,
       );
 
       if (!mounted) {
@@ -222,20 +226,26 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
       _camera?.description.lensDirection == CameraLensDirection.front;
 
   Rect _normalizeStagingFace(DetectedFaceFrame frame) {
+    final camera = _camera;
     final rotated = FacePreviewMapping.normalizeBoundingBox(
       boundingBox: frame.boundingBox,
       imageSize: frame.imageSize,
-      sensorOrientation: _camera?.description.sensorOrientation ?? 90,
+      rotationDegrees: camera == null
+          ? 90
+          : CameraFrameOrientation.mlKitRotationDegreesFor(camera),
       mirrorX: _stagingUsesFrontCamera,
     );
     final view = _stagingViewSize;
-    final preview = _camera?.value.previewSize;
-    if (view == null || preview == null || preview.width <= 0 || preview.height <= 0) {
+    if (view == null || camera == null || !camera.value.isInitialized) {
+      return rotated;
+    }
+    final layout = CameraFrameOrientation.previewLayoutSizeFor(camera);
+    if (layout.width <= 0 || layout.height <= 0) {
       return rotated;
     }
     return FacePreviewMapping.sourceToCoverViewport(
       face: rotated,
-      sourceAspect: preview.height / preview.width,
+      sourceAspect: layout.width / layout.height,
       viewport: view,
     );
   }
