@@ -36,14 +36,17 @@ services:
 
   - type: web
     name: tatis-ai-sidecar
-    runtime: python
+    runtime: docker
     rootDir: ai-service
+    dockerfilePath: ./Dockerfile
     plan: free
     healthCheckPath: /health
-    buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: APP_ENV
         value: production
+      - key: MEDIAPIPE_DISABLE_GPU
+        value: "1"
+      - key: LIBGL_ALWAYS_SOFTWARE
+        value: "1"
       # Set in dashboard if used by sidecar:
       # REPLICATE_API_TOKEN, REPLICATE_FLUX_MODEL
