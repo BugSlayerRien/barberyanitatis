@@ -3,7 +3,10 @@ import 'dart:ui';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+
+import 'camera_frame_orientation.dart';
 
 class DetectedFaceFrame {
   final Rect boundingBox;
@@ -56,6 +59,8 @@ class FaceDetectorService {
   Future<DetectedFaceFrame?> processFrame(
     CameraImage image, {
     required int sensorOrientation,
+    DeviceOrientation deviceOrientation = DeviceOrientation.portraitUp,
+    CameraLensDirection lensDirection = CameraLensDirection.front,
   }) async {
     if (!_initialized) {
       debugPrint('[FaceDetectorService] Not initialized yet');
@@ -63,7 +68,12 @@ class FaceDetectorService {
     }
     
     try {
-      final inputImage = _toInputImage(image, sensorOrientation);
+      final rotationDegrees = CameraFrameOrientation.mlKitRotationDegrees(
+        sensorOrientation: sensorOrientation,
+        deviceOrientation: deviceOrientation,
+        lensDirection: lensDirection,
+      );
+      final inputImage = _toInputImage(image, rotationDegrees);
       if (inputImage == null) {
         return null;
       }
@@ -111,16 +121,16 @@ class FaceDetectorService {
     }
   }
 
-  InputImage? _toInputImage(CameraImage image, int sensorOrientation) {
+  InputImage? _toInputImage(CameraImage image, int rotationDegrees) {
     final format = InputImageFormatValue.fromRawValue(image.format.raw);
     if (format == null) {
       debugPrint('[FaceDetectorService] Unsupported image format: ${image.format.raw}');
       return null;
     }
 
-    final rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    final rotation = InputImageRotationValue.fromRawValue(rotationDegrees);
     if (rotation == null) {
-      debugPrint('[FaceDetectorService] Invalid sensor orientation: $sensorOrientation');
+      debugPrint('[FaceDetectorService] Invalid image rotation: $rotationDegrees');
       return null;
     }
 

@@ -1,6 +1,7 @@
 import 'dart:ui';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/services.dart';
 
 class DetectedFaceFrame {
   final Rect boundingBox;
@@ -26,6 +27,8 @@ class FaceDetectorService {
   Future<DetectedFaceFrame?> processFrame(
     CameraImage image, {
     required int sensorOrientation,
+    DeviceOrientation deviceOrientation = DeviceOrientation.portraitUp,
+    CameraLensDirection lensDirection = CameraLensDirection.front,
   }) async {
     return null;
   }

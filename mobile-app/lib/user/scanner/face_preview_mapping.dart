@@ -1,14 +1,15 @@
 import 'dart:ui';
 
 /// Maps ML Kit face boxes from the camera buffer into the same space as a
-/// portrait [BoxFit.cover] [CameraPreview] (rotated, optionally mirrored).
+/// [BoxFit.cover] [CameraPreview] (rotated for the current UI orientation,
+/// optionally mirrored).
 class FacePreviewMapping {
   FacePreviewMapping._();
 
   static Rect normalizeBoundingBox({
     required Rect boundingBox,
     required Size imageSize,
-    required int sensorOrientation,
+    required int rotationDegrees,
     required bool mirrorX,
   }) {
     if (imageSize.width <= 0 || imageSize.height <= 0) {
@@ -21,7 +22,7 @@ class FacePreviewMapping {
     final height = boundingBox.height / imageSize.height;
 
     late final Rect rotated;
-    switch (sensorOrientation % 360) {
+    switch (rotationDegrees % 360) {
       case 90:
         rotated = Rect.fromLTWH(top, 1.0 - left - width, height, width);
         break;

@@ -27,6 +27,7 @@ import 'scanner/overlay_registry.dart';
 import 'scanner/overlay_asset_cache.dart';
 import 'scanner/scanner_layout.dart';
 import 'scanner/camera_preview_cover.dart';
+import 'scanner/camera_frame_orientation.dart';
 import 'scanner/face_preview_mapping.dart';
 import 'scanner/staging_face_validation.dart';
 import 'scanner/attachment_engine.dart';
@@ -609,6 +610,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       await controller.initialize();
       debugPrint('[AiFaceScan] Camera controller initialized successfully');
+      if (widget.kioskMode) {
+        final lockTo = CameraFrameOrientation.landscapeLockTarget(controller);
+        await controller.lockCaptureOrientation(lockTo);
+        debugPrint('[AiFaceScan] Locked capture orientation to $lockTo');
+      }
       
       debugPrint('[AiFaceScan] Starting image stream...');
       await controller.startImageStream((image) async {
@@ -618,6 +624,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           final frame = await _detector.processFrame(
             image,
             sensorOrientation: controller.description.sensorOrientation,
+            deviceOrientation:
+                CameraFrameOrientation.previewOrientation(controller),
+            lensDirection: controller.description.lensDirection,
           );
           if (!mounted) {
             _busy = false;
@@ -1639,10 +1648,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _camera?.description.lensDirection == CameraLensDirection.front;
 
   Rect _normalizeStagingFace(DetectedFaceFrame frame) {
+    final camera = _camera;
     final rotated = FacePreviewMapping.normalizeBoundingBox(
       boundingBox: frame.boundingBox,
       imageSize: frame.imageSize,
-      sensorOrientation: _camera?.description.sensorOrientation ?? 90,
+      rotationDegrees: camera == null
+          ? 90
+          : CameraFrameOrientation.mlKitRotationDegreesFor(camera),
       mirrorX: _stagingUsesFrontCamera,
     );
     return _stagingViewportFace(rotated);
@@ -1650,13 +1662,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   Rect _stagingViewportFace(Rect sourceNorm) {
     final view = _stagingViewSize;
-    final preview = _camera?.value.previewSize;
-    if (view == null || preview == null || preview.width <= 0 || preview.height <= 0) {
+    final camera = _camera;
+    if (view == null || camera == null || !camera.value.isInitialized) {
+      return sourceNorm;
+    }
+    final layout = CameraFrameOrientation.previewLayoutSizeFor(camera);
+    if (layout.width <= 0 || layout.height <= 0) {
       return sourceNorm;
     }
     return FacePreviewMapping.sourceToCoverViewport(
       face: sourceNorm,
-      sourceAspect: preview.height / preview.width,
+      sourceAspect: layout.width / layout.height,
       viewport: view,
     );
   }
@@ -1853,6 +1869,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         final frame = await _detector.processFrame(
           image,
           sensorOrientation: _camera!.description.sensorOrientation,
+          deviceOrientation:
+              CameraFrameOrientation.previewOrientation(_camera!),
+          lensDirection: _camera!.description.lensDirection,
         );
         if (!mounted) {
           _busy = false;
@@ -3560,32 +3579,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         child: Stack(
           fit: StackFit.expand,
           children: [
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final previewSize = _camera!.value.previewSize;
-                final previewWidth = previewSize?.height ?? constraints.maxWidth;
-                final previewHeight = previewSize?.width ?? constraints.maxHeight;
-
-                return ClipRect(
-                  child: OverflowBox(
-                    alignment: Alignment.center,
-                    minWidth: constraints.maxWidth,
-                    minHeight: constraints.maxHeight,
-                    maxWidth: double.infinity,
-                    maxHeight: double.infinity,
-                    child: FittedBox(
-                      fit: BoxFit.cover,
-                      alignment: Alignment.center,
-                      child: SizedBox(
-                        width: previewWidth,
-                        height: previewHeight,
-                        child: CameraPreview(_camera!),
-                      ),
-                    ),
-                  ),
-                );
-              },
-            ),
+            CameraPreviewCover(controller: _camera!),
             LayoutBuilder(
               builder: (context, constraints) {
                 return _buildScanGuideOverlay(constraints);
