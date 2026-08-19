@@ -88,6 +88,27 @@ async function parseJsonResponse(response) {
 /**
  * fetch with timeout + retries for Render cold starts / dropped connections.
  */
+function portalAuthHeaders() {
+  try {
+    const token =
+      (typeof sessionStorage !== "undefined" && sessionStorage.getItem("portalToken")) || "";
+    if (!token) return {};
+    return {
+      Authorization: `Bearer ${token}`,
+      "X-Portal-Token": token,
+    };
+  } catch (_) {
+    return {};
+  }
+}
+
+function storePortalSession(data) {
+  const token = data?.portalToken || data?.user?.portalToken || "";
+  if (token) {
+    sessionStorage.setItem("portalToken", token);
+  }
+}
+
 async function fetchWithRetry(url, options = {}, attempts = API_RETRY_ATTEMPTS) {
   let lastError = null;
 
@@ -108,6 +129,10 @@ async function fetchWithRetry(url, options = {}, attempts = API_RETRY_ATTEMPTS) 
     try {
       const response = await fetch(url, {
         ...options,
+        headers: {
+          ...portalAuthHeaders(),
+          ...(options.headers || {}),
+        },
         signal: controller.signal,
       });
       return response;

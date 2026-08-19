@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/admin_auth.php';
 
 function ensure_system_settings_table(PDO $pdo): void
 {
@@ -146,7 +147,10 @@ function settings_backup_info(): array
     $dir = api_project_root() . DIRECTORY_SEPARATOR . 'storage' . DIRECTORY_SEPARATOR . 'backups';
     $latest = null;
     if (is_dir($dir)) {
-        $files = glob($dir . DIRECTORY_SEPARATOR . 'tatis_backup_*.json') ?: [];
+        $files = array_merge(
+            glob($dir . DIRECTORY_SEPARATOR . 'tatis_partial_export_*.json') ?: [],
+            glob($dir . DIRECTORY_SEPARATOR . 'tatis_backup_*.json') ?: []
+        );
         rsort($files);
         if ($files !== []) {
             $path = $files[0];
@@ -159,11 +163,13 @@ function settings_backup_info(): array
     }
 
     return [
+        'kind' => 'partial-data-export',
+        'coversFullDatabase' => false,
         'manualBackupSupported' => true,
         'manualRestoreSupported' => true,
         'automaticBackupImplemented' => false,
         'latest' => $latest,
-        'note' => 'Manual JSON backups are supported. Automatic scheduled backups are not implemented.',
+        'note' => 'Partial application-data export only (selected tables, max 2,000 rows each). Not a full database backup. Restore truncates those tables and CASCADE-clears related rows that are not in the file.',
     ];
 }
 
@@ -357,6 +363,8 @@ function backup_table_allowlist(): array
 function build_backup_payload(PDO $pdo): array
 {
     $backup = [
+        'kind' => 'partial-data-export',
+        'coversFullDatabase' => false,
         'generatedAt' => (new DateTimeImmutable('now', new DateTimeZone(shop_timezone())))->format(DateTimeInterface::ATOM),
         'tables' => [],
     ];
@@ -470,6 +478,8 @@ function restore_backup_payload(PDO $pdo, array $backup): array
             static fn(string $table): string => '"' . str_replace('"', '', $table) . '"',
             array_keys($incoming)
         ));
+        // CASCADE also empties tables that FK-reference these ones (payments, walk-ins, etc.)
+        // even when those tables were never in the JSON export.
         $pdo->exec('TRUNCATE TABLE ' . $quoted . ' RESTART IDENTITY CASCADE');
 
         $restored = [];
@@ -602,6 +612,7 @@ function send_test_notification_email(PDO $pdo, string $toEmail, string $fromEma
 try {
     $pdo = get_db_connection();
     ensure_system_settings_table($pdo);
+    require_admin($pdo);
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     if ($method === 'GET') {
@@ -661,12 +672,12 @@ try {
             json_response(['error' => 'Unable to create backup directory'], 500);
         }
 
-        $fileName = 'tatis_backup_' . date('Ymd_His') . '.json';
+        $fileName = 'tatis_partial_export_' . date('Ymd_His') . '.json';
         $path = $dir . DIRECTORY_SEPARATOR . $fileName;
         file_put_contents($path, $json);
 
         json_response([
-            'message' => 'Backup created.',
+            'message' => 'Partial data export created.',
             'fileName' => $fileName,
             'downloadUrl' => '../storage/backups/' . $fileName,
             'backup' => $backup,
@@ -696,7 +707,7 @@ try {
 
         $map = load_settings_map($pdo);
         json_response([
-            'message' => 'Backup restored.',
+            'message' => 'Partial data export restored.',
             'restored' => $restored,
             'settings' => settings_payload($map),
             'notifications' => settings_notification_meta($pdo),

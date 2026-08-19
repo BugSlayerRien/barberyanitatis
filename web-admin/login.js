@@ -28,6 +28,9 @@ form.addEventListener("submit", async (event) => {
     const roles = (data.user?.roles || []).map((role) => role.toLowerCase());
     sessionStorage.setItem("roles", JSON.stringify(roles));
     sessionStorage.setItem("user", JSON.stringify(data.user));
+    if (typeof storePortalSession === "function") {
+      storePortalSession(data);
+    }
 
     if (roles.includes("admin")) {
       window.location.href = "./admin/index.html";
