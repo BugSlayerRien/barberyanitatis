@@ -2349,6 +2349,7 @@ function applySettingsPayload(data) {
   if (backupMeta) {
     backupMeta.innerHTML = settingsKvRows([
       ["Manual backup", backup.manualBackupSupported ? "Available" : "Unavailable", backup.manualBackupSupported ? "ok" : "warn"],
+      ["Manual restore", backup.manualRestoreSupported ? "Available" : "Unavailable", backup.manualRestoreSupported ? "ok" : "warn"],
       ["Automatic backups", backup.automaticBackupImplemented ? "Enabled" : "Not implemented", backup.automaticBackupImplemented ? "ok" : "muted"],
       ["Last successful backup", latest ? formatSettingsDate(latest.modifiedAt) : "None yet"],
       ["Latest file", latest ? `${latest.fileName} (${formatBytes(latest.sizeBytes)})` : "-"],
@@ -3007,6 +3008,60 @@ document.getElementById("settings-download-backup")?.addEventListener("click", a
       toast(error.message || "Backup failed", "error");
     }
   }, { label: "Creating backup..." });
+});
+
+document.getElementById("settings-restore-backup")?.addEventListener("click", () => {
+  document.getElementById("settings-restore-file")?.click();
+});
+
+document.getElementById("settings-restore-file")?.addEventListener("change", async (event) => {
+  const input = event.currentTarget;
+  if (!(input instanceof HTMLInputElement) || !input.files || input.files.length === 0) {
+    return;
+  }
+  const file = input.files[0];
+  input.value = "";
+
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch {
+    toast("That file is not valid JSON.", "error");
+    return;
+  }
+  if (!backup || typeof backup !== "object" || !backup.tables) {
+    toast("That file is not a Tatis backup. Choose a JSON file created by Create & download backup.", "error");
+    return;
+  }
+
+  const confirmed = await confirmAction(
+    "This replaces current users, barbers, staff, services, appointments, slots, notifications, and system settings with the file. Related records that are not in the backup will be cleared. This cannot be undone.",
+    {
+      title: "Restore backup",
+      confirmLabel: "Restore now",
+      danger: true,
+    },
+  );
+  if (!confirmed) return;
+
+  const btn = document.getElementById("settings-restore-backup");
+  await withButtonLoading(btn, async () => {
+    try {
+      const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "restoreBackup", backup }),
+      });
+      const data = await parseJsonResponse(response);
+      if (!response.ok) {
+        throw new Error(data.error || data.details || "Restore failed");
+      }
+      applySettingsPayload(data);
+      toast(data.message || "Backup restored.", "success");
+    } catch (error) {
+      toast(error.message || "Restore failed", "error");
+    }
+  }, { label: "Restoring..." });
 });
 
 document.getElementById("settings-refresh-all")?.addEventListener("click", async (event) => {

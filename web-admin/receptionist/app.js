@@ -93,12 +93,57 @@ function formatCurrency(value) {
   return `PHP ${Number(value).toFixed(2)}`;
 }
 
-function localTodayYmd() {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, "0");
-  const d = String(now.getDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+/** Shop wall-clock timezone. Matches api/shop_schedule.php shop_timezone(). */
+const SHOP_TIMEZONE = "Asia/Manila";
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function ymdFromParts(year, month, day) {
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+/** Today's calendar date in the shop timezone, not UTC and not the browser zone. */
+function localTodayYmd(now = new Date()) {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: SHOP_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(now);
+    const get = (type) => parts.find((part) => part.type === type)?.value;
+    return `${get("year")}-${get("month")}-${get("day")}`;
+  } catch {
+    return ymdFromParts(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  }
+}
+
+/**
+ * Calendar day for an appointment_date value.
+ * DATE / naive datetime strings keep their written day (the shop stores Manila dates).
+ * Values with a timezone offset are converted to the shop calendar day.
+ */
+function calendarDateYmd(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})(.*)$/);
+  if (!match) {
+    const parsed = new Date(raw);
+    return Number.isNaN(parsed.getTime()) ? "" : localTodayYmd(parsed);
+  }
+
+  const written = `${match[1]}-${match[2]}-${match[3]}`;
+  const tail = match[4].trim();
+  if (!tail) return written;
+
+  // Offset/Z after the time — not the "-DD" in the date itself.
+  const hasExplicitTz = /[zZ]|[+-]\d{2}(?::?\d{2})?$/.test(tail);
+  if (!hasExplicitTz) return written;
+
+  const parsed = new Date(raw.includes(" ") ? raw.replace(" ", "T") : raw);
+  return Number.isNaN(parsed.getTime()) ? written : localTodayYmd(parsed);
 }
 
 async function postJson(url, payload, loadingMessage = false) {
@@ -621,7 +666,7 @@ function buildTracking(appointments, walkins) {
 }
 
 function formatScheduleLabel(dateValue, timeValue) {
-  const date = String(dateValue || "").trim();
+  const date = calendarDateYmd(dateValue);
   const time = String(timeValue || "").trim();
   if (!date) {
     return time ? formatTime12(time) : "Schedule TBD";
@@ -655,8 +700,7 @@ function renderAppointments(appointments) {
   const statusFilter = appointmentsStatusFilter?.value || "all";
   const today = localTodayYmd();
   const filtered = (appointments || []).filter((item) => {
-    const dateStr = String(item.appointment_date || "").slice(0, 10);
-    if (dateStr !== today) return false;
+    if (calendarDateYmd(item.appointment_date) !== today) return false;
     const textMatch = !q
       || String(item.name).toLowerCase().includes(q)
       || String(item.service).toLowerCase().includes(q)
@@ -1260,7 +1304,10 @@ function toCsv(rows) {
 }
 
 function exportAppointmentsCsv() {
-  const exportRows = state.appointments.map((item) => ({
+  const today = localTodayYmd();
+  const exportRows = (state.appointments || [])
+    .filter((item) => calendarDateYmd(item.appointment_date) === today)
+    .map((item) => ({
     client: item.name,
     service: item.service,
     time: item.time,
