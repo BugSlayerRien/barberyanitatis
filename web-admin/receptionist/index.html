@@ -8,50 +8,61 @@
   </head>
   <body>
     <div class="app">
-      <aside class="sidebar">
+      <aside class="sidebar" id="portal-sidebar">
         <div class="brand">
           <div class="brand-badge brand-badge-logo" aria-label="Tatis logo"></div>
-          <div>
-            <h1>Barberya ni Tatis</h1>
-            <div class="badge">RECEPTIONIST</div>
+          <div class="brand-text">
+            <h1 class="brand-name">Barberya ni Tatis</h1>
+            <span class="brand-role">Receptionist</span>
           </div>
         </div>
-        <nav class="nav">
-          <div class="nav-category">Dashboard</div>
+
+        <nav class="nav" aria-label="Primary navigation">
+          <p class="nav-category">Front desk</p>
           <button class="active" data-view="dashboard" type="button">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3z"></path><path d="M13 21h8v-6h-8z"></path><path d="M13 11h8V3h-8z"></path><path d="M3 21h8v-6H3z"></path></svg></span>
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 13h8V3H3z"></path><path d="M13 21h8v-6h-8z"></path><path d="M13 11h8V3h-8z"></path><path d="M3 21h8v-6H3z"></path></svg></span>
             <span class="nav-label">Dashboard</span>
           </button>
-
-          <div class="nav-category">Operations</div>
           <button data-view="tracking" type="button">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg></span>
-            <span class="nav-label">Tracking</span>
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4"></path></svg></span>
+            <span class="nav-label">Live tracking</span>
           </button>
 
-          <div class="nav-category">Team</div>
+          <p class="nav-category">Team</p>
           <button data-view="barbers" type="button">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
-            <span class="nav-label">Barbers</span>
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
+            <span class="nav-label">Barbers &amp; leave</span>
           </button>
 
-          <div class="nav-category">Session</div>
-          <button data-view="logout" type="button">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>
-            <span class="nav-label">Logout</span>
-          </button>
+          <div class="nav-group-end">
+            <p class="nav-category">Session</p>
+            <button class="nav-danger" data-view="logout" type="button">
+              <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>
+              <span class="nav-label">Sign out</span>
+            </button>
+          </div>
         </nav>
+
         <div class="sidebar-footer">
-          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+          <span class="sidebar-meta">Last updated&nbsp;<strong id="last-updated">--</strong></span>
         </div>
       </aside>
+
+      <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
+
       <main class="main">
-        <div class="header">
-          <div>
-            <h2>Receptionist Control Desk</h2>
-            <p class="subtitle">Queue flow, appointment actions, and AI service readiness in one branded desk.</p>
+        <header class="topbar">
+          <div class="topbar-lead">
+            <button class="icon-btn sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="portal-sidebar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </button>
+            <nav class="breadcrumb" aria-label="Breadcrumb">
+              <span>Front desk</span>
+              <span class="crumb-sep" aria-hidden="true">/</span>
+              <span class="crumb-current" id="crumb-current">Dashboard</span>
+            </nav>
           </div>
-          <div class="toolbar">
+          <div class="topbar-actions">
             <button class="icon-btn refresh-btn" id="refresh-dashboard" type="button" title="Refresh dashboard" aria-label="Refresh dashboard">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>
             </button>
@@ -60,173 +71,270 @@
               <span class="profile-chip-name" id="profile-avatar-name">Receptionist</span>
             </button>
           </div>
-        </div>
+        </header>
 
-        <section id="dashboard-view">
-          <div class="card hero-card" style="margin-bottom: 16px;">
-            <h3>Front Desk Priority</h3>
-            <p class="meta">Keep waiting times low, assign barbers quickly, and prevent service bottlenecks during peak hours.</p>
-          </div>
-          <div class="grid stats" id="analytics-stats"></div>
-
-          <div class="card" style="margin-bottom: 16px;">
-            <h3 style="margin: 0 0 8px;">Team leave calendar</h3>
-            <p class="meta" style="margin: 0 0 10px;">Approved barber absences and shop closed days. Click a day for details.</p>
-            <div class="row-wrap" style="justify-content: space-between; margin-bottom: 10px;">
-              <strong id="leave-cal-month-label">—</strong>
-              <div class="row-wrap" style="gap: 8px;">
-                <select class="select" id="leave-cal-barber-filter" style="max-width: 200px;">
-                  <option value="">All barbers</option>
-                </select>
-                <button class="btn secondary" id="leave-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
-                <button class="btn secondary" id="leave-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+        <div class="main-body">
+          <section id="dashboard-view">
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Front desk</h2>
+                <p class="page-sub">Today at a glance: who is booked, who is waiting, and which barbers are available.</p>
               </div>
             </div>
-            <div class="schedule-calendar leave-calendar" id="leave-calendar-grid"></div>
-            <div class="schedule-cal-legend row-wrap" style="margin-top: 10px; gap: 12px;">
-              <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
-              <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
-              <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
-              <span class="meta"><span class="cal-legend-swatch cal-has-leave"></span> Barber leave</span>
-              <span class="meta"><span class="cal-legend-swatch cal-busy"></span> Busy day</span>
-              <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
-            </div>
-            <div class="meta" id="leave-cal-day-detail" style="margin-top: 12px; line-height: 1.6;"></div>
-          </div>
 
-          <div class="split" style="margin-top: 16px;">
-            <div>
-              <div class="section-title">Today’s Appointments</div>
-              <div class="card" style="margin-bottom: 12px;">
-                <div class="row-wrap">
-                  <input class="input" id="appointments-search" placeholder="Search client, service, barber" style="max-width: 320px;" />
-                  <select class="select" id="appointments-status-filter" style="max-width: 220px;">
-                    <option value="all">All statuses</option>
-                    <option value="Scheduled">Scheduled</option>
-                    <option value="CheckedIn">Checked In</option>
-                    <option value="InProgress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                    <option value="Cancelled">Cancelled</option>
-                    <option value="NoShow">No Show</option>
-                  </select>
-                  <button class="btn" id="appointments-export">Export CSV</button>
+            <div class="grid stats" id="analytics-stats"></div>
+
+            <div class="split">
+              <div class="column">
+                <div class="section-head">
+                  <div>
+                    <h3 class="section-title">Today’s appointments</h3>
+                    <p class="section-title-sub">Booked clients for the current day only.</p>
+                  </div>
+                  <button class="btn secondary" id="appointments-export" type="button">Export CSV</button>
                 </div>
-              </div>
-              <div class="card">
-                <table class="table" id="appointments-table"></table>
-              </div>
-            </div>
-            <div>
-              <div class="section-title">Walk-in Queue</div>
-              <div class="card" style="margin-bottom: 12px;">
-                <div class="row-wrap">
-                  <input class="input" id="walkins-search" placeholder="Search queue, service, status" style="max-width: 320px;" />
-                </div>
-              </div>
-              <div class="card" style="margin-bottom: 16px;">
-                <form id="walkin-form" class="form-grid">
-                  <label>
-                    <div class="meta">Services</div>
-                    <select id="walkin-services" class="select" multiple required></select>
+
+                <div class="filter-bar">
+                  <label class="field field-grow">
+                    <span>Search</span>
+                    <input class="input" id="appointments-search" type="search" placeholder="Client, service or barber" />
                   </label>
-                  <label>
-                    <div class="meta">Preferred Barber</div>
-                    <select id="walkin-barber" class="select">
-                      <option value="">Unassigned</option>
+                  <label class="field">
+                    <span>Status</span>
+                    <select class="select" id="appointments-status-filter">
+                      <option value="all">All statuses</option>
+                      <option value="Scheduled">Scheduled</option>
+                      <option value="CheckedIn">Checked in</option>
+                      <option value="InProgress">In progress</option>
+                      <option value="Completed">Completed</option>
+                      <option value="Cancelled">Cancelled</option>
+                      <option value="NoShow">No show</option>
                     </select>
                   </label>
-                  <button type="submit" class="btn">Add Walk-in</button>
-                  <div id="walkin-error" class="meta" style="color: var(--danger);"></div>
-                </form>
+                </div>
+
+                <div class="card is-flush">
+                  <div class="table-wrap">
+                    <table class="table" id="appointments-table"></table>
+                  </div>
+                </div>
+              </div>
+
+              <div class="column">
+                <div class="section-head">
+                  <div>
+                    <h3 class="section-title">Walk-in queue</h3>
+                    <p class="section-title-sub">Add and monitor clients without a booking.</p>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-head">
+                    <div class="card-head-text">
+                      <h3 class="card-title">Add walk-in</h3>
+                      <p class="card-sub">Select at least one service. Leave the barber unassigned to use the next available.</p>
+                    </div>
+                  </div>
+                  <form id="walkin-form">
+                    <div class="form-grid align-top">
+                      <label class="field">
+                        <span>Services <span class="field-hint">select one or more</span></span>
+                        <select id="walkin-services" class="select" multiple required></select>
+                      </label>
+                      <label class="field">
+                        <span>Preferred barber</span>
+                        <select id="walkin-barber" class="select">
+                          <option value="">Unassigned</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div id="walkin-error" class="field-error" role="alert" aria-live="polite"></div>
+                    <div class="card-foot">
+                      <span class="meta">The client is added to the regular queue.</span>
+                      <button type="submit" class="btn primary">Add walk-in</button>
+                    </div>
+                  </form>
+                </div>
+
+                <div class="filter-bar">
+                  <label class="field field-grow">
+                    <span>Search queue</span>
+                    <input class="input" id="walkins-search" type="search" placeholder="Queue number, client, service or status" />
+                  </label>
+                </div>
+
+                <div class="card is-flush">
+                  <div class="table-wrap">
+                    <table class="table" id="walkins-table"></table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Team leave calendar</h3>
+                  <p class="card-sub">Approved barber absences and shop closures. Select a day for details.</p>
+                </div>
+                <div class="card-tools">
+                  <strong id="leave-cal-month-label">—</strong>
+                  <select class="select" id="leave-cal-barber-filter" aria-label="Filter calendar by barber" style="max-width: 190px;">
+                    <option value="">All barbers</option>
+                  </select>
+                  <button class="icon-btn" id="leave-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+                  <button class="icon-btn" id="leave-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+                </div>
+              </div>
+              <div class="schedule-calendar leave-calendar" id="leave-calendar-grid"></div>
+              <div class="schedule-cal-legend row-wrap" style="margin-top: 12px;">
+                <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-has-leave"></span> Barber leave</span>
+                <span class="meta"><span class="cal-legend-swatch cal-busy"></span> Busy day</span>
+                <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
+              </div>
+              <div class="cal-detail" id="leave-cal-day-detail"></div>
+            </div>
+          </section>
+
+          <section id="tracking-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Live tracking</h2>
+                <p class="page-sub">Who is waiting and who is being served. Complete or cancel a service directly from its card.</p>
+              </div>
+            </div>
+
+            <div class="card" id="tracking-automation-feed" style="display: none;">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Live queue updates</h3>
+                  <p class="card-sub">The queue also advances automatically at slot times. Manual Complete and Cancel still work.</p>
+                </div>
+              </div>
+              <div class="list" id="tracking-automation-list"></div>
+            </div>
+
+            <div class="tracking-columns">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Regular queue</h3>
+                    <p class="card-sub">Walk-in and kiosk clients.</p>
+                  </div>
+                </div>
+                <div class="list" id="tracking-regular-list"></div>
               </div>
               <div class="card">
-                <table class="table" id="walkins-table"></table>
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Exclusive queue</h3>
+                    <p class="card-sub">Booked appointments.</p>
+                  </div>
+                </div>
+                <div class="list" id="tracking-exclusive-list"></div>
               </div>
             </div>
-          </div>
-        </section>
+          </section>
 
-        <section id="tracking-view" hidden>
-          <div class="section-title">Tracking</div>
-          <div class="card" id="tracking-automation-feed" style="margin-bottom: 12px; display: none;">
-            <h3 style="margin-top: 0;">Live queue updates</h3>
-            <p class="meta" style="margin: 0 0 8px;">Queue also updates automatically at slot times. You can still Complete or Cancel manually when needed.</p>
-            <div class="list" id="tracking-automation-list"></div>
-          </div>
-          <div class="tracking-columns">
-            <div class="card">
-              <h3 style="margin-top: 0;">Regular queue (walk-in / kiosk)</h3>
-              <div class="list" id="tracking-regular-list"></div>
+          <section id="barbers-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Barbers &amp; leave</h2>
+                <p class="page-sub">Team availability by channel, plus time-off requests waiting on the front desk.</p>
+              </div>
             </div>
-            <div class="card">
-              <h3 style="margin-top: 0;">Exclusive queue (appointments)</h3>
-              <div class="list" id="tracking-exclusive-list"></div>
+
+            <div class="card time-off-section">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="section-heading">Pending time-off requests</h3>
+                  <p class="card-sub">Approving a request blocks that barber’s availability for the date.</p>
+                </div>
+              </div>
+              <div class="time-off-grid" id="barber-unavailability-list"></div>
             </div>
-          </div>
-        </section>
 
-        <section id="barbers-view" hidden>
-          <div class="section-title">Barbers</div>
+            <div class="split split-even">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Regular barbers</h3>
+                    <p class="card-sub">Walk-in and kiosk channel.</p>
+                  </div>
+                </div>
+                <div class="list barber-grid" id="barbers-regular-list"></div>
+              </div>
 
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin-top: 0; font-size: 14px; color: var(--text);">Regular barbers</h3>
-            <p class="meta" style="margin: 0 0 10px;">Walk-in and kiosk channel.</p>
-            <div class="list barber-grid" id="barbers-regular-list"></div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin-top: 0; font-size: 14px; color: var(--text);">Exclusive barbers</h3>
-            <p class="meta" style="margin: 0 0 10px;">Appointment channel only.</p>
-            <div class="list barber-grid" id="barbers-exclusive-list"></div>
-          </div>
-
-          <div class="card time-off-section">
-            <h3 class="section-heading">Barber time-off requests</h3>
-            <p class="meta" style="margin: 0 0 12px;">Pending leave requests waiting for front-desk approval.</p>
-            <div class="time-off-grid" id="barber-unavailability-list"></div>
-          </div>
-        </section>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Exclusive barbers</h3>
+                    <p class="card-sub">Appointment channel only.</p>
+                  </div>
+                </div>
+                <div class="list barber-grid" id="barbers-exclusive-list"></div>
+              </div>
+            </div>
+          </section>
+        </div>
       </main>
     </div>
 
     <dialog id="confirm-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <h3 id="confirm-dialog-title" style="margin: 0 0 8px;">Confirm</h3>
-        <p id="confirm-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
-        <div class="row-wrap" style="justify-content: flex-end;">
+        <div class="modal-head">
+          <h3 id="confirm-dialog-title">Confirm</h3>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-dialog-message" class="modal-message"></p>
+        </div>
+        <div class="modal-foot">
           <button class="btn secondary" id="confirm-dialog-cancel" type="button">Cancel</button>
-          <button class="btn" id="confirm-dialog-confirm" type="button">Confirm</button>
+          <button class="btn primary" id="confirm-dialog-confirm" type="button">Confirm</button>
         </div>
       </div>
     </dialog>
 
     <dialog id="message-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <h3 id="message-dialog-title" style="margin: 0 0 8px;">Notice</h3>
-        <p id="message-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
-        <div class="row-wrap" style="justify-content: flex-end;">
-          <button class="btn" id="message-dialog-ok" type="button">OK</button>
+        <div class="modal-head">
+          <h3 id="message-dialog-title">Notice</h3>
+        </div>
+        <div class="modal-body">
+          <p id="message-dialog-message" class="modal-message"></p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn primary" id="message-dialog-ok" type="button">OK</button>
         </div>
       </div>
     </dialog>
 
     <dialog id="profile-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <div class="row-wrap" style="justify-content: space-between; align-items: center;">
-          <h3 style="margin: 0;">Profile</h3>
-          <button class="icon-btn" id="profile-dialog-edit" type="button" title="Edit profile">✎</button>
+        <div class="modal-head">
+          <div>
+            <h3>Profile</h3>
+            <p class="modal-sub">Your portal account details.</p>
+          </div>
+          <button class="icon-btn" id="profile-dialog-edit" type="button" title="Edit profile" aria-label="Edit profile">✎</button>
         </div>
-        <div class="list" id="profile-dialog-content"></div>
-        <div class="row-wrap" style="margin-top: 10px; justify-content: flex-end;">
-          <button class="btn" id="profile-dialog-save" type="button" hidden>Save</button>
+        <div class="modal-body">
+          <div class="list" id="profile-dialog-content"></div>
+        </div>
+        <div class="modal-foot">
           <button class="btn secondary" id="profile-dialog-cancel" type="button" hidden>Cancel</button>
-          <button class="btn" id="profile-dialog-close" type="button">Close</button>
+          <button class="btn primary" id="profile-dialog-save" type="button" hidden>Save changes</button>
+          <button class="btn secondary" id="profile-dialog-close" type="button">Close</button>
         </div>
       </div>
     </dialog>
 
     <script src="../assets/api-config.js"></script>
     <script src="../assets/ui.js"></script>
+    <script src="../assets/shell.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>
