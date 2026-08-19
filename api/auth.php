@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth_sync.php';
+require_once __DIR__ . '/admin_auth.php';
 
 require_method('POST');
 
@@ -438,7 +439,8 @@ try {
         // Staff > barber > customer — same order as find_account_by_email / Google.
         // A promoted customer still has an active users row, so customer must not win first.
         if ($staff && password_hash_matches($staff, $password)) {
-            json_response(['message' => 'Login successful', 'user' => build_user_payload('staff', $staff)]);
+            $user = attach_staff_portal_session($pdo, build_user_payload('staff', $staff), (int)$staff['staff_id']);
+            json_response(['message' => 'Login successful', 'user' => $user, 'portalToken' => $user['portalToken']]);
         }
 
         if ($barber) {
@@ -510,9 +512,14 @@ try {
 
         $account = find_account_by_email($pdo, $email);
         if ($account !== null) {
+            $user = build_user_payload((string)$account['type'], (array)$account['row']);
+            if ((string)$account['type'] === 'staff') {
+                $user = attach_staff_portal_session($pdo, $user, (int)$account['row']['staff_id']);
+            }
             json_response([
                 'message' => 'Google sign-in successful',
-                'user' => build_user_payload((string)$account['type'], (array)$account['row']),
+                'user' => $user,
+                'portalToken' => $user['portalToken'] ?? null,
             ]);
         }
 

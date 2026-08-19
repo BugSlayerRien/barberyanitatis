@@ -625,17 +625,17 @@
                   <div class="card settings-panel is-action">
                     <div class="settings-panel-head">
                       <div>
-                        <h3>Backup &amp; data</h3>
-                        <p class="meta settings-panel-sub">Manual export and restore</p>
+                        <h3>Partial Data Export</h3>
+                        <p class="meta settings-panel-sub">Selected application data for transfer or reference. Not a full database backup.</p>
                       </div>
-                      <span class="settings-badge muted">Manual</span>
+                      <span class="settings-badge muted">Partial</span>
                     </div>
                     <div class="settings-kv" id="settings-backup-meta"></div>
-                    <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Restore replaces those same tables from a backup file. Related records that are not in the file are cleared. Automatic scheduled backups are not implemented.</p>
+                    <p class="meta settings-footnote">Exports selected tables (max 2,000 rows each) as JSON. Restore replaces those tables and CASCADE-deletes related rows that are not in the file. Production disaster recovery uses Supabase backups and a separate pg_dump process — see docs/DATABASE_BACKUP.md.</p>
                     <div class="settings-actions">
-                      <button class="btn secondary" id="settings-download-backup" type="button">Create &amp; download backup</button>
+                      <button class="btn secondary" id="settings-download-backup" type="button">Export JSON</button>
                       <input id="settings-restore-file" type="file" accept="application/json,.json" hidden />
-                      <button class="btn danger" id="settings-restore-backup" type="button">Restore from backup</button>
+                      <button class="btn danger" id="settings-restore-backup" type="button">Restore JSON export</button>
                     </div>
                   </div>
                 </div>

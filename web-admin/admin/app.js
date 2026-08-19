@@ -2199,8 +2199,14 @@ async function loadSettings(options = {}) {
   if (showRegion) setRegionLoading(desk, true, "Loading settings...");
   try {
     const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"));
-    if (!response.ok) throw new Error("API error");
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
+    if (response.status === 401 || response.status === 403) {
+      toast(data.error || "Admin session required. Please sign in again.", "error");
+      sessionStorage.clear();
+      window.location.href = "../login.html";
+      return null;
+    }
+    if (!response.ok) throw new Error(data.error || "API error");
     applySettingsPayload(data);
     return data;
   } catch (_) {
@@ -2348,8 +2354,10 @@ function applySettingsPayload(data) {
   const backupMeta = document.getElementById("settings-backup-meta");
   if (backupMeta) {
     backupMeta.innerHTML = settingsKvRows([
-      ["Manual backup", backup.manualBackupSupported ? "Available" : "Unavailable", backup.manualBackupSupported ? "ok" : "warn"],
-      ["Manual restore", backup.manualRestoreSupported ? "Available" : "Unavailable", backup.manualRestoreSupported ? "ok" : "warn"],
+      ["Export type", "Partial Data Export (JSON)", "muted"],
+      ["Full database dump", "Uses pg_dump / Supabase Backups — not this JSON export", "muted"],
+      ["JSON export", backup.manualBackupSupported ? "Available" : "Unavailable", backup.manualBackupSupported ? "ok" : "warn"],
+      ["JSON restore", backup.manualRestoreSupported ? "Available (CASCADE risk)" : "Unavailable", backup.manualRestoreSupported ? "warn" : "warn"],
       ["Automatic backups", backup.automaticBackupImplemented ? "Enabled" : "Not implemented", backup.automaticBackupImplemented ? "ok" : "muted"],
       ["Last successful backup", latest ? formatSettingsDate(latest.modifiedAt) : "None yet"],
       ["Latest file", latest ? `${latest.fileName} (${formatBytes(latest.sizeBytes)})` : "-"],
@@ -2979,10 +2987,13 @@ document.getElementById("settings-process-notifications")?.addEventListener("cli
 
 document.getElementById("settings-download-backup")?.addEventListener("click", async (event) => {
   const btn = event.currentTarget;
-  const confirmed = await confirmAction("Create a JSON database backup and download it now?", {
-    title: "Create backup",
-    confirmLabel: "Create & download",
-  });
+  const confirmed = await confirmAction(
+    "Export a partial JSON snapshot of selected tables (max 2,000 rows each)? This is not a full database backup.",
+    {
+      title: "Partial data export",
+      confirmLabel: "Export JSON",
+    },
+  );
   if (!confirmed) return;
   await withButtonLoading(btn, async () => {
     try {
@@ -2999,10 +3010,10 @@ document.getElementById("settings-download-backup")?.addEventListener("click", a
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = data.fileName || `tatis_backup_${Date.now()}.json`;
+      a.download = data.fileName || `tatis_partial_export_${Date.now()}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast(data.message || "Backup downloaded.", "success");
+      toast(data.message || "Partial export downloaded.", "success");
       await loadSettings({ showRegion: false });
     } catch (error) {
       toast(error.message || "Backup failed", "error");
@@ -3030,15 +3041,15 @@ document.getElementById("settings-restore-file")?.addEventListener("change", asy
     return;
   }
   if (!backup || typeof backup !== "object" || !backup.tables) {
-    toast("That file is not a Tatis backup. Choose a JSON file created by Create & download backup.", "error");
+    toast("That file is not a Tatis partial data export. Choose a JSON file created by Export JSON.", "error");
     return;
   }
 
   const confirmed = await confirmAction(
-    "This replaces current users, barbers, staff, services, appointments, slots, notifications, and system settings with the file. Related records that are not in the backup will be cleared. This cannot be undone.",
+    "This is a partial JSON restore, not a full database recovery. It truncates the exported tables and CASCADE-deletes related records that are not in the file (for example walk-ins or payments tied to restored appointments). This cannot be undone.",
     {
-      title: "Restore backup",
-      confirmLabel: "Restore now",
+      title: "Restore JSON export",
+      confirmLabel: "Restore JSON",
       danger: true,
     },
   );
@@ -3057,7 +3068,7 @@ document.getElementById("settings-restore-file")?.addEventListener("change", asy
         throw new Error(data.error || data.details || "Restore failed");
       }
       applySettingsPayload(data);
-      toast(data.message || "Backup restored.", "success");
+      toast(data.message || "Partial export restored.", "success");
     } catch (error) {
       toast(error.message || "Restore failed", "error");
     }
