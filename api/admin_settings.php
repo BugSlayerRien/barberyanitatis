@@ -160,6 +160,7 @@ function settings_backup_info(): array
 
     return [
         'manualBackupSupported' => true,
+        'manualRestoreSupported' => true,
         'automaticBackupImplemented' => false,
         'latest' => $latest,
         'note' => 'Manual JSON backups are supported. Automatic scheduled backups are not implemented.',
@@ -235,6 +236,7 @@ function settings_system_info(PDO $pdo): array
             'staffMfaEnforced' => false,
             'automaticBackups' => false,
             'manualBackupDownload' => true,
+            'manualBackupRestore' => true,
             'aiProviderEditableInUi' => false,
         ],
     ];
@@ -344,15 +346,22 @@ function export_table_csv(PDO $pdo, string $table): string
     return implode("\n", $lines);
 }
 
+/**
+ * @return list<string>
+ */
+function backup_table_allowlist(): array
+{
+    return ['users', 'barbers', 'staff_users', 'services', 'appointments', 'appointment_details', 'time_slots', 'notifications', 'system_settings'];
+}
+
 function build_backup_payload(PDO $pdo): array
 {
-    $tables = ['users', 'barbers', 'staff_users', 'services', 'appointments', 'appointment_details', 'time_slots', 'notifications', 'system_settings'];
     $backup = [
         'generatedAt' => (new DateTimeImmutable('now', new DateTimeZone(shop_timezone())))->format(DateTimeInterface::ATOM),
         'tables' => [],
     ];
 
-    foreach ($tables as $table) {
+    foreach (backup_table_allowlist() as $table) {
         try {
             $rows = $pdo->query("SELECT * FROM {$table} ORDER BY 1 DESC LIMIT 2000")->fetchAll(PDO::FETCH_ASSOC);
             $backup['tables'][$table] = $rows;
@@ -362,6 +371,166 @@ function build_backup_payload(PDO $pdo): array
     }
 
     return $backup;
+}
+
+/**
+ * @return list<string>
+ */
+function table_column_names(PDO $pdo, string $table): array
+{
+    $stmt = $pdo->prepare(
+        "SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = :table
+         ORDER BY ordinal_position"
+    );
+    $stmt->execute([':table' => $table]);
+    return array_map(static fn(array $row): string => (string)$row['column_name'], $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+function table_has_identity(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare(
+        "SELECT 1
+         FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = :table
+           AND is_identity = 'YES'
+         LIMIT 1"
+    );
+    $stmt->execute([':table' => $table]);
+    return (bool)$stmt->fetchColumn();
+}
+
+function reset_table_identity(PDO $pdo, string $table): void
+{
+    $stmt = $pdo->prepare(
+        "SELECT column_name
+         FROM information_schema.columns
+         WHERE table_schema = current_schema()
+           AND table_name = :table
+           AND is_identity = 'YES'
+         LIMIT 1"
+    );
+    $stmt->execute([':table' => $table]);
+    $column = $stmt->fetchColumn();
+    if (!is_string($column) || $column === '') {
+        return;
+    }
+
+    $seqStmt = $pdo->prepare('SELECT pg_get_serial_sequence(:table, :column)');
+    $seqStmt->execute([':table' => $table, ':column' => $column]);
+    $sequence = $seqStmt->fetchColumn();
+    if (!is_string($sequence) || $sequence === '') {
+        return;
+    }
+
+    $quotedTable = '"' . str_replace('"', '', $table) . '"';
+    $quotedColumn = '"' . str_replace('"', '', $column) . '"';
+    $pdo->prepare(
+        "SELECT setval(:sequence, COALESCE((SELECT MAX({$quotedColumn}) FROM {$quotedTable}), 1), true)"
+    )->execute([':sequence' => $sequence]);
+}
+
+/**
+ * @param array<string, mixed> $backup
+ * @return array<string, int>
+ */
+function restore_backup_payload(PDO $pdo, array $backup): array
+{
+    if (!isset($backup['tables']) || !is_array($backup['tables'])) {
+        throw new InvalidArgumentException('This file is not a Tatis backup. It is missing a tables object.');
+    }
+
+    $incoming = [];
+    foreach (backup_table_allowlist() as $table) {
+        if (!array_key_exists($table, $backup['tables'])) {
+            continue;
+        }
+        $rows = $backup['tables'][$table];
+        if (!is_array($rows)) {
+            throw new InvalidArgumentException("Backup table \"{$table}\" is not a list of rows.");
+        }
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                throw new InvalidArgumentException("Backup table \"{$table}\" has an invalid row at index {$index}.");
+            }
+        }
+        $incoming[$table] = $rows;
+    }
+
+    if ($incoming === []) {
+        throw new InvalidArgumentException('This backup has none of the supported tables.');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $quoted = implode(', ', array_map(
+            static fn(string $table): string => '"' . str_replace('"', '', $table) . '"',
+            array_keys($incoming)
+        ));
+        $pdo->exec('TRUNCATE TABLE ' . $quoted . ' RESTART IDENTITY CASCADE');
+
+        $restored = [];
+        foreach ($incoming as $table => $rows) {
+            $liveColumns = table_column_names($pdo, $table);
+            $hasIdentity = table_has_identity($pdo, $table);
+            $count = 0;
+
+            foreach ($rows as $row) {
+                $insertCols = [];
+                $values = [];
+                foreach ($liveColumns as $column) {
+                    if (!array_key_exists($column, $row)) {
+                        continue;
+                    }
+                    $insertCols[] = $column;
+                    $values[] = $row[$column];
+                }
+                if ($insertCols === []) {
+                    continue;
+                }
+
+                $colSql = implode(', ', array_map(
+                    static fn(string $column): string => '"' . str_replace('"', '', $column) . '"',
+                    $insertCols
+                ));
+                $placeholders = implode(', ', array_fill(0, count($insertCols), '?'));
+                $override = $hasIdentity ? ' OVERRIDING SYSTEM VALUE' : '';
+                $quotedTable = '"' . str_replace('"', '', $table) . '"';
+                $stmt = $pdo->prepare(
+                    "INSERT INTO {$quotedTable} ({$colSql}){$override} VALUES ({$placeholders})"
+                );
+
+                foreach ($values as $index => $value) {
+                    $param = $index + 1;
+                    if ($value === null) {
+                        $stmt->bindValue($param, null, PDO::PARAM_NULL);
+                    } elseif (is_bool($value)) {
+                        $stmt->bindValue($param, $value, PDO::PARAM_BOOL);
+                    } elseif (is_array($value) || is_object($value)) {
+                        $stmt->bindValue($param, json_encode($value, JSON_UNESCAPED_UNICODE));
+                    } else {
+                        $stmt->bindValue($param, $value);
+                    }
+                }
+                $stmt->execute();
+                $count++;
+            }
+
+            reset_table_identity($pdo, $table);
+            $restored[$table] = $count;
+        }
+
+        $pdo->commit();
+        return $restored;
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
 }
 
 function queue_pending_notifications(PDO $pdo, int $limit = 50): int
@@ -501,6 +670,40 @@ try {
             'fileName' => $fileName,
             'downloadUrl' => '../storage/backups/' . $fileName,
             'backup' => $backup,
+        ]);
+    }
+
+    if ($action === 'restorebackup') {
+        $payload = $input['backup'] ?? null;
+        if (is_string($payload) && trim($payload) !== '') {
+            $decoded = json_decode($payload, true);
+            $payload = is_array($decoded) ? $decoded : null;
+        }
+        if (!is_array($payload)) {
+            json_response(['error' => 'Upload a valid Tatis backup JSON file.'], 422);
+        }
+
+        $encodedSize = strlen((string)json_encode($payload));
+        if ($encodedSize > 8 * 1024 * 1024) {
+            json_response(['error' => 'Backup file is too large to restore (8 MB limit).'], 422);
+        }
+
+        try {
+            $restored = restore_backup_payload($pdo, $payload);
+        } catch (InvalidArgumentException $e) {
+            json_response(['error' => $e->getMessage()], 422);
+        }
+
+        $map = load_settings_map($pdo);
+        json_response([
+            'message' => 'Backup restored.',
+            'restored' => $restored,
+            'settings' => settings_payload($map),
+            'notifications' => settings_notification_meta($pdo),
+            'schedule' => settings_schedule_summary($pdo),
+            'backup' => settings_backup_info(),
+            'ai' => settings_ai_status_safe(),
+            'system' => settings_system_info($pdo),
         ]);
     }
 

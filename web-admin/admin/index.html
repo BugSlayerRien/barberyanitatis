@@ -626,14 +626,16 @@
                     <div class="settings-panel-head">
                       <div>
                         <h3>Backup &amp; data</h3>
-                        <p class="meta settings-panel-sub">Manual export only</p>
+                        <p class="meta settings-panel-sub">Manual export and restore</p>
                       </div>
                       <span class="settings-badge muted">Manual</span>
                     </div>
                     <div class="settings-kv" id="settings-backup-meta"></div>
-                    <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Automatic scheduled backups are not implemented.</p>
+                    <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Restore replaces those same tables from a backup file. Related records that are not in the file are cleared. Automatic scheduled backups are not implemented.</p>
                     <div class="settings-actions">
                       <button class="btn secondary" id="settings-download-backup" type="button">Create &amp; download backup</button>
+                      <input id="settings-restore-file" type="file" accept="application/json,.json" hidden />
+                      <button class="btn danger" id="settings-restore-backup" type="button">Restore from backup</button>
                     </div>
                   </div>
                 </div>

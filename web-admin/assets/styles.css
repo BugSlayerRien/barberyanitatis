@@ -2369,16 +2369,11 @@ table.table {
   top: 0;
   bottom: 0;
   width: 3px;
+  background: var(--line-loud);
 }
 
-.settings-panel.is-editable::after {
-  background: var(--gold);
-}
-
-.settings-panel.is-action::after {
-  background: var(--info);
-}
-
+.settings-panel.is-editable::after,
+.settings-panel.is-action::after,
 .settings-panel.is-readonly::after {
   background: var(--line-loud);
 }
