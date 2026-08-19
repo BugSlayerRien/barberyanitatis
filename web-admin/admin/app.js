@@ -284,21 +284,39 @@ function downloadCsv(fileName, rows) {
   URL.revokeObjectURL(url);
 }
 
+/** Presentation only: shared empty / error block used across admin views. */
+function emptyStateMarkup(title, text, options = {}) {
+  const classes = ["card", "empty"];
+  if (options.error) classes.push("state-error");
+  const style = options.full ? ' style="grid-column: 1 / -1;"' : "";
+  return `
+    <div class="${classes.join(" ")}"${style}>
+      <p class="empty-state-title">${title}</p>
+      <p class="empty-state-text">${text}</p>
+    </div>
+  `;
+}
+
 function renderStats(stats) {
   const grid = document.getElementById("stats-grid");
   if (!grid) return;
   grid.innerHTML = "";
   if (!stats?.length) {
-    grid.innerHTML = "<div class=\"card empty\">No stats available.</div>";
+    grid.innerHTML = emptyStateMarkup(
+      "No statistics available",
+      "The dashboard summary could not be loaded. Use refresh in the top bar to try again.",
+      { full: true },
+    );
     return;
   }
   stats.forEach((stat) => {
+    const tone = String(stat.changeType || "").trim();
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = `card kpi${tone ? ` kpi-${tone}` : ""}`;
     card.innerHTML = `
-      <h3>${stat.title}</h3>
+      <h3 class="kpi-label">${stat.title}</h3>
       <div class="value">${stat.value}</div>
-      <div class="meta ${stat.changeType || ""}">${stat.change || ""}</div>
+      ${stat.change ? `<div class="meta ${tone}">${stat.change}</div>` : ""}
     `;
     grid.appendChild(card);
   });
@@ -409,7 +427,10 @@ function renderActivities(activities) {
   if (!list) return;
   list.innerHTML = "";
   if (!activities?.length) {
-    list.innerHTML = "<div class=\"card empty\">No recent activity.</div>";
+    list.innerHTML = emptyStateMarkup(
+      "No recent activity",
+      "Appointments, account changes and service updates will be listed here as they happen.",
+    );
     return;
   }
 
@@ -434,7 +455,10 @@ function renderActivities(activities) {
   });
 
   if (!filtered.length) {
-    list.innerHTML = "<div class=\"card empty\">No activity for this category.</div>";
+    list.innerHTML = emptyStateMarkup(
+      "No activity in this category",
+      "Choose a different category, or select “All categories” to see everything.",
+    );
     return;
   }
 
@@ -469,7 +493,10 @@ function renderActivities(activities) {
   });
 
   if (!list.innerHTML.trim()) {
-    list.innerHTML = "<div class=\"card empty\">No activity for this category.</div>";
+    list.innerHTML = emptyStateMarkup(
+      "No activity in this category",
+      "Choose a different category, or select “All categories” to see everything.",
+    );
     return;
   }
 
@@ -502,20 +529,32 @@ async function loadAiStatus() {
 
     panel.innerHTML = `
       <div class="card gradient">
-        <h4>Chat / Scan AI</h4>
-        <p class="meta">Provider: ${data?.scan?.provider || "-"} | Model: ${data?.scan?.model || "-"}</p>
-        <div class="tag ${scanEnabled ? "success" : "warning"}">${scanEnabled ? "Configured" : "Not Configured"}</div>
+        <div class="card-head">
+          <div class="card-head-text">
+            <h4 class="card-title">Chat / Scan AI</h4>
+            <p class="card-sub">Provider ${data?.scan?.provider || "-"} · Model ${data?.scan?.model || "-"}</p>
+          </div>
+          <span class="status status--${scanEnabled ? "success" : "warning"}">${scanEnabled ? "Configured" : "Not configured"}</span>
+        </div>
       </div>
       <div class="card gradient">
-        <h4>Try-On AI</h4>
-        <p class="meta">Provider: ${tryonProvider} | Model: ${tryonModel} | Limit: ${styleLimit}</p>
-        <div class="tag ${tryonConfigured ? "success" : "warning"}">${tryonConfigured ? "Configured" : "Not Configured"}</div>
+        <div class="card-head">
+          <div class="card-head-text">
+            <h4 class="card-title">Try-on AI</h4>
+            <p class="card-sub">Provider ${tryonProvider} · Model ${tryonModel} · Limit ${styleLimit}</p>
+          </div>
+          <span class="status status--${tryonConfigured ? "success" : "warning"}">${tryonConfigured ? "Configured" : "Not configured"}</span>
+        </div>
       </div>
     `;
   } catch (_) {
     badge.textContent = "AI: Unavailable";
     badge.className = "badge status-warn";
-    panel.innerHTML = "<div class=\"empty\">AI status endpoint is unavailable.</div>";
+    panel.innerHTML = emptyStateMarkup(
+      "AI status unavailable",
+      "The AI status endpoint did not respond. Face scan and try-on may still work; refresh to check again.",
+      { error: true },
+    );
   }
 }
 
@@ -535,17 +574,59 @@ async function loadDashboard() {
   }
 }
 
+/**
+ * Presentation only: relative column widths so identifiers and email addresses
+ * get the room they need instead of every column being an equal share.
+ */
+const COLUMN_WEIGHTS = {
+  full_name: 1.6,
+  style_name: 1.4,
+  service_name: 1.5,
+  email: 2,
+  description: 1.8,
+  specialty: 1.3,
+  phone: 1.1,
+  actions: 1.5,
+  is_active: 0.9,
+  overlay_status: 1,
+  created_at: 1,
+  queue_label: 0.9,
+  channel_label: 1.6,
+  category: 0.9,
+  base_duration: 0.9,
+  base_price: 0.9,
+  style_code: 1.1,
+  gender: 0.8,
+  variant_count: 0.8,
+  rating: 0.7,
+  role: 0.9,
+};
+
+/** Presentation only: renders an active/inactive flag as a status badge. */
+function activeBadge(value) {
+  const inactive =
+    value === false || value === 0 || value === "0" || value === "f" || value === "No";
+  return inactive
+    ? '<span class="status status--neutral">Inactive</span>'
+    : '<span class="status status--success">Active</span>';
+}
+
 function renderTable(containerId, columns, rows) {
   const container = document.getElementById(containerId);
   if (!container) return;
   if (!rows?.length || !columns.length) {
-    container.innerHTML = "<div class=\"empty\">No records found.</div>";
+    container.innerHTML = emptyStateMarkup(
+      "No records to show",
+      "Nothing matches the current search or filter. Clear them to see every record.",
+    );
     return;
   }
 
   const paged = paginateRows(containerId, rows);
 
-  const columnTemplate = `repeat(${columns.length}, minmax(0, 1fr))`;
+  const columnTemplate = columns
+    .map((column) => `minmax(0, ${COLUMN_WEIGHTS[column.key] ?? 1}fr)`)
+    .join(" ");
   const header = `
     <div class="table-row table-header" style="grid-template-columns:${columnTemplate};">
       ${columns.map((c) => `<div>${c.label}</div>`).join("")}
@@ -599,7 +680,8 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "customers"
       ? data.customers.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="customer" data-id="${row.user_id}">Edit</button> <button class="btn secondary btn-delete" data-type="customer" data-id="${row.user_id}">Delete</button>`,
+          is_active: activeBadge(row.is_active),
+          actions: `<button class="btn secondary btn-edit" data-type="customer" data-id="${row.user_id}">Edit</button> <button class="btn danger btn-delete" data-type="customer" data-id="${row.user_id}">Delete</button>`,
         }))
       : [])
   );
@@ -619,8 +701,9 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "barbers"
       ? data.barbers.map((row) => ({
           ...row,
+          is_active: activeBadge(row.is_active),
           queue_label: String(row.barber_channel || "").toLowerCase() === "walk_in" ? "Regular" : "Exclusive",
-          actions: `<button class="btn btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button> <button class="btn secondary btn-delete" data-type="barber" data-id="${row.barber_id}">Delete</button>`,
+          actions: `<button class="btn secondary btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button> <button class="btn danger btn-delete" data-type="barber" data-id="${row.barber_id}">Delete</button>`,
         }))
       : [])
   );
@@ -638,7 +721,8 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "receptionists"
       ? data.receptionists.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn secondary btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
+          is_active: activeBadge(row.is_active),
+          actions: `<button class="btn secondary btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn danger btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
         }))
       : [])
   );
@@ -656,7 +740,8 @@ function renderUserTables() {
     (roleFilter === "all" || roleFilter === "admins"
       ? data.admins.map((row) => ({
           ...row,
-          actions: `<button class="btn btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn secondary btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
+          is_active: activeBadge(row.is_active),
+          actions: `<button class="btn secondary btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn danger btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
         }))
       : [])
   );
@@ -1168,7 +1253,7 @@ function renderServices() {
     category: r.category || r.service_category || "(Uncategorized)",
     channel_label: formatServiceChannel(r.service_channel),
     base_price: `₱${Number(r.base_price ?? 0).toFixed(2)}`,
-    is_active: r.is_active === false || r.is_active === "f" ? "No" : "Yes",
+    is_active: activeBadge(r.is_active),
   }));
 
   const rows = filterRows(normalized, query, ["service_name", "category", "description", "channel_label"]);
@@ -1187,7 +1272,7 @@ function renderServices() {
       ...row,
       actions: `
         <button class="btn secondary btn-service" data-id="${row.service_id}" type="button">Edit</button>
-        <button class="btn secondary btn-service-delete" data-id="${row.service_id}" type="button">Delete</button>
+        <button class="btn danger btn-service-delete" data-id="${row.service_id}" type="button">Delete</button>
       `,
     })),
   );
@@ -1227,8 +1312,10 @@ function renderHaircuts() {
   const query = document.getElementById("haircuts-search")?.value || "";
   const normalized = (state.haircuts || []).map((row) => ({
     ...row,
-    overlay_status: row.has_overlay_assets ? "Ready" : "Missing PNGs",
-    is_active: row.is_active === false || row.is_active === "f" ? "No" : "Yes",
+    overlay_status: row.has_overlay_assets
+      ? '<span class="status status--success">Ready</span>'
+      : '<span class="status status--warning">Missing PNGs</span>',
+    is_active: activeBadge(row.is_active),
   }));
   const rows = filterRows(normalized, query, ["style_name", "style_code", "description", "gender"]);
   renderTable(
@@ -1246,7 +1333,7 @@ function renderHaircuts() {
       ...row,
       actions: `
         <button class="btn secondary btn-haircut" data-id="${row.hairstyle_id}" type="button">Manage</button>
-        <button class="btn secondary btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Delete</button>
+        <button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Delete</button>
       `,
     })),
   );
@@ -1316,21 +1403,24 @@ function renderHaircutVariantsList() {
   if (!list || !state.haircutDetail) return;
   const variants = state.haircutDetail.variants ?? [];
   if (!variants.length) {
-    list.innerHTML = '<div class="card empty">No variants yet.</div>';
+    list.innerHTML = emptyStateMarkup(
+      "No variants yet",
+      "Add a variant to describe how this style is cut for a given face shape and hair texture.",
+    );
     return;
   }
   list.innerHTML = variants
     .map(
       (variant) => `
-        <div class="card" style="margin-bottom: 8px;">
-          <div class="row-wrap" style="justify-content: space-between;">
-            <div>
-              <strong>${variant.face_shape}</strong> · ${variant.hair_texture}
-              <p class="meta">${variant.estimated_minutes} min · confidence ${variant.confidence_score}</p>
+        <div class="card">
+          <div class="card-head" style="margin-bottom: 0;">
+            <div class="card-head-text">
+              <h4 class="card-title">${variant.face_shape} · ${variant.hair_texture}</h4>
+              <p class="card-sub">${variant.estimated_minutes} min · confidence ${variant.confidence_score}</p>
             </div>
-            <div class="row-wrap">
-              <button class="btn secondary btn-variant-edit" data-id="${variant.variant_id}" type="button">Edit</button>
-              <button class="btn secondary btn-variant-delete" data-id="${variant.variant_id}" type="button">Delete</button>
+            <div class="card-tools">
+              <button class="btn secondary sm btn-variant-edit" data-id="${variant.variant_id}" type="button">Edit</button>
+              <button class="btn danger sm btn-variant-delete" data-id="${variant.variant_id}" type="button">Delete</button>
             </div>
           </div>
         </div>
@@ -1609,7 +1699,10 @@ function renderAudit() {
 
   list.innerHTML = "";
   if (!filtered.length) {
-    list.innerHTML = '<div class="card empty">No audit events found.</div>';
+    list.innerHTML = emptyStateMarkup(
+      "No audit events found",
+      "No logged event matches this search or category. Clear the filters to see the full log.",
+    );
     return;
   }
 
@@ -1705,15 +1798,36 @@ function escapeAnalyticsText(value) {
   return String(value ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]));
 }
 
+/** Chart colours mirrored from the design tokens in assets/styles.css. */
+const CHART_COLORS = {
+  gold: "#a99941",
+  goldSoft: "rgba(169, 153, 65, 0.22)",
+  goldBar: "rgba(169, 153, 65, 0.7)",
+  info: "#57a5f0",
+  infoSoft: "rgba(87, 165, 240, 0.2)",
+  infoBar: "rgba(87, 165, 240, 0.65)",
+  tick: "#a2a2ad",
+  grid: "rgba(255, 255, 255, 0.06)",
+  statusMix: ["#48c07a", "#57a5f0", "#e9a83e", "#ec5f56", "#d5bf72", "#7c7c88", "#8c7f34"],
+  empty: "rgba(255, 255, 255, 0.08)",
+};
+
 function chartDefaults() {
   return {
     maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: "#c9c9c9" } },
+      legend: { labels: { color: CHART_COLORS.tick, boxWidth: 12, usePointStyle: true } },
     },
     scales: {
-      x: { ticks: { color: "#c9c9c9", maxRotation: 0 }, grid: { color: "rgba(255,255,255,0.08)" } },
-      y: { ticks: { color: "#c9c9c9", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" }, beginAtZero: true },
+      x: {
+        ticks: { color: CHART_COLORS.tick, maxRotation: 0 },
+        grid: { color: CHART_COLORS.grid, drawBorder: false },
+      },
+      y: {
+        ticks: { color: CHART_COLORS.tick, precision: 0 },
+        grid: { color: CHART_COLORS.grid, drawBorder: false },
+        beginAtZero: true,
+      },
     },
   };
 }
@@ -1739,8 +1853,8 @@ function renderAnalyticsKpis(metrics) {
     },
   ];
   grid.innerHTML = cards.map((card) => `
-    <div class="card">
-      <h3>${escapeAnalyticsText(card.title)}</h3>
+    <div class="card kpi">
+      <h3 class="kpi-label">${escapeAnalyticsText(card.title)}</h3>
       <div class="value">${escapeAnalyticsText(card.value)}</div>
       ${card.meta ? `<div class="meta">${escapeAnalyticsText(card.meta)}</div>` : ""}
     </div>
@@ -1779,8 +1893,11 @@ function renderTrendChart(metrics) {
       datasets: [{
         label: mode === "revenue" ? "Revenue (₱)" : "Appointments",
         data: values,
-        borderColor: mode === "revenue" ? "#a99941" : "#00b0ff",
-        backgroundColor: mode === "revenue" ? "rgba(169,153,65,0.18)" : "rgba(0,176,255,0.18)",
+        borderColor: mode === "revenue" ? CHART_COLORS.gold : CHART_COLORS.info,
+        backgroundColor: mode === "revenue" ? CHART_COLORS.goldSoft : CHART_COLORS.infoSoft,
+        borderWidth: 2,
+        pointRadius: 2,
+        pointHoverRadius: 4,
         tension: 0.35,
         fill: true,
       }],
@@ -1808,12 +1925,20 @@ function renderAnalyticsCharts(metrics) {
         labels: statusRows.length ? statusRows.map((r) => r.status || "Unknown") : ["No Data"],
         datasets: [{
           data: statusRows.length ? statusRows.map((r) => Number(r.count ?? 0)) : [1],
-          backgroundColor: ["#00c853", "#00b0ff", "#f7c948", "#ff4f81", "#ff7043", "#9e9e9e", "#7e57c2"],
+          backgroundColor: statusRows.length ? CHART_COLORS.statusMix : [CHART_COLORS.empty],
+          borderColor: "#121216",
+          borderWidth: 2,
         }],
       },
       options: {
         maintainAspectRatio: false,
-        plugins: { legend: { position: "bottom", labels: { color: "#c9c9c9", boxWidth: 12 } } },
+        cutout: "62%",
+        plugins: {
+          legend: {
+            position: "bottom",
+            labels: { color: CHART_COLORS.tick, boxWidth: 12, usePointStyle: true },
+          },
+        },
       },
     });
   }
@@ -1827,8 +1952,9 @@ function renderAnalyticsCharts(metrics) {
         datasets: [{
           label: "Bookings",
           data: serviceRows.length ? serviceRows.map((r) => Number(r.booking_count ?? r.count ?? 0)) : [0],
-          backgroundColor: "#00b0ff",
-          borderRadius: 8,
+          backgroundColor: CHART_COLORS.goldBar,
+          borderRadius: 6,
+          maxBarThickness: 42,
         }],
       },
       options: chartDefaults(),
@@ -1863,8 +1989,8 @@ function renderAnalyticsCharts(metrics) {
         datasets: [{
           label: "Bookings by hour",
           data: hourValues,
-          backgroundColor: "rgba(0,176,255,0.55)",
-          borderRadius: 6,
+          backgroundColor: CHART_COLORS.infoBar,
+          borderRadius: 5,
         }],
       },
       options: { ...chartDefaults(), plugins: { legend: { display: false } } },
@@ -1882,8 +2008,8 @@ function renderAnalyticsCharts(metrics) {
         datasets: [{
           label: "Bookings by day",
           data: dayNames.map((_, i) => dayMap[i] || 0),
-          backgroundColor: "rgba(169,153,65,0.65)",
-          borderRadius: 6,
+          backgroundColor: CHART_COLORS.goldBar,
+          borderRadius: 5,
         }],
       },
       options: { ...chartDefaults(), plugins: { legend: { display: false } } },
@@ -2279,14 +2405,16 @@ function renderScheduleWeekly() {
   list.innerHTML = SCHEDULE_DAY_ORDER.map((dow) => {
     const day = byDay.get(dow) || { isClosed: false, openTime: "09:00", closeTime: "20:00" };
     return `
-      <div class="row-wrap" data-schedule-day="${dow}" style="gap: 12px;">
-        <strong style="width: 110px;">${SCHEDULE_DAY_NAMES[dow]}</strong>
-        <label class="meta" style="display: flex; align-items: center; gap: 6px;">
+      <div class="schedule-day-row" data-schedule-day="${dow}">
+        <strong>${SCHEDULE_DAY_NAMES[dow]}</strong>
+        <label class="switch">
           <input type="checkbox" class="schedule-day-closed" ${day.isClosed ? "checked" : ""} /> Closed
         </label>
-        <input class="input schedule-day-open" type="time" value="${day.openTime}" ${day.isClosed ? "disabled" : ""} style="max-width: 130px;" />
-        <span class="meta">to</span>
-        <input class="input schedule-day-close" type="time" value="${day.closeTime}" ${day.isClosed ? "disabled" : ""} style="max-width: 130px;" />
+        <div class="schedule-times">
+          <input class="input schedule-day-open" type="time" aria-label="${SCHEDULE_DAY_NAMES[dow]} opening time" value="${day.openTime}" ${day.isClosed ? "disabled" : ""} />
+          <span class="meta">to</span>
+          <input class="input schedule-day-close" type="time" aria-label="${SCHEDULE_DAY_NAMES[dow]} closing time" value="${day.closeTime}" ${day.isClosed ? "disabled" : ""} />
+        </div>
       </div>`;
   }).join("");
 
@@ -2305,12 +2433,15 @@ function renderScheduleBreaks() {
   if (!list || !state.schedule) return;
   const breaks = state.schedule.breaks || [];
   if (!breaks.length) {
-    list.innerHTML = '<div class="meta">No break windows. Slots run straight through opening hours.</div>';
+    list.innerHTML = emptyStateMarkup(
+      "No break windows",
+      "Slots run straight through opening hours. Add a break below to block a time range.",
+    );
     return;
   }
   list.innerHTML = breaks.map((item, index) => `
-    <div class="row-wrap" style="gap: 12px;">
-      <strong style="width: 110px;">${escapeScheduleText(item.dayName)}</strong>
+    <div class="schedule-day-row">
+      <strong>${escapeScheduleText(item.dayName)}</strong>
       <span>${item.startTime} – ${item.endTime}</span>
       <span class="meta">${escapeScheduleText(item.label)}</span>
       <button class="btn secondary schedule-break-remove" data-index="${index}" type="button">Remove</button>
@@ -2329,12 +2460,15 @@ function renderScheduleClosedDates() {
   if (!list || !state.schedule) return;
   const dates = state.schedule.closedDates || [];
   if (!dates.length) {
-    list.innerHTML = '<div class="meta">No upcoming closed dates.</div>';
+    list.innerHTML = emptyStateMarkup(
+      "No upcoming closed dates",
+      "Add a holiday or one-off closure below and it will stop being offered for booking.",
+    );
     return;
   }
   list.innerHTML = dates.map((item) => `
-    <div class="row-wrap" style="gap: 12px;">
-      <strong style="width: 110px;">${item.date}</strong>
+    <div class="schedule-day-row">
+      <strong>${item.date}</strong>
       <span class="meta">${escapeScheduleText(item.reason) || "-"}</span>
       <button class="btn secondary schedule-closed-remove" data-date="${item.date}" type="button">Remove</button>
     </div>`).join("");

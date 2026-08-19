@@ -9,72 +9,89 @@
   </head>
   <body>
     <div class="app">
-      <aside class="sidebar">
+      <aside class="sidebar" id="portal-sidebar">
         <div class="brand">
           <div class="brand-badge brand-badge-logo" aria-label="Tatis logo"></div>
-          <div>
-            <h1>Barberya ni Tatis</h1>
-            <div class="badge">ADMIN</div>
+          <div class="brand-text">
+            <h1 class="brand-name">Barberya ni Tatis</h1>
+            <span class="brand-role">Admin</span>
           </div>
         </div>
-        <nav class="nav">
-          <div class="nav-category">Dashboard</div>
-          <button class="active" data-view="dashboard">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h8V3H3z"></path><path d="M13 21h8v-6h-8z"></path><path d="M13 11h8V3h-8z"></path><path d="M3 21h8v-6H3z"></path></svg></span>
-            <span class="nav-label">Overview</span>
+
+        <nav class="nav" aria-label="Primary navigation">
+          <p class="nav-category">Overview</p>
+          <button class="active" data-view="dashboard" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 13h8V3H3z"></path><path d="M13 21h8v-6h-8z"></path><path d="M13 11h8V3h-8z"></path><path d="M3 21h8v-6H3z"></path></svg></span>
+            <span class="nav-label">Dashboard</span>
           </button>
-          <button data-view="analytics">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="M7 14l4-4 3 3 5-7"></path></svg></span>
+          <button data-view="analytics" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 14l4-4 3 3 5-7"></path></svg></span>
             <span class="nav-label">Analytics</span>
           </button>
 
-          <div class="nav-category">Management</div>
-          <button data-view="users">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
+          <p class="nav-category">Management</p>
+          <button data-view="users" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
             <span class="nav-label">Users</span>
           </button>
-          <button data-view="services">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></span>
+          <button data-view="services" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></span>
             <span class="nav-label">Services</span>
           </button>
-          <button data-view="haircuts">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v7"></path><path d="M18 3v7"></path><path d="M6 10c0 4 2 6 6 6s6-2 6-6"></path><path d="M12 16v5"></path></svg></span>
+          <button data-view="haircuts" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 3v7"></path><path d="M18 3v7"></path><path d="M6 10c0 4 2 6 6 6s6-2 6-6"></path><path d="M12 16v5"></path></svg></span>
             <span class="nav-label">Haircuts</span>
           </button>
-          <button data-view="schedule">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="M12 14v3"></path><path d="M10.5 15.5h3"></path></svg></span>
+          <button data-view="schedule" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></span>
             <span class="nav-label">Operating Schedule</span>
           </button>
 
-          <div class="nav-category">Monitoring</div>
-          <button data-view="audit">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h8"></path><path d="M8 9h3"></path></svg></span>
+          <p class="nav-category">System</p>
+          <button data-view="audit" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path><path d="M8 13h8"></path><path d="M8 17h8"></path><path d="M8 9h3"></path></svg></span>
             <span class="nav-label">Audit Logs</span>
           </button>
-          <button data-view="settings">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 1 1 4.4 17l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82L4.2 7.2a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.25V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 1 1 19.8 7.2l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>
+          <button data-view="settings" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06A2 2 0 1 1 4.4 17l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82L4.2 7.2a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01A1.65 1.65 0 0 0 10 3.25V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06A2 2 0 1 1 19.8 7.2l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg></span>
             <span class="nav-label">Settings</span>
           </button>
 
-          <div class="nav-category">Session</div>
-          <button data-view="logout">
-            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>
-            <span class="nav-label">Logout</span>
-          </button>
+          <div class="nav-group-end">
+            <p class="nav-category">Session</p>
+            <button class="nav-danger" data-view="logout" type="button">
+              <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg></span>
+              <span class="nav-label">Sign out</span>
+            </button>
+          </div>
         </nav>
+
         <div class="sidebar-footer">
-          <span class="badge">Last updated: <span id="last-updated">--</span></span>
+          <span class="sidebar-meta">Last updated&nbsp;<strong id="last-updated">--</strong></span>
         </div>
       </aside>
+
+      <div class="sidebar-scrim" id="sidebar-scrim" aria-hidden="true"></div>
+
       <main class="main">
-        <div class="header">
-          <div>
-            <h2>Admin Control Desk</h2>
-            <p class="subtitle">Operations, users, audit, and AI insights in one dashboard.</p>
+        <header class="topbar">
+          <div class="topbar-lead">
+            <button class="icon-btn sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="portal-sidebar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+            </button>
+            <nav class="breadcrumb" aria-label="Breadcrumb">
+              <span>Admin</span>
+              <span class="crumb-sep" aria-hidden="true">/</span>
+              <span class="crumb-current" id="crumb-current">Dashboard</span>
+            </nav>
           </div>
-          <div class="toolbar">
+          <div class="topbar-actions">
+            <div class="header-search-wrap search-field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input class="input header-search" id="global-search" type="search" placeholder="Search current view" aria-label="Search the current view" />
+            </div>
             <span class="badge" id="ai-health-badge">AI: Checking...</span>
-            <button class="icon-btn refresh-btn" id="refresh-all" type="button" title="Refresh dashboard" aria-label="Refresh dashboard">
+            <button class="icon-btn refresh-btn" id="refresh-all" type="button" title="Refresh data" aria-label="Refresh data">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>
             </button>
             <button class="profile-chip" id="profile-avatar-btn" type="button" title="View profile">
@@ -82,518 +99,733 @@
               <span class="profile-chip-name" id="profile-avatar-name">Admin</span>
             </button>
           </div>
-        </div>
+        </header>
 
-        <section id="dashboard-view">
-          <div class="grid stats" id="stats-grid"></div>
-
-          <div class="split" style="margin-top: 16px;">
-            <div>
-              <div class="section-title">Recent Activity</div>
-              <div class="row-wrap" style="margin-bottom: 10px;">
-                <select class="select" id="activity-category-filter" style="max-width: 220px;">
-                  <option value="all">All Categories</option>
-                  <option value="appointments">Appointments</option>
-                  <option value="users">Users</option>
-                  <option value="services">Services</option>
-                  <option value="system">System</option>
-                </select>
+        <div class="main-body">
+          <section id="dashboard-view">
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Dashboard</h2>
+                <p class="page-sub">Shop-wide snapshot: accounts, catalogue, revenue and what needs attention right now.</p>
               </div>
-              <div class="list" id="activity-list"></div>
             </div>
-            <div>
-              <div class="section-title">AI Integration Status</div>
+
+            <div class="grid stats" id="stats-grid"></div>
+
+            <div class="split">
+              <div class="column">
+                <div class="section-head">
+                  <div>
+                    <h3 class="section-title">Recent activity</h3>
+                    <p class="section-title-sub">Latest changes across appointments, users and services.</p>
+                  </div>
+                  <select class="select" id="activity-category-filter" aria-label="Filter activity by category" style="max-width: 200px;">
+                    <option value="all">All categories</option>
+                    <option value="appointments">Appointments</option>
+                    <option value="users">Users</option>
+                    <option value="services">Services</option>
+                    <option value="system">System</option>
+                  </select>
+                </div>
+                <div class="list" id="activity-list"></div>
+              </div>
+
+              <div class="column">
+                <div class="section-head">
+                  <div>
+                    <h3 class="section-title">AI integration status</h3>
+                    <p class="section-title-sub">Face scan and try-on service readiness.</p>
+                  </div>
+                </div>
+                <div class="card">
+                  <div id="ai-status-panel" class="list"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="analytics-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Analytics</h2>
+                <p class="page-sub" id="analytics-period-label">Business performance from live shop data.</p>
+              </div>
+              <div class="page-actions">
+                <div class="analytics-period-tabs" id="analytics-period-tabs" role="tablist" aria-label="Date range">
+                  <button type="button" class="btn secondary analytics-period-btn" data-period="7d">7 days</button>
+                  <button type="button" class="btn secondary analytics-period-btn is-active" data-period="30d">30 days</button>
+                  <button type="button" class="btn secondary analytics-period-btn" data-period="3m">3 months</button>
+                  <button type="button" class="btn secondary analytics-period-btn" data-period="1y">1 year</button>
+                </div>
+                <button class="btn secondary" id="analytics-refresh" type="button">Refresh</button>
+              </div>
+            </div>
+
+            <div class="grid stats analytics-kpi-grid" id="analytics-kpi-grid"></div>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Revenue &amp; appointment trends</h3>
+                  <p class="card-sub">Completed activity across the selected period.</p>
+                </div>
+                <div class="card-tools segmented">
+                  <button type="button" class="btn secondary analytics-trend-btn is-active" data-trend="revenue">Revenue</button>
+                  <button type="button" class="btn secondary analytics-trend-btn" data-trend="appointments">Appointments</button>
+                </div>
+              </div>
+              <div class="analytics-chart-wrap">
+                <canvas id="analytics-trend-chart" height="140"></canvas>
+                <p class="meta analytics-chart-empty" id="analytics-trend-empty" hidden>No trend data for this period.</p>
+              </div>
+            </div>
+
+            <div class="split split-even">
               <div class="card">
-                <div id="ai-status-panel" class="list"></div>
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Appointment status mix</h3>
+                    <p class="card-sub">How bookings resolved in this period.</p>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap">
+                  <canvas id="analytics-status-chart" height="140"></canvas>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Top services</h3>
+                    <p class="card-sub">Highest demand by booking volume.</p>
+                  </div>
+                </div>
+                <div class="analytics-chart-wrap">
+                  <canvas id="analytics-services-chart" height="140"></canvas>
+                </div>
+                <div class="list" id="analytics-services-list" style="margin-top: 12px;"></div>
               </div>
             </div>
-          </div>
-        </section>
 
-        <section id="users-view" hidden>
-          <div class="section-title">Manage Users</div>
-          <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
-              <label>Search
-                <input class="input" id="users-search" placeholder="Name, email, specialty" />
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Barber performance</h3>
+                  <p class="card-sub">Completed services, revenue and reliability per barber.</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="table" id="analytics-barber-table">
+                  <thead>
+                    <tr>
+                      <th>Barber</th>
+                      <th>Completed</th>
+                      <th>Revenue</th>
+                      <th>Avg rating</th>
+                      <th>Cancel / No-show</th>
+                    </tr>
+                  </thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p class="meta" id="analytics-barber-empty" hidden>No barber activity in this period.</p>
+            </div>
+
+            <div class="split split-even">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Appointment operations</h3>
+                    <p class="card-sub">Demand distribution across hours and days.</p>
+                  </div>
+                </div>
+                <div class="analytics-ops-kpis" id="analytics-ops-kpis"></div>
+                <div class="analytics-chart-wrap" style="margin-top: 12px;">
+                  <canvas id="analytics-hours-chart" height="120"></canvas>
+                </div>
+                <div class="analytics-chart-wrap" style="margin-top: 12px;">
+                  <canvas id="analytics-days-chart" height="120"></canvas>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Customer insights</h3>
+                    <p class="card-sub">Retention and repeat behaviour.</p>
+                  </div>
+                </div>
+                <div id="analytics-customers" class="analytics-stack"></div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">AI business insights</h3>
+                  <p class="card-sub ai-center-desc">Insight, recommendation and prediction are grounded in the metrics above. The AI will not invent statistics.</p>
+                </div>
+              </div>
+              <p id="analytics-summary" class="meta">Loading insights…</p>
+              <div class="ai-brief-list" id="analytics-ai-brief"></div>
+            </div>
+          </section>
+
+          <section id="users-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Users</h2>
+                <p class="page-sub">Customer and staff accounts. Editing an account updates its portal access immediately.</p>
+              </div>
+              <div class="page-actions">
+                <button class="btn primary" id="users-add-account" type="button">Add account</button>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <label class="field field-grow">
+                <span>Search</span>
+                <input class="input" id="users-search" type="search" placeholder="Name, email or specialty" />
               </label>
-              <label>Role filter
+              <label class="field">
+                <span>Role</span>
                 <select class="select" id="users-role-filter">
-                  <option value="all">All</option>
+                  <option value="all">All roles</option>
                   <option value="customers">Customers</option>
                   <option value="barbers">Barbers</option>
                   <option value="receptionists">Receptionists</option>
                   <option value="admins">Admins</option>
                 </select>
               </label>
-              <button class="btn" id="users-add-account" type="button">Add account</button>
             </div>
-          </div>
-          <div class="users-stack">
-            <div class="card">
-              <h3>Customers</h3>
-              <div class="list" id="customers-table"></div>
-            </div>
-            <div class="card">
-              <h3>Barbers</h3>
-              <div class="list" id="barbers-table"></div>
-            </div>
-            <div class="card">
-              <h3>Receptionists</h3>
-              <div class="list" id="receptionists-table"></div>
-            </div>
-            <div class="card">
-              <h3>Admins</h3>
-              <div class="list" id="admins-table"></div>
-            </div>
-          </div>
-        </section>
 
-        <section id="audit-view" hidden>
-          <div class="section-title">Audit Logs</div>
-          <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap">
-              <input class="input" id="audit-search" placeholder="Search title or details" style="max-width: 360px;" />
-              <select class="select" id="audit-category-filter" style="max-width: 220px;">
-                <option value="all">All Categories</option>
-                <option value="appointments">Appointments</option>
-                <option value="users">Users</option>
-                <option value="services">Services</option>
-                <option value="system">System</option>
-              </select>
-              <button class="btn" id="audit-export">Export View CSV</button>
-            </div>
-          </div>
-          <div class="list" id="audit-list"></div>
-        </section>
-
-        <section id="analytics-view" hidden>
-          <div class="analytics-header row-wrap" style="justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 12px;">
-            <div>
-              <div class="section-title" style="margin-bottom: 4px;">Analytics</div>
-              <p class="meta" id="analytics-period-label" style="margin: 0;">Business performance from live shop data.</p>
-            </div>
-            <div class="row-wrap" style="gap: 8px; align-items: center;">
-              <div class="analytics-period-tabs" id="analytics-period-tabs" role="tablist" aria-label="Date range">
-                <button type="button" class="btn secondary analytics-period-btn" data-period="7d">7 Days</button>
-                <button type="button" class="btn secondary analytics-period-btn is-active" data-period="30d">30 Days</button>
-                <button type="button" class="btn secondary analytics-period-btn" data-period="3m">3 Months</button>
-                <button type="button" class="btn secondary analytics-period-btn" data-period="1y">1 Year</button>
-              </div>
-              <button class="btn secondary" id="analytics-refresh" type="button">Refresh</button>
-            </div>
-          </div>
-
-          <div class="grid stats analytics-kpi-grid" id="analytics-kpi-grid" style="margin-bottom: 12px;"></div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap" style="justify-content: space-between; align-items: center; margin-bottom: 8px;">
-              <h3 style="margin: 0;">Revenue &amp; Appointment Trends</h3>
-              <div class="row-wrap" style="gap: 6px;">
-                <button type="button" class="btn secondary analytics-trend-btn is-active" data-trend="revenue">Revenue</button>
-                <button type="button" class="btn secondary analytics-trend-btn" data-trend="appointments">Appointments</button>
-              </div>
-            </div>
-            <div class="analytics-chart-wrap">
-              <canvas id="analytics-trend-chart" height="140"></canvas>
-            </div>
-            <div class="meta" id="analytics-trend-empty" hidden>No trend data for this period.</div>
-          </div>
-
-          <div class="split" style="margin-bottom: 12px;">
-            <div class="card">
-              <h3>Appointment Status Mix</h3>
-              <div class="analytics-chart-wrap">
-                <canvas id="analytics-status-chart" height="140"></canvas>
-              </div>
-            </div>
-            <div class="card">
-              <h3>Top Services</h3>
-              <div class="analytics-chart-wrap">
-                <canvas id="analytics-services-chart" height="140"></canvas>
-              </div>
-              <div class="list" id="analytics-services-list" style="margin-top: 10px;"></div>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3>Barber Performance</h3>
-            <div class="table-wrap">
-              <table class="table" id="analytics-barber-table">
-                <thead>
-                  <tr>
-                    <th>Barber</th>
-                    <th>Completed</th>
-                    <th>Revenue</th>
-                    <th>Avg rating</th>
-                    <th>Cancel / No-show</th>
-                  </tr>
-                </thead>
-                <tbody></tbody>
-              </table>
-            </div>
-            <div class="meta" id="analytics-barber-empty" hidden>No barber activity in this period.</div>
-          </div>
-
-          <div class="split" style="margin-bottom: 12px;">
-            <div class="card">
-              <h3>Appointment Operations</h3>
-              <div class="analytics-ops-kpis" id="analytics-ops-kpis"></div>
-              <div class="analytics-chart-wrap" style="margin-top: 10px;">
-                <canvas id="analytics-hours-chart" height="120"></canvas>
-              </div>
-              <div class="analytics-chart-wrap" style="margin-top: 10px;">
-                <canvas id="analytics-days-chart" height="120"></canvas>
-              </div>
-            </div>
-            <div class="card">
-              <h3>Customer Insights</h3>
-              <div id="analytics-customers" class="analytics-stack"></div>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3>AI Business Insights</h3>
-            <p class="ai-center-desc">Insight, recommendation, and prediction are grounded in the metrics above. The AI will not invent statistics.</p>
-            <p id="analytics-summary" class="meta">Loading insights…</p>
-            <div class="ai-brief-list" id="analytics-ai-brief"></div>
-          </div>
-        </section>
-
-        <section id="haircuts-view" hidden>
-          <div class="section-title">Manage Haircuts</div>
-          <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
-              <input class="input" id="haircuts-search" placeholder="Search name or code" style="max-width: 360px;" />
-              <button class="btn" id="haircuts-add" type="button">Add haircut</button>
-            </div>
-          </div>
-          <div class="card">
-            <div class="list" id="haircuts-table"></div>
-          </div>
-        </section>
-
-        <section id="services-view" hidden>
-          <div class="section-title">Manage Services</div>
-          <div class="card" style="margin-bottom: 12px;">
-            <div class="row-wrap" style="gap: 8px; flex-wrap: wrap;">
-              <input class="input" id="services-search" placeholder="Search service or category" style="max-width: 360px;" />
-              <button class="btn" id="services-add" type="button">Add service</button>
-            </div>
-          </div>
-          <div class="card">
-            <div class="list" id="services-table"></div>
-          </div>
-        </section>
-
-        <section id="schedule-view" hidden>
-          <div class="section-title">Operating Schedule</div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin: 0 0 10px;">Business calendar</h3>
-            <p class="meta" style="margin: 0 0 10px;">See which days the shop is open or closed. Click a day for details.</p>
-            <div class="row-wrap" style="justify-content: space-between; margin-bottom: 10px;">
-              <strong id="schedule-cal-month-label">—</strong>
-              <div class="row-wrap">
-                <button class="btn secondary" id="schedule-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
-                <button class="btn secondary" id="schedule-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
-              </div>
-            </div>
-            <div class="schedule-calendar" id="schedule-calendar-grid"></div>
-            <div class="schedule-cal-legend row-wrap" style="margin-top: 10px; gap: 12px;">
-              <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
-              <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
-              <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
-              <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
-            </div>
-            <div class="meta" id="schedule-cal-day-detail" style="margin-top: 12px; line-height: 1.6;"></div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin: 0 0 10px;">Weekly hours</h3>
-            <p class="meta" style="margin: 0 0 10px;">Set opening hours per day. Changes apply to new availability; existing appointments are kept.</p>
-            <div class="list" id="schedule-weekly"></div>
-            <div class="row-wrap" style="margin-top: 12px;">
-              <button class="btn" id="schedule-save-weekly" type="button">Save weekly hours</button>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin: 0 0 10px;">Break windows</h3>
-            <p class="meta" style="margin: 0 0 10px;">No slots can be booked during a break. Use “Every day” for breaks that repeat daily.</p>
-            <div class="list" id="schedule-breaks"></div>
-            <div class="row-wrap" style="margin-top: 12px;">
-              <select class="select" id="schedule-break-day">
-                <option value="">Every day</option>
-                <option value="1">Monday</option>
-                <option value="2">Tuesday</option>
-                <option value="3">Wednesday</option>
-                <option value="4">Thursday</option>
-                <option value="5">Friday</option>
-                <option value="6">Saturday</option>
-                <option value="0">Sunday</option>
-              </select>
-              <input class="input" type="time" id="schedule-break-start" value="12:00" style="max-width: 130px;" />
-              <input class="input" type="time" id="schedule-break-end" value="13:00" style="max-width: 130px;" />
-              <input class="input" id="schedule-break-label" placeholder="Label (optional)" style="max-width: 200px;" />
-              <button class="btn secondary" id="schedule-break-add" type="button">Add break</button>
-              <button class="btn" id="schedule-save-breaks" type="button">Save breaks</button>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin: 0 0 10px;">Closed dates</h3>
-            <p class="meta" style="margin: 0 0 10px;">Holidays or one-off closures. No bookings are offered on these dates.</p>
-            <div class="list" id="schedule-closed-dates"></div>
-            <div class="row-wrap" style="margin-top: 12px;">
-              <input class="input" type="date" id="schedule-closed-date" style="max-width: 180px;" />
-              <input class="input" id="schedule-closed-reason" placeholder="Reason (e.g. Holiday)" style="max-width: 260px;" />
-              <button class="btn" id="schedule-closed-add" type="button">Add closed date</button>
-            </div>
-          </div>
-
-          <div class="card" style="margin-bottom: 12px;">
-            <h3 style="margin: 0 0 10px;">Slot settings</h3>
-            <div class="form-grid">
-              <label>Appointment slot duration (minutes)
-                <input class="input" type="number" id="schedule-slot-minutes" min="5" max="240" step="5" />
-              </label>
-              <label>Walk-in duration (minutes)
-                <input class="input" type="number" id="schedule-walkin-minutes" min="5" max="240" step="5" />
-              </label>
-              <label>Timezone
-                <input class="input" id="schedule-timezone" disabled />
-              </label>
-            </div>
-            <div class="row-wrap" style="margin-top: 12px;">
-              <button class="btn" id="schedule-save-slots" type="button">Save slot settings</button>
-            </div>
-          </div>
-
-          <div class="card">
-            <h3 style="margin: 0 0 10px;">Preview bookable slots</h3>
-            <div class="row-wrap">
-              <input class="input" type="date" id="schedule-preview-date" style="max-width: 180px;" />
-              <button class="btn secondary" id="schedule-preview-btn" type="button">Preview</button>
-            </div>
-            <div class="meta" id="schedule-preview-result" style="margin-top: 10px; line-height: 1.6;"></div>
-          </div>
-        </section>
-
-        <section id="settings-view" hidden>
-          <div class="section-title">System Settings</div>
-          <p class="meta settings-intro">Configure supported notification options and review live system status. Secrets and provider keys stay on the server.</p>
-
-          <div class="settings-desk" id="settings-desk">
-            <div class="settings-group">
-              <div class="settings-group-label">Operations</div>
-              <div class="settings-layout settings-layout-ops">
-                <div class="card settings-panel is-editable">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>Notifications</h3>
-                      <p class="meta settings-panel-sub">Editable · persisted in system settings</p>
-                    </div>
-                    <span class="settings-badge" id="settings-notif-badge">—</span>
+            <div class="users-stack">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Customers</h3>
+                    <p class="card-sub">App and kiosk accounts.</p>
                   </div>
-                  <div class="settings-editable-block">
-                    <div class="form-grid settings-form">
-                      <label class="settings-toggle">Enable email notification processing
-                        <input type="checkbox" id="setting-email" />
-                      </label>
-                      <label>Sender / from email
-                        <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" autocomplete="off" />
-                      </label>
-                      <label>Test notification email
-                        <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" autocomplete="off" />
-                      </label>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="customers-table"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Barbers</h3>
+                    <p class="card-sub">Regular (walk-in) and exclusive (appointment) queues.</p>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="barbers-table"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Receptionists</h3>
+                    <p class="card-sub">Front-desk portal access.</p>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="receptionists-table"></div>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Admins</h3>
+                    <p class="card-sub">Full system access.</p>
+                  </div>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="admins-table"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="services-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Services</h2>
+                <p class="page-sub">Catalogue offered through appointments, walk-ins and the kiosk.</p>
+              </div>
+              <div class="page-actions">
+                <button class="btn primary" id="services-add" type="button">Add service</button>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <label class="field field-grow">
+                <span>Search</span>
+                <input class="input" id="services-search" type="search" placeholder="Service name, category or channel" />
+              </label>
+            </div>
+
+            <div class="card">
+              <div class="table-wrap">
+                <div class="list" id="services-table"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="haircuts-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Haircuts</h2>
+                <p class="page-sub">Styles, variants and overlay assets used by the AI preview.</p>
+              </div>
+              <div class="page-actions">
+                <button class="btn primary" id="haircuts-add" type="button">Add haircut</button>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <label class="field field-grow">
+                <span>Search</span>
+                <input class="input" id="haircuts-search" type="search" placeholder="Style name or code" />
+              </label>
+            </div>
+
+            <div class="card">
+              <div class="table-wrap">
+                <div class="list" id="haircuts-table"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="schedule-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Operating schedule</h2>
+                <p class="page-sub">Opening hours, breaks and closures that drive bookable slots. Existing appointments are never removed by these changes.</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Business calendar</h3>
+                  <p class="card-sub">Open and closed days at a glance. Select a day for details.</p>
+                </div>
+                <div class="card-tools">
+                  <strong id="schedule-cal-month-label">—</strong>
+                  <button class="icon-btn" id="schedule-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+                  <button class="icon-btn" id="schedule-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+                </div>
+              </div>
+              <div class="schedule-calendar" id="schedule-calendar-grid"></div>
+              <div class="schedule-cal-legend row-wrap" style="margin-top: 12px;">
+                <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
+              </div>
+              <div class="cal-detail" id="schedule-cal-day-detail"></div>
+            </div>
+
+            <div class="split split-even">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Weekly hours</h3>
+                    <p class="card-sub">Opening hours per weekday. Applies to newly generated availability.</p>
+                  </div>
+                </div>
+                <div class="list" id="schedule-weekly"></div>
+                <div class="card-foot">
+                  <span class="meta">Changes take effect after saving.</span>
+                  <button class="btn primary" id="schedule-save-weekly" type="button">Save weekly hours</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Break windows</h3>
+                    <p class="card-sub">No slots are offered during a break. Use “Every day” for daily breaks.</p>
+                  </div>
+                </div>
+                <div class="list" id="schedule-breaks"></div>
+                <div class="form-grid" style="margin-top: 12px;">
+                  <label class="field">
+                    <span>Day</span>
+                    <select class="select" id="schedule-break-day">
+                      <option value="">Every day</option>
+                      <option value="1">Monday</option>
+                      <option value="2">Tuesday</option>
+                      <option value="3">Wednesday</option>
+                      <option value="4">Thursday</option>
+                      <option value="5">Friday</option>
+                      <option value="6">Saturday</option>
+                      <option value="0">Sunday</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Start</span>
+                    <input class="input" type="time" id="schedule-break-start" value="12:00" />
+                  </label>
+                  <label class="field">
+                    <span>End</span>
+                    <input class="input" type="time" id="schedule-break-end" value="13:00" />
+                  </label>
+                  <label class="field">
+                    <span>Label <span class="field-hint">optional</span></span>
+                    <input class="input" id="schedule-break-label" placeholder="e.g. Lunch" />
+                  </label>
+                </div>
+                <div class="card-foot">
+                  <button class="btn secondary" id="schedule-break-add" type="button">Add break</button>
+                  <button class="btn primary" id="schedule-save-breaks" type="button">Save breaks</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="split split-even">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Closed dates</h3>
+                    <p class="card-sub">Holidays and one-off closures. No bookings are offered on these dates.</p>
+                  </div>
+                </div>
+                <div class="list" id="schedule-closed-dates"></div>
+                <div class="form-grid" style="margin-top: 12px;">
+                  <label class="field">
+                    <span>Date</span>
+                    <input class="input" type="date" id="schedule-closed-date" />
+                  </label>
+                  <label class="field">
+                    <span>Reason</span>
+                    <input class="input" id="schedule-closed-reason" placeholder="e.g. Public holiday" />
+                  </label>
+                </div>
+                <div class="card-foot">
+                  <span class="meta">Added dates are saved immediately.</span>
+                  <button class="btn primary" id="schedule-closed-add" type="button">Add closed date</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Slot settings</h3>
+                    <p class="card-sub">Duration used when generating bookable slots.</p>
+                  </div>
+                </div>
+                <div class="form-grid">
+                  <label class="field">
+                    <span>Appointment slot (minutes)</span>
+                    <input class="input" type="number" id="schedule-slot-minutes" min="5" max="240" step="5" />
+                  </label>
+                  <label class="field">
+                    <span>Walk-in duration (minutes)</span>
+                    <input class="input" type="number" id="schedule-walkin-minutes" min="5" max="240" step="5" />
+                  </label>
+                  <label class="field">
+                    <span>Timezone <span class="field-hint">server controlled</span></span>
+                    <input class="input" id="schedule-timezone" disabled />
+                  </label>
+                </div>
+                <div class="card-foot">
+                  <button class="btn primary" id="schedule-save-slots" type="button">Save slot settings</button>
+                </div>
+
+                <div class="settings-status-block">
+                  <div class="settings-block-label">Preview bookable slots</div>
+                  <div class="row-wrap">
+                    <input class="input" type="date" id="schedule-preview-date" style="max-width: 180px;" />
+                    <button class="btn secondary" id="schedule-preview-btn" type="button">Preview</button>
+                  </div>
+                  <div class="cal-detail" id="schedule-preview-result"></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section id="audit-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Audit logs</h2>
+                <p class="page-sub">System events grouped by day, newest first.</p>
+              </div>
+              <div class="page-actions">
+                <button class="btn secondary" id="audit-export" type="button">Export view as CSV</button>
+              </div>
+            </div>
+
+            <div class="filter-bar">
+              <label class="field field-grow">
+                <span>Search</span>
+                <input class="input" id="audit-search" type="search" placeholder="Event title or details" />
+              </label>
+              <label class="field">
+                <span>Category</span>
+                <select class="select" id="audit-category-filter">
+                  <option value="all">All categories</option>
+                  <option value="appointments">Appointments</option>
+                  <option value="users">Users</option>
+                  <option value="services">Services</option>
+                  <option value="system">System</option>
+                </select>
+              </label>
+            </div>
+
+            <div class="list" id="audit-list"></div>
+          </section>
+
+          <section id="settings-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">System settings</h2>
+                <p class="page-sub settings-intro">Configure supported notification options and review live system status. Secrets and provider keys stay on the server.</p>
+              </div>
+            </div>
+
+            <div class="settings-desk" id="settings-desk">
+              <div class="settings-group">
+                <div class="settings-group-label">Operations</div>
+                <div class="settings-layout settings-layout-ops">
+                  <div class="card settings-panel is-editable">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>Notifications</h3>
+                        <p class="meta settings-panel-sub">Editable · persisted in system settings</p>
+                      </div>
+                      <span class="settings-badge" id="settings-notif-badge">—</span>
                     </div>
+                    <div class="settings-editable-block">
+                      <div class="form-grid settings-form">
+                        <label class="settings-toggle">Enable email notification processing
+                          <input type="checkbox" id="setting-email" />
+                        </label>
+                        <label class="field">
+                          <span>Sender / from email</span>
+                          <input class="input" type="email" id="setting-from-email" placeholder="noreply@barberyatatis.com" autocomplete="off" />
+                        </label>
+                        <label class="field">
+                          <span>Test notification email</span>
+                          <input class="input" type="email" id="setting-test-email" placeholder="admin@example.com" autocomplete="off" />
+                        </label>
+                      </div>
+                      <div class="settings-actions">
+                        <button class="btn primary" id="settings-save" type="button">Save notification settings</button>
+                        <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
+                        <button class="btn secondary" id="settings-process-notifications" type="button">Process queue</button>
+                      </div>
+                    </div>
+                    <div class="settings-status-block">
+                      <div class="settings-block-label">Notification coverage</div>
+                      <div class="settings-kv" id="settings-notif-meta" aria-live="polite"></div>
+                      <p class="meta settings-footnote" id="settings-notif-footnote"></p>
+                    </div>
+                  </div>
+
+                  <div class="card settings-panel is-action">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>Backup &amp; data</h3>
+                        <p class="meta settings-panel-sub">Manual export only</p>
+                      </div>
+                      <span class="settings-badge muted">Manual</span>
+                    </div>
+                    <div class="settings-kv" id="settings-backup-meta"></div>
+                    <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Automatic scheduled backups are not implemented.</p>
                     <div class="settings-actions">
-                      <button class="btn" id="settings-save" type="button">Save notification settings</button>
-                      <button class="btn secondary" id="settings-test-email" type="button">Send test email</button>
-                      <button class="btn secondary" id="settings-process-notifications" type="button">Process notification queue</button>
+                      <button class="btn secondary" id="settings-download-backup" type="button">Create &amp; download backup</button>
                     </div>
-                  </div>
-                  <div class="settings-status-block">
-                    <div class="settings-block-label">Notification coverage</div>
-                    <div class="settings-kv" id="settings-notif-meta" aria-live="polite"></div>
-                    <p class="meta settings-footnote" id="settings-notif-footnote"></p>
                   </div>
                 </div>
+              </div>
 
-                <div class="card settings-panel is-action">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>Backup &amp; data</h3>
-                      <p class="meta settings-panel-sub">Manual export only</p>
+              <div class="settings-group">
+                <div class="settings-group-label">Configuration &amp; status</div>
+                <div class="settings-layout settings-layout-status">
+                  <div class="card settings-panel is-readonly">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>Security</h3>
+                        <p class="meta settings-panel-sub">Read-only status</p>
+                      </div>
+                      <span class="settings-badge muted">Read-only</span>
                     </div>
-                    <span class="settings-badge muted">Manual</span>
+                    <div class="settings-kv" id="settings-security-meta"></div>
+                    <p class="meta settings-footnote">Staff MFA enforcement and admin-editable password policies are not implemented in this build. API keys and database credentials are never shown here.</p>
                   </div>
-                  <div class="settings-kv" id="settings-backup-meta"></div>
-                  <p class="meta settings-footnote">Creates a JSON export of core tables and downloads it. Automatic scheduled backups are not implemented.</p>
-                  <div class="settings-actions">
-                    <button class="btn secondary" id="settings-download-backup" type="button">Create &amp; download backup</button>
+
+                  <div class="card settings-panel is-readonly">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>AI configuration</h3>
+                        <p class="meta settings-panel-sub">Server / .env controlled</p>
+                      </div>
+                      <span class="settings-badge" id="settings-ai-badge">—</span>
+                    </div>
+                    <div class="settings-kv" id="settings-ai-meta"></div>
+                    <div class="settings-actions">
+                      <button class="btn secondary" id="settings-refresh-ai" type="button">Refresh AI status</button>
+                    </div>
+                  </div>
+
+                  <div class="card settings-panel is-readonly">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>Operating schedule</h3>
+                        <p class="meta settings-panel-sub">Summary · managed separately</p>
+                      </div>
+                      <span class="settings-badge muted">Summary</span>
+                    </div>
+                    <div class="settings-kv" id="settings-schedule-meta"></div>
+                    <div class="settings-actions">
+                      <button class="btn secondary" data-jump="schedule" type="button">Manage operating schedule</button>
+                    </div>
+                  </div>
+
+                  <div class="card settings-panel is-readonly">
+                    <div class="settings-panel-head">
+                      <div>
+                        <h3>System information</h3>
+                        <p class="meta settings-panel-sub">Health &amp; environment</p>
+                      </div>
+                      <span class="settings-badge" id="settings-system-badge">—</span>
+                    </div>
+                    <div class="settings-kv" id="settings-system-meta"></div>
+                    <div class="settings-actions">
+                      <button class="btn secondary" id="settings-refresh-all" type="button">Refresh status</button>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
-
-            <div class="settings-group">
-              <div class="settings-group-label">Configuration &amp; status</div>
-              <div class="settings-layout settings-layout-status">
-                <div class="card settings-panel is-readonly">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>Security</h3>
-                      <p class="meta settings-panel-sub">Read-only status</p>
-                    </div>
-                    <span class="settings-badge muted">Read-only</span>
-                  </div>
-                  <div class="settings-kv" id="settings-security-meta"></div>
-                  <p class="meta settings-footnote">Staff MFA enforcement and admin-editable password policies are not implemented in this build. API keys and database credentials are never shown here.</p>
-                </div>
-
-                <div class="card settings-panel is-readonly">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>AI configuration</h3>
-                      <p class="meta settings-panel-sub">Server / .env controlled</p>
-                    </div>
-                    <span class="settings-badge" id="settings-ai-badge">—</span>
-                  </div>
-                  <div class="settings-kv" id="settings-ai-meta"></div>
-                  <div class="settings-actions">
-                    <button class="btn secondary" id="settings-refresh-ai" type="button">Refresh AI status</button>
-                  </div>
-                </div>
-
-                <div class="card settings-panel is-readonly">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>Operating schedule</h3>
-                      <p class="meta settings-panel-sub">Summary · managed separately</p>
-                    </div>
-                    <span class="settings-badge muted">Summary</span>
-                  </div>
-                  <div class="settings-kv" id="settings-schedule-meta"></div>
-                  <div class="settings-actions">
-                    <button class="btn" data-jump="schedule" type="button">Manage operating schedule</button>
-                  </div>
-                </div>
-
-                <div class="card settings-panel is-readonly">
-                  <div class="settings-panel-head">
-                    <div>
-                      <h3>System information</h3>
-                      <p class="meta settings-panel-sub">Health &amp; environment</p>
-                    </div>
-                    <span class="settings-badge" id="settings-system-badge">—</span>
-                  </div>
-                  <div class="settings-kv" id="settings-system-meta"></div>
-                  <div class="settings-actions">
-                    <button class="btn secondary" id="settings-refresh-all" type="button">Refresh status</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
       </main>
     </div>
 
     <dialog id="confirm-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <h3 id="confirm-dialog-title" style="margin: 0 0 8px;">Confirm</h3>
-        <p id="confirm-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
-        <div class="row-wrap" style="justify-content: flex-end;">
+        <div class="modal-head">
+          <h3 id="confirm-dialog-title">Confirm</h3>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-dialog-message" class="modal-message"></p>
+        </div>
+        <div class="modal-foot">
           <button class="btn secondary" id="confirm-dialog-cancel" type="button">Cancel</button>
-          <button class="btn" id="confirm-dialog-confirm" type="button">Confirm</button>
+          <button class="btn primary" id="confirm-dialog-confirm" type="button">Confirm</button>
         </div>
       </div>
     </dialog>
 
     <dialog id="message-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <h3 id="message-dialog-title" style="margin: 0 0 8px;">Notice</h3>
-        <p id="message-dialog-message" class="meta" style="margin: 0 0 14px; line-height: 1.5;"></p>
-        <div class="row-wrap" style="justify-content: flex-end;">
-          <button class="btn" id="message-dialog-ok" type="button">OK</button>
+        <div class="modal-head">
+          <h3 id="message-dialog-title">Notice</h3>
+        </div>
+        <div class="modal-body">
+          <p id="message-dialog-message" class="modal-message"></p>
+        </div>
+        <div class="modal-foot">
+          <button class="btn primary" id="message-dialog-ok" type="button">OK</button>
         </div>
       </div>
     </dialog>
 
     <dialog id="profile-dialog" class="profile-dialog">
       <div class="profile-dialog-inner">
-        <div class="row-wrap" style="justify-content: space-between; align-items: center;">
-          <h3 style="margin: 0;">Profile</h3>
-          <button class="icon-btn" id="profile-dialog-edit" type="button" title="Edit profile">✎</button>
-        </div>
-        <div class="list" id="profile-dialog-content"></div>
-        <div class="row-wrap" style="margin-top: 10px; justify-content: flex-end;">
-          <button class="btn" id="profile-dialog-save" type="button" hidden>Save</button>
-          <button class="btn secondary" id="profile-dialog-cancel" type="button" hidden>Cancel</button>
-          <button class="btn" id="profile-dialog-close" type="button">Close</button>
-        </div>
-      </div>
-    </dialog>
-
-    <dialog id="account-editor-dialog" class="profile-dialog">
-      <div class="profile-dialog-inner">
-        <h3 id="account-editor-title" style="margin: 0 0 10px;">Edit Account</h3>
-        <div id="account-editor-form" class="form-grid"></div>
-        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
-          <button class="btn" id="account-editor-save" type="button">Save</button>
-          <button class="btn secondary" id="account-editor-cancel" type="button">Cancel</button>
-        </div>
-      </div>
-    </dialog>
-
-    <dialog id="service-editor-dialog" class="profile-dialog">
-      <div class="profile-dialog-inner">
-        <h3 id="service-editor-title" style="margin: 0 0 10px;">Service</h3>
-        <div id="service-editor-form" class="form-grid"></div>
-        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
-          <button class="btn" id="service-editor-save" type="button">Save</button>
-          <button class="btn secondary" id="service-editor-cancel" type="button">Cancel</button>
-        </div>
-      </div>
-    </dialog>
-
-    <dialog id="haircut-editor-dialog" class="profile-dialog">
-      <div class="profile-dialog-inner" style="max-width: 720px;">
-        <h3 id="haircut-editor-title" style="margin: 0 0 10px;">Haircut</h3>
-        <div id="haircut-editor-form" class="form-grid"></div>
-        <div id="haircut-overlay-section" style="margin-top: 14px;" hidden>
-          <div class="section-title" style="font-size: 14px;">Overlay PNGs (front / left / right)</div>
-          <div class="form-grid" id="haircut-overlay-uploads"></div>
-        </div>
-        <div id="haircut-variants-section" style="margin-top: 14px;" hidden>
-          <div class="row-wrap" style="justify-content: space-between; align-items: center;">
-            <div class="section-title" style="font-size: 14px; margin: 0;">Variants</div>
-            <button class="btn secondary" id="haircut-variant-add" type="button">Add variant</button>
+        <div class="modal-head">
+          <div>
+            <h3>Profile</h3>
+            <p class="modal-sub">Your portal account details.</p>
           </div>
-          <div class="list" id="haircut-variants-list" style="margin-top: 8px;"></div>
+          <button class="icon-btn" id="profile-dialog-edit" type="button" title="Edit profile" aria-label="Edit profile">✎</button>
         </div>
-        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
-          <button class="btn" id="haircut-editor-save" type="button">Save</button>
-          <button class="btn secondary" id="haircut-editor-cancel" type="button">Cancel</button>
+        <div class="modal-body">
+          <div class="list" id="profile-dialog-content"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn secondary" id="profile-dialog-cancel" type="button" hidden>Cancel</button>
+          <button class="btn primary" id="profile-dialog-save" type="button" hidden>Save changes</button>
+          <button class="btn secondary" id="profile-dialog-close" type="button">Close</button>
         </div>
       </div>
     </dialog>
 
-    <dialog id="variant-editor-dialog" class="profile-dialog">
+    <dialog id="account-editor-dialog" class="profile-dialog modal-lg">
       <div class="profile-dialog-inner">
-        <h3 id="variant-editor-title" style="margin: 0 0 10px;">Variant</h3>
-        <div id="variant-editor-form" class="form-grid"></div>
-        <div class="row-wrap" style="margin-top: 12px; justify-content: flex-end;">
-          <button class="btn" id="variant-editor-save" type="button">Save</button>
+        <div class="modal-head">
+          <h3 id="account-editor-title">Edit account</h3>
+        </div>
+        <div class="modal-body">
+          <div id="account-editor-form" class="form-grid"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn secondary" id="account-editor-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="account-editor-save" type="button">Save</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="service-editor-dialog" class="profile-dialog modal-lg">
+      <div class="profile-dialog-inner">
+        <div class="modal-head">
+          <h3 id="service-editor-title">Service</h3>
+        </div>
+        <div class="modal-body">
+          <div id="service-editor-form" class="form-grid"></div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn secondary" id="service-editor-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="service-editor-save" type="button">Save</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="haircut-editor-dialog" class="profile-dialog modal-lg">
+      <div class="profile-dialog-inner">
+        <div class="modal-head">
+          <h3 id="haircut-editor-title">Haircut</h3>
+        </div>
+        <div class="modal-body">
+          <div id="haircut-editor-form" class="form-grid"></div>
+          <div id="haircut-overlay-section" hidden>
+            <div class="settings-block-label">Overlay PNGs (front / left / right)</div>
+            <div class="form-grid" id="haircut-overlay-uploads"></div>
+          </div>
+          <div id="haircut-variants-section" hidden>
+            <div class="section-head">
+              <div class="settings-block-label" style="margin: 0;">Variants</div>
+              <button class="btn secondary" id="haircut-variant-add" type="button">Add variant</button>
+            </div>
+            <div class="list" id="haircut-variants-list" style="margin-top: 8px;"></div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn secondary" id="haircut-editor-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="haircut-editor-save" type="button">Save</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="variant-editor-dialog" class="profile-dialog modal-lg">
+      <div class="profile-dialog-inner">
+        <div class="modal-head">
+          <h3 id="variant-editor-title">Variant</h3>
+        </div>
+        <div class="modal-body">
+          <div id="variant-editor-form" class="form-grid"></div>
+        </div>
+        <div class="modal-foot">
           <button class="btn secondary" id="variant-editor-cancel" type="button">Cancel</button>
+          <button class="btn primary" id="variant-editor-save" type="button">Save</button>
         </div>
       </div>
     </dialog>
 
     <script src="../assets/api-config.js"></script>
     <script src="../assets/ui.js"></script>
+    <script src="../assets/shell.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

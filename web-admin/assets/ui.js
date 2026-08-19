@@ -137,16 +137,30 @@
     }
   }
 
+  const TOAST_ICONS = { success: "✓", error: "!", info: "i" };
+
   function toast(message, type) {
     const host = ensureToastHost();
+    const tone = type || "info";
     const item = document.createElement("div");
-    item.className = `toast toast-${type || "info"}`;
-    item.textContent = String(message || "");
+    item.className = `toast toast-${tone}`;
+    item.setAttribute("role", tone === "error" ? "alert" : "status");
+
+    const icon = document.createElement("span");
+    icon.className = "toast-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.textContent = TOAST_ICONS[tone] || TOAST_ICONS.info;
+
+    const text = document.createElement("span");
+    text.className = "toast-text";
+    text.textContent = String(message || "");
+
+    item.append(icon, text);
     host.appendChild(item);
     window.setTimeout(() => {
       item.classList.add("toast-out");
       window.setTimeout(() => item.remove(), 220);
-    }, 3200);
+    }, tone === "error" ? 5000 : 3200);
   }
 
   function openDialog(id) {
@@ -183,7 +197,7 @@
     if (messageEl) messageEl.textContent = opts.message || "Are you sure?";
     confirmBtn.textContent = opts.confirmLabel || "Confirm";
     cancelBtn.textContent = opts.cancelLabel || "Cancel";
-    confirmBtn.className = opts.danger ? "btn danger" : "btn";
+    confirmBtn.className = opts.danger ? "btn danger" : "btn primary";
 
     return new Promise((resolve) => {
       const cleanup = () => {

@@ -258,18 +258,24 @@ async function saveProfileEdits() {
 
 function renderStats(stats) {
   const grid = document.getElementById("analytics-stats");
+  if (!grid) return;
   grid.innerHTML = "";
   if (!stats || stats.length === 0) {
-    grid.innerHTML = "<div class=\"card\">No stats available.</div>";
+    grid.innerHTML = emptyStateMarkup(
+      "No desk figures yet",
+      "Counts appear once today's appointments and walk-ins have loaded.",
+      { full: true },
+    );
     return;
   }
   stats.forEach((stat) => {
+    const tone = String(stat.changeType ?? "").trim();
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = `card kpi${tone ? ` kpi-${tone}` : ""}`;
     card.innerHTML = `
-      <h3>${stat.title}</h3>
+      <h3 class="kpi-label">${stat.title}</h3>
       <div class="value">${stat.value}</div>
-      <div class="meta ${stat.changeType ?? ""}">${stat.change}</div>
+      ${stat.change ? `<div class="meta ${tone}">${stat.change}</div>` : ""}
     `;
     grid.appendChild(card);
   });
@@ -282,6 +288,44 @@ function statusTag(status) {
   if (["checkedin", "scheduled", "assigned", "waiting"].includes(lower)) return "info";
   if (["cancelled", "noshow"].includes(lower)) return "warning";
   return "info";
+}
+
+/** Presentation only: maps a status label to a semantic badge tone. */
+const STATUS_TONES = {
+  completed: "success",
+  inprogress: "success",
+  inservice: "success",
+  ready: "gold",
+  completing: "warning",
+  pendingpayment: "warning",
+  checkedin: "info",
+  scheduled: "info",
+  assigned: "info",
+  waiting: "info",
+  cancelled: "danger",
+  noshow: "danger",
+};
+
+function statusBadge(label) {
+  const text = String(label ?? "").trim();
+  if (!text) return "";
+  const key = text.toLowerCase().replace(/[^a-z]/g, "");
+  const tone = STATUS_TONES[key] || "neutral";
+  // API statuses arrive as "InProgress"/"NoShow"; split them for reading.
+  const readable = text.replace(/([a-z])([A-Z])/g, "$1 $2");
+  return `<span class="status status--${tone}">${readable}</span>`;
+}
+
+function emptyStateMarkup(title, text, options = {}) {
+  const classes = ["card", "empty"];
+  if (options.error) classes.push("state-error");
+  const style = options.full ? ' style="grid-column: 1 / -1;"' : "";
+  return `
+    <div class="${classes.join(" ")}"${style}>
+      <p class="empty-state-title">${title}</p>
+      <p class="empty-state-text">${text}</p>
+    </div>
+  `;
 }
 
 function getPageSize(key) {
@@ -622,7 +666,21 @@ function renderAppointments(appointments) {
   });
 
   if (!filtered.length) {
-    table.innerHTML = "<tr><td colspan=\"7\">No appointments for today.</td></tr>";
+    const hasFilters = Boolean(q) || statusFilter !== "all";
+    table.innerHTML = `
+      <tbody>
+        <tr>
+          <td colspan="7">
+            ${emptyStateMarkup(
+              hasFilters ? "No matching appointments" : "No appointments today",
+              hasFilters
+                ? "No booking for today matches this search or status. Clear the filters to see the full day."
+                : "Nothing is booked for today yet. New bookings appear here automatically.",
+            )}
+          </td>
+        </tr>
+      </tbody>
+    `;
     return;
   }
 
@@ -631,13 +689,13 @@ function renderAppointments(appointments) {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>Client</th>
-        <th>Service</th>
-        <th>Time</th>
-        <th>Duration</th>
-        <th>Price</th>
-        <th>Status</th>
-        <th>Barber</th>
+        <th scope="col">Client</th>
+        <th scope="col">Service</th>
+        <th scope="col">Time</th>
+        <th scope="col">Duration</th>
+        <th scope="col">Price</th>
+        <th scope="col">Status</th>
+        <th scope="col">Barber</th>
       </tr>
     </thead>
     <tbody>
@@ -645,19 +703,19 @@ function renderAppointments(appointments) {
         .map(
           (item) => `
             <tr>
-              <td>${item.name}${item.is_group ? ` <span class="tag info">Group · ${item.people_count || 1}</span>` : ""}</td>
+              <td><strong>${item.name}</strong>${item.is_group ? ` <span class="status status--info">Group · ${item.people_count || 1}</span>` : ""}</td>
               <td>${item.service}</td>
               <td>${item.time_range || item.time}</td>
               <td>${item.duration}</td>
               <td>${item.price}</td>
-              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "Scheduled" ? "info" : "warning"}">${item.status}</span></td>
+              <td>${statusBadge(item.status)}</td>
               <td>${item.barber}</td>
             </tr>
           `,
         )
         .join("")}
     </tbody>
-    ${paginationMarkup("appointments-table", paged.currentPage, paged.totalPages, 8)}
+    ${paginationMarkup("appointments-table", paged.currentPage, paged.totalPages, 7)}
   `;
 }
 
@@ -676,7 +734,20 @@ function renderWalkins(walkins) {
   });
 
   if (!filtered.length) {
-    table.innerHTML = "<tr><td>No walk-ins yet.</td></tr>";
+    table.innerHTML = `
+      <tbody>
+        <tr>
+          <td colspan="5">
+            ${emptyStateMarkup(
+              q ? "No matching walk-ins" : "Queue is empty",
+              q
+                ? "No queued client matches this search. Clear it to see the whole queue."
+                : "Use “Add walk-in” above to place a client in the regular queue.",
+            )}
+          </td>
+        </tr>
+      </tbody>
+    `;
     return;
   }
 
@@ -685,11 +756,11 @@ function renderWalkins(walkins) {
   table.innerHTML = `
     <thead>
       <tr>
-        <th>Queue</th>
-        <th>Client</th>
-        <th>Service</th>
-        <th>Wait Time</th>
-        <th>Status</th>
+        <th scope="col">Queue</th>
+        <th scope="col">Client</th>
+        <th scope="col">Service</th>
+        <th scope="col">Wait time</th>
+        <th scope="col">Status</th>
       </tr>
     </thead>
     <tbody>
@@ -697,17 +768,17 @@ function renderWalkins(walkins) {
         .map(
           (item) => `
             <tr>
-              <td>${item.queue_number || "—"}</td>
+              <td><strong>${item.queue_number || "—"}</strong></td>
               <td>${item.name}</td>
               <td>${item.service}</td>
               <td>${item.waitTime}</td>
-              <td><span class="tag ${item.status === "Completed" ? "success" : item.status === "InService" ? "warning" : "info"}">${item.status}</span></td>
+              <td>${statusBadge(item.status)}</td>
             </tr>
           `,
         )
         .join("")}
     </tbody>
-    ${paginationMarkup("walkins-table", paged.currentPage, paged.totalPages, 6)}
+    ${paginationMarkup("walkins-table", paged.currentPage, paged.totalPages, 5)}
   `;
 }
 
@@ -716,14 +787,17 @@ function renderTracking(items, listId) {
   if (!list) return;
   list.innerHTML = "";
   if (!items || !items.length) {
-    list.innerHTML = '<div class="card">No clients in this queue.</div>';
+    list.innerHTML = emptyStateMarkup(
+      "Queue is clear",
+      "No client is waiting or in service in this queue right now.",
+    );
     return;
   }
 
   const paged = paginateRows(listId, items);
   paged.items.forEach((item) => {
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = "card queue-card";
     const pct = Math.round((item.progress || 0) * 100);
     const canCancel = item.status !== "COMPLETED";
     const canComplete = item.status !== "COMPLETED" && item.status !== "PENDING PAYMENT";
@@ -731,39 +805,39 @@ function renderTracking(items, listId) {
       item.kind === "walkin" &&
       item.queueId > 0 &&
       (item.rawStatus === "Waiting" || item.rawStatus === "Assigned");
+    const timing = String(item.timeRemaining ?? "");
+    const timingMeta = [];
+    if (item.status === "IN PROGRESS" && pct > 0) timingMeta.push(`${pct}%`);
+    if (item.status === "COMPLETING" && !/auto-complet/i.test(timing)) {
+      timingMeta.push("Auto-completing shortly");
+    }
     card.innerHTML = `
-      <div class="row-wrap" style="justify-content: space-between; align-items: flex-start;">
+      <div class="queue-card-head">
         <div>
-          <h4 style="margin: 0 0 4px;">${item.name}${item.isGroup ? ` <span class="tag info" style="margin-left:6px;">Group · ${item.peopleCount}</span>` : ""}${item.queueNumber ? ` <span class="tag info" style="margin-left:6px;">${item.queueNumber}</span>` : ""}</h4>
-          <p style="margin: 0 0 4px;">${item.service}</p>
-          <p class="meta" style="margin: 0 0 4px; color: #c9b46a;">${item.schedule || ""}</p>
-          ${item.barber ? `<p class="meta" style="margin: 0;">Barber: ${item.barber}</p>` : ""}
+          <h4 class="queue-name">
+            ${item.name}
+            ${item.queueNumber ? `<span class="status status--gold no-dot">${item.queueNumber}</span>` : ""}
+            ${item.isGroup ? `<span class="status status--info no-dot">Group · ${item.peopleCount}</span>` : ""}
+          </h4>
+          <p class="queue-service">${item.service}</p>
+          ${item.schedule ? `<p class="queue-schedule">${item.schedule}</p>` : ""}
+          ${item.barber ? `<p class="queue-barber">Barber: ${item.barber}</p>` : ""}
         </div>
-        <span class="tag ${
-          item.status === "WAITING"
-            ? "info"
-            : item.status === "IN PROGRESS"
-              ? "success"
-              : item.status === "COMPLETING"
-                ? "warning"
-              : item.status === "PENDING PAYMENT"
-                ? "warning"
-                : "warning"
-        }">${item.status}</span>
+        ${statusBadge(item.status)}
       </div>
-      <div class="progress" style="margin-top: 10px; height: 8px;">
+      <div class="progress">
         <span style="width: ${pct}%; background: ${item.color};"></span>
       </div>
-      <div class="row-wrap" style="margin-top: 6px; justify-content: space-between; align-items: center;">
-        <span class="meta">${item.timeRemaining}${item.status === "IN PROGRESS" && pct > 0 ? ` • ${pct}%` : ""}${item.status === "COMPLETING" ? " • Auto-completing shortly" : ""}</span>
+      <div class="queue-foot">
+        <span class="queue-timing">${[timing, ...timingMeta].filter(Boolean).join(" • ")}</span>
         ${canCancel || canComplete ? `
-          <div class="row-wrap" style="gap: 6px;">
+          <div class="queue-actions">
             ${canStartWalkin ? `<button type="button" class="btn primary tracking-start" title="Start service"
-              data-kind="${item.kind}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">▶ Start</button>` : ""}
-            ${canComplete ? `<button type="button" class="btn secondary tracking-complete" title="Mark completed"
-              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✓ Complete</button>` : ""}
-            ${canCancel ? `<button type="button" class="btn secondary tracking-cancel" title="Cancel / remove"
-              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">✕ Cancel</button>` : ""}
+              data-kind="${item.kind}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">Start</button>` : ""}
+            ${canComplete ? `<button type="button" class="btn success tracking-complete" title="Mark completed"
+              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">Complete</button>` : ""}
+            ${canCancel ? `<button type="button" class="btn danger tracking-cancel" title="Cancel / remove"
+              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">Cancel</button>` : ""}
           </div>
         ` : ""}
       </div>
@@ -793,8 +867,9 @@ function renderAutomationFeed(automation) {
   list.innerHTML = events
     .map(
       (event) => `
-        <div class="card" style="padding: 10px 12px; margin-bottom: 8px; border-color: #4CAF50;">
-          <span class="meta" style="color: #9ad49a;">${event.action === "started" ? "▶" : "✓"} ${event.label || "Queue updated"}</span>
+        <div class="automation-item">
+          <span aria-hidden="true">${event.action === "started" ? "▶" : "✓"}</span>
+          <span>${event.label || "Queue updated"}</span>
         </div>
       `,
     )
@@ -812,7 +887,10 @@ function renderBarbers(items, listId) {
   if (!list) return;
   list.innerHTML = "";
   if (!items || !items.length) {
-    list.innerHTML = "<div class=\"card\">No barbers in this group.</div>";
+    list.innerHTML = emptyStateMarkup(
+      "No barbers in this group",
+      "Assign a barber to this channel from the admin portal to see them here.",
+    );
     return;
   }
 
@@ -821,11 +899,15 @@ function renderBarbers(items, listId) {
     const card = document.createElement("div");
     card.className = "card gradient barber-card";
     card.innerHTML = `
-      <h4>${item.name}</h4>
+      <div class="barber-card-head">
+        <h4>${item.name}</h4>
+        ${item.channelLabel ? `<span class="status status--neutral no-dot">${item.channelLabel}</span>` : ""}
+      </div>
       <p>${item.specialty}</p>
-      <div class="meta">${item.channelLabel || ""}</div>
-      <div class="meta">Rating: ${item.rating}</div>
-      <div class="meta">Experience: ${item.experience}</div>
+      <div class="meta barber-card-meta">
+        <span class="barber-rating">★ ${item.rating}</span>
+        <span>${item.experience}</span>
+      </div>
     `;
     list.appendChild(card);
   });
@@ -887,7 +969,11 @@ async function loadBarberUnavailabilityRequests() {
     const data = await postJson(apiUrl("barber_schedule.php"), { action: "listRequests", status: "Pending" });
     const rows = data.requests ?? [];
     if (!rows.length) {
-      list.innerHTML = '<div class="time-off-card"><p class="meta" style="margin:0;">No pending time-off requests.</p></div>';
+      list.innerHTML = emptyStateMarkup(
+        "Nothing waiting for approval",
+        "Barber time-off requests appear here as soon as they are submitted.",
+        { full: true },
+      );
       return;
     }
 
@@ -897,10 +983,10 @@ async function loadBarberUnavailabilityRequests() {
       card.className = "time-off-card";
       card.innerHTML = `
         <h4>${row.barber_name ?? "Barber"}</h4>
-        <p><strong>Date:</strong> ${row.request_date}</p>
-        <p>${row.note ? `<strong>Note:</strong> ${row.note}` : "No note provided."}</p>
+        <p><strong>Date</strong> · ${row.request_date}</p>
+        <p>${row.note ? `<strong>Note</strong> · ${row.note}` : "No note provided."}</p>
         <div class="row-wrap" style="margin-top: 8px;">
-          <button class="btn gold" data-approve="${row.request_id}" type="button">Approve</button>
+          <button class="btn primary" data-approve="${row.request_id}" type="button">Approve</button>
           <button class="btn secondary" data-reject="${row.request_id}" type="button">Reject</button>
         </div>
       `;
@@ -925,7 +1011,11 @@ async function loadBarberUnavailabilityRequests() {
       });
     });
   } catch (error) {
-    list.innerHTML = '<div class="time-off-card"><p class="meta" style="margin:0;">Could not load time-off requests.</p></div>';
+    list.innerHTML = emptyStateMarkup(
+      "Could not load time-off requests",
+      `${error?.message || "The request failed."} Use the refresh button in the top bar to try again.`,
+      { full: true, error: true },
+    );
   }
 }
 
