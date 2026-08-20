@@ -30,14 +30,17 @@ Custom-format dump of the **application schema only**.
 
 The PHP API uses the Supabase **session pooler** (`DB_URL`, host `*.pooler.supabase.com`).
 
-`pg_dump` must use the **direct** database host:
+`pg_dump` must use the **direct** database host when the network can reach it:
 
 - Host: `db.<project-ref>.supabase.co`
 - Port: `5432`
+- User: `postgres` (not `postgres.<project-ref>` — that username is for the pooler)
 - `sslmode=require`
 - Env var: `DB_DIRECT_URL` (see `.env.example`)
 
 Do **not** use the transaction pooler (`port 6543`). Do not hardcode passwords.
+
+GitHub Actions cannot use IPv6 Direct. The scheduled workflow still takes `DB_DIRECT_URL`, then uses the session pooler on port **5432** when Direct has no IPv4 address.
 
 Set `DB_DIRECT_URL` in your local environment or CI secrets. Do not set it on Render unless you are running a dedicated backup job off the web request path (this repo does not run `pg_dump` from PHP).
 
@@ -68,27 +71,18 @@ Requires `pg_dump` (PostgreSQL client tools), not the Render PHP container.
 **Linux / macOS / CI**
 
 ```bash
-export DB_DIRECT_URL="postgresql://postgres.<project-ref>:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require"
+export DB_DIRECT_URL="postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require"
 ./scripts/backup_public_schema.sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-$env:DB_DIRECT_URL = "postgresql://postgres.<project-ref>:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require"
+$env:DB_DIRECT_URL = "postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require"
 .\scripts\backup_public_schema.ps1
 ```
 
-Equivalent command:
-
-```bash
-pg_dump "$DB_DIRECT_URL" \
-  --schema=public \
-  --no-owner \
-  --no-acl \
-  --format=custom \
-  --file="tatis_public_YYYYMMDD_HHMMSS.dump"
-```
+Prefer `./scripts/backup_public_schema.sh`, which sets libpq variables (including IPv4 `hostaddr` when needed) instead of passing a URI as the database name.
 
 Store the `.dump` file **off Render** (encrypted disk, object storage, or your backup vault). Do not keep the only copy on the API container.
 
@@ -115,7 +109,7 @@ Do not put dumps in `tatis-public`. Keep `tatis-backups` private.
 
 | Secret | Purpose |
 |---|---|
-| `DB_DIRECT_URL` | Direct Postgres URL: `db.<project-ref>.supabase.co:5432?sslmode=require` |
+| `DB_DIRECT_URL` | Direct Postgres URL: `postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require` |
 | `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | Service role — server only |
 
@@ -141,7 +135,7 @@ Never commit these values. The workflow does not echo connection strings.
 3. Run the workflow once with **Run workflow** and confirm a `.dump` appears in Storage.
 4. Confirm GitHub Actions is allowed to run on `main` (Actions tab not disabled).
 
-GitHub-hosted runners can usually reach the **direct** DB host. If DNS/IPv6 fails, do not switch to pooler port `6543`. Fix IPv6 or use the session pooler host on port **5432** only as a last resort.
+GitHub-hosted runners are **IPv4-only**. Supabase Direct (`db.<project-ref>.supabase.co`) is **IPv6-only** unless the IPv4 add-on is enabled. The backup script still starts from `DB_DIRECT_URL`; if that host has no IPv4 address, it dumps through the **session** pooler on port **5432** (never transaction pooler port `6543`).
 
 ---
 
