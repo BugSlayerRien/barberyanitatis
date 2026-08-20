@@ -1,0 +1,60 @@
+# Automatic public-schema database backup (pg_dump).
+# Runs outside the Render PHP web process. Dumps are uploaded to a private
+# Supabase Storage bucket — never Render's ephemeral disk.
+#
+# Required GitHub secrets:
+#   DB_DIRECT_URL              direct Postgres URL (db.<ref>.supabase.co:5432, sslmode=require)
+#   SUPABASE_URL               https://<project-ref>.supabase.co
+#   SUPABASE_SERVICE_ROLE_KEY  service role (server-only)
+#
+# Optional:
+#   BACKUP_STORAGE_BUCKET      default tatis-backups (must stay private)
+
+name: Scheduled database backup
+
+on:
+  schedule:
+    # 02:00 Asia/Manila (off-hours)
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-db-backup
+  cancel-in-progress: false
+
+jobs:
+  pg-dump:
+    name: pg_dump public schema
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Dump, upload, prune
+        env:
+          DB_DIRECT_URL: ${{ secrets.DB_DIRECT_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKUP_OUTPUT_DIR: ${{ runner.temp }}/db-backups
+          BACKUP_RETENTION_DAYS: "14"
+          BACKUP_KEEP_MIN: "7"
+          BACKUP_STORAGE_BUCKET: tatis-backups
+        run: bash scripts/scheduled_pg_dump_backup.sh
+
+      - name: Keep a GitHub Actions copy (14 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: tatis-public-pgdump
+          path: ${{ runner.temp }}/db-backups/*.dump
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
