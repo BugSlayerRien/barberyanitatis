@@ -27,12 +27,26 @@ if (-not $env:DB_DIRECT_URL) {
 }
 
 if ($env:DB_DIRECT_URL -match ":6543") {
-  throw "DB_DIRECT_URL looks like the transaction pooler (port 6543). pg_dump needs the direct host on port 5432."
+  throw "DB_DIRECT_URL looks like the transaction pooler (port 6543). pg_dump needs port 5432."
 }
 
 $pgDump = Get-Command pg_dump -ErrorAction SilentlyContinue
 if (-not $pgDump) {
   throw "pg_dump not found. Install PostgreSQL client tools and ensure pg_dump is on PATH."
+}
+
+$python = Get-Command python3 -ErrorAction SilentlyContinue
+if (-not $python) { $python = Get-Command python -ErrorAction SilentlyContinue }
+if (-not $python) {
+  throw "python3 is required to prepare the pg_dump connection."
+}
+$connJson = & $python.Source (Join-Path $PSScriptRoot "pg_dump_connection.py") --json
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to prepare the pg_dump connection."
+}
+$conn = $connJson | ConvertFrom-Json
+$conn.PSObject.Properties | ForEach-Object {
+  Set-Item -Path "Env:$($_.Name)" -Value $_.Value
 }
 
 if (-not $OutputDir) {
@@ -42,7 +56,7 @@ New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $outFile = Join-Path $OutputDir "tatis_public_$stamp.dump"
 
-& pg_dump $env:DB_DIRECT_URL --schema=public --no-owner --no-acl --format=custom --file=$outFile
+& pg_dump --schema=public --no-owner --no-acl --format=custom --file=$outFile
 if ($LASTEXITCODE -ne 0) {
   throw "pg_dump failed with exit code $LASTEXITCODE"
 }

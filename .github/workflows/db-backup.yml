@@ -3,9 +3,15 @@
 # Supabase Storage bucket — never Render's ephemeral disk.
 #
 # Required GitHub secrets:
-#   DB_DIRECT_URL              direct Postgres URL (db.<ref>.supabase.co:5432, sslmode=require)
+#   DB_DIRECT_URL              Direct Postgres URL (db.<ref>.supabase.co:5432, sslmode=require).
+#                              Username must be postgres (not postgres.<ref>).
 #   SUPABASE_URL               https://<project-ref>.supabase.co
 #   SUPABASE_SERVICE_ROLE_KEY  service role (server-only)
+#
+# GitHub-hosted runners are IPv4-only. Supabase Direct is IPv6-only unless the
+# IPv4 add-on is enabled. The dump script then uses the session pooler on port
+# 5432 (never transaction pooler 6543). Optional secret DB_URL can supply that
+# pooler host; otherwise SUPABASE_POOLER_HOST below is used.
 #
 # Optional:
 #   BACKUP_STORAGE_BUCKET      default tatis-backups (must stay private)
@@ -37,17 +43,27 @@ jobs:
       - name: Install PostgreSQL client
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends postgresql-client
+          sudo apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo gpg --dearmor -o /usr/share/keyrings/pgdg.gpg
+          echo "deb [signed-by=/usr/share/keyrings/pgdg.gpg] http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client-17
+          pg_dump --version
 
       - name: Dump, upload, prune
         env:
           DB_DIRECT_URL: ${{ secrets.DB_DIRECT_URL }}
+          DB_URL: ${{ secrets.DB_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_POOLER_HOST: aws-1-ap-northeast-1.pooler.supabase.com
           BACKUP_OUTPUT_DIR: ${{ runner.temp }}/db-backups
           BACKUP_RETENTION_DAYS: "14"
           BACKUP_KEEP_MIN: "7"
           BACKUP_STORAGE_BUCKET: tatis-backups
+          PGCONNECT_TIMEOUT: "20"
         run: bash scripts/scheduled_pg_dump_backup.sh
 
       - name: Keep a GitHub Actions copy (14 days)
