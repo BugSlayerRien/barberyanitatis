@@ -1,5 +1,19 @@
 const form = document.getElementById("login-form");
 const errorBox = document.getElementById("error");
+const passwordInput = document.getElementById("password");
+const passwordToggle = document.getElementById("password-toggle");
+
+passwordToggle?.addEventListener("click", () => {
+  if (!(passwordInput instanceof HTMLInputElement)) return;
+  const show = passwordInput.type === "password";
+  passwordInput.type = show ? "text" : "password";
+  passwordToggle.setAttribute("aria-pressed", show ? "true" : "false");
+  passwordToggle.setAttribute("aria-label", show ? "Hide password" : "Show password");
+  const eye = passwordToggle.querySelector(".password-toggle-show");
+  const eyeOff = passwordToggle.querySelector(".password-toggle-hide");
+  if (eye instanceof Element) eye.toggleAttribute("hidden", show);
+  if (eyeOff instanceof Element) eyeOff.toggleAttribute("hidden", !show);
+});
 
 form.addEventListener("submit", async (event) => {
   event.preventDefault();

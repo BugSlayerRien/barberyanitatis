@@ -4,6 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tatis Barbershop | Receptionist Dashboard</title>
+    <link rel="icon" type="image/png" href="../assets/images/TATIS.png" />
+    <link rel="apple-touch-icon" href="../assets/images/TATIS.png" />
     <link rel="stylesheet" href="../assets/styles.css" />
   </head>
   <body>
@@ -63,6 +65,10 @@
             </nav>
           </div>
           <div class="topbar-actions">
+            <div class="header-search-wrap search-field">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+              <input class="input header-search" id="global-search" type="search" placeholder="Search current view" aria-label="Search the current view" />
+            </div>
             <button class="icon-btn refresh-btn" id="refresh-dashboard" type="button" title="Refresh dashboard" aria-label="Refresh dashboard">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>
             </button>
@@ -80,6 +86,7 @@
                 <h2 class="page-title">Front desk</h2>
                 <p class="page-sub">Today at a glance: who is booked, who is waiting, and which barbers are available.</p>
               </div>
+              <button class="btn secondary" id="desk-export" type="button">Export CSV</button>
             </div>
 
             <div class="grid stats" id="analytics-stats"></div>
@@ -139,7 +146,7 @@
                     <div class="form-grid align-top">
                       <label class="field">
                         <span>Services <span class="field-hint">select one or more</span></span>
-                        <select id="walkin-services" class="select" multiple required></select>
+                        <select id="walkin-services" class="select walkin-services-select" multiple required size="3"></select>
                       </label>
                       <label class="field">
                         <span>Preferred barber</span>

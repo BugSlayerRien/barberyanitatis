@@ -1323,38 +1323,43 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
 }
 
 /**
- * @return array{walkInsToday: int, appointmentsToday: int, inProgress: int, availableBarbers: int}
+ * @return array{walkInsToday: int, appointmentsToday: int, inProgress: int, availableBarbers: int, todayRevenue: float}
  */
 function fetch_receptionist_front_desk_stats(PDO $pdo): array
 {
+    $today = shop_today();
+    $tz = shop_timezone();
+
     $walkInsTodayStmt = $pdo->prepare(
-        'SELECT COUNT(*) FROM walkin_queue WHERE DATE(created_at) = CURRENT_DATE'
+        'SELECT COUNT(*) FROM walkin_queue
+         WHERE (created_at AT TIME ZONE :tz)::date = :today'
     );
-    $walkInsTodayStmt->execute();
+    $walkInsTodayStmt->execute([':tz' => $tz, ':today' => $today]);
     $walkInsToday = (int)$walkInsTodayStmt->fetchColumn();
 
     $appointmentsTodayStmt = $pdo->prepare(
         "SELECT COUNT(*) FROM (
             SELECT DISTINCT COALESCE(booking_group_id::text, 'a' || appointment_id::text) AS unit_key
             FROM appointments
-            WHERE appointment_date = CURRENT_DATE
+            WHERE appointment_date = :today
               AND status NOT IN ('Cancelled', 'NoShow')
          ) units"
     );
-    $appointmentsTodayStmt->execute();
+    $appointmentsTodayStmt->execute([':today' => $today]);
     $appointmentsToday = (int)$appointmentsTodayStmt->fetchColumn();
 
     $inProgressStmt = $pdo->prepare(
         "SELECT
             (SELECT COUNT(*) FROM walkin_queue
-              WHERE status = 'InProgress' AND DATE(created_at) = CURRENT_DATE)
+              WHERE status = 'InProgress'
+                AND (created_at AT TIME ZONE :tz)::date = :today)
           + (SELECT COUNT(*) FROM (
                 SELECT DISTINCT COALESCE(booking_group_id::text, 'a' || appointment_id::text) AS unit_key
                 FROM appointments
-                WHERE appointment_date = CURRENT_DATE AND status = 'InProgress'
+                WHERE appointment_date = :today AND status = 'InProgress'
              ) appt_units)"
     );
-    $inProgressStmt->execute();
+    $inProgressStmt->execute([':tz' => $tz, ':today' => $today]);
     $inProgress = (int)$inProgressStmt->fetchColumn();
 
     $availableBarbersStmt = $pdo->prepare(
@@ -1364,7 +1369,7 @@ function fetch_receptionist_front_desk_stats(PDO $pdo): array
            AND NOT EXISTS (
                 SELECT 1 FROM appointments a
                  WHERE a.barber_id = b.barber_id
-                   AND a.appointment_date = CURRENT_DATE
+                   AND a.appointment_date = :today
                    AND a.status = 'InProgress'
            )
            AND NOT EXISTS (
@@ -1373,13 +1378,34 @@ function fetch_receptionist_front_desk_stats(PDO $pdo): array
                    AND wq.status = 'InProgress'
            )"
     );
-    $availableBarbersStmt->execute();
+    $availableBarbersStmt->execute([':today' => $today]);
     $availableBarbers = (int)$availableBarbersStmt->fetchColumn();
+
+    $apptRevenueStmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(ad.final_price), 0)
+         FROM appointments a
+         JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+         WHERE a.appointment_date = :today
+           AND a.status = 'Completed'"
+    );
+    $apptRevenueStmt->execute([':today' => $today]);
+    $appointmentRevenue = (float)$apptRevenueStmt->fetchColumn();
+
+    $walkRevenueStmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(wsd.final_price), 0)
+         FROM walkin_queue wq
+         JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
+         WHERE (wq.created_at AT TIME ZONE :tz)::date = :today
+           AND wq.status = 'Completed'"
+    );
+    $walkRevenueStmt->execute([':tz' => $tz, ':today' => $today]);
+    $walkinRevenue = (float)$walkRevenueStmt->fetchColumn();
 
     return [
         'walkInsToday' => $walkInsToday,
         'appointmentsToday' => $appointmentsToday,
         'inProgress' => $inProgress,
         'availableBarbers' => $availableBarbers,
+        'todayRevenue' => $appointmentRevenue + $walkinRevenue,
     ];
 }
