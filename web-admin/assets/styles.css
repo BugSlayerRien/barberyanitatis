@@ -92,6 +92,7 @@
   --topbar-h: 62px;
   --focus: rgba(213, 191, 114, 0.85);
   --speed: 0.16s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -184,15 +185,17 @@ a {
   grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
   height: 100dvh;
   overflow: hidden;
+  transition: grid-template-columns 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (min-width: 1025px) {
   .app.nav-collapsed {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: 0 minmax(0, 1fr);
   }
 
   .app.nav-collapsed .sidebar {
-    display: none;
+    transform: translateX(-100%);
+    pointer-events: none;
   }
 }
 
@@ -202,19 +205,25 @@ a {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  width: var(--sidebar-w);
   background: linear-gradient(180deg, var(--sidebar), #08080b);
   border-right: 1px solid var(--line);
   padding: var(--s-5) var(--s-3) var(--s-3);
   gap: var(--s-4);
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .sidebar-scrim {
-  display: none;
+  display: block;
   position: fixed;
   inset: 0;
   z-index: 55;
   background: rgba(0, 0, 0, 0.62);
   backdrop-filter: blur(2px);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.28s ease, visibility 0.28s ease;
 }
 
 /* Brand */
@@ -514,6 +523,18 @@ a {
   flex-direction: column;
   align-items: stretch;
   gap: var(--s-4);
+  animation: rise-in 0.32s var(--ease-out);
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 /* 4. Page header ----------------------------------------------------------- */
@@ -604,6 +625,16 @@ a {
 .grid.stats {
   grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }
+
+.grid.stats > .card {
+  animation: rise-in 0.36s var(--ease-out) both;
+}
+
+.grid.stats > .card:nth-child(1) { animation-delay: 0.02s; }
+.grid.stats > .card:nth-child(2) { animation-delay: 0.06s; }
+.grid.stats > .card:nth-child(3) { animation-delay: 0.1s; }
+.grid.stats > .card:nth-child(4) { animation-delay: 0.14s; }
+.grid.stats > .card:nth-child(5) { animation-delay: 0.18s; }
 
 .split {
   display: grid;
@@ -862,6 +893,7 @@ a {
 .btn:hover {
   background: var(--surface-4);
   border-color: var(--line-loud);
+  transform: translateY(-1px);
 }
 
 .btn:active {
@@ -972,13 +1004,14 @@ a {
   font-size: 15px;
   line-height: 1;
   transition: background var(--speed) ease, color var(--speed) ease,
-    border-color var(--speed) ease;
+    border-color var(--speed) ease, transform var(--speed) ease;
 }
 
 .icon-btn:hover {
   background: var(--surface-4);
   color: var(--text);
   border-color: var(--line-loud);
+  transform: translateY(-1px);
 }
 
 .icon-btn svg {
@@ -989,6 +1022,28 @@ a {
 
 .sidebar-toggle {
   display: inline-grid;
+}
+
+.sidebar-toggle svg {
+  overflow: visible;
+}
+
+.sidebar-toggle .ham-line {
+  transform-box: fill-box;
+  transform-origin: 50% 50%;
+  transition: transform 0.22s var(--ease-out), opacity 0.16s ease;
+}
+
+.sidebar-toggle[aria-expanded="true"] .ham-1 {
+  transform: translateY(6px) rotate(45deg);
+}
+
+.sidebar-toggle[aria-expanded="true"] .ham-2 {
+  opacity: 0;
+}
+
+.sidebar-toggle[aria-expanded="true"] .ham-3 {
+  transform: translateY(-6px) rotate(-45deg);
 }
 
 .password-field {
@@ -2819,11 +2874,7 @@ canvas {
   border-radius: var(--r-xl);
   padding: var(--s-7) var(--s-6);
   box-shadow: var(--shadow-lg);
-}
-
-.login-brand {
-  text-align: center;
-  margin-bottom: var(--s-6);
+  animation: rise-in 0.4s var(--ease-out);
 }
 
 .login-logo {
@@ -2836,6 +2887,16 @@ canvas {
   background: transparent;
   padding: 0;
   border-radius: 0;
+  transition: transform 0.35s var(--ease-out);
+}
+
+.login-logo:hover {
+  transform: scale(1.04);
+}
+
+.login-brand {
+  text-align: center;
+  margin-bottom: var(--s-6);
 }
 
 .login-eyebrow {
@@ -2955,7 +3016,6 @@ canvas {
     width: 272px;
     height: 100dvh;
     transform: translateX(-100%);
-    transition: transform 0.22s ease;
     box-shadow: var(--shadow-lg);
   }
 
@@ -2964,7 +3024,9 @@ canvas {
   }
 
   .app.nav-open .sidebar-scrim {
-    display: block;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
   }
 
   .header-search-wrap {
