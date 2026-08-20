@@ -28,7 +28,7 @@ try {
         $rows = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $normalized = apply_hairstyle_overlay_paths($row);
-            $overlayInfo = overlay_paths_for_style_name((string)$row['style_name']);
+            $overlayInfo = overlay_paths_for_hairstyle($row);
             $normalized['overlay_folder'] = $overlayInfo['folder'] ?? ($normalized['overlay_folder'] ?? null);
             $normalized['has_overlay_assets'] = hairstyle_overlay_files_exist($normalized);
             $rows[] = $normalized;
@@ -65,7 +65,7 @@ try {
         }
 
         $hairstyle = apply_hairstyle_overlay_paths($row);
-        $overlayInfo = overlay_paths_for_style_name((string)$row['style_name']);
+        $overlayInfo = overlay_paths_for_hairstyle($row);
         $hairstyle['overlay_folder'] = $overlayInfo['folder'] ?? ($hairstyle['overlay_folder'] ?? null);
         $hairstyle['has_overlay_assets'] = hairstyle_overlay_files_exist($hairstyle);
 
@@ -281,37 +281,63 @@ function normalize_hair_texture(string $value): string
  */
 function variant_overlay_paths_for_hairstyle(PDO $pdo, int $hairstyleId): array
 {
-    $stmt = $pdo->prepare('SELECT style_name FROM hairstyles WHERE hairstyle_id = :id LIMIT 1');
+    $stmt = $pdo->prepare(
+        'SELECT style_name, style_code FROM hairstyles WHERE hairstyle_id = :id LIMIT 1'
+    );
     $stmt->execute([':id' => $hairstyleId]);
-    $name = (string)$stmt->fetchColumn();
-    if ($name === '') {
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
         return [];
     }
 
-    $paths = overlay_paths_for_style_name($name);
+    $paths = overlay_paths_for_hairstyle($row);
 
     return $paths ?? [];
 }
 
+function overlay_asset_is_present(string $relativePath): bool
+{
+    static $cache = [];
+    $relativePath = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
+    if ($relativePath === '') {
+        return false;
+    }
+    if (array_key_exists($relativePath, $cache)) {
+        return $cache[$relativePath];
+    }
+
+    $present = overlay_library_local_exists($relativePath);
+    if (!$present && function_exists('storage_exists')) {
+        $present = storage_exists($relativePath);
+    }
+
+    $cache[$relativePath] = $present;
+
+    return $present;
+}
+
 function hairstyle_overlay_files_exist(array $hairstyle): bool
 {
-    $folder = (string)($hairstyle['overlay_folder'] ?? '');
-    if ($folder === '') {
-        $paths = overlay_paths_for_style_name((string)($hairstyle['style_name'] ?? ''));
-        $folder = $paths['folder'] ?? '';
-    }
-    if ($folder === '') {
+    $mapped = overlay_paths_for_hairstyle($hairstyle);
+    $paths = $mapped !== null
+        ? [$mapped['front'], $mapped['side'], $mapped['back']]
+        : array_values(array_filter([
+            (string)($hairstyle['front_view_url'] ?? ''),
+            (string)($hairstyle['side_view_url'] ?? ''),
+            (string)($hairstyle['back_view_url'] ?? ''),
+        ]));
+
+    if (count($paths) < 3) {
         return false;
     }
 
-    $root = mobile_app_overlay_root() . '/' . $folder;
-    if (!is_dir($root)) {
-        return false;
+    foreach ($paths as $path) {
+        if (!overlay_asset_is_present((string)$path)) {
+            return false;
+        }
     }
 
-    $files = array_diff(scandir($root) ?: [], ['.', '..']);
-
-    return count($files) >= 3;
+    return true;
 }
 
 function handle_upload_overlay(PDO $pdo): void
@@ -342,14 +368,18 @@ function handle_upload_overlay(PDO $pdo): void
         json_response(['error' => 'Only PNG overlays are supported'], 422);
     }
 
-    $stmt = $pdo->prepare('SELECT style_name FROM hairstyles WHERE hairstyle_id = :id LIMIT 1');
+    $stmt = $pdo->prepare(
+        'SELECT style_name, style_code FROM hairstyles WHERE hairstyle_id = :id LIMIT 1'
+    );
     $stmt->execute([':id' => $hairstyleID]);
-    $styleName = (string)$stmt->fetchColumn();
-    if ($styleName === '') {
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $styleName = (string)($row['style_name'] ?? '');
+    $styleCode = (string)($row['style_code'] ?? '');
+    if ($styleName === '' && $styleCode === '') {
         json_response(['error' => 'Hairstyle not found'], 404);
     }
 
-    $target = overlay_target_for_view($styleName, $view);
+    $target = overlay_target_for_view($styleName, $view, $styleCode);
     if ($target === null && $folderOverride === '') {
         json_response([
             'error' => 'No overlay mapping for this style. Set overlayFolder when uploading a new style.',

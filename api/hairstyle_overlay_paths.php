@@ -11,37 +11,57 @@ declare(strict_types=1);
  */
 function overlay_library_style_codes(): array
 {
-    return [
-        'HC-BLOWOUT-TAPER',
-        'HC-BUZZ-CUT',
-        'HC-CAESAR',
-        'HC-CREW',
-        'HC-CURLY-BURST',
-        'HC-CURLY-CREW',
-        'HC-CURLY-DROP',
-        'HC-CURLY-MID',
-        'HC-CURLY-MULLET',
-        'HC-CURLY-TAPER',
-        'HC-EDGAR',
-        'HC-FRENCH-CROP',
-        'HC-LOW-FADE',
-        'HC-MESSY-QUIFF',
-        'HC-MODERN-CURTAINS',
-        'HC-MODERN-MULLET',
-        'HC-POMPADOUR',
-        'HC-TEXTURED-CROP',
-        'HC-TWO-BLOCK',
-        'HC-WAVY-BURST',
-        'HC-WAVY-FRINGE',
-        'HC-WAVY-MESSY',
-        'HC-WAVY-MOD',
-        'HC-WAVY-SWEEP',
-    ];
+    return array_keys(overlay_library_code_keys());
 }
 
 function overlay_library_catalog_size(): int
 {
     return count(overlay_library_style_codes());
+}
+
+/**
+ * HC-* style_code → overlay catalog key (must match hairstyle_overlay_paths()).
+ *
+ * @return array<string, string>
+ */
+function overlay_library_code_keys(): array
+{
+    return [
+        'HC-BLOWOUT-TAPER' => 'blowout taper',
+        'HC-BUZZ-CUT' => 'buzz cut',
+        'HC-CAESAR' => 'caesar cut',
+        'HC-CREW' => 'crew cut',
+        'HC-CURLY-BURST' => 'curly burst fade',
+        'HC-CURLY-CREW' => 'curly crew cut',
+        'HC-CURLY-DROP' => 'curly drop fade',
+        'HC-CURLY-MID' => 'curly mid fade',
+        'HC-CURLY-MULLET' => 'curly modern mullet',
+        'HC-CURLY-TAPER' => 'curly taper fade',
+        'HC-EDGAR' => 'edgar cut',
+        'HC-FRENCH-CROP' => 'french crop',
+        'HC-LOW-FADE' => 'low fade',
+        'HC-MESSY-QUIFF' => 'messy quiff',
+        'HC-MODERN-CURTAINS' => 'modern curtains',
+        'HC-MODERN-MULLET' => 'modern mullet',
+        'HC-POMPADOUR' => 'pompadour',
+        'HC-TEXTURED-CROP' => 'textured crop',
+        'HC-TWO-BLOCK' => 'two block',
+        'HC-WAVY-BURST' => 'wavy burst fade',
+        'HC-WAVY-FRINGE' => 'wavy fringe',
+        'HC-WAVY-MESSY' => 'wavy messy top',
+        'HC-WAVY-MOD' => 'wavy mod cut',
+        'HC-WAVY-SWEEP' => 'wavy side sweep',
+    ];
+}
+
+function overlay_key_for_style_code(string $styleCode): ?string
+{
+    $code = strtoupper(trim($styleCode));
+    if ($code === '') {
+        return null;
+    }
+
+    return overlay_library_code_keys()[$code] ?? null;
 }
 
 function is_overlay_library_row(array $row): bool
@@ -222,10 +242,19 @@ function resolve_hairstyle_overlay_key(string $styleName): ?string
     return null;
 }
 
+function resolve_hairstyle_overlay_key_for_row(array $row): ?string
+{
+    $fromCode = overlay_key_for_style_code((string)($row['style_code'] ?? ''));
+    if ($fromCode !== null) {
+        return $fromCode;
+    }
+
+    return resolve_hairstyle_overlay_key((string)($row['style_name'] ?? ''));
+}
+
 function apply_hairstyle_overlay_paths(array $row): array
 {
-    $styleName = (string)($row['style_name'] ?? '');
-    $key = resolve_hairstyle_overlay_key($styleName);
+    $key = resolve_hairstyle_overlay_key_for_row($row);
     if ($key === null) {
         return $row;
     }
@@ -253,12 +282,33 @@ function overlay_folder_from_asset_path(string $assetPath): ?string
  */
 function overlay_paths_for_style_name(string $styleName): ?array
 {
-    $key = resolve_hairstyle_overlay_key($styleName);
+    return overlay_paths_for_overlay_key(resolve_hairstyle_overlay_key($styleName));
+}
+
+/**
+ * @param array<string, mixed> $row
+ * @return array{front: string, side: string, back: string, folder: string}|null
+ */
+function overlay_paths_for_hairstyle(array $row): ?array
+{
+    return overlay_paths_for_overlay_key(resolve_hairstyle_overlay_key_for_row($row));
+}
+
+/**
+ * @return array{front: string, side: string, back: string, folder: string}|null
+ */
+function overlay_paths_for_overlay_key(?string $key): ?array
+{
     if ($key === null) {
         return null;
     }
 
-    $paths = hairstyle_overlay_paths()[$key];
+    $catalog = hairstyle_overlay_paths();
+    if (!isset($catalog[$key])) {
+        return null;
+    }
+
+    $paths = $catalog[$key];
     $folder = overlay_folder_from_asset_path($paths['front']);
     if ($folder === null) {
         return null;
@@ -272,12 +322,34 @@ function overlay_paths_for_style_name(string $styleName): ?array
     ];
 }
 
+function overlay_library_local_path(string $relativePath): string
+{
+    $rel = ltrim(str_replace('\\', '/', $relativePath), '/');
+    $prefix = 'assets/images/overlays/';
+    if (str_starts_with($rel, $prefix)) {
+        $rel = substr($rel, strlen($prefix));
+    }
+
+    return mobile_app_overlay_root() . DIRECTORY_SEPARATOR
+        . str_replace('/', DIRECTORY_SEPARATOR, $rel);
+}
+
+function overlay_library_local_exists(string $relativePath): bool
+{
+    $full = overlay_library_local_path($relativePath);
+
+    return is_file($full) && filesize($full) > 0;
+}
+
 /**
  * @return array{folder: string, filename: string}|null
  */
-function overlay_target_for_view(string $styleName, string $view): ?array
+function overlay_target_for_view(string $styleName, string $view, string $styleCode = ''): ?array
 {
-    $paths = overlay_paths_for_style_name($styleName);
+    $paths = overlay_paths_for_hairstyle([
+        'style_name' => $styleName,
+        'style_code' => $styleCode,
+    ]);
     if ($paths === null) {
         return null;
     }
