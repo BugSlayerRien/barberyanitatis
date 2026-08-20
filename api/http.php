@@ -110,7 +110,7 @@ function apply_api_cors_headers(): void
 {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Portal-Token');
     header('Access-Control-Max-Age: 86400');
 }
 
