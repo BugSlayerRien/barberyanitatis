@@ -103,7 +103,7 @@ First API call after idle may take ~1 minute (cold start).
 
 With `STORAGE_DRIVER=supabase`, new images live in Supabase buckets. A Render disk at `/var/data` is optional (JSON partial exports / leftover local files). **Do not store the only production database backup on Render.**
 
-Database disaster recovery (Supabase backups / PITR, portable `pg_dump`) is documented in [DATABASE_BACKUP.md](./DATABASE_BACKUP.md). The admin portal JSON tool is a **partial data export**, not a full backup.
+Database disaster recovery (Supabase backups / PITR, portable `pg_dump`, nightly GitHub Actions dump) is documented in [DATABASE_BACKUP.md](./DATABASE_BACKUP.md). The admin portal JSON tool is a **partial data export**, not a full backup.
 
 ---
 
