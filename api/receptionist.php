@@ -77,6 +77,7 @@ try {
         $appointmentsToday = $deskStats['appointmentsToday'];
         $inProgress = $deskStats['inProgress'];
         $activeBarbers = $deskStats['availableBarbers'];
+        $todayRevenue = $deskStats['todayRevenue'];
 
         ensure_group_booking_schema($pdo);
         sync_paid_groups_from_payments($pdo, true);
@@ -179,9 +180,11 @@ try {
             'stats' => [
                 ['title' => 'Walk-ins', 'value' => (string)$walkInsToday, 'change' => '', 'changeType' => 'info'],
                 ['title' => 'Appointments', 'value' => (string)$appointmentsToday, 'change' => '', 'changeType' => 'success'],
+                ['title' => "Today's revenue", 'value' => 'PHP ' . number_format($todayRevenue, 2, '.', ''), 'change' => '', 'changeType' => 'gold'],
                 ['title' => 'In Progress', 'value' => (string)$inProgress, 'change' => '', 'changeType' => 'warning'],
                 ['title' => 'Available Barbers', 'value' => (string)$activeBarbers, 'change' => '', 'changeType' => 'success'],
             ],
+            'todayRevenue' => $todayRevenue,
             'appointments' => array_map(static function (array $row): array {
                 return [
                     'appointment_id' => (int)$row['appointment_id'],

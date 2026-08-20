@@ -1,7 +1,7 @@
 /**
  * Portal shell: presentation-only chrome shared by the Admin and Receptionist
- * portals. Handles the responsive sidebar drawer and keeps the top bar
- * breadcrumb in sync with the active navigation item.
+ * portals. Handles the sidebar drawer (mobile) / collapse (desktop) and keeps
+ * the top bar breadcrumb in sync with the active navigation item.
  *
  * This file never touches data, API calls or view logic.
  */
@@ -12,17 +12,36 @@
     return document.querySelector(".app");
   }
 
+  function toggle() {
+    return document.getElementById("sidebar-toggle");
+  }
+
   function isDrawerLayout() {
     return window.matchMedia(MOBILE_QUERY).matches;
   }
 
-  function setDrawer(open) {
+  function isNavShown() {
     const shell = app();
-    const toggle = document.getElementById("sidebar-toggle");
+    if (!shell) return false;
+    if (isDrawerLayout()) {
+      return shell.classList.contains("nav-open");
+    }
+    return !shell.classList.contains("nav-collapsed");
+  }
+
+  function setNavShown(open) {
+    const shell = app();
+    const button = toggle();
     if (!shell) return;
-    shell.classList.toggle("nav-open", open);
-    if (toggle) {
-      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    if (isDrawerLayout()) {
+      shell.classList.toggle("nav-open", open);
+      shell.classList.remove("nav-collapsed");
+    } else {
+      shell.classList.toggle("nav-collapsed", !open);
+      shell.classList.remove("nav-open");
+    }
+    if (button) {
+      button.setAttribute("aria-expanded", open ? "true" : "false");
     }
   }
 
@@ -35,45 +54,67 @@
     }
   }
 
+  function bindToggle() {
+    const button = toggle();
+    if (!button || button.dataset.shellBound === "1") return;
+    button.dataset.shellBound = "1";
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setNavShown(!isNavShown());
+    });
+  }
+
   document.addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target : null;
     if (!target) return;
 
-    if (target.closest("#sidebar-toggle")) {
-      setDrawer(!app()?.classList.contains("nav-open"));
-      return;
-    }
-
     if (target.closest("#sidebar-scrim")) {
-      setDrawer(false);
+      setNavShown(false);
       return;
     }
 
     const navButton = target.closest(".nav button");
     if (navButton) {
-      // App scripts update `.active` on their own click handler first.
       window.requestAnimationFrame(syncBreadcrumb);
       if (isDrawerLayout()) {
-        setDrawer(false);
+        setNavShown(false);
       }
     }
   });
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && app()?.classList.contains("nav-open")) {
-      setDrawer(false);
+      setNavShown(false);
     }
   });
 
   window.addEventListener("resize", () => {
-    if (!isDrawerLayout()) {
-      setDrawer(false);
+    const shell = app();
+    if (!shell) return;
+    if (isDrawerLayout()) {
+      shell.classList.remove("nav-collapsed");
+    } else {
+      shell.classList.remove("nav-open");
+    }
+    const button = toggle();
+    if (button) {
+      button.setAttribute("aria-expanded", isNavShown() ? "true" : "false");
     }
   });
 
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", syncBreadcrumb);
-  } else {
+  function boot() {
+    bindToggle();
     syncBreadcrumb();
+    const button = toggle();
+    if (button) {
+      button.setAttribute("aria-expanded", isNavShown() ? "true" : "false");
+    }
+  }
+
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", boot);
+  } else {
+    boot();
   }
 })();

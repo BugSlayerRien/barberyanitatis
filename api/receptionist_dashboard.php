@@ -17,6 +17,7 @@ try {
     $appointmentsToday = $deskStats['appointmentsToday'];
     $inProgress = $deskStats['inProgress'];
     $activeBarbers = $deskStats['availableBarbers'];
+    $todayRevenue = $deskStats['todayRevenue'];
 
     $appointmentsStmt = $pdo->prepare(
         'SELECT a.appointment_id, u.full_name AS name,
@@ -84,9 +85,11 @@ try {
         'stats' => [
             ['title' => 'Walk-ins', 'value' => (string)$walkInsToday, 'change' => '', 'changeType' => 'info'],
             ['title' => 'Appointments', 'value' => (string)$appointmentsToday, 'change' => '', 'changeType' => 'success'],
+            ['title' => "Today's revenue", 'value' => 'PHP ' . number_format($todayRevenue, 2, '.', ''), 'change' => '', 'changeType' => 'gold'],
             ['title' => 'In Progress', 'value' => (string)$inProgress, 'change' => '', 'changeType' => 'warning'],
             ['title' => 'Available Barbers', 'value' => (string)$activeBarbers, 'change' => '', 'changeType' => 'success'],
         ],
+        'todayRevenue' => $todayRevenue,
         'appointments' => array_map(function (array $row): array {
             return [
                 'name' => $row['name'] ?? 'Customer',

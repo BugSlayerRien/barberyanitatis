@@ -7,6 +7,7 @@ const views = {
 const state = {
   appointments: [],
   walkins: [],
+  todayRevenue: 0,
   currentUser: null,
   profileEditMode: false,
   pagination: {},
@@ -82,11 +83,47 @@ navButtons.forEach((button) => {
     }
 
     showView(view);
+    applyGlobalSearch();
     if (view === "barbers") {
       loadBarberUnavailabilityRequests();
     }
   });
 });
+
+function headerSearchValue() {
+  return (document.getElementById("global-search")?.value || "").trim().toLowerCase();
+}
+
+function matchesQuery(query, ...values) {
+  if (!query) return true;
+  return values.some((value) => String(value ?? "").toLowerCase().includes(query));
+}
+
+function applyGlobalSearch() {
+  const query = headerSearchValue();
+  const activeView = document.querySelector(".nav button.active")?.dataset.view || "dashboard";
+  if (activeView === "dashboard") {
+    if (appointmentsSearch && appointmentsSearch.value !== query) {
+      appointmentsSearch.value = query;
+    }
+    if (walkinsSearch && walkinsSearch.value !== query) {
+      walkinsSearch.value = query;
+    }
+    resetPagination(["appointments-table", "walkins-table"]);
+    renderAppointments(state.appointments);
+    renderWalkins(state.walkins);
+    return;
+  }
+  if (activeView === "tracking") {
+    resetPagination(["tracking-regular-list", "tracking-exclusive-list"]);
+    renderSplitTracking(state.appointments, state.walkins);
+    return;
+  }
+  if (activeView === "barbers") {
+    resetPagination(["barbers-regular-list", "barbers-exclusive-list"]);
+    renderSplitBarbers(window.__barbersCache || []);
+  }
+}
 
 function formatCurrency(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "-";
@@ -921,7 +958,10 @@ function renderAutomationFeed(automation) {
 }
 
 function renderSplitTracking(appointments, walkins) {
-  const tracking = buildTracking(appointments, walkins);
+  const query = headerSearchValue();
+  const tracking = buildTracking(appointments, walkins).filter((item) =>
+    matchesQuery(query, item.name, item.service, item.barber, item.status, item.queueNumber, item.schedule),
+  );
   renderTracking(tracking.filter((item) => item.kind === "walkin"), "tracking-regular-list");
   renderTracking(tracking.filter((item) => item.kind === "appointment"), "tracking-exclusive-list");
 }
@@ -963,8 +1003,15 @@ function renderBarbers(items, listId) {
 }
 
 function renderSplitBarbers(barbers) {
-  renderBarbers(mapBarberCards(barbers, "walk_in"), "barbers-regular-list");
-  renderBarbers(mapBarberCards(barbers, "appointment"), "barbers-exclusive-list");
+  const query = headerSearchValue();
+  const regular = mapBarberCards(barbers, "walk_in").filter((item) =>
+    matchesQuery(query, item.name, item.specialty, item.channelLabel),
+  );
+  const exclusive = mapBarberCards(barbers, "appointment").filter((item) =>
+    matchesQuery(query, item.name, item.specialty, item.channelLabel),
+  );
+  renderBarbers(regular, "barbers-regular-list");
+  renderBarbers(exclusive, "barbers-exclusive-list");
 }
 
 async function loadOptions() {
@@ -983,6 +1030,7 @@ async function loadOptions() {
       walkinServices.innerHTML = services
         .map((service) => `<option value="${service.service_id}">${service.service_name}</option>`)
         .join("");
+      walkinServices.size = Math.max(2, Math.min(services.length || 2, 4));
     }
 
     if (walkinBarber) {
@@ -1259,6 +1307,7 @@ async function loadDashboard(showOverlay = false) {
     );
     state.appointments = data.appointments ?? [];
     state.walkins = data.walkins ?? [];
+    state.todayRevenue = Number(data.todayRevenue ?? 0);
     state.automation = data.automation ?? { events: [], counts: {} };
     renderStats(data.stats ?? []);
     renderAppointments(state.appointments);
@@ -1272,6 +1321,7 @@ async function loadDashboard(showOverlay = false) {
   } catch (error) {
     state.appointments = [];
     state.walkins = [];
+    state.todayRevenue = 0;
     renderStats([]);
     renderAppointments([]);
     renderWalkins([]);
@@ -1308,19 +1358,62 @@ function exportAppointmentsCsv() {
   const exportRows = (state.appointments || [])
     .filter((item) => calendarDateYmd(item.appointment_date) === today)
     .map((item) => ({
+      type: "appointment",
+      client: item.name,
+      service: item.service,
+      time: item.time,
+      duration: item.duration,
+      price: item.price,
+      status: item.status,
+      barber: item.barber,
+    }));
+  downloadCsv("appointments-today.csv", exportRows);
+}
+
+function exportDeskCsv() {
+  const today = localTodayYmd();
+  const appointmentRows = (state.appointments || [])
+    .filter((item) => calendarDateYmd(item.appointment_date) === today)
+    .map((item) => ({
+      type: "appointment",
+      client: item.name,
+      service: item.service,
+      time: item.time_range || item.time,
+      status: item.status,
+      barber: item.barber,
+      price: item.price,
+    }));
+  const walkinRows = (state.walkins || []).map((item) => ({
+    type: "walk-in",
     client: item.name,
     service: item.service,
-    time: item.time,
-    duration: item.duration,
-    price: item.price,
+    time: item.waitTime || "",
     status: item.status,
     barber: item.barber,
+    price: "",
   }));
-  const blob = new Blob([toCsv(exportRows)], { type: "text/csv" });
+  const rows = [
+    {
+      type: "summary",
+      client: "Today's revenue",
+      service: "",
+      time: today,
+      status: "",
+      barber: "",
+      price: formatCurrency(state.todayRevenue),
+    },
+    ...appointmentRows,
+    ...walkinRows,
+  ];
+  downloadCsv(`front-desk-${today}.csv`, rows);
+}
+
+function downloadCsv(filename, rows) {
+  const blob = new Blob([toCsv(rows)], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "appointments-today.csv";
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -1585,6 +1678,8 @@ walkinsSearch?.addEventListener("input", () => {
 });
 
 document.getElementById("appointments-export")?.addEventListener("click", exportAppointmentsCsv);
+document.getElementById("desk-export")?.addEventListener("click", exportDeskCsv);
+document.getElementById("global-search")?.addEventListener("input", applyGlobalSearch);
 document.getElementById("profile-avatar-btn")?.addEventListener("click", openProfileDialog);
 document.getElementById("profile-dialog-close")?.addEventListener("click", () => {
   const dialog = document.getElementById("profile-dialog");

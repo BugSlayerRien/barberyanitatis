@@ -63,6 +63,7 @@ navButtons.forEach((button) => {
       return;
     }
     showView(view);
+    applyAdminGlobalSearch();
     if (view === "schedule") {
       await ensureScheduleViewReady();
     }
@@ -450,8 +451,15 @@ function renderActivities(activities) {
   };
 
   const filtered = activities.filter((activity) => {
-    if (filterValue === "all") return true;
-    return categorize(activity.title) === filterValue;
+    if (filterValue !== "all" && categorize(activity.title) !== filterValue) return false;
+    const activeView = document.querySelector(".nav button.active")?.dataset.view || "dashboard";
+    const query = activeView === "dashboard"
+      ? String(document.getElementById("global-search")?.value || "").trim().toLowerCase()
+      : "";
+    if (!query) return true;
+    return `${activity.title || ""} ${activity.description || ""} ${activity.time || ""}`
+      .toLowerCase()
+      .includes(query);
   });
 
   if (!filtered.length) {
@@ -3247,9 +3255,14 @@ document.getElementById("refresh-all")?.addEventListener("click", async (event) 
   await withButtonLoading(event.currentTarget, () => refreshAll(), { label: "Refreshing..." });
 });
 
-document.getElementById("global-search")?.addEventListener("input", (event) => {
-  const value = String(event.target.value || "");
+function applyAdminGlobalSearch() {
+  const value = String(document.getElementById("global-search")?.value || "");
   const activeView = document.querySelector(".nav button.active")?.dataset.view || "dashboard";
+  if (activeView === "dashboard") {
+    resetPagination(["activity-list"]);
+    renderActivities(state.activities || []);
+    return;
+  }
   if (activeView === "users") {
     const usersSearch = document.getElementById("users-search");
     if (usersSearch) {
@@ -3282,7 +3295,9 @@ document.getElementById("global-search")?.addEventListener("input", (event) => {
       renderHaircuts();
     }
   }
-});
+}
+
+document.getElementById("global-search")?.addEventListener("input", applyAdminGlobalSearch);
 
 async function init() {
   if (!requireAdmin()) return;

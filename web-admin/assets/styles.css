@@ -186,6 +186,16 @@ a {
   overflow: hidden;
 }
 
+@media (min-width: 1025px) {
+  .app.nav-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .app.nav-collapsed .sidebar {
+    display: none;
+  }
+}
+
 .sidebar {
   position: relative;
   z-index: 60;
@@ -487,10 +497,6 @@ a {
 .topbar .crumb-current {
   color: var(--text);
   font-weight: 700;
-}
-
-.sidebar-toggle {
-  display: none;
 }
 
 .main-body {
@@ -978,6 +984,45 @@ a {
 .icon-btn svg {
   width: 17px;
   height: 17px;
+  pointer-events: none;
+}
+
+.sidebar-toggle {
+  display: inline-grid;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field .login-input {
+  padding-right: 44px;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.password-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.password-toggle-icon {
+  width: 18px;
+  height: 18px;
 }
 
 /* Segmented control (analytics periods, trend switch) */
@@ -1130,9 +1175,16 @@ textarea.input {
 }
 
 .select[multiple] {
-  min-height: 104px;
-  padding: 6px;
+  min-height: 0;
+  height: auto;
+  max-height: 96px;
+  padding: 4px;
   background-image: none;
+}
+
+.select.walkin-services-select[multiple] {
+  max-height: 72px;
+  overflow-y: auto;
 }
 
 .select[multiple] option {
@@ -2775,13 +2827,15 @@ canvas {
 }
 
 .login-logo {
-  width: 78px;
-  height: 78px;
+  width: 108px;
+  height: 108px;
   object-fit: contain;
-  border-radius: var(--r-lg);
-  border: 1px solid var(--line-strong);
-  background: #0f0f13;
-  padding: 10px;
+  display: block;
+  margin: 0 auto;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
 }
 
 .login-eyebrow {
@@ -2791,7 +2845,7 @@ canvas {
   font-weight: 700;
   letter-spacing: 1.6px;
   text-transform: uppercase;
-  color: var(--gold-300);
+  color: var(--text);
 }
 
 .login-title {
@@ -2913,12 +2967,8 @@ canvas {
     display: block;
   }
 
-  .sidebar-toggle {
-    display: inline-grid;
-  }
-
   .header-search-wrap {
-    display: none;
+    max-width: 180px;
   }
 }
 
