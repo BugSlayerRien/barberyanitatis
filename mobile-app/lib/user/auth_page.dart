@@ -153,10 +153,16 @@ class _AuthPageState extends State<AuthPage> {
 
       if (phpLogin.statusCode == 401) {
         final code = phpData['code']?.toString() ?? '';
+        final accountType = phpData['accountType']?.toString() ?? '';
         final message = phpData['error']?.toString() ?? 'Invalid email or password.';
-        if (code == 'NO_LOCAL_PASSWORD' ||
-            code == 'WRONG_PASSWORD' ||
-            code == 'OAUTH_ONLY') {
+        final isStaffOrBarber =
+            accountType == 'staff' || accountType == 'barber';
+        // Staff/barber stay on PHP. Customers fall through to Supabase Auth
+        // (email/password Sign Up, Forgot Password, and older placeholder hashes).
+        if (isStaffOrBarber &&
+            (code == 'NO_LOCAL_PASSWORD' ||
+                code == 'WRONG_PASSWORD' ||
+                code == 'OAUTH_ONLY')) {
           throw Exception(message);
         }
       } else if (phpLogin.statusCode != 200) {

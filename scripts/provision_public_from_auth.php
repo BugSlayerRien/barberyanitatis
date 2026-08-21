@@ -80,10 +80,9 @@ while (true) {
         echo "MISSING\n";
         echo ($dryRun ? "DRY RUN: would create public.users\n" : "Creating public.users... ");
         if ($dryRun) continue;
-        $placeholder = password_hash('__auth_via_supabase__' . time() . rand(1000,9999), PASSWORD_DEFAULT);
         $stmt = $pdo->prepare('INSERT INTO users (email, full_name, password_hash, is_active) VALUES (?, ?, ?, TRUE) RETURNING user_id');
         try {
-            $stmt->execute([$email, $fullName, $placeholder]);
+            $stmt->execute([$email, $fullName, '__auth_via_supabase__']);
             $id = $stmt->fetchColumn();
             echo "OK (user_id={$id})\n";
             $totalCreated++;

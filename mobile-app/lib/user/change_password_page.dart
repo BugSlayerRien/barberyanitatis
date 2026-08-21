@@ -69,42 +69,30 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     setState(() => _submitting = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'changePassword',
-          'userId': UserSession.userId,
-          'email': UserSession.email,
-          'currentPassword': current,
-          'newPassword': next,
-          'confirmPassword': confirm,
-        }),
-      );
-
-      final data = response.body.isNotEmpty
-          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-          : <String, dynamic>{};
-
-      if (response.statusCode == 200) {
-        await _syncSupabasePasswordIfNeeded(next);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              data['message']?.toString() ?? 'Password updated successfully.',
-            ),
-          ),
+      final email = (UserSession.email ?? '').trim();
+      final supabase = Supabase.instance.client;
+      if (supabase.auth.currentSession != null && email.isNotEmpty) {
+        final updated = await _updateSupabasePassword(
+          email: email,
+          currentPassword: current,
+          newPassword: next,
         );
-        Navigator.of(context).pop(true);
+        if (updated) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Password updated successfully.')),
+          );
+          Navigator.of(context).pop(true);
+          return;
+        }
         return;
       }
 
-      final message = data['error']?.toString() ?? 'Could not change password.';
-      setState(() => _formError = message);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
-      }
+      await _updatePhpPassword(
+        current: current,
+        next: next,
+        confirm: confirm,
+      );
     } catch (e) {
       const message = 'Could not change password. Check your connection and try again.';
       setState(() => _formError = message);
@@ -118,17 +106,83 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     }
   }
 
-  Future<void> _syncSupabasePasswordIfNeeded(String newPassword) async {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      return;
-    }
+  /// Returns true when the password was changed. Returns false when a
+  /// user-facing error was already shown (wrong current password / OAuth).
+  Future<bool> _updateSupabasePassword({
+    required String email,
+    required String currentPassword,
+    required String newPassword,
+  }) async {
     try {
+      await Supabase.instance.client.auth.signInWithPassword(
+        email: email,
+        password: currentPassword,
+      );
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: newPassword),
       );
-    } catch (_) {
-      // Local/API password already updated; Supabase sync is best-effort.
+      return true;
+    } on AuthException catch (e) {
+      final lower = e.message.toLowerCase();
+      final message = (lower.contains('invalid') ||
+              lower.contains('credentials') ||
+              lower.contains('grant'))
+          ? 'Current password is incorrect. If you signed in with Google or Facebook, use those buttons. You can set an email password with Forgot password.'
+          : (e.message.trim().isEmpty
+              ? 'Could not change password.'
+              : e.message);
+      setState(() => _formError = message);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+      return false;
+    }
+  }
+
+  Future<void> _updatePhpPassword({
+    required String current,
+    required String next,
+    required String confirm,
+  }) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/auth.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'changePassword',
+        'userId': UserSession.userId,
+        'email': UserSession.email,
+        'currentPassword': current,
+        'newPassword': next,
+        'confirmPassword': confirm,
+      }),
+    );
+
+    final data = response.body.isNotEmpty
+        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+        : <String, dynamic>{};
+
+    if (response.statusCode == 200) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            data['message']?.toString() ?? 'Password updated successfully.',
+          ),
+        ),
+      );
+      Navigator.of(context).pop(true);
+      return;
+    }
+
+    final code = data['code']?.toString() ?? '';
+    final message = code == 'OAUTH_ONLY'
+        ? 'This account uses Google or Facebook. Use those buttons, or Forgot password to set an email password.'
+        : code == 'SUPABASE_PASSWORD'
+            ? 'Sign in with your email and password first, then try again. Or use Forgot password.'
+            : (data['error']?.toString() ?? 'Could not change password.');
+    setState(() => _formError = message);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
