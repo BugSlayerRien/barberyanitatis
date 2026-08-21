@@ -335,7 +335,7 @@ function create_customer_account(PDO $pdo, string $fullName, string $email): arr
     );
     $stmt->execute([
         ':email' => $email,
-        ':password_hash' => password_hash(bin2hex(random_bytes(24)), PASSWORD_BCRYPT),
+        ':password_hash' => USER_PASSWORD_HASH_OAUTH,
         ':full_name' => $fullName,
         ':phone' => null,
         ':gender' => 'Male',
@@ -472,10 +472,18 @@ try {
         }
 
         if ($user) {
-            if (empty($user['password_hash'])) {
+            $kind = customer_password_kind((string)($user['password_hash'] ?? ''));
+            if ($kind === 'oauth') {
                 json_response([
                     'error' => 'This account uses Google/Facebook sign-in. Tap those buttons instead of email/password.',
                     'code' => 'OAUTH_ONLY',
+                    'accountType' => 'customer',
+                ], 401);
+            }
+            if ($kind === 'supabase') {
+                json_response([
+                    'error' => 'Use your email and password to sign in.',
+                    'code' => 'SUPABASE_PASSWORD',
                     'accountType' => 'customer',
                 ], 401);
             }
@@ -713,10 +721,17 @@ try {
         }
 
         $storedHash = trim((string)($customer['password_hash'] ?? ''));
-        if ($storedHash === '' || str_starts_with($storedHash, '__auth_via_supabase__')) {
+        $kind = customer_password_kind($storedHash);
+        if ($kind === 'oauth') {
             json_response([
-                'error' => 'This account uses Google or social sign-in and does not have a local password to change. Use Forgot password if you want an email/password login, or manage sign-in through your Google account.',
+                'error' => 'This account uses Google or Facebook sign-in. Use those buttons, or Forgot password to set an email password.',
                 'code' => 'OAUTH_ONLY',
+            ], 400);
+        }
+        if ($kind === 'supabase') {
+            json_response([
+                'error' => 'This account password is managed in Supabase Auth.',
+                'code' => 'SUPABASE_PASSWORD',
             ], 400);
         }
 

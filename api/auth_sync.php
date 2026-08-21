@@ -9,6 +9,24 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 
+/** Marker in public.users.password_hash: real password lives in Supabase Auth. */
+const USER_PASSWORD_HASH_SUPABASE = '__auth_via_supabase__';
+/** Marker: customer was provisioned via Google/Facebook; no app password. */
+const USER_PASSWORD_HASH_OAUTH = '__oauth_only__';
+
+function customer_password_kind(?string $hash): string
+{
+    $value = trim((string)$hash);
+    if ($value === '' || $value === USER_PASSWORD_HASH_OAUTH || str_starts_with($value, USER_PASSWORD_HASH_OAUTH)) {
+        return 'oauth';
+    }
+    if ($value === USER_PASSWORD_HASH_SUPABASE || str_starts_with($value, USER_PASSWORD_HASH_SUPABASE)) {
+        return 'supabase';
+    }
+
+    return 'local';
+}
+
 /**
  * Create or update a public.users record from Supabase Auth metadata.
  * 
@@ -57,18 +75,14 @@ function sync_auth_to_public_users(string $email, string $fullName): array {
             ];
         }
         
-        // Insert new user to public.users with a placeholder password
-        // (auth happens via Supabase Auth, not this table)
+        // Insert public.users identity only. Credentials stay in Supabase Auth.
         $stmt = $pdo->prepare(
             'INSERT INTO users (email, full_name, password_hash, is_active)
              VALUES (?, ?, ?, TRUE)
              RETURNING user_id'
         );
-        
-        // Use a placeholder hash that won't match anything
-        $placeholder = password_hash('__auth_via_supabase__' . time(), PASSWORD_DEFAULT);
-        
-        $stmt->execute([$normalizedEmail, trim($fullName), $placeholder]);
+
+        $stmt->execute([$normalizedEmail, trim($fullName), USER_PASSWORD_HASH_SUPABASE]);
         $userId = $stmt->fetchColumn();
         
         if ($userId) {

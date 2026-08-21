@@ -1,11 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../admins/admin_dashboard_page.dart';
-import '../barber/barber_dashboard_page.dart';
-import '../receptionist/receptionist_dashboard_page.dart';
-import 'dashboard_page.dart';
-import 'user_session.dart';
+import 'auth_bootstrap.dart';
+import 'password_policy.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   const ResetPasswordPage({super.key});
@@ -50,10 +47,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       );
       return;
     }
-    if (newPassword.length < 6) {
+    final policyError = PasswordPolicy.validationError(newPassword);
+    if (policyError != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content: Text('Password must be at least 6 characters.')),
+        SnackBar(content: Text(policyError)),
       );
       return;
     }
@@ -73,7 +70,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
       final session = Supabase.instance.client.auth.currentSession;
       if (session != null) {
-        _applySupabaseSession(session);
+        await AuthBootstrap.applySupabaseSession(session);
       }
 
       if (!mounted) {
@@ -83,7 +80,8 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Password updated successfully.')),
       );
-      _goToSignedInDestination();
+      AuthBootstrap.resetNavigationLock();
+      AuthBootstrap.navigateToSignedInHome(showSnackBar: false);
     } catch (e) {
       if (!mounted) {
         return;
@@ -95,57 +93,6 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       if (mounted) {
         setState(() => _isSubmitting = false);
       }
-    }
-  }
-
-  void _applySupabaseSession(Session session) {
-    final user = session.user;
-    final metadata = user.userMetadata ?? <String, dynamic>{};
-    final appMetadata = user.appMetadata;
-    final rawRole = '${appMetadata['role'] ?? metadata['role']}'.trim();
-    final role = rawRole.isEmpty || rawRole == 'null' ? null : rawRole;
-    final fullNameValue = metadata['full_name'];
-    final nameValue = metadata['name'];
-    final resolvedFullName = fullNameValue != null &&
-        fullNameValue.toString().trim().isNotEmpty
-        ? fullNameValue.toString().trim()
-        : nameValue != null && nameValue.toString().trim().isNotEmpty
-            ? nameValue.toString().trim()
-            : user.email;
-
-    UserSession.userId = user.id.hashCode.abs();
-    UserSession.fullName = resolvedFullName;
-    UserSession.email = user.email;
-    UserSession.roles = role != null && role.isNotEmpty
-        ? [role.toLowerCase()]
-        : ['authenticated'];
-  }
-
-  void _goToSignedInDestination() {
-    if (!mounted) {
-      return;
-    }
-
-    if (UserSession.roles.contains('admin')) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const AdminDashboardPage()),
-        (route) => false,
-      );
-    } else if (UserSession.roles.contains('receptionist')) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ReceptionistDashboardPage()),
-        (route) => false,
-      );
-    } else if (UserSession.roles.contains('barber')) {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const BarberDashboardPage()),
-        (route) => false,
-      );
-    } else {
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const DashboardPage()),
-        (route) => false,
-      );
     }
   }
 
