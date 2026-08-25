@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
+import '../user/app_brand.dart';
 import '../user/api_config.dart';
 import '../user/time_format_utils.dart';
 import '../user/widgets/app_top_bar.dart';
@@ -108,7 +109,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     return PopScope(
       canPop: false,
       child: Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: AppBrand.background,
       appBar: AppTopBar(
         onProfileTap: () {
           Navigator.of(context).push(
@@ -117,8 +118,8 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
         },
       ),
       body: RefreshIndicator(
-        color: Colors.white,
-        backgroundColor: const Color(0xFF111111),
+        color: AppBrand.gold,
+        backgroundColor: AppBrand.surface,
         onRefresh: _loadAppointments,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -127,15 +128,18 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             if (_showWelcomeBanner) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
+                  color: AppBrand.goldTint,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppBrand.goldLine),
                 ),
                 child: Text(
-                  UserSession.fullName != null ? 'Welcome ${UserSession.fullName}' : 'Welcome',
+                  UserSession.fullName != null
+                      ? 'Welcome, ${UserSession.fullName}'
+                      : 'Welcome',
                   style: const TextStyle(
-                    color: Colors.black,
+                    color: AppBrand.text,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.3,
@@ -166,9 +170,9 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF1A1A1A),
-        selectedItemColor: Colors.white,
-        unselectedItemColor: Colors.white54,
+        backgroundColor: AppBrand.surface,
+        selectedItemColor: AppBrand.gold,
+        unselectedItemColor: AppBrand.textMuted,
         type: BottomNavigationBarType.fixed,
         currentIndex: _currentTab.clamp(0, 3),
         showSelectedLabels: true,
@@ -279,7 +283,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
           decoration: BoxDecoration(
             color: const Color(0xFF121212),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white12),
+            border: Border.all(color: AppBrand.border),
           ),
           child: const Text(
             'No scheduled appointments right now.',
@@ -360,7 +364,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
         decoration: BoxDecoration(
           color: const Color(0xFF121212),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: AppBrand.border),
         ),
         child: Row(
           children: [
@@ -380,7 +384,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               decoration: BoxDecoration(
                 color: const Color(0xFF1A1A1A),
                 borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: Colors.white24),
+                border: Border.all(color: AppBrand.border),
               ),
               child: Text(
                 '$count',
@@ -425,7 +429,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
         decoration: BoxDecoration(
           color: const Color(0xFF121212),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: AppBrand.border),
         ),
         child: Row(
           children: [
@@ -445,13 +449,13 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFA99941).withValues(alpha: 0.2),
+                            color: AppBrand.goldTint,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFA99941)),
+                            border: Border.all(color: AppBrand.goldLine),
                           ),
                           child: Text(
                             'Group · $peopleCount',
-                            style: const TextStyle(color: Color(0xFFA99941), fontSize: 11, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: AppBrand.gold, fontSize: 11, fontWeight: FontWeight.bold),
                           ),
                         ),
                     ],

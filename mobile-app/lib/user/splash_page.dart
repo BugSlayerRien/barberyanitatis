@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_page.dart';
 import 'auth_redirect.dart';
@@ -74,30 +75,12 @@ class _SplashPageState extends State<SplashPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppBrand.background,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Image.asset(
-              'assets/images/TATIS.png',
-              height: 120,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'BARBERYA NI TATIS',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 1.5,
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'AI Hairstyle Recommender',
-              style: TextStyle(color: Colors.white54, fontSize: 12),
-            ),
+            const BrandWordmark(logoHeight: 120, showTagline: true),
             if (_completingOAuth) ...[
               const SizedBox(height: 24),
               const SizedBox(
@@ -105,7 +88,7 @@ class _SplashPageState extends State<SplashPage> {
                 height: 28,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Colors.white,
+                  color: AppBrand.gold,
                 ),
               ),
               const SizedBox(height: 12),

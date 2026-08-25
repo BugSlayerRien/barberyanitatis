@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_brand.dart';
 import 'api_config.dart';
 import 'password_policy.dart';
 import 'user_session.dart';
@@ -189,7 +190,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: AppBrand.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -243,13 +244,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
           const SizedBox(height: 24),
           ElevatedButton(
             onPressed: _submitting ? null : _submit,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              disabledBackgroundColor: Colors.white24,
-              minimumSize: const Size.fromHeight(50),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
+            style: AppBrand.primaryButton,
             child: _submitting
                 ? const SizedBox(
                     width: 18,
@@ -282,18 +277,18 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         labelText: label,
         labelStyle: const TextStyle(color: Colors.white54),
         filled: true,
-        fillColor: const Color(0xFF1A1A1A),
+        fillColor: AppBrand.surfaceAlt,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white10),
+          borderSide: const BorderSide(color: AppBrand.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white10),
+          borderSide: const BorderSide(color: AppBrand.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFFA99941)),
+          borderSide: const BorderSide(color: AppBrand.goldLine),
         ),
         suffixIcon: IconButton(
           icon: Icon(
@@ -314,7 +309,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: AppBrand.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
