@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'password_policy.dart';
 
@@ -116,9 +117,16 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       hintText: hint,
       hintStyle: const TextStyle(color: Colors.white54),
       filled: true,
-      fillColor: const Color(0xFF1A1A1A),
+      fillColor: AppBrand.surfaceAlt,
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.border)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.goldLine)),
       border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.border)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       suffixIcon: suffix,
     );
@@ -127,7 +135,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppBrand.background,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -144,11 +152,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Container(
               padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F0F0F),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white10),
-              ),
+              decoration: AppBrand.card,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -203,11 +207,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                   const SizedBox(height: 18),
                   ElevatedButton(
                     onPressed: _isSubmitting ? null : _resetPassword,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                      minimumSize: const Size.fromHeight(48),
-                    ),
+                    style: AppBrand.primaryButton,
                     child: Text(
                       _isSubmitting ? 'Submitting...' : 'Reset password',
                       style: const TextStyle(fontWeight: FontWeight.bold),

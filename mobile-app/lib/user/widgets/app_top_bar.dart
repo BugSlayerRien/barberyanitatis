@@ -378,7 +378,7 @@ class _AppTopBarState extends State<AppTopBar> {
       bottom: widget.solidBackground
           ? const PreferredSize(
               preferredSize: Size.fromHeight(1),
-              child: Divider(height: 1, thickness: 1, color: Colors.white12),
+              child: Divider(height: 1, thickness: 1, color: Color(0x21FFFFFF)),
             )
           : null,
       titleSpacing: 0,
@@ -393,7 +393,7 @@ class _AppTopBarState extends State<AppTopBar> {
           const SizedBox(width: 8),
           Image.asset(
             'assets/images/TATIS.png',
-            height: 42,
+            height: 46,
           ),
         ],
       ),

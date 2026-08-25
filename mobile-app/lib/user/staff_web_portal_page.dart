@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'app_brand.dart';
 import 'auth_page.dart';
 
 /// Shown when staff/admin/receptionist sign in on mobile — those roles use the web portal only.
@@ -9,15 +10,15 @@ class StaffWebPortalPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: AppBrand.background,
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.computer_outlined, color: Colors.white, size: 64),
-              const SizedBox(height: 20),
+              const BrandWordmark(logoHeight: 88),
+              const SizedBox(height: 28),
               const Text(
                 'Use the Web Portal',
                 textAlign: TextAlign.center,
@@ -37,7 +38,7 @@ class StaffWebPortalPage extends StatelessWidget {
               const Text(
                 'Open in your browser:\nweb-admin/login.html',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white54, fontSize: 13),
+                style: TextStyle(color: AppBrand.gold, fontSize: 13),
               ),
               const SizedBox(height: 28),
               ElevatedButton(
@@ -47,11 +48,7 @@ class StaffWebPortalPage extends StatelessWidget {
                     (route) => false,
                   );
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(48),
-                ),
+                style: AppBrand.primaryButton,
                 child: const Text('Back to sign in'),
               ),
             ],

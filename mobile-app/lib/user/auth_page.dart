@@ -8,12 +8,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'forgot_password_page.dart';
 import 'api_config.dart';
+import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_redirect.dart';
 import 'user_session.dart';
 
-// Local copy of the white color used in the app to avoid circular imports
-const Color kGoldColor = Colors.white;
+const Color kGoldColor = AppBrand.gold;
 const String kGoogleLogoAsset = 'assets/images/google_logo.png';
 
 class AuthPage extends StatefulWidget {
@@ -473,7 +473,7 @@ class _AuthPageState extends State<AuthPage> {
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: AppBrand.background,
       resizeToAvoidBottomInset: true,
       body: Center(
         child: SingleChildScrollView(
@@ -484,26 +484,12 @@ class _AuthPageState extends State<AuthPage> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Logo outside the card
-                Image.asset('assets/images/TATIS.png', height: 96),
-                const SizedBox(height: 12),
-                const Text(
-                  'BARBERYA NI TATIS',
-                  style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2),
-                ),
+                const BrandWordmark(logoHeight: 104),
                 const SizedBox(height: 18),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF0F0F0F),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white10),
-                  ),
+                  decoration: AppBrand.card,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -620,17 +606,14 @@ class _AuthPageState extends State<AuthPage> {
             ),
             child: const Text(
               'Forgot password?',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              style: TextStyle(color: AppBrand.gold, fontSize: 12),
             ),
           ),
         ),
         const SizedBox(height: 16),
         ElevatedButton(
           onPressed: _isLoading ? null : _login,
-          style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              minimumSize: const Size.fromHeight(48)),
+          style: AppBrand.primaryButton,
           child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN',
               style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
@@ -648,11 +631,7 @@ class _AuthPageState extends State<AuthPage> {
             'Continue with Google',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(46),
-            side: const BorderSide(color: Colors.white24),
-            backgroundColor: const Color(0xFF1A1A1A),
-          ),
+          style: AppBrand.outlineButton,
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
@@ -662,11 +641,7 @@ class _AuthPageState extends State<AuthPage> {
             'Continue with Facebook',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
-          style: OutlinedButton.styleFrom(
-            minimumSize: const Size.fromHeight(46),
-            side: const BorderSide(color: Colors.white24),
-            backgroundColor: const Color(0xFF1A1A1A),
-          ),
+          style: AppBrand.outlineButton,
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -678,7 +653,7 @@ class _AuthPageState extends State<AuthPage> {
             TextButton(
               onPressed: () => setState(() => _isLogin = false),
               child: const Text('Sign up',
-                  style: TextStyle(color: Colors.white, fontSize: 12)),
+                  style: TextStyle(color: AppBrand.gold, fontSize: 12)),
             ),
           ],
         ),
@@ -768,12 +743,7 @@ class _AuthPageState extends State<AuthPage> {
           onPressed: (_isLoading || !_canSubmitRegisterPassword)
               ? null
               : _register,
-          style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              disabledBackgroundColor: Colors.white24,
-              disabledForegroundColor: Colors.white54,
-              minimumSize: const Size.fromHeight(48)),
+          style: AppBrand.primaryButton,
           child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT',
               style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
@@ -786,7 +756,7 @@ class _AuthPageState extends State<AuthPage> {
             TextButton(
               onPressed: () => setState(() => _isLogin = true),
               child: const Text('Sign in',
-                  style: TextStyle(color: Colors.white, fontSize: 12)),
+                  style: TextStyle(color: AppBrand.gold, fontSize: 12)),
             ),
           ],
         ),
@@ -801,9 +771,16 @@ class _AuthPageState extends State<AuthPage> {
       helperText: helperText,
       helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
       filled: true,
-      fillColor: const Color(0xFF1A1A1A),
+      fillColor: AppBrand.surfaceAlt,
+      enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.border)),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.goldLine)),
       border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+          borderRadius: BorderRadius.circular(8),
+          borderSide: const BorderSide(color: AppBrand.border)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
       suffixIcon: suffix,
     );
@@ -875,7 +852,7 @@ class _AuthPageState extends State<AuthPage> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: AppBrand.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

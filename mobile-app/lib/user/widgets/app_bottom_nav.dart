@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../app_brand.dart';
+
 class AppBottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
@@ -13,9 +15,9 @@ class AppBottomNavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BottomNavigationBar(
-      backgroundColor: const Color(0xFF1A1A1A),
-      selectedItemColor: Colors.white,
-      unselectedItemColor: Colors.white54,
+      backgroundColor: AppBrand.surface,
+      selectedItemColor: AppBrand.gold,
+      unselectedItemColor: AppBrand.textMuted,
       type: BottomNavigationBarType.fixed,
       currentIndex: currentIndex,
       showSelectedLabels: true,
@@ -31,11 +33,11 @@ class AppBottomNavBar extends StatelessWidget {
             width: 48,
             height: 48,
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: AppBrand.gold,
               shape: BoxShape.circle,
               boxShadow: [
                 BoxShadow(
-                  color: Colors.white.withOpacity(0.4),
+                  color: AppBrand.gold.withValues(alpha: 0.28),
                   blurRadius: 10,
                   spreadRadius: 1,
                 ),

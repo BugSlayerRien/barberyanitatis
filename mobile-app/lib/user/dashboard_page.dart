@@ -26,6 +26,7 @@ import 'group_size_page.dart';
 import 'time_format_utils.dart';
 import 'booking_guard.dart';
 import 'suggested_appointment_page.dart';
+import 'app_brand.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -662,11 +663,11 @@ class _DashboardPageState extends State<DashboardPage>
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFA99941), width: 1),
+          border: Border.all(color: AppBrand.goldLine, width: 1),
         ),
         child: Row(
           children: [
-            const Icon(Icons.event_available, color: Color(0xFFA99941), size: 28),
+            const Icon(Icons.event_available, color: AppBrand.gold, size: 28),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -675,7 +676,7 @@ class _DashboardPageState extends State<DashboardPage>
                   const Text(
                     'Upcoming appointment',
                     style: TextStyle(
-                      color: Color(0xFFA99941),
+                      color: AppBrand.gold,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,
@@ -738,7 +739,7 @@ class _DashboardPageState extends State<DashboardPage>
       decoration: BoxDecoration(
         color: const Color(0xFF151515),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: AppBrand.borderStrong),
       ),
       child: Row(
         children: [
@@ -768,7 +769,7 @@ class _DashboardPageState extends State<DashboardPage>
             onPressed: _continueBooking,
             child: const Text(
               'Continue',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+              style: TextStyle(color: AppBrand.gold, fontWeight: FontWeight.w700),
             ),
           ),
         ],
@@ -795,7 +796,7 @@ class _DashboardPageState extends State<DashboardPage>
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFA99941)),
+        border: Border.all(color: AppBrand.goldLine),
       ),
       child: Material(
         color: Colors.transparent,
@@ -806,7 +807,7 @@ class _DashboardPageState extends State<DashboardPage>
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(Icons.flash_on, color: Color(0xFFA99941), size: 28),
+                const Icon(Icons.flash_on, color: AppBrand.gold, size: 28),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -864,7 +865,7 @@ class _DashboardPageState extends State<DashboardPage>
       decoration: BoxDecoration(
         color: const Color(0xFF121212),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppBrand.border),
       ),
       child: Row(
         children: [
@@ -932,7 +933,7 @@ class _DashboardPageState extends State<DashboardPage>
         decoration: BoxDecoration(
           color: const Color(0xFF151515),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white24),
+          border: Border.all(color: AppBrand.borderStrong),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -973,7 +974,7 @@ class _DashboardPageState extends State<DashboardPage>
                 onPressed: () => _openFaceScan(startFresh: true),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.white,
-                  side: const BorderSide(color: Colors.white38),
+                  side: const BorderSide(color: AppBrand.borderStrong),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
                 child: const Text(
@@ -1003,7 +1004,7 @@ class _DashboardPageState extends State<DashboardPage>
       decoration: BoxDecoration(
         color: const Color(0xFF151515),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white24),
+        border: Border.all(color: AppBrand.borderStrong),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1035,7 +1036,7 @@ class _DashboardPageState extends State<DashboardPage>
                   onPressed: _openLastScanResults,
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white38),
+                    side: const BorderSide(color: AppBrand.borderStrong),
                   ),
                   child: const Text(
                     'View results',
@@ -1048,7 +1049,7 @@ class _DashboardPageState extends State<DashboardPage>
                 child: ElevatedButton(
                   onPressed: () => _openFaceScan(startFresh: true),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
+                    backgroundColor: AppBrand.gold,
                     foregroundColor: Colors.black,
                   ),
                   child: const Text(
@@ -1223,7 +1224,7 @@ class _DashboardPageState extends State<DashboardPage>
           title: barber['fullName']?.toString() ?? 'Barber',
           subtitle: '$source · $ratingText★',
           icon: Icons.star_rounded,
-          accent: const Color(0xFFA99941),
+          accent: AppBrand.gold,
           onAction: _bookWithFavoriteBarber,
         ),
       );
@@ -1269,7 +1270,7 @@ class _DashboardPageState extends State<DashboardPage>
         decoration: BoxDecoration(
           color: const Color(0xFF151515),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white12),
+          border: Border.all(color: AppBrand.border),
         ),
         child: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1318,7 +1319,7 @@ class _DashboardPageState extends State<DashboardPage>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A),
+      backgroundColor: AppBrand.background,
       appBar: AppTopBar(
         onProfileTap: () {
           Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ProfilePage()));
@@ -1337,16 +1338,19 @@ class _DashboardPageState extends State<DashboardPage>
             if (_showWelcome) ...[
               Container(
                 width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
+                  color: AppBrand.goldTint,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppBrand.goldLine),
                 ),
                 child: Text(
-                  UserSession.fullName != null ? 'Welcome ${UserSession.fullName}' : 'Welcome',
+                  UserSession.fullName != null
+                      ? 'Welcome, ${UserSession.fullName}'
+                      : 'Welcome',
                   textAlign: TextAlign.left,
                   style: const TextStyle(
-                    color: Colors.black,
+                    color: AppBrand.text,
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.3,
@@ -1434,7 +1438,7 @@ class _QuickActionTile extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: Colors.white24),
+            border: Border.all(color: AppBrand.borderStrong),
           ),
           child: Row(
             children: [
@@ -1484,7 +1488,7 @@ class _InsightCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF151515),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppBrand.border),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
@@ -1546,7 +1550,7 @@ class _InsightCard extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white38),
+                  border: Border.all(color: AppBrand.borderStrong),
                 ),
                 child: const Icon(
                   Icons.arrow_forward_ios,
@@ -1574,7 +1578,7 @@ class _ScanChip extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF0A0A0A),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white38),
+        border: Border.all(color: AppBrand.borderStrong),
       ),
       child: Text(
         label,
@@ -1600,7 +1604,7 @@ class _InsightCardSkeleton extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF151515),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: AppBrand.border),
       ),
       child: const Row(
         children: [
