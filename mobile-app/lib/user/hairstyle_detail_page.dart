@@ -501,7 +501,10 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
 
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
+          builder: (_) => SuggestedAppointmentPage(
+            suggestion: result.suggestion!,
+            alternatives: result.alternatives,
+          ),
         ),
       );
     } finally {

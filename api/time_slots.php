@@ -7,6 +7,7 @@ require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/slot_recommendation.php';
 
 require_method('POST');
 
@@ -229,9 +230,16 @@ try {
             ? ''
             : " AND ts.slot_date NOT IN ('" . implode("','", array_map(static fn(string $d): string => preg_replace('/[^0-9-]/', '', $d), $closedDates)) . "')";
 
-        $runBestSlotQuery = static function (PDO $pdo, string $leadDate, string $leadTime, string $shopWindowEnd, string $appointmentFilter) use ($envelopeHours, $breakFilter, $breakFilter2, $closedFilter): ?array {
-            $bestStmt = $pdo->prepare(
-                "SELECT ts.barber_id, ts.slot_date, ts.slot_time,
+        $baseFrom = " FROM time_slots ts
+                   JOIN barbers b ON b.barber_id = ts.barber_id
+                  WHERE b.is_active = TRUE{$appointmentFilter}
+                    AND ts.status = 'Available'
+                    AND ts.slot_date <= :window_end_date{$closedFilter}
+                    AND " . bookable_slot_sql_clause() . "
+                    AND EXTRACT(MINUTE FROM ts.slot_time) = 0
+                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN {$envelopeHours}{$breakFilter}";
+
+        $selectCols = "SELECT ts.barber_id, b.full_name AS barber_name, b.specialty, ts.slot_date, ts.slot_time,
                         (
                             SELECT COUNT(*)::int
                               FROM time_slots ts2
@@ -240,31 +248,81 @@ try {
                                AND ts2.status = 'Available'
                                AND EXTRACT(MINUTE FROM ts2.slot_time) = 0
                                AND EXTRACT(HOUR FROM ts2.slot_time) BETWEEN {$envelopeHours}{$breakFilter2}
-                        ) AS available_count
-                   FROM time_slots ts
-                   JOIN barbers b ON b.barber_id = ts.barber_id
-                  WHERE b.is_active = TRUE{$appointmentFilter}
-                    AND ts.status = 'Available'
-                    AND ts.slot_date <= :window_end_date{$closedFilter}
-                    AND " . bookable_slot_sql_clause() . "
-                    AND EXTRACT(MINUTE FROM ts.slot_time) = 0
-                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN {$envelopeHours}{$breakFilter}
-                  ORDER BY ts.slot_date ASC, ts.slot_time ASC
-                  LIMIT 1"
-            );
-            $bestStmt->execute([
-                ':lead_date' => $leadDate,
-                ':lead_time' => $leadTime,
-                ':window_end_date' => $shopWindowEnd,
-            ]);
+                        ) AS available_count";
 
-            $row = $bestStmt->fetch();
-            return $row === false ? null : $row;
+        $baseParams = [
+            ':lead_date' => $leadDate,
+            ':lead_time' => $leadTime,
+            ':window_end_date' => $shopWindowEnd,
+        ];
+
+        $runSlotQuery = static function (string $sql, array $params) use ($pdo): array {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         };
 
-        $best = $runBestSlotQuery($pdo, $leadDate, $leadTime, $shopWindowEnd, $appointmentFilter);
+        $userId = (int)($input['userID'] ?? $input['userId'] ?? 0);
+        $profile = slot_recommendation_build_profile([]);
+        if ($userId > 0) {
+            $profile = slot_recommendation_build_profile(
+                slot_recommendation_load_history($pdo, $userId),
+                slot_recommendation_load_rated_favorite($pdo, $userId)
+            );
+        }
 
-        if (!$best) {
+        $cfg = slot_recommendation_config();
+        $fetchCandidates = static function () use (
+            $runSlotQuery,
+            $selectCols,
+            $baseFrom,
+            $baseParams,
+            $profile,
+            $cfg
+        ): array {
+            $rows = $runSlotQuery(
+                $selectCols . $baseFrom . ' ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 30',
+                $baseParams
+            );
+
+            $preferredBarber = (int)($profile['preferred_barber_id'] ?? 0);
+            if ($preferredBarber > 0) {
+                $params = $baseParams;
+                $params[':pref_barber'] = $preferredBarber;
+                $rows = array_merge($rows, $runSlotQuery(
+                    $selectCols . $baseFrom . ' AND ts.barber_id = :pref_barber ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 40',
+                    $params
+                ));
+            }
+
+            $bucketHours = match ($profile['preferred_bucket'] ?? null) {
+                'morning' => [9, 10, 11],
+                'afternoon' => [13, 14, 15, 16],
+                'evening' => [17, 18, 19],
+                default => [],
+            };
+            if ($bucketHours !== []) {
+                $hourList = implode(',', array_map('intval', $bucketHours));
+                $rows = array_merge($rows, $runSlotQuery(
+                    $selectCols . $baseFrom . " AND EXTRACT(HOUR FROM ts.slot_time) IN ({$hourList}) ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 40",
+                    $baseParams
+                ));
+            }
+
+            if (($profile['preferred_weekday'] ?? null) !== null && !empty($profile['preferred_weekday_usual'])) {
+                $params = $baseParams;
+                $params[':pref_dow'] = (int)$profile['preferred_weekday'];
+                $rows = array_merge($rows, $runSlotQuery(
+                    $selectCols . $baseFrom . ' AND EXTRACT(DOW FROM ts.slot_date) = :pref_dow ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 30',
+                    $params
+                ));
+            }
+
+            return slot_recommendation_dedupe_candidates($rows, (int)$cfg['candidate_cap']);
+        };
+
+        $candidates = $fetchCandidates();
+        if ($candidates === []) {
             $seedStmt = $pdo->prepare(
                 "SELECT barber_id FROM barbers WHERE is_active = TRUE{$appointmentFilter}"
             );
@@ -275,38 +333,106 @@ try {
                     ensure_week_seeded_for_barber($pdo, $barberID, $bookingWindowDays);
                 }
             }
-            $best = $runBestSlotQuery($pdo, $leadDate, $leadTime, $shopWindowEnd, $appointmentFilter);
+            $candidates = $fetchCandidates();
         }
 
-        if (!$best) {
+        $normalized = [];
+        foreach ($candidates as $row) {
+            $slotDateRaw = $row['slot_date'] ?? '';
+            $slotDate = $slotDateRaw instanceof DateTimeInterface
+                ? $slotDateRaw->format('Y-m-d')
+                : substr((string)$slotDateRaw, 0, 10);
+            $timeRaw = $row['slot_time'] ?? '';
+            $timeStr = $timeRaw instanceof DateTimeInterface
+                ? $timeRaw->format('H:i:s')
+                : (string)$timeRaw;
+            $slotTime = shop_normalize_slot_time($timeStr, $slotDate);
+            if ($slotDate === '' || $slotTime === null || !shop_is_suggestable_slot($slotDate, $slotTime)) {
+                continue;
+            }
+            $row['slot_date'] = $slotDate;
+            $row['slot_time'] = $slotTime;
+            $row['barber_id'] = (int)($row['barber_id'] ?? 0);
+            $normalized[] = $row;
+        }
+
+        if ($normalized === []) {
             json_response(['error' => 'No available slots found'], 404);
         }
 
-        $normalizedSlotTime = shop_normalize_slot_time((string)$best['slot_time'], (string)$best['slot_date']);
-        if ($normalizedSlotTime === null || !shop_is_suggestable_slot((string)$best['slot_date'], $normalizedSlotTime)) {
+        $earliestDate = (string)$normalized[0]['slot_date'];
+        foreach ($normalized as $row) {
+            if ((string)$row['slot_date'] < $earliestDate) {
+                $earliestDate = (string)$row['slot_date'];
+            }
+        }
+
+        $dayAvailableHours = [];
+        $knownOccupancyDays = [];
+        $pairs = [];
+        foreach ($normalized as $row) {
+            $pairs[(int)$row['barber_id'] . '|' . $row['slot_date']] = [
+                'barber_id' => (int)$row['barber_id'],
+                'slot_date' => (string)$row['slot_date'],
+            ];
+        }
+        if ($pairs !== []) {
+            $pairSql = [];
+            $occParams = [];
+            $i = 0;
+            foreach ($pairs as $pair) {
+                $b = ':ob' . $i;
+                $d = ':od' . $i;
+                $pairSql[] = "(barber_id = {$b} AND slot_date = {$d})";
+                $occParams[$b] = $pair['barber_id'];
+                $occParams[$d] = $pair['slot_date'];
+                $i++;
+            }
+            $occStmt = $pdo->prepare(
+                'SELECT barber_id, slot_date, EXTRACT(HOUR FROM slot_time)::int AS hour, status
+                   FROM time_slots
+                  WHERE (' . implode(' OR ', $pairSql) . ")
+                    AND EXTRACT(MINUTE FROM slot_time) = 0"
+            );
+            $occStmt->execute($occParams);
+            foreach ($occStmt->fetchAll(PDO::FETCH_ASSOC) as $occ) {
+                $occDateRaw = $occ['slot_date'] ?? '';
+                $occDate = $occDateRaw instanceof DateTimeInterface
+                    ? $occDateRaw->format('Y-m-d')
+                    : substr((string)$occDateRaw, 0, 10);
+                $key = (int)$occ['barber_id'] . '|' . $occDate;
+                $knownOccupancyDays[$key] = true;
+                if (strcasecmp((string)$occ['status'], 'Available') === 0) {
+                    $dayAvailableHours[$key] ??= [];
+                    $hour = (int)$occ['hour'];
+                    if (!in_array($hour, $dayAvailableHours[$key], true)) {
+                        $dayAvailableHours[$key][] = $hour;
+                    }
+                }
+            }
+        }
+
+        $ranked = slot_recommendation_rank(
+            $normalized,
+            $profile,
+            $dayAvailableHours,
+            $earliestDate,
+            $knownOccupancyDays
+        );
+        $primary = $ranked['primary'];
+        if ($primary === null) {
             json_response(['error' => 'No available time for suggested slot'], 404);
         }
 
-        $barberStmt = $pdo->prepare('SELECT barber_id, full_name, specialty FROM barbers WHERE barber_id = :barber_id');
-        $barberStmt->execute([':barber_id' => $best['barber_id']]);
-        $barber = $barberStmt->fetch();
-
-        $barberId = (int)$best['barber_id'];
-        $availableCount = (int)($best['available_count'] ?? 0);
-        $reason = build_suggestion_reason((string)$best['slot_date'], $normalizedSlotTime, $barberId, $availableCount);
+        $leadHours = shop_booking_lead_hours();
+        $alternatives = [];
+        foreach ($ranked['alternatives'] as $alt) {
+            $alternatives[] = slot_recommendation_public_payload($alt, $leadHours);
+        }
 
         json_response([
-            'suggestion' => [
-                'barberID' => $barberId,
-                'barberName' => $barber['full_name'] ?? 'Barber',
-                'specialty' => $barber['specialty'] ?? null,
-                'slotDate' => $best['slot_date'],
-                'slotTime' => $normalizedSlotTime,
-                'availableCount' => $availableCount,
-                'suggestionReason' => $reason,
-                'leadHours' => shop_booking_lead_hours(),
-                'isFallback' => false,
-            ],
+            'suggestion' => slot_recommendation_public_payload($primary, $leadHours),
+            'alternatives' => $alternatives,
         ]);
     }
 

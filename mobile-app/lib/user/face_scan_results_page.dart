@@ -1039,7 +1039,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       if (!mounted) return;
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
+          builder: (_) => SuggestedAppointmentPage(
+            suggestion: result.suggestion!,
+            alternatives: result.alternatives,
+          ),
         ),
       );
     } catch (e) {
