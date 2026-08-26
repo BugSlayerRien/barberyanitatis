@@ -49,6 +49,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   Map<String, dynamic>? _nextUpcomingAppointment;
   Map<String, dynamic>? _slotSuggestion;
+  List<Map<String, dynamic>> _slotAlternatives = const [];
   Map<String, dynamic>? _quickBookProfile;
   BookingDraft? _bookingDraft;
   bool _hasActiveAppointment = false;
@@ -289,12 +290,14 @@ class _DashboardPageState extends State<DashboardPage>
     }
 
     Map<String, dynamic>? suggestion;
+    List<Map<String, dynamic>> alternatives = const [];
     try {
       final slotResult = await BookingSlotsService.fetchBestSuggestion(
         timeout: BookingSlotsService.dashboardTimeout,
       );
       if (slotResult.isSuccess) {
         suggestion = slotResult.suggestion;
+        alternatives = slotResult.alternatives;
       }
     } catch (_) {}
 
@@ -302,6 +305,7 @@ class _DashboardPageState extends State<DashboardPage>
     if (_hasActiveAppointment) {
       setState(() {
         _slotSuggestion = null;
+        _slotAlternatives = const [];
         _quickBookProfile = null;
       });
       return;
@@ -310,6 +314,7 @@ class _DashboardPageState extends State<DashboardPage>
     if (suggestion == null) return;
     setState(() {
       _slotSuggestion = suggestion;
+      _slotAlternatives = alternatives;
       _suggestionFetchedAt = DateTime.now();
     });
   }
@@ -321,6 +326,7 @@ class _DashboardPageState extends State<DashboardPage>
       setState(() {
         _nextUpcomingAppointment = null;
         _slotSuggestion = null;
+        _slotAlternatives = const [];
         _quickBookProfile = null;
         _bookingDraft = null;
         _hasActiveAppointment = false;
@@ -391,6 +397,7 @@ class _DashboardPageState extends State<DashboardPage>
       _bookingDraft = draft;
       if (hasActive) {
         _slotSuggestion = null;
+        _slotAlternatives = const [];
         _quickBookProfile = null;
         _suggestionFetchedAt = null;
       } else {
@@ -558,6 +565,7 @@ class _DashboardPageState extends State<DashboardPage>
       MaterialPageRoute(
         builder: (_) => SuggestedAppointmentPage(
           suggestion: suggestion,
+          alternatives: _slotAlternatives,
           skipPreviews: true,
         ),
       ),

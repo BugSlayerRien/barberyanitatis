@@ -5,8 +5,9 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import 'ai_funnel_service.dart';
-import 'services/face_scan_service.dart';
 import 'api_config.dart';
+import 'app_brand.dart';
+import 'services/face_scan_service.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
@@ -14,14 +15,17 @@ import 'payment_page.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
+import 'services/booking_slots_service.dart';
 
 class SuggestedAppointmentPage extends StatefulWidget {
   final Map<String, dynamic> suggestion;
+  final List<Map<String, dynamic>> alternatives;
   final bool skipPreviews;
 
   const SuggestedAppointmentPage({
     super.key,
     required this.suggestion,
+    this.alternatives = const [],
     this.skipPreviews = false,
   });
 
@@ -35,11 +39,17 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   bool _refreshingSuggestion = false;
   bool _retriedAfterConflict = false;
   late Map<String, dynamic> _suggestion;
+  late Map<String, dynamic> _recommended;
+  late List<Map<String, dynamic>> _alternatives;
 
   @override
   void initState() {
     super.initState();
     _suggestion = Map<String, dynamic>.from(widget.suggestion);
+    _recommended = Map<String, dynamic>.from(widget.suggestion);
+    _alternatives = widget.alternatives
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
     unawaited(_refreshSuggestionIfStale());
   }
 
@@ -52,21 +62,12 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
 
     setState(() => _refreshingSuggestion = true);
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      );
-      if (!mounted || response.statusCode != 200 || response.body.isEmpty) {
+      final result = await BookingSlotsService.fetchBestSuggestion();
+      if (!mounted || !result.isSuccess || result.suggestion == null) {
         return;
       }
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final refreshed = data['suggestion'] as Map<String, dynamic>?;
-      if (refreshed == null) {
-        return;
-      }
-
+      final refreshed = result.suggestion!;
       final refreshedDate = refreshed['slotDate']?.toString() ?? '';
       final refreshedTime = refreshed['slotTime']?.toString() ?? '';
       if (refreshedDate.isEmpty ||
@@ -75,7 +76,13 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         return;
       }
 
-      setState(() => _suggestion = refreshed);
+      setState(() {
+        _suggestion = refreshed;
+        _recommended = Map<String, dynamic>.from(refreshed);
+        _alternatives = result.alternatives
+            .map((item) => Map<String, dynamic>.from(item))
+            .toList();
+      });
     } catch (_) {
       // Keep the original suggestion; booking guard still blocks stale times.
     } finally {
@@ -415,6 +422,95 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     return '$month/$day/$year';
   }
 
+  String _slotKey(Map<String, dynamic> slot) {
+    return '${slot['barberID']}|${slot['slotDate']}|${slot['slotTime']}';
+  }
+
+  void _selectSlot(Map<String, dynamic> slot) {
+    if (_booking || _refreshingSuggestion) {
+      return;
+    }
+    setState(() => _suggestion = Map<String, dynamic>.from(slot));
+  }
+
+  Widget _slotChoiceCard(Map<String, dynamic> slot, {required bool recommended}) {
+    final selected = _slotKey(slot) == _slotKey(_suggestion);
+    final barberName = slot['barberName']?.toString() ?? 'Barber';
+    final date = _formatDisplayDate(slot['slotDate']?.toString() ?? '');
+    final time = formatTo12Hour(slot['slotTime']?.toString() ?? '');
+    final reason = formatSuggestionReasonTo12h(
+      slot['suggestionReason']?.toString() ?? '',
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: selected ? AppBrand.goldTint : const Color(0xFF151515),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: () => _selectSlot(slot),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: selected ? AppBrand.goldLine : AppBrand.border,
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  selected ? Icons.radio_button_checked : Icons.radio_button_off,
+                  color: selected ? AppBrand.gold : Colors.white54,
+                  size: 20,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        recommended ? 'Recommended' : 'Also available',
+                        style: TextStyle(
+                          color: recommended ? AppBrand.gold : Colors.white54,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$barberName · $date · $time',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (reason.isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          reason,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final barberName = _suggestion['barberName']?.toString() ?? 'Barber';
@@ -488,9 +584,16 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                     )
                   else
                     const SizedBox(height: 12),
-                  _detailRow('Barber', barberName),
-                  _detailRow('Date', _formatDisplayDate(slotDate)),
-                  _detailRow('Time', slotTime),
+                  if (_alternatives.isNotEmpty) ...[
+                    _slotChoiceCard(_recommended, recommended: true),
+                    ..._alternatives
+                        .where((slot) => _slotKey(slot) != _slotKey(_recommended))
+                        .map((slot) => _slotChoiceCard(slot, recommended: false)),
+                  ] else ...[
+                    _detailRow('Barber', barberName),
+                    _detailRow('Date', _formatDisplayDate(slotDate)),
+                    _detailRow('Time', slotTime),
+                  ],
                   if (_refreshingSuggestion)
                     const Padding(
                       padding: EdgeInsets.only(bottom: 10),

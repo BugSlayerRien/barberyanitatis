@@ -6,23 +6,29 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../api_config.dart';
+import '../user_session.dart';
 
 /// Result of `time_slots.php` → `suggestBestSlot`.
 class SuggestSlotResult {
   final Map<String, dynamic>? suggestion;
+  final List<Map<String, dynamic>> alternatives;
   final String? errorMessage;
   final bool isConnectionError;
 
   const SuggestSlotResult._({
     this.suggestion,
+    this.alternatives = const [],
     this.errorMessage,
     this.isConnectionError = false,
   });
 
   bool get isSuccess => suggestion != null && errorMessage == null;
 
-  factory SuggestSlotResult.success(Map<String, dynamic> suggestion) =>
-      SuggestSlotResult._(suggestion: suggestion);
+  factory SuggestSlotResult.success(
+    Map<String, dynamic> suggestion, {
+    List<Map<String, dynamic>> alternatives = const [],
+  }) =>
+      SuggestSlotResult._(suggestion: suggestion, alternatives: alternatives);
 
   factory SuggestSlotResult.noSlots() => const SuggestSlotResult._();
 
@@ -46,14 +52,20 @@ class BookingSlotsService {
 
   static Future<SuggestSlotResult> fetchBestSuggestion({
     Duration timeout = defaultTimeout,
+    int? userId,
   }) async {
     final uri = Uri.parse('${ApiConfig.baseUrl}/time_slots.php');
+    final resolvedUserId = userId ?? UserSession.userId;
     try {
       final response = await http
           .post(
             uri,
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({'action': 'suggestBestSlot'}),
+            body: jsonEncode({
+              'action': 'suggestBestSlot',
+              if (resolvedUserId != null && resolvedUserId > 0)
+                'userID': resolvedUserId,
+            }),
           )
           .timeout(timeout);
 
@@ -61,7 +73,14 @@ class BookingSlotsService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         final suggestion = data['suggestion'];
         if (suggestion is Map<String, dynamic>) {
-          return SuggestSlotResult.success(suggestion);
+          final alternatives = (data['alternatives'] as List<dynamic>? ?? [])
+              .whereType<Map>()
+              .map((item) => Map<String, dynamic>.from(item))
+              .toList();
+          return SuggestSlotResult.success(
+            suggestion,
+            alternatives: alternatives,
+          );
         }
         return SuggestSlotResult.noSlots();
       }

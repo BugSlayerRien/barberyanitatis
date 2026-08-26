@@ -1,7 +1,4 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'ai_funnel_service.dart';
@@ -12,6 +9,7 @@ import 'dashboard_page.dart';
 import 'haircuts_list_page.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
+import 'services/booking_slots_service.dart';
 
 /// DEPRECATED: This page is no longer used in the booking flow.
 /// The active path is: ai_face_scan_page → haircuts_list_page → time_slot_page → payment_page
@@ -364,11 +362,11 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
       backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
     );
 
-    final suggestion = await _fetchSuggestedSlot();
+    final result = await BookingSlotsService.fetchBestSuggestion();
     if (!context.mounted) {
       return;
     }
-    if (suggestion == null) {
+    if (!result.isSuccess || result.suggestion == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No available slots found. Please choose manually.')),
       );
@@ -380,26 +378,12 @@ class _ScanResultsPageState extends State<ScanResultsPage> {
 
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+        builder: (_) => SuggestedAppointmentPage(
+          suggestion: result.suggestion!,
+          alternatives: result.alternatives,
+        ),
       ),
     );
-  }
-
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return null;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
-    }
   }
 
   Map<String, dynamic> _toStyleMap(Map<String, dynamic> recommendation) {

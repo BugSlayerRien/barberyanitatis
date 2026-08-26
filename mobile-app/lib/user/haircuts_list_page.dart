@@ -18,6 +18,7 @@ import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
 import 'services/booking_draft_service.dart';
+import 'services/booking_slots_service.dart';
 import 'ai_face_scan_page.dart';
 import 'feature_flags.dart';
 import 'hairstyle_detail_page.dart';
@@ -722,11 +723,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
     );
 
-    final suggestion = await _fetchSuggestedSlot();
+    final result = await BookingSlotsService.fetchBestSuggestion();
     if (!context.mounted) {
       return;
     }
-    if (suggestion == null) {
+    if (!result.isSuccess || result.suggestion == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No available slots found. Please choose manually.')),
       );
@@ -740,26 +741,12 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     await BookingDraftService.saveFromSession(step: 'barber');
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(suggestion: suggestion),
+        builder: (_) => SuggestedAppointmentPage(
+          suggestion: result.suggestion!,
+          alternatives: result.alternatives,
+        ),
       ),
     );
-  }
-
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return null;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
-    }
   }
 
   String _scoreToRating(double score) {

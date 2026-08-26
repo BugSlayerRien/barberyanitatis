@@ -17,6 +17,7 @@ import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'suggested_appointment_page.dart';
 import 'barber_selection_page.dart';
+import 'services/booking_slots_service.dart';
 import 'payment_page.dart';
 import 'calendar_page.dart';
 import '../shared/pagination_controls.dart';
@@ -881,23 +882,6 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     return appointments.sublist(start, end);
   }
 
-  Future<Map<String, dynamic>?> _fetchSuggestedSlot() async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'suggestBestSlot'}),
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return null;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      return data['suggestion'] as Map<String, dynamic>?;
-    } catch (_) {
-      return null;
-    }
-  }
-
   Widget _buildPaymentChip(String state) {
     final normalized = state.trim();
     Color fg;
@@ -1121,12 +1105,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         return;
       }
 
-      final suggestion = await _fetchSuggestedSlot();
+      final result = await BookingSlotsService.fetchBestSuggestion();
       if (!mounted) {
         return;
       }
 
-      if (suggestion == null) {
+      if (!result.isSuccess || result.suggestion == null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
               content:
@@ -1140,7 +1124,11 @@ class _AppointmentsPageState extends State<AppointmentsPage>
 
       Navigator.of(context).push(
         MaterialPageRoute(
-            builder: (_) => SuggestedAppointmentPage(suggestion: suggestion)),
+          builder: (_) => SuggestedAppointmentPage(
+            suggestion: result.suggestion!,
+            alternatives: result.alternatives,
+          ),
+        ),
       );
     } finally {
       if (mounted && appointmentId > 0) {

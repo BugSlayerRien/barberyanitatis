@@ -4467,7 +4467,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => SuggestedAppointmentPage(suggestion: result.suggestion!),
+        builder: (_) => SuggestedAppointmentPage(
+          suggestion: result.suggestion!,
+          alternatives: result.alternatives,
+        ),
         ),
       );
     } finally {
