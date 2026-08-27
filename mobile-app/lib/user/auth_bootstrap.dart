@@ -142,6 +142,13 @@ class AuthBootstrap {
       return true;
     }
 
+    // Native OAuth must return via the custom scheme. Do not treat arbitrary
+    // https pages that happen to contain `?code=` (Google intermediate, HTML
+    // error pages) as a PKCE callback — exchanging those yields HTML/JSON errors.
+    if (!kIsWeb) {
+      return false;
+    }
+
     final fragmentParameters = _readAuthCallbackParameters(uri);
     final hasOAuthFragment = fragmentParameters.containsKey('access_token') ||
         fragmentParameters.containsKey('refresh_token') ||

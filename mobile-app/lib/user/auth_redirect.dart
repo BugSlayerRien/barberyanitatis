@@ -11,7 +11,8 @@ import 'web_origin_fallback_stub.dart'
 /// - **Project URL** (`https://<ref>.supabase.co`) → only for `Supabase.initialize` / REST (already in code).
 /// - **Site URL** → your Flutter web app (wildcards are not allowed). Use `http://localhost` or the exact
 ///   origin you see in the browser (any port each run). **Not** the `.supabase.co` URL.
-/// - **Redirect URLs** → include `http://localhost:*` and the callback below with `**` so `?return_to=...` matches.
+/// - **Redirect URLs** → include `http://localhost:*`, the web callback with `**`,
+///   `io.supabase.flutter://login-callback`, and `io.supabase.flutter://login-callback/**`.
 class AuthRedirect {
   AuthRedirect._();
 
