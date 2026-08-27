@@ -160,6 +160,8 @@ class _ProfilePageState extends State<ProfilePage> {
     return body;
   }
 
+  /// Small Auth metadata only. Never write profile_image_base64 here — GoTrue
+  /// copies user_metadata into every JWT and oversized tokens are rejected.
   Future<void> _syncSupabaseMetadata(Map<String, dynamic> updates) async {
     final currentSession = Supabase.instance.client.auth.currentSession;
     final currentUser =
@@ -218,8 +220,6 @@ class _ProfilePageState extends State<ProfilePage> {
       final resolvedGender = _readProfileValue(metadata, 'gender');
       final resolvedHairTexture = _readProfileValue(metadata, 'hair_texture');
       final resolvedProfileImageUrl = _readProfileValue(metadata, 'avatar_url');
-      final resolvedProfileImageBase64 =
-          _readProfileValue(metadata, 'profile_image_base64');
       final resolvedHaircutsDone = metadata['haircuts_done'] is int
           ? metadata['haircuts_done'] as int
           : int.tryParse('${metadata['haircuts_done']}') ?? 0;
@@ -233,9 +233,6 @@ class _ProfilePageState extends State<ProfilePage> {
         gender: resolvedGender,
         hairTexture: resolvedHairTexture,
         profileImageUrl: resolvedProfileImageUrl,
-        profileImageBytes: resolvedProfileImageBase64.isNotEmpty
-            ? base64Decode(resolvedProfileImageBase64)
-            : null,
       );
     } catch (e) {
       if (!mounted) return;
@@ -498,7 +495,6 @@ class _ProfilePageState extends State<ProfilePage> {
           'phone': newPhone,
           'gender': newGender,
           'hair_texture': newHairTexture,
-          if (profileImageBase64 != null) 'profile_image_base64': profileImageBase64,
         });
 
         if (!mounted) return;
@@ -520,7 +516,6 @@ class _ProfilePageState extends State<ProfilePage> {
         'phone': newPhone,
         'gender': newGender,
         'hair_texture': newHairTexture,
-        if (profileImageBase64 != null) 'profile_image_base64': profileImageBase64,
       };
 
       await Supabase.instance.client.auth.updateUser(
