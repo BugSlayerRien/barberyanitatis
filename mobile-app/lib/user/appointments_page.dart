@@ -111,26 +111,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     });
 
     try {
-      final response = await CustomerApi.postJson('booking.php', {
+      final data = await CustomerApi.postDecoded('booking.php', {
         'action': 'listByCustomer',
         'userID': UserSession.userId,
       });
-
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : {};
-      if (response.statusCode != 200) {
-        final details = data['details']?.toString();
-        final message = data['error']?.toString() ?? 'Failed to load appointments.';
-        if (!mounted) return;
-        setState(() {
-          _error = details != null && details.isNotEmpty
-              ? '$message\n$details'
-              : message;
-          _loading = false;
-        });
-        return;
-      }
 
       final items = (data['appointments'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
@@ -253,6 +237,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         _completedAppointments = completed;
         _upcomingPage = 1;
         _completedPage = 1;
+        _loading = false;
+      });
+    } on CustomerApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
         _loading = false;
       });
     } catch (e) {
@@ -1257,7 +1247,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       setState(() => _processingAppointmentIds.add(normalizedId));
     }
     try {
-      final response = await CustomerApi.postJson('booking.php', {
+      await CustomerApi.postDecoded('booking.php', {
         'action': 'cancel',
         'appointmentID': appointmentId,
         'userID': UserSession.userId,
@@ -1266,22 +1256,19 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       if (!mounted) {
         return;
       }
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : {};
-      if (response.statusCode != 200) {
-        final message =
-            data['error']?.toString() ?? 'Failed to cancel appointment.';
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
-        return;
-      }
       await _loadAppointments();
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('Appointment cancelled')));
+    } on CustomerApiException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message)),
+      );
     } catch (e) {
       if (!mounted) {
         return;
@@ -1442,18 +1429,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         return;
       }
 
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content: Text(
-                  data['error']?.toString() ?? 'Failed to submit feedback.')),
-        );
-        return;
-      }
+      final data = CustomerApi.decodeJsonObject(response);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

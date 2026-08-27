@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import 'customer_api.dart';
@@ -45,23 +43,10 @@ class _HistoryPageState extends State<HistoryPage> {
     });
 
     try {
-      final response = await CustomerApi.postJson('payments.php', {
+      final data = await CustomerApi.postDecoded('payments.php', {
         'action': 'listWallet',
         'userID': userId,
       });
-
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        setState(() {
-          _error =
-              data['error']?.toString() ?? 'Failed to load payment history.';
-          _loading = false;
-        });
-        return;
-      }
 
       final rows = (data['history'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
@@ -70,6 +55,11 @@ class _HistoryPageState extends State<HistoryPage> {
       setState(() {
         _history = rows;
         _currentPage = 1;
+        _loading = false;
+      });
+    } on CustomerApiException catch (e) {
+      setState(() {
+        _error = e.message;
         _loading = false;
       });
     } catch (e) {

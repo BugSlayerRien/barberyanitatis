@@ -755,36 +755,33 @@ Keep the total response under 24 words.
                       final endTime = _addMinutes(startTime, duration);
 
                       if (_isRescheduleMode) {
-                        final response = await CustomerApi.postJson('booking.php', {
-                          'action': 'reschedule',
-                          'appointmentID': widget.rescheduleAppointmentId,
-                          'userID': UserSession.userId,
-                          'appointmentDate': _formatDate(_activeDate),
-                          'startTime': startTime,
-                          'endTime': endTime,
-                        });
-                        if (!context.mounted) return;
-                        final data = response.body.isNotEmpty
-                            ? jsonDecode(response.body) as Map<String, dynamic>
-                            : <String, dynamic>{};
-                        if (response.statusCode != 200) {
+                        try {
+                          final data = await CustomerApi.postDecoded('booking.php', {
+                            'action': 'reschedule',
+                            'appointmentID': widget.rescheduleAppointmentId,
+                            'userID': UserSession.userId,
+                            'appointmentDate': _formatDate(_activeDate),
+                            'startTime': startTime,
+                            'endTime': endTime,
+                          });
+                          if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content: Text(data['error']?.toString() ?? 'Reschedule failed.'),
+                              content: Text(
+                                data['message']?.toString() ?? 'Appointment rescheduled.',
+                              ),
                             ),
+                          );
+                          Navigator.of(context).pop(true);
+                          Navigator.of(context).pop(true);
+                          return;
+                        } on CustomerApiException catch (e) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(e.message)),
                           );
                           return;
                         }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              data['message']?.toString() ?? 'Appointment rescheduled.',
-                            ),
-                          ),
-                        );
-                        Navigator.of(context).pop(true);
-                        Navigator.of(context).pop(true);
-                        return;
                       }
 
                       if (UserSession.selectedVariantId == null) {
@@ -837,22 +834,22 @@ Keep the total response under 24 words.
 
                       final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
 
-                      final response = await CustomerApi.postJson('booking.php', {
-                        'action': 'create',
-                        'userID': UserSession.userId,
-                        'barberID': widget.barberId,
-                        'appointmentDate': _formatDate(_activeDate),
-                        'startTime': startTime,
-                        'endTime': endTime,
-                        'serviceIDs': [serviceId],
-                        'variantID': UserSession.selectedVariantId,
-                        ...FaceScanService.bookingPreviewPayload(),
-                      });
-
-                      if (!context.mounted) return;
-                      if (response.statusCode != 201) {
-                        final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
-                        if (response.statusCode == 409) {
+                      late final Map<String, dynamic> bookingData;
+                      try {
+                        bookingData = await CustomerApi.postDecoded('booking.php', {
+                          'action': 'create',
+                          'userID': UserSession.userId,
+                          'barberID': widget.barberId,
+                          'appointmentDate': _formatDate(_activeDate),
+                          'startTime': startTime,
+                          'endTime': endTime,
+                          'serviceIDs': [serviceId],
+                          'variantID': UserSession.selectedVariantId,
+                          ...FaceScanService.bookingPreviewPayload(),
+                        }, okStatusCodes: {201});
+                      } on CustomerApiException catch (e) {
+                        if (!context.mounted) return;
+                        if (e.statusCode == 409) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('You already have an active appointment.')),
                           );
@@ -862,12 +859,10 @@ Keep the total response under 24 words.
                           return;
                         }
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(data['error']?.toString() ?? 'Booking failed.')),
+                          SnackBar(content: Text(e.message)),
                         );
                         return;
                       }
-
-                      final bookingData = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
                       final appointmentId = int.tryParse(bookingData['appointmentID']?.toString() ?? '') ?? 0;
                       await BookingDraftService.clear();
                       if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null) {
@@ -916,6 +911,12 @@ Keep the total response under 24 words.
                           haircutName: UserSession.selectedStyleName ?? 'Haircut',
                         ),
                       ));
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Booking failed: $e')),
+                          );
+                        }
                       } finally {
                         if (mounted) {
                           setState(() => _bookingInFlight = false);

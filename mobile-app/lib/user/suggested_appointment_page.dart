@@ -170,200 +170,205 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     }
 
     setState(() => _booking = true);
-
-    final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
-    if (!mounted) {
-      return;
-    }
-    if (hasActive) {
-      setState(() => _booking = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-      );
-      return;
-    }
-
-    final service = await _loadDefaultService();
-    if (!mounted) {
-      return;
-    }
-    if (service == null || service.isEmpty) {
-      setState(() => _booking = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No haircut service configured.')),
-      );
-      return;
-    }
-
-    final suggestion = _suggestion;
-    final barberId = suggestion['barberID'] is int
-        ? suggestion['barberID'] as int
-        : int.tryParse('${suggestion['barberID']}') ?? 0;
-    final barberName = suggestion['barberName']?.toString() ?? 'Barber';
-    final appointmentDate = suggestion['slotDate']?.toString() ?? '';
-    final startTime = suggestion['slotTime']?.toString() ?? '';
-
-    if (barberId <= 0 || appointmentDate.isEmpty || startTime.isEmpty) {
-      setState(() => _booking = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Suggested schedule is incomplete. Please choose manually.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
-    }
-
-    if (_isPastOrInvalidSlot(date: appointmentDate, time: startTime)) {
-      setState(() => _booking = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This suggested time has already passed. Please choose another schedule.')),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
-    }
-
-    final serviceId = int.tryParse(service['service_id']?.toString() ?? '') ?? 0;
-    if (serviceId <= 0) {
-      setState(() => _booking = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid service configuration.')),
-      );
-      return;
-    }
-
-    final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
-    const duration = 60;
-    final endTime = _addMinutes(startTime, duration);
-
-    final response = await CustomerApi.postJson('booking.php', {
-      'action': 'create',
-      'userID': UserSession.userId,
-      'barberID': barberId,
-      'appointmentDate': appointmentDate,
-      'startTime': startTime,
-      'endTime': endTime,
-      'serviceIDs': [serviceId],
-      'variantID': UserSession.selectedVariantId,
-      if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
-    });
-
-    if (!mounted) {
-      return;
-    }
-
-    if (response.statusCode != 201) {
-      final data = response.body.isNotEmpty
-          ? jsonDecode(response.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-      setState(() => _booking = false);
-      if (response.statusCode == 409) {
-        final errorText = data['error']?.toString() ?? '';
-        if (errorText.contains('active appointment')) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('You already have an active appointment.')),
-          );
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-          );
-          return;
-        }
-        if (!_retriedAfterConflict) {
-          _retriedAfterConflict = true;
-          await _refreshSuggestionIfStale();
-          if (!mounted) return;
-          if (!_isPastOrInvalidSlot(
-            date: _suggestion['slotDate']?.toString() ?? '',
-            time: _suggestion['slotTime']?.toString() ?? '',
-          )) {
-            setState(() => _booking = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('That slot was just taken. Trying the next available time…')),
-            );
-            await _proceedToPayment();
-            return;
-          }
-        }
-        setState(() => _booking = false);
+    try {
+      final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
+      if (!mounted) {
+        return;
+      }
+      if (hasActive) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorText.isNotEmpty ? errorText : 'This slot is no longer available.')),
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
+      }
+
+      final service = await _loadDefaultService();
+      if (!mounted) {
+        return;
+      }
+      if (service == null || service.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No haircut service configured.')),
+        );
+        return;
+      }
+
+      final suggestion = _suggestion;
+      final barberId = suggestion['barberID'] is int
+          ? suggestion['barberID'] as int
+          : int.tryParse('${suggestion['barberID']}') ?? 0;
+      final barberName = suggestion['barberName']?.toString() ?? 'Barber';
+      final appointmentDate = suggestion['slotDate']?.toString() ?? '';
+      final startTime = suggestion['slotTime']?.toString() ?? '';
+
+      if (barberId <= 0 || appointmentDate.isEmpty || startTime.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Suggested schedule is incomplete. Please choose manually.')),
         );
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
         );
         return;
       }
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(data['error']?.toString() ?? 'Booking failed.')),
-      );
-      return;
-    }
 
-    final bookingData = response.body.isNotEmpty
-        ? jsonDecode(response.body) as Map<String, dynamic>
-        : <String, dynamic>{};
-    final appointmentId = int.tryParse(bookingData['appointmentID']?.toString() ?? '') ?? 0;
+      if (_isPastOrInvalidSlot(date: appointmentDate, time: startTime)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('This suggested time has already passed. Please choose another schedule.')),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+        );
+        return;
+      }
 
-    await BookingDraftService.clear();
+      final serviceId = int.tryParse(service['service_id']?.toString() ?? '') ?? 0;
+      if (serviceId <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid service configuration.')),
+        );
+        return;
+      }
 
-    if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null && !widget.skipPreviews) {
-      await AiFunnelService.trackBookingCreated(
-        scanSessionId: UserSession.ensureScanSessionId(),
-        userId: UserSession.userId!,
-        variantId: UserSession.selectedVariantId!,
-        appointmentId: appointmentId,
-        serviceId: serviceId,
-        estimatedMinutes: duration,
-        frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-        sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-        backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
-      );
-      if (bookingData['previewsAttached'] != true) {
-        try {
-          await FaceScanService.attachPreviewsToAppointment(
-            appointmentId: appointmentId,
-            scanSessionId: UserSession.ensureScanSessionId(),
-            variantId: UserSession.selectedVariantId!,
-          );
-        } catch (e) {
-          debugPrint('Preview attach failed: $e');
-          if (mounted) {
+      final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
+      const duration = 60;
+      final endTime = _addMinutes(startTime, duration);
+
+      late final Map<String, dynamic> bookingData;
+      try {
+        bookingData = await CustomerApi.postDecoded(
+          'booking.php',
+          {
+            'action': 'create',
+            'userID': UserSession.userId,
+            'barberID': barberId,
+            'appointmentDate': appointmentDate,
+            'startTime': startTime,
+            'endTime': endTime,
+            'serviceIDs': [serviceId],
+            'variantID': UserSession.selectedVariantId,
+            if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
+          },
+          okStatusCodes: {201},
+        );
+      } on CustomerApiException catch (e) {
+        if (!mounted) {
+          return;
+        }
+        if (e.statusCode == 409) {
+          final errorText = e.message;
+          if (errorText.contains('active appointment')) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Booking saved, but preview photos could not be linked. '
-                  'Your barber may see the default style images.',
-                ),
-              ),
+              const SnackBar(content: Text('You already have an active appointment.')),
             );
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+            );
+            return;
+          }
+          if (!_retriedAfterConflict) {
+            _retriedAfterConflict = true;
+            await _refreshSuggestionIfStale();
+            if (!mounted) return;
+            if (!_isPastOrInvalidSlot(
+              date: _suggestion['slotDate']?.toString() ?? '',
+              time: _suggestion['slotTime']?.toString() ?? '',
+            )) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('That slot was just taken. Trying the next available time…')),
+              );
+              await _proceedToPayment();
+              return;
+            }
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(errorText.isNotEmpty ? errorText : 'This slot is no longer available.')),
+          );
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+          );
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+        return;
+      }
+
+      final appointmentId = int.tryParse(bookingData['appointmentID']?.toString() ?? '') ?? 0;
+
+      await BookingDraftService.clear();
+
+      if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null && !widget.skipPreviews) {
+        await AiFunnelService.trackBookingCreated(
+          scanSessionId: UserSession.ensureScanSessionId(),
+          userId: UserSession.userId!,
+          variantId: UserSession.selectedVariantId!,
+          appointmentId: appointmentId,
+          serviceId: serviceId,
+          estimatedMinutes: duration,
+          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
+          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
+          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
+        );
+        if (bookingData['previewsAttached'] != true) {
+          try {
+            await FaceScanService.attachPreviewsToAppointment(
+              appointmentId: appointmentId,
+              scanSessionId: UserSession.ensureScanSessionId(),
+              variantId: UserSession.selectedVariantId!,
+            );
+          } catch (e) {
+            debugPrint('Preview attach failed: $e');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Booking saved, but preview photos could not be linked. '
+                    'Your barber may see the default style images.',
+                  ),
+                ),
+              );
+            }
           }
         }
       }
-    }
 
-    if (!mounted) {
-      return;
-    }
+      if (!mounted) {
+        return;
+      }
 
-    setState(() => _booking = false);
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PaymentPage(
-          appointmentID: appointmentId,
-          barberName: barberName,
-          date: appointmentDate,
-          time: formatTo12Hour(startTime),
-          amount: price.round(),
-          haircutName: UserSession.selectedStyleName ?? 'Haircut',
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PaymentPage(
+            appointmentID: appointmentId,
+            barberName: barberName,
+            date: appointmentDate,
+            time: formatTo12Hour(startTime),
+            amount: price.round(),
+            haircutName: UserSession.selectedStyleName ?? 'Haircut',
+          ),
         ),
-      ),
-    );
+      );
+    } on CustomerApiException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Booking failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _booking = false);
+      }
+    }
   }
 
   String _addMinutes(String time, int minutes) {
@@ -513,9 +518,9 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     final barberName = _suggestion['barberName']?.toString() ?? 'Barber';
     final slotDate = _suggestion['slotDate']?.toString() ?? '';
     final slotTime = formatTo12Hour(_suggestion['slotTime']?.toString() ?? '');
-    final isFallback = _suggestion['isFallback'] == true;
+    final isFallback = _recommended['isFallback'] == true;
     final suggestionReason = formatSuggestionReasonTo12h(
-      _suggestion['suggestionReason']?.toString() ?? '',
+      _recommended['suggestionReason']?.toString() ?? '',
     );
     final isStale = slotDate.isNotEmpty &&
         _suggestion['slotTime']?.toString().isNotEmpty == true &&

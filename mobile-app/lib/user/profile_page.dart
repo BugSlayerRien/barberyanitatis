@@ -119,22 +119,14 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<Map<String, dynamic>?> _loadProfileFromApi(int userId) async {
-    final response = await CustomerApi.postJson('profile.php', {
+    final body = await CustomerApi.postDecoded('profile.php', {
       'action': 'get',
       'userID': userId,
     });
 
-    final body = response.body.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-        : <String, dynamic>{};
-
-    if (response.statusCode != 200) {
-      throw Exception(body['error']?.toString() ?? 'Failed to load profile');
-    }
-
     final profile = body['profile'];
     if (profile is! Map) {
-      throw Exception('Profile response was invalid');
+      throw const CustomerApiException('Profile response was invalid');
     }
     return Map<String, dynamic>.from(profile);
   }
@@ -159,15 +151,7 @@ class _ProfilePageState extends State<ProfilePage> {
       payload['profile_image_base64'] = profileImageBase64;
     }
 
-    final response = await CustomerApi.postJson('profile.php', payload);
-
-    final body = response.body.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-        : <String, dynamic>{};
-
-    if (response.statusCode != 200) {
-      throw Exception(body['error']?.toString() ?? 'Failed to save profile');
-    }
+    final body = await CustomerApi.postDecoded('profile.php', payload);
 
     final profile = body['profile'];
     if (profile is Map) {

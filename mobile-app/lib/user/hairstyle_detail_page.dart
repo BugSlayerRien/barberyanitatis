@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'package:flutter/foundation.dart';
@@ -331,17 +330,13 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       return;
     }
     try {
-      final response = await CustomerApi.postJson('favorites.php', {
-        'action': 'status',
-        'userID': userId,
-        'variantID': variantId,
-      });
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (!mounted) return;
-      setState(() => _isFavorite = data['isFavorite'] == true);
+        final data = await CustomerApi.postDecoded('favorites.php', {
+          'action': 'status',
+          'userID': userId,
+          'variantID': variantId,
+        });
+        if (!mounted) return;
+        setState(() => _isFavorite = data['isFavorite'] == true);
     }
     catch (_) {
       // Ignore favorite status errors so the page still loads.
@@ -405,22 +400,16 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     setState(() => _savingFavorite = true);
     try {
       final action = _isFavorite ? 'remove' : 'add';
-      final response = await CustomerApi.postJson('favorites.php', {
+      await CustomerApi.postDecoded('favorites.php', {
         'action': action,
         'userID': userId,
         'variantID': variantId,
-      });
+      }, okStatusCodes: {200, 201});
       if (!mounted) return;
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        setState(() => _isFavorite = !_isFavorite);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_isFavorite ? 'Saved to bookmarks.' : 'Removed from bookmarks.')),
-        );
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update saved haircuts.')),
-        );
-      }
+      setState(() => _isFavorite = !_isFavorite);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_isFavorite ? 'Saved to bookmarks.' : 'Removed from bookmarks.')),
+      );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

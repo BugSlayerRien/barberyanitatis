@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'customer_api.dart';
 
 class BookingGuard {
@@ -21,16 +19,11 @@ class BookingGuard {
     }
 
     try {
-      final response = await CustomerApi.postJson('booking.php', {
+      final data = await CustomerApi.postDecoded('booking.php', {
         'action': 'listByCustomer',
         'userID': userId,
       });
 
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return false;
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final appointments = (data['appointments'] as List<dynamic>? ?? [])
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
