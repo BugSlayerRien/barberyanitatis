@@ -3,16 +3,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
 $data = get_json_input();
 $action = strtolower(trim((string)($data['action'] ?? 'get')));
-$userID = (int)($data['userID'] ?? $data['userId'] ?? 0);
-
-if ($userID <= 0) {
-    json_response(['error' => 'userID is required'], 400);
-}
 
 function normalize_gender(?string $value): string
 {
@@ -115,7 +111,9 @@ function profile_payload_from_row(array $row): array
 }
 
 try {
-    with_pdo_retry(function (PDO $pdo) use ($action, $data, $userID): void {
+    with_pdo_retry(function (PDO $pdo) use ($action, $data): void {
+    $customer = require_customer($pdo, $data);
+    $userID = $customer['user_id'];
 
     if ($action === 'update') {
         $row = fetch_profile_row($pdo, $userID);

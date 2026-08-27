@@ -1,8 +1,6 @@
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
-
-import 'api_config.dart';
+import 'customer_api.dart';
 
 class BookingGuard {
   static const Set<String> _activeStatuses = {
@@ -23,14 +21,10 @@ class BookingGuard {
     }
 
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'listByCustomer',
-          'userID': userId,
-        }),
-      );
+      final response = await CustomerApi.postJson('booking.php', {
+        'action': 'listByCustomer',
+        'userID': userId,
+      });
 
       if (response.statusCode != 200 || response.body.isEmpty) {
         return false;

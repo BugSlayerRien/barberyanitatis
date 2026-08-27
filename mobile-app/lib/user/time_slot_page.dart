@@ -8,6 +8,7 @@ import 'appointments_page.dart';
 import 'booking_guard.dart';
 import 'payment_page.dart';
 import 'api_config.dart';
+import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/face_scan_service.dart';
@@ -754,18 +755,14 @@ Keep the total response under 24 words.
                       final endTime = _addMinutes(startTime, duration);
 
                       if (_isRescheduleMode) {
-                        final response = await http.post(
-                          Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-                          headers: {'Content-Type': 'application/json'},
-                          body: jsonEncode({
-                            'action': 'reschedule',
-                            'appointmentID': widget.rescheduleAppointmentId,
-                            'userID': UserSession.userId,
-                            'appointmentDate': _formatDate(_activeDate),
-                            'startTime': startTime,
-                            'endTime': endTime,
-                          }),
-                        );
+                        final response = await CustomerApi.postJson('booking.php', {
+                          'action': 'reschedule',
+                          'appointmentID': widget.rescheduleAppointmentId,
+                          'userID': UserSession.userId,
+                          'appointmentDate': _formatDate(_activeDate),
+                          'startTime': startTime,
+                          'endTime': endTime,
+                        });
                         if (!context.mounted) return;
                         final data = response.body.isNotEmpty
                             ? jsonDecode(response.body) as Map<String, dynamic>
@@ -840,21 +837,17 @@ Keep the total response under 24 words.
 
                       final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
 
-                      final response = await http.post(
-                        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-                        headers: {'Content-Type': 'application/json'},
-                        body: jsonEncode({
-                          'action': 'create',
-                          'userID': UserSession.userId,
-                          'barberID': widget.barberId,
-                          'appointmentDate': _formatDate(_activeDate),
-                          'startTime': startTime,
-                          'endTime': endTime,
-                          'serviceIDs': [serviceId],
-                          'variantID': UserSession.selectedVariantId,
-                          ...FaceScanService.bookingPreviewPayload(),
-                        }),
-                      );
+                      final response = await CustomerApi.postJson('booking.php', {
+                        'action': 'create',
+                        'userID': UserSession.userId,
+                        'barberID': widget.barberId,
+                        'appointmentDate': _formatDate(_activeDate),
+                        'startTime': startTime,
+                        'endTime': endTime,
+                        'serviceIDs': [serviceId],
+                        'variantID': UserSession.selectedVariantId,
+                        ...FaceScanService.bookingPreviewPayload(),
+                      });
 
                       if (!context.mounted) return;
                       if (response.statusCode != 201) {

@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 import 'appointments_page.dart';
 import 'api_config.dart';
+import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 
@@ -235,17 +236,13 @@ class _PaymentPageState extends State<PaymentPage> {
     required String resourceType,
   }) async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/payments.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'confirmGatewayPayment',
-          'appointmentID': widget.appointmentID,
-          'providerRef': providerRef,
-          'resourceType': resourceType,
-          'userID': UserSession.userId,
-        }),
-      );
+      final response = await CustomerApi.postJson('payments.php', {
+        'action': 'confirmGatewayPayment',
+        'appointmentID': widget.appointmentID,
+        'providerRef': providerRef,
+        'resourceType': resourceType,
+        'userID': UserSession.userId,
+      });
       if (response.body.isEmpty) {
         return {'paymentState': 'Paid'};
       }

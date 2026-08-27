@@ -1,9 +1,6 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-import 'api_config.dart';
+import 'customer_api.dart';
 import 'user_session.dart';
 
 /// First-time (or missing profile) hair texture picker shown before browsing cuts.
@@ -29,16 +26,12 @@ class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
 
       final userId = UserSession.userId;
       if (userId != null && userId > 0) {
-        await http.post(
-          Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'action': 'update',
-            'userID': userId,
-            'fullName': UserSession.fullName ?? 'Customer',
-            'hairTexture': _selected,
-          }),
-        );
+        await CustomerApi.postJson('profile.php', {
+          'action': 'update',
+          'userID': userId,
+          'fullName': UserSession.fullName ?? 'Customer',
+          'hairTexture': _selected,
+        });
       }
 
       if (!mounted) return;

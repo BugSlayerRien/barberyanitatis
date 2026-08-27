@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'payment_page.dart';
+import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
@@ -163,23 +164,19 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
     if (!mounted) return;
     setState(() => _bookingInFlight = true);
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'createGroup',
-          'userID': UserSession.userId,
-          'barberID': option['barberID'] ?? widget.barberId,
-          'appointmentDate': option['slotDate'],
-          'slots': slots,
-          'memberNames': [_customerName],
-          'peopleCount': widget.peopleCount,
-          'requestedCount': widget.peopleCount,
-          'allowPartial': type == 'partial' && _confirmPartial,
-          'confirmPartial': type == 'partial' && _confirmPartial,
-          'variantID': UserSession.selectedVariantId,
-        }),
-      );
+      final response = await CustomerApi.postJson('booking.php', {
+        'action': 'createGroup',
+        'userID': UserSession.userId,
+        'barberID': option['barberID'] ?? widget.barberId,
+        'appointmentDate': option['slotDate'],
+        'slots': slots,
+        'memberNames': [_customerName],
+        'peopleCount': widget.peopleCount,
+        'requestedCount': widget.peopleCount,
+        'allowPartial': type == 'partial' && _confirmPartial,
+        'confirmPartial': type == 'partial' && _confirmPartial,
+        'variantID': UserSession.selectedVariantId,
+      });
 
       final data = response.body.isNotEmpty
           ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)

@@ -5,13 +5,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'customer_navigation.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
+import 'customer_api.dart';
 import 'user_session.dart';
 
 class ProfilePage extends StatefulWidget {
@@ -119,14 +119,10 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<Map<String, dynamic>?> _loadProfileFromApi(int userId) async {
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'get',
-        'userID': userId,
-      }),
-    );
+    final response = await CustomerApi.postJson('profile.php', {
+      'action': 'get',
+      'userID': userId,
+    });
 
     final body = response.body.isNotEmpty
         ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
@@ -163,11 +159,7 @@ class _ProfilePageState extends State<ProfilePage> {
       payload['profile_image_base64'] = profileImageBase64;
     }
 
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(payload),
-    );
+    final response = await CustomerApi.postJson('profile.php', payload);
 
     final body = response.body.isNotEmpty
         ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
