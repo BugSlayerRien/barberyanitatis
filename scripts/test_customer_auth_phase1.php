@@ -178,6 +178,20 @@ try {
     phase1_ok('3. No JWT + any userID is 401', $e->httpStatus === 401, $e->getMessage());
 }
 
+$_SERVER['HTTP_AUTHORIZATION'] = '';
+$_SERVER['HTTP_X_SUPABASE_ACCESS_TOKEN'] = $tokenA;
+try {
+    $resolved = resolve_authenticated_customer($pdo, ['userID' => (int)$userA['user_id']]);
+    phase1_ok(
+        '3b. X-Supabase-Access-Token authenticates without Authorization',
+        (int)$resolved['user_id'] === (int)$userA['user_id'],
+        'user_id=' . $resolved['user_id']
+    );
+} catch (CustomerAuthException $e) {
+    phase1_ok('3b. X-Supabase-Access-Token authenticates without Authorization', false, $e->httpStatus . ' ' . $e->getMessage());
+}
+unset($_SERVER['HTTP_X_SUPABASE_ACCESS_TOKEN']);
+
 $apptB = $pdo->prepare(
     'SELECT appointment_id, user_id FROM appointments WHERE user_id <> :user_id ORDER BY appointment_id DESC LIMIT 1'
 );
@@ -296,6 +310,17 @@ if ($probe['status'] === 0) {
             ['Authorization: Bearer ' . $tokenA]
         );
         phase1_ok('HTTP User A JWT + A userID → 200', $withA['status'] === 200, 'status=' . $withA['status']);
+
+        $withXToken = phase1_http(
+            $apiBase . '/profile.php',
+            ['action' => 'get', 'userID' => (int)$userA['user_id']],
+            ['X-Supabase-Access-Token: ' . $tokenA]
+        );
+        phase1_ok(
+            'HTTP User A X-Supabase-Access-Token + A userID → 200',
+            $withXToken['status'] === 200,
+            'status=' . $withXToken['status']
+        );
 
         $cross = phase1_http(
             $apiBase . '/profile.php',

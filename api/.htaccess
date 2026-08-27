@@ -1,0 +1,5 @@
+# XAMPP: pass Authorization through to PHP (CGI/Apache often strips it).
+<IfModule mod_setenvif.c>
+  SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1
+  SetEnvIf Authorization "(.*)" REDIRECT_HTTP_AUTHORIZATION=$1
+</IfModule>
