@@ -1,8 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-import '../api_config.dart';
+import '../customer_api.dart';
 import '../user_session.dart';
 
 class AppTopBar extends StatefulWidget implements PreferredSizeWidget {
@@ -53,14 +52,10 @@ class _AppTopBarState extends State<AppTopBar> {
       return 0;
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'unreadCount',
-          'userID': UserSession.userId,
-        }),
-      );
+      final response = await CustomerApi.postJson('notifications.php', {
+        'action': 'unreadCount',
+        'userID': UserSession.userId,
+      });
       if (response.statusCode != 200 || response.body.isEmpty) {
         return 0;
       }
@@ -76,11 +71,10 @@ class _AppTopBarState extends State<AppTopBar> {
       return [];
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'list', 'userID': UserSession.userId}),
-      );
+      final response = await CustomerApi.postJson('notifications.php', {
+        'action': 'list',
+        'userID': UserSession.userId,
+      });
       if (response.statusCode != 200 || response.body.isEmpty) {
         return [];
       }
@@ -110,15 +104,11 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'markRead',
-          'userID': UserSession.userId,
-          'notificationID': notificationID,
-        }),
-      );
+      final response = await CustomerApi.postJson('notifications.php', {
+        'action': 'markRead',
+        'userID': UserSession.userId,
+        'notificationID': notificationID,
+      });
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -130,14 +120,10 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'markAllRead',
-          'userID': UserSession.userId,
-        }),
-      );
+      final response = await CustomerApi.postJson('notifications.php', {
+        'action': 'markAllRead',
+        'userID': UserSession.userId,
+      });
       return response.statusCode == 200;
     } catch (_) {
       return false;
@@ -149,15 +135,11 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/notifications.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'delete',
-          'userID': UserSession.userId,
-          'notificationID': notificationID,
-        }),
-      );
+      final response = await CustomerApi.postJson('notifications.php', {
+        'action': 'delete',
+        'userID': UserSession.userId,
+        'notificationID': notificationID,
+      });
       return response.statusCode == 200;
     } catch (_) {
       return false;

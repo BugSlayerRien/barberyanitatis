@@ -1,9 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 
-import 'api_config.dart';
+import 'customer_api.dart';
 import '../shared/pagination_controls.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
@@ -46,11 +45,10 @@ class _HistoryPageState extends State<HistoryPage> {
     });
 
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/payments.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'listWallet', 'userID': userId}),
-      );
+      final response = await CustomerApi.postJson('payments.php', {
+        'action': 'listWallet',
+        'userID': userId,
+      });
 
       final data = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>

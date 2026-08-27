@@ -144,10 +144,24 @@ class _AuthPageState extends State<AuthPage> {
       if (phpLogin.statusCode == 200) {
         final phpUser = phpData['user'] as Map<String, dynamic>?;
         if (phpUser != null) {
-          AuthBootstrap.applyPhpAuthUser(phpUser);
-          if (!mounted) return;
-          AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
-          return;
+          final roles = (phpUser['roles'] as List<dynamic>? ?? const [])
+              .map((role) => role.toString().toLowerCase())
+              .toList();
+          final isStaffOrBarber = roles.any(
+            (role) =>
+                role == 'admin' ||
+                role == 'barber' ||
+                role == 'receptionist' ||
+                role == 'staff',
+          );
+          // Staff/barber keep PHP sessions. Customers must obtain a Supabase JWT
+          // or Phase 1 APIs will reject body userID as identity.
+          if (isStaffOrBarber) {
+            AuthBootstrap.applyPhpAuthUser(phpUser);
+            if (!mounted) return;
+            AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
+            return;
+          }
         }
       }
 

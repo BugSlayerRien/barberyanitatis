@@ -13,6 +13,7 @@ import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
+import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'suggested_appointment_page.dart';
@@ -110,14 +111,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     });
 
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'listByCustomer',
-          'userID': UserSession.userId,
-        }),
-      );
+      final response = await CustomerApi.postJson('booking.php', {
+        'action': 'listByCustomer',
+        'userID': UserSession.userId,
+      });
 
       final data = response.body.isNotEmpty
           ? jsonDecode(response.body) as Map<String, dynamic>
@@ -1260,16 +1257,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       setState(() => _processingAppointmentIds.add(normalizedId));
     }
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'cancel',
-          'appointmentID': appointmentId,
-          'userID': UserSession.userId,
-          'reason': reason,
-        }),
-      );
+      final response = await CustomerApi.postJson('booking.php', {
+        'action': 'cancel',
+        'appointmentID': appointmentId,
+        'userID': UserSession.userId,
+        'reason': reason,
+      });
       if (!mounted) {
         return;
       }

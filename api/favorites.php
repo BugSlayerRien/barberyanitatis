@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -29,10 +30,8 @@ try {
     $pdo = get_db_connection();
     ensure_favorites_table($pdo);
 
-    $userID = (int)($input['userID'] ?? $input['userId'] ?? 0);
-    if ($userID <= 0) {
-        json_response(['error' => 'Invalid userID'], 422);
-    }
+    $customer = require_customer($pdo, $input);
+    $userID = $customer['user_id'];
 
     if ($action === 'listByUser') {
         $stmt = $pdo->prepare(

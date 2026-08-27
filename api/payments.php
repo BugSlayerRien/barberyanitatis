@@ -7,6 +7,7 @@ require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/appointment_payment_notify_trigger.php';
 require_once __DIR__ . '/appointment_notifications.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -195,11 +196,11 @@ try {
         // Trigger creation can fail on restricted roles; payment flow still completes.
     }
 
+    $customer = require_customer($pdo, $input);
+    $customerUserId = $customer['user_id'];
+
     if ($action === 'listWallet') {
-        $userID = (int)($input['userID'] ?? 0);
-        if ($userID <= 0) {
-            json_response(['error' => 'Invalid userID'], 422);
-        }
+        $userID = $customerUserId;
 
         $stmt = $pdo->prepare(
             "SELECT a.appointment_id, a.booking_code, a.appointment_date, a.start_time,
@@ -276,6 +277,9 @@ try {
         }
 
         $appointment = get_appointment($pdo, $appointmentID);
+        if ((int)$appointment['user_id'] !== $customerUserId) {
+            json_response(['error' => 'You are not authorized to access this appointment.'], 403);
+        }
         $latestPayment = get_latest_payment($pdo, $appointmentID);
         if ($latestPayment && (string)$latestPayment['status'] === 'Captured') {
             json_response([
@@ -374,6 +378,9 @@ try {
         }
 
         $appointment = get_appointment($pdo, $appointmentID);
+        if ((int)$appointment['user_id'] !== $customerUserId) {
+            json_response(['error' => 'You are not authorized to access this appointment.'], 403);
+        }
         $latestPayment = get_latest_payment($pdo, $appointmentID);
         if ($latestPayment && (string)$latestPayment['status'] === 'Captured') {
             json_response([
@@ -476,10 +483,19 @@ try {
             }
             $appointmentID = (int)$intent['appointment_id'];
         } else {
+            $ownedAppointment = get_appointment($pdo, $appointmentID);
+            if ((int)$ownedAppointment['user_id'] !== $customerUserId) {
+                json_response(['error' => 'You are not authorized to access this appointment.'], 403);
+            }
             $intent = get_latest_intent($pdo, $appointmentID);
             if (!$intent) {
                 json_response(['paymentState' => 'Unpaid', 'intent' => null]);
             }
+        }
+
+        $statusAppointment = get_appointment($pdo, $appointmentID);
+        if ((int)$statusAppointment['user_id'] !== $customerUserId) {
+            json_response(['error' => 'You are not authorized to access this appointment.'], 403);
         }
 
         if ((string)$intent['status'] === 'PendingGateway' && strtotime((string)$intent['expires_at']) < time()) {
@@ -541,6 +557,9 @@ try {
         }
 
         $appointment = get_appointment($pdo, (int)$intent['appointment_id']);
+        if ((int)$appointment['user_id'] !== $customerUserId) {
+            json_response(['error' => 'You are not authorized to access this appointment.'], 403);
+        }
 
         if (in_array((string)$intent['status'], ['Paid', 'Failed', 'Expired', 'Cancelled'], true)) {
             $latestPayment = get_latest_payment($pdo, (int)$intent['appointment_id']);

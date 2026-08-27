@@ -12,6 +12,7 @@ import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
 import 'payment_page.dart';
+import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
@@ -240,21 +241,17 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     const duration = 60;
     final endTime = _addMinutes(startTime, duration);
 
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'create',
-        'userID': UserSession.userId,
-        'barberID': barberId,
-        'appointmentDate': appointmentDate,
-        'startTime': startTime,
-        'endTime': endTime,
-        'serviceIDs': [serviceId],
-        'variantID': UserSession.selectedVariantId,
-        if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
-      }),
-    );
+    final response = await CustomerApi.postJson('booking.php', {
+      'action': 'create',
+      'userID': UserSession.userId,
+      'barberID': barberId,
+      'appointmentDate': appointmentDate,
+      'startTime': startTime,
+      'endTime': endTime,
+      'serviceIDs': [serviceId],
+      'variantID': UserSession.selectedVariantId,
+      if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
+    });
 
     if (!mounted) {
       return;

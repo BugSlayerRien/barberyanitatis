@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/schema_cache.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -61,9 +62,19 @@ try {
     $pdo = get_db_connection();
     ensure_notification_type_constraint($pdo);
 
-    $recipient = resolve_notification_recipient($input);
-    $recipientType = $recipient['recipient_type'];
-    $recipientId = $recipient['recipient_id'];
+    $explicitType = strtolower(trim((string)($input['recipientType'] ?? '')));
+    $barberId = (int)($input['barberID'] ?? $input['barberId'] ?? 0);
+    $isBarberRecipient = $explicitType === 'barber' || $barberId > 0;
+
+    if ($isBarberRecipient) {
+        $recipient = resolve_notification_recipient($input);
+        $recipientType = $recipient['recipient_type'];
+        $recipientId = $recipient['recipient_id'];
+    } else {
+        $customer = require_customer($pdo, $input);
+        $recipientType = 'User';
+        $recipientId = $customer['user_id'];
+    }
 
     if ($action === 'unreadCount') {
         $countStmt = $pdo->prepare(
@@ -83,6 +94,9 @@ try {
         $notificationID = (int)($input['notificationID'] ?? 0);
         if ($notificationID <= 0) {
             json_response(['error' => 'Invalid notificationID'], 422);
+        }
+        if (!$isBarberRecipient) {
+            require_customer_owns_notification($pdo, $recipientId, $notificationID);
         }
 
         $stmt = $pdo->prepare(
@@ -128,6 +142,9 @@ try {
         $notificationID = (int)($input['notificationID'] ?? 0);
         if ($notificationID <= 0) {
             json_response(['error' => 'Invalid notificationID'], 422);
+        }
+        if (!$isBarberRecipient) {
+            require_customer_owns_notification($pdo, $recipientId, $notificationID);
         }
 
         $stmt = $pdo->prepare(

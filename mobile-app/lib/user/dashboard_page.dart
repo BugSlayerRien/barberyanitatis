@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'profile_page.dart';
 import 'saved_haircuts_page.dart';
 import 'haircuts_list_page.dart';
@@ -11,7 +10,7 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'widgets/shimmer_skeleton.dart';
-import 'api_config.dart';
+import 'customer_api.dart';
 import 'ai_face_scan_page.dart';
 import 'appointments_page.dart';
 import 'customer_navigation.dart';
@@ -131,14 +130,10 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<List<Map<String, dynamic>>> _fetchCustomerAppointments(int userId) async {
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'listByCustomer',
-        'userID': userId,
-      }),
-    );
+    final response = await CustomerApi.postJson('booking.php', {
+      'action': 'listByCustomer',
+      'userID': userId,
+    });
     if (response.statusCode != 200 || response.body.isEmpty) {
       return const [];
     }
@@ -196,14 +191,10 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<Map<String, dynamic>?> _fetchQuickBookProfile(int userId) async {
-    final profileResponse = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'getQuickBookProfile',
-        'userID': userId,
-      }),
-    );
+    final profileResponse = await CustomerApi.postJson('booking.php', {
+      'action': 'getQuickBookProfile',
+      'userID': userId,
+    });
     if (profileResponse.statusCode != 200 || profileResponse.body.isEmpty) {
       return null;
     }
@@ -218,14 +209,10 @@ class _DashboardPageState extends State<DashboardPage>
         Map<String, dynamic>? recentHaircut,
         Map<String, dynamic>? trendingHaircut,
       })> _fetchPersonalInsights(int userId) async {
-    final insightsResponse = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/booking.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'action': 'getCustomerHomeInsights',
-        'userID': userId,
-      }),
-    );
+    final insightsResponse = await CustomerApi.postJson('booking.php', {
+      'action': 'getCustomerHomeInsights',
+      'userID': userId,
+    });
     if (insightsResponse.statusCode != 200 ||
         insightsResponse.body.isEmpty) {
       return (
@@ -416,11 +403,10 @@ class _DashboardPageState extends State<DashboardPage>
     final userId = UserSession.userId;
     if (userId != null && userId > 0) {
       try {
-        final response = await http.post(
-          Uri.parse('${ApiConfig.baseUrl}/profile.php'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'action': 'get', 'userID': userId}),
-        );
+        final response = await CustomerApi.postJson('profile.php', {
+          'action': 'get',
+          'userID': userId,
+        });
         if (response.statusCode == 200 && response.body.isNotEmpty) {
           final data = jsonDecode(response.body) as Map<String, dynamic>;
           final profile = data['profile'] as Map<String, dynamic>?;

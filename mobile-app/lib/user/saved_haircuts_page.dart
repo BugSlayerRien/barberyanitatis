@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'ai_face_scan_page.dart';
 import 'api_config.dart';
+import 'customer_api.dart';
 import 'appointments_page.dart';
 import 'customer_navigation.dart';
 import 'hairstyle_detail_page.dart';
@@ -48,11 +49,10 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
       return [];
     }
 
-    final response = await http.post(
-      Uri.parse('${ApiConfig.baseUrl}/favorites.php'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'action': 'listByUser', 'userID': UserSession.userId}),
-    );
+    final response = await CustomerApi.postJson('favorites.php', {
+      'action': 'listByUser',
+      'userID': UserSession.userId,
+    });
 
     if (response.statusCode != 200) {
       return [];

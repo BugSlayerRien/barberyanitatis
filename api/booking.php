@@ -10,6 +10,7 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/face_scan_attach.php';
+require_once __DIR__ . '/customer_auth.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -211,6 +212,12 @@ if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber
 
 try {
     $pdo = get_db_connection();
+    $customer = null;
+    if ($action !== 'listByBarber') {
+        $customer = require_customer($pdo, $input);
+    } else {
+        $customer = ['user_id' => 0, 'email' => '', 'supabase_sub' => ''];
+    }
     ensure_service_channel_column($pdo);
     ensure_financial_tables($pdo);
     ensure_appointments_status_constraint($pdo);
@@ -236,7 +243,7 @@ try {
     }
 
     if ($action === 'createGroup') {
-        $userID = (int)($input['userID'] ?? 0);
+        $userID = (int)$customer['user_id'];
         $barberID = (int)($input['barberID'] ?? $input['primaryBarberID'] ?? 0);
         $slotDate = trim((string)($input['appointmentDate'] ?? $input['slotDate'] ?? ''));
         $slots = $input['slots'] ?? [];
@@ -295,7 +302,7 @@ try {
     }
 
     if ($action === 'create') {
-        $userID = (int)($input['userID'] ?? 0);
+        $userID = (int)$customer['user_id'];
         $barberID = (int)($input['barberID'] ?? 0);
         $appointmentDate = trim((string)($input['appointmentDate'] ?? ''));
         $startTimeRaw = trim((string)($input['startTime'] ?? ''));
@@ -575,10 +582,7 @@ try {
     }
 
     if ($action === 'getCustomerHomeInsights') {
-        $userID = (int)($input['userID'] ?? 0);
-        if ($userID <= 0) {
-            json_response(['error' => 'Invalid userID'], 422);
-        }
+        $userID = (int)$customer['user_id'];
 
         $favoriteBarber = null;
         // Avoid information_schema on every home load (slow on some hosts).
@@ -707,10 +711,7 @@ try {
         require_once __DIR__ . '/ai_funnel.php';
         ensure_ai_funnel_tables($pdo);
 
-        $userID = (int)($input['userID'] ?? 0);
-        if ($userID <= 0) {
-            json_response(['error' => 'Invalid userID'], 422);
-        }
+        $userID = (int)$customer['user_id'];
 
         $completedStmt = $pdo->prepare(
             "SELECT ad.variant_id, ad.service_id,
@@ -786,10 +787,7 @@ try {
     }
 
     if ($action === 'listByCustomer') {
-        $userID = (int)($input['userID'] ?? 0);
-        if ($userID <= 0) {
-            json_response(['error' => 'Invalid userID'], 422);
-        }
+        $userID = (int)$customer['user_id'];
 
         $paymentsTableExists = (int)$pdo->query(
             "SELECT COUNT(*) FROM information_schema.tables
@@ -979,7 +977,7 @@ try {
 
     if ($action === 'cancel') {
         $appointmentID = (int)($input['appointmentID'] ?? 0);
-        $userID = (int)($input['userID'] ?? 0);
+        $userID = (int)$customer['user_id'];
         if ($appointmentID <= 0) {
             json_response(['error' => 'Invalid appointmentID'], 422);
         }
@@ -998,7 +996,7 @@ try {
             json_response(['error' => 'Appointment not found'], 404);
         }
 
-        if ($userID > 0 && (int)$appt['user_id'] !== $userID) {
+        if ((int)$appt['user_id'] !== $userID) {
             json_response(['error' => 'You can only cancel your own appointments'], 403);
         }
 
@@ -1081,7 +1079,7 @@ try {
         ensure_reschedule_count_column($pdo);
 
         $appointmentID = (int)($input['appointmentID'] ?? 0);
-        $userID = (int)($input['userID'] ?? 0);
+        $userID = (int)$customer['user_id'];
         $newDate = trim((string)($input['appointmentDate'] ?? ''));
         $newStartTimeRaw = trim((string)($input['startTime'] ?? ''));
 
@@ -1137,7 +1135,7 @@ try {
             json_response(['error' => 'Appointment not found'], 404);
         }
 
-        if ($userID > 0 && (int)$appt['user_id'] !== $userID) {
+        if ((int)$appt['user_id'] !== $userID) {
             json_response(['error' => 'You can only reschedule your own appointments'], 403);
         }
 
