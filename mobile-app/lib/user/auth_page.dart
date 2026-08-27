@@ -106,6 +106,90 @@ class _AuthPageState extends State<AuthPage> {
     AuthBootstrap.navigateToSignedInHome();
   }
 
+  Map<String, dynamic> _tryDecodeJsonMap(String body) {
+    final raw = body.trim();
+    if (raw.isEmpty || raw.startsWith('<')) {
+      return const <String, dynamic>{};
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+    } on FormatException {
+      // HTML/proxy bodies must not abort customer Supabase login.
+    }
+    return const <String, dynamic>{};
+  }
+
+  /// Staff/barber keep PHP sessions. Returns true when login is finished.
+  /// Customers, Render 5xx/HTML, and network timeouts fall through to Supabase.
+  Future<bool> _completePhpStaffLoginIfPossible(
+    String email,
+    String password,
+  ) async {
+    late final http.Response phpLogin;
+    try {
+      phpLogin = await http
+          .post(
+            Uri.parse('$_apiBaseUrl/auth.php'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'action': 'login',
+              'email': email,
+              'password': password,
+            }),
+          )
+          .timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      return false;
+    } on http.ClientException {
+      return false;
+    }
+
+    final phpData = _tryDecodeJsonMap(phpLogin.body);
+
+    if (phpLogin.statusCode == 200) {
+      final phpUser = phpData['user'] as Map<String, dynamic>?;
+      if (phpUser != null) {
+        final roles = (phpUser['roles'] as List<dynamic>? ?? const [])
+            .map((role) => role.toString().toLowerCase())
+            .toList();
+        final isStaffOrBarber = roles.any(
+          (role) =>
+              role == 'admin' ||
+              role == 'barber' ||
+              role == 'receptionist' ||
+              role == 'staff',
+        );
+        if (isStaffOrBarber) {
+          AuthBootstrap.applyPhpAuthUser(phpUser);
+          if (!mounted) return true;
+          AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
+          return true;
+        }
+      }
+      return false;
+    }
+
+    if (phpLogin.statusCode == 401) {
+      final code = phpData['code']?.toString() ?? '';
+      final accountType = phpData['accountType']?.toString() ?? '';
+      final message =
+          phpData['error']?.toString() ?? 'Invalid email or password.';
+      final isStaffOrBarber =
+          accountType == 'staff' || accountType == 'barber';
+      if (isStaffOrBarber &&
+          (code == 'NO_LOCAL_PASSWORD' ||
+              code == 'WRONG_PASSWORD' ||
+              code == 'OAUTH_ONLY')) {
+        throw Exception(message);
+      }
+    }
+
+    return false;
+  }
+
   Future<void> _login() async {
     final email = _loginUser.text.trim();
     final password = _loginPass.text;
@@ -127,65 +211,10 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _isLoading = true);
 
     try {
-      final phpLogin = await http.post(
-        Uri.parse('$_apiBaseUrl/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'login',
-          'email': email,
-          'password': password,
-        }),
-      );
-
-      final phpData = phpLogin.body.isNotEmpty
-          ? jsonDecode(phpLogin.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (phpLogin.statusCode == 200) {
-        final phpUser = phpData['user'] as Map<String, dynamic>?;
-        if (phpUser != null) {
-          final roles = (phpUser['roles'] as List<dynamic>? ?? const [])
-              .map((role) => role.toString().toLowerCase())
-              .toList();
-          final isStaffOrBarber = roles.any(
-            (role) =>
-                role == 'admin' ||
-                role == 'barber' ||
-                role == 'receptionist' ||
-                role == 'staff',
-          );
-          // Staff/barber keep PHP sessions. Customers must obtain a Supabase JWT
-          // or Phase 1 APIs will reject body userID as identity.
-          if (isStaffOrBarber) {
-            AuthBootstrap.applyPhpAuthUser(phpUser);
-            if (!mounted) return;
-            AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
-            return;
-          }
-        }
-      }
-
-      if (phpLogin.statusCode == 401) {
-        final code = phpData['code']?.toString() ?? '';
-        final accountType = phpData['accountType']?.toString() ?? '';
-        final message = phpData['error']?.toString() ?? 'Invalid email or password.';
-        final isStaffOrBarber =
-            accountType == 'staff' || accountType == 'barber';
-        // Staff/barber stay on PHP. Customers fall through to Supabase Auth
-        // (email/password Sign Up, Forgot Password, and older placeholder hashes).
-        if (isStaffOrBarber &&
-            (code == 'NO_LOCAL_PASSWORD' ||
-                code == 'WRONG_PASSWORD' ||
-                code == 'OAUTH_ONLY')) {
-          throw Exception(message);
-        }
-      } else if (phpLogin.statusCode != 200) {
-        // Server or DB error — do not fall through to Supabase (misleading errors).
-        final err = phpData['error']?.toString() ?? 'Login server error.';
-        final details = phpData['details']?.toString();
-        throw Exception(
-          (details != null && details.trim().isNotEmpty) ? '$err $details' : err,
-        );
+      // Staff/barber stay on PHP. Customers, Render 5xx/HTML, and timeouts
+      // must still reach Supabase Auth — that is what mints the JWT.
+      if (await _completePhpStaffLoginIfPossible(email, password)) {
+        return;
       }
 
       final response = await Supabase.instance.client.auth.signInWithPassword(
@@ -440,7 +469,7 @@ class _AuthPageState extends State<AuthPage> {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.google,
         redirectTo: AuthRedirect.supabaseRedirectUri,
-        authScreenLaunchMode: LaunchMode.platformDefault,
+        authScreenLaunchMode: LaunchMode.externalApplication,
       );
       if (!mounted) return;
       if (kIsWeb) {
@@ -471,7 +500,7 @@ class _AuthPageState extends State<AuthPage> {
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.facebook,
         redirectTo: AuthRedirect.supabaseRedirectUri,
-        authScreenLaunchMode: LaunchMode.platformDefault,
+        authScreenLaunchMode: LaunchMode.externalApplication,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
