@@ -8,23 +8,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libcurl4-openssl-dev \
         ca-certificates \
     && docker-php-ext-install -j$(nproc) pdo_pgsql pgsql zip \
-    && a2enmod rewrite headers \
-    && printf '%s\n' \
-        'CGIPassAuth On' \
-        'SetEnvIf Authorization "(.+)" HTTP_AUTHORIZATION=$1' \
-        'SetEnvIf Authorization "(.+)" REDIRECT_HTTP_AUTHORIZATION=$1' \
-        '<Directory /var/www/html>' \
-        '    AllowOverride FileInfo AuthConfig Limit' \
-        '    CGIPassAuth On' \
-        '</Directory>' \
-        > /etc/apache2/conf-available/pass-authorization.conf \
-    && a2enconf pass-authorization \
+    && a2enmod rewrite headers setenvif \
     && rm -rf /var/lib/apt/lists/*
+
+# Pass Authorization into PHP. CGIPassAuth is directory-only (see the conf file).
+COPY apache-pass-authorization.conf /etc/apache2/conf-available/pass-authorization.conf
+RUN a2enconf pass-authorization
 
 # App lives at document root so URLs are https://host/auth.php
 COPY . /var/www/html/
 
-RUN mkdir -p /var/www/html/uploads/face_scans \
+RUN rm -f /var/www/html/apache-pass-authorization.conf \
+    && mkdir -p /var/www/html/uploads/face_scans \
         /var/www/html/uploads/profiles \
         /var/www/html/uploads/barbers \
         /var/www/html/storage \
