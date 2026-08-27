@@ -22,10 +22,35 @@ function customer_bearer_token_from_request(): string
     $candidates = [
         (string)($_SERVER['HTTP_AUTHORIZATION'] ?? ''),
         (string)($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''),
+        (string)($_SERVER['HTTP_X_AUTHORIZATION'] ?? ''),
+        (string)($_SERVER['HTTP_X_SUPABASE_ACCESS_TOKEN'] ?? ''),
     ];
+
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        if (is_array($headers)) {
+            foreach ($headers as $name => $value) {
+                if (strcasecmp((string)$name, 'Authorization') === 0
+                    || strcasecmp((string)$name, 'X-Authorization') === 0
+                    || strcasecmp((string)$name, 'X-Supabase-Access-Token') === 0
+                ) {
+                    $candidates[] = (string)$value;
+                }
+            }
+        }
+    }
+
     foreach ($candidates as $header) {
+        $header = trim($header);
+        if ($header === '') {
+            continue;
+        }
         if (preg_match('/Bearer\s+(\S+)/i', $header, $matches) === 1) {
             return trim($matches[1]);
+        }
+        // X-Supabase-Access-Token may be the raw JWT without a Bearer prefix.
+        if (substr_count($header, '.') === 2 && !str_contains($header, ' ')) {
+            return $header;
         }
     }
 
