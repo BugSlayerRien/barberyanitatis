@@ -26,7 +26,7 @@ class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
 
       final userId = UserSession.userId;
       if (userId != null && userId > 0) {
-        await CustomerApi.postJson('profile.php', {
+        await CustomerApi.postDecoded('profile.php', {
           'action': 'update',
           'userID': userId,
           'fullName': UserSession.fullName ?? 'Customer',

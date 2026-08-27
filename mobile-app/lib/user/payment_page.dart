@@ -77,32 +77,25 @@ class _PaymentPageState extends State<PaymentPage> {
       // Create payment intent via backend PayMongo endpoint
       final cents = (total * 100).round();
       final paymentRoot = _paymongoBase();
-      final createIntentResponse = await http.post(
-        Uri.parse('$paymentRoot/paymongo/create-payment.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'amount': cents,
-          'currency': 'PHP',
-          'method': _selectedMethod,
-          'description': 'Appointment ${widget.appointmentID}',
-          'appointment_id': widget.appointmentID.toString(),
-          'success_url': _paymentReturnUrl(true),
-          'failed_url': _paymentReturnUrl(false),
-        }),
-      );
+      final createIntentResponse = await http
+          .post(
+            Uri.parse('$paymentRoot/paymongo/create-payment.php'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'amount': cents,
+              'currency': 'PHP',
+              'method': _selectedMethod,
+              'description': 'Appointment ${widget.appointmentID}',
+              'appointment_id': widget.appointmentID.toString(),
+              'success_url': _paymentReturnUrl(true),
+              'failed_url': _paymentReturnUrl(false),
+            }),
+          )
+          .timeout(CustomerApi.defaultTimeout);
 
       if (!mounted) return;
 
-      final data = createIntentResponse.body.isNotEmpty
-          ? jsonDecode(createIntentResponse.body) as Map<String, dynamic>
-          : <String, dynamic>{};
-
-      if (createIntentResponse.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['error']?.toString() ?? 'Payment failed.')),
-        );
-        return;
-      }
+      final data = CustomerApi.decodeJsonObject(createIntentResponse);
 
       final resourceId = data['resource_id']?.toString() ?? data['data']?['id']?.toString() ?? '';
       final resourceType = data['resource_type']?.toString() ??
@@ -125,7 +118,17 @@ class _PaymentPageState extends State<PaymentPage> {
       }
 
       final statusData = await _pollPaymentUntilFinal(resourceId, resourceType: resourceType);
-      if (!mounted || statusData == null) return;
+      if (!mounted) return;
+      if (statusData == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment status could not be confirmed. Check Appointments or retry.',
+            ),
+          ),
+        );
+        return;
+      }
 
       final paymentState = statusData['paymentState']?.toString() ?? 'Unpaid';
       final receipt = statusData['receiptRef']?.toString();
@@ -184,9 +187,7 @@ class _PaymentPageState extends State<PaymentPage> {
         );
         final response = await http.get(uri).timeout(const Duration(seconds: 5));
 
-        final data = response.body.isNotEmpty
-            ? jsonDecode(response.body) as Map<String, dynamic>
-            : <String, dynamic>{};
+        final data = CustomerApi.decodeJsonObject(response);
 
         if (response.statusCode != 200) {
           debugPrint('Payment status check failed (attempt $attempt): ${response.statusCode}');
@@ -236,23 +237,17 @@ class _PaymentPageState extends State<PaymentPage> {
     required String resourceType,
   }) async {
     try {
-      final response = await CustomerApi.postJson('payments.php', {
+      final data = await CustomerApi.postDecoded('payments.php', {
         'action': 'confirmGatewayPayment',
         'appointmentID': widget.appointmentID,
         'providerRef': providerRef,
         'resourceType': resourceType,
         'userID': UserSession.userId,
       });
-      if (response.body.isEmpty) {
-        return {'paymentState': 'Paid'};
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      if (response.statusCode == 200) {
-        return {
-          'paymentState': data['paymentState']?.toString() ?? 'Paid',
-          'receiptRef': data['receiptRef']?.toString(),
-        };
-      }
+      return {
+        'paymentState': data['paymentState']?.toString() ?? 'Paid',
+        'receiptRef': data['receiptRef']?.toString(),
+      };
     } catch (e) {
       debugPrint('confirmGatewayPayment failed: $e');
     }

@@ -164,7 +164,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
     if (!mounted) return;
     setState(() => _bookingInFlight = true);
     try {
-      final response = await CustomerApi.postJson('booking.php', {
+      final data = await CustomerApi.postDecoded('booking.php', {
         'action': 'createGroup',
         'userID': UserSession.userId,
         'barberID': option['barberID'] ?? widget.barberId,
@@ -177,14 +177,6 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
         'confirmPartial': type == 'partial' && _confirmPartial,
         'variantID': UserSession.selectedVariantId,
       });
-
-      final data = response.body.isNotEmpty
-          ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-          : <String, dynamic>{};
-
-      if (response.statusCode != 200) {
-        throw Exception(data['error']?.toString() ?? 'Group booking failed');
-      }
 
       final groupIds = (data['group']?['appointmentIDs'] as List<dynamic>? ?? []);
       final firstGroupId = groupIds.isNotEmpty ? (groupIds.first as num).toInt() : null;

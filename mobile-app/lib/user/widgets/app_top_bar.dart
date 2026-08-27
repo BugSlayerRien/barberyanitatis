@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import '../customer_api.dart';
 import '../user_session.dart';
@@ -52,14 +50,10 @@ class _AppTopBarState extends State<AppTopBar> {
       return 0;
     }
     try {
-      final response = await CustomerApi.postJson('notifications.php', {
+      final data = await CustomerApi.postDecoded('notifications.php', {
         'action': 'unreadCount',
         'userID': UserSession.userId,
       });
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return 0;
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       return (data['unreadCount'] as num?)?.toInt() ?? 0;
     } catch (_) {
       return 0;
@@ -71,14 +65,10 @@ class _AppTopBarState extends State<AppTopBar> {
       return [];
     }
     try {
-      final response = await CustomerApi.postJson('notifications.php', {
+      final data = await CustomerApi.postDecoded('notifications.php', {
         'action': 'list',
         'userID': UserSession.userId,
       });
-      if (response.statusCode != 200 || response.body.isEmpty) {
-        return [];
-      }
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
       final unread = (data['unreadCount'] as num?)?.toInt() ?? 0;
       if (mounted) {
         setState(() => _unreadCount = unread);
@@ -104,12 +94,12 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await CustomerApi.postJson('notifications.php', {
+      await CustomerApi.postDecoded('notifications.php', {
         'action': 'markRead',
         'userID': UserSession.userId,
         'notificationID': notificationID,
       });
-      return response.statusCode == 200;
+      return true;
     } catch (_) {
       return false;
     }
@@ -120,11 +110,11 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await CustomerApi.postJson('notifications.php', {
+      await CustomerApi.postDecoded('notifications.php', {
         'action': 'markAllRead',
         'userID': UserSession.userId,
       });
-      return response.statusCode == 200;
+      return true;
     } catch (_) {
       return false;
     }
@@ -135,12 +125,12 @@ class _AppTopBarState extends State<AppTopBar> {
       return false;
     }
     try {
-      final response = await CustomerApi.postJson('notifications.php', {
+      await CustomerApi.postDecoded('notifications.php', {
         'action': 'delete',
         'userID': UserSession.userId,
         'notificationID': notificationID,
       });
-      return response.statusCode == 200;
+      return true;
     } catch (_) {
       return false;
     }

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'profile_page.dart';
@@ -130,17 +129,17 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<List<Map<String, dynamic>>> _fetchCustomerAppointments(int userId) async {
-    final response = await CustomerApi.postJson('booking.php', {
-      'action': 'listByCustomer',
-      'userID': userId,
-    });
-    if (response.statusCode != 200 || response.body.isEmpty) {
+    try {
+      final data = await CustomerApi.postDecoded('booking.php', {
+        'action': 'listByCustomer',
+        'userID': userId,
+      });
+      return (data['appointments'] as List<dynamic>? ?? [])
+          .map((item) => Map<String, dynamic>.from(item as Map))
+          .toList();
+    } catch (_) {
       return const [];
     }
-    final data = jsonDecode(response.body) as Map<String, dynamic>;
-    return (data['appointments'] as List<dynamic>? ?? [])
-        .map((item) => Map<String, dynamic>.from(item as Map))
-        .toList();
   }
 
   Map<String, dynamic>? _firstUpcomingFromAppointments(
@@ -191,16 +190,15 @@ class _DashboardPageState extends State<DashboardPage>
   }
 
   Future<Map<String, dynamic>?> _fetchQuickBookProfile(int userId) async {
-    final profileResponse = await CustomerApi.postJson('booking.php', {
-      'action': 'getQuickBookProfile',
-      'userID': userId,
-    });
-    if (profileResponse.statusCode != 200 || profileResponse.body.isEmpty) {
+    try {
+      final profileData = await CustomerApi.postDecoded('booking.php', {
+        'action': 'getQuickBookProfile',
+        'userID': userId,
+      });
+      return profileData['profile'] as Map<String, dynamic>?;
+    } catch (_) {
       return null;
     }
-    final profileData =
-        jsonDecode(profileResponse.body) as Map<String, dynamic>;
-    return profileData['profile'] as Map<String, dynamic>?;
   }
 
   Future<
@@ -209,20 +207,19 @@ class _DashboardPageState extends State<DashboardPage>
         Map<String, dynamic>? recentHaircut,
         Map<String, dynamic>? trendingHaircut,
       })> _fetchPersonalInsights(int userId) async {
-    final insightsResponse = await CustomerApi.postJson('booking.php', {
-      'action': 'getCustomerHomeInsights',
-      'userID': userId,
-    });
-    if (insightsResponse.statusCode != 200 ||
-        insightsResponse.body.isEmpty) {
+    late final Map<String, dynamic> insights;
+    try {
+      insights = await CustomerApi.postDecoded('booking.php', {
+        'action': 'getCustomerHomeInsights',
+        'userID': userId,
+      });
+    } catch (_) {
       return (
         favoriteBarber: null,
         recentHaircut: null,
         trendingHaircut: null,
       );
     }
-    final insights =
-        jsonDecode(insightsResponse.body) as Map<String, dynamic>;
     return (
       favoriteBarber: insights['favoriteBarber'] is Map
           ? Map<String, dynamic>.from(insights['favoriteBarber'] as Map)
@@ -403,18 +400,15 @@ class _DashboardPageState extends State<DashboardPage>
     final userId = UserSession.userId;
     if (userId != null && userId > 0) {
       try {
-        final response = await CustomerApi.postJson('profile.php', {
+        final data = await CustomerApi.postDecoded('profile.php', {
           'action': 'get',
           'userID': userId,
         });
-        if (response.statusCode == 200 && response.body.isNotEmpty) {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          final profile = data['profile'] as Map<String, dynamic>?;
-          final fromDb = profile?['hairTexture']?.toString().trim() ?? '';
-          if (fromDb.isNotEmpty) {
-            texture = fromDb;
-            await UserSession.savePreferredHairTexture(fromDb);
-          }
+        final profile = data['profile'] as Map<String, dynamic>?;
+        final fromDb = profile?['hairTexture']?.toString().trim() ?? '';
+        if (fromDb.isNotEmpty) {
+          texture = fromDb;
+          await UserSession.savePreferredHairTexture(fromDb);
         }
       } catch (_) {
         // Keep local preference when profile fetch fails.

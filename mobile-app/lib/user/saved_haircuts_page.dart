@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -49,18 +47,10 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
       return [];
     }
 
-    final response = await CustomerApi.postJson('favorites.php', {
+    final data = await CustomerApi.postDecoded('favorites.php', {
       'action': 'listByUser',
       'userID': UserSession.userId,
     });
-
-    if (response.statusCode != 200) {
-      return [];
-    }
-
-    final data = response.body.isNotEmpty
-        ? jsonDecode(response.body) as Map<String, dynamic>
-        : <String, dynamic>{};
     final favorites = (data['favorites'] as List<dynamic>? ?? [])
         .map((item) => Map<String, dynamic>.from(item as Map))
         .toList();
@@ -163,6 +153,26 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return _buildSavedHaircutsSkeleton();
+                  }
+
+                  if (snapshot.hasError) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 48),
+                      child: Column(
+                        children: [
+                          Text(
+                            snapshot.error.toString(),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white70, height: 1.4),
+                          ),
+                          const SizedBox(height: 16),
+                          TextButton(
+                            onPressed: _refresh,
+                            child: const Text('Try again'),
+                          ),
+                        ],
+                      ),
+                    );
                   }
 
                   final items = snapshot.data ?? [];
