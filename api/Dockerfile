@@ -13,7 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Pass Authorization into PHP. CGIPassAuth is directory-only (see the conf file).
 COPY apache-pass-authorization.conf /etc/apache2/conf-available/pass-authorization.conf
-RUN a2enconf pass-authorization
+RUN a2enconf pass-authorization \
+    && sed -i '1i LimitRequestFieldSize 32768\nLimitRequestLine 16384' /etc/apache2/apache2.conf
 
 # App lives at document root so URLs are https://host/auth.php
 COPY . /var/www/html/
