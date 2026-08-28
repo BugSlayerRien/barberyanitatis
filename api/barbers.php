@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -89,9 +90,10 @@ try {
     ensure_barber_channel_column($pdo);
 
     if ($action === 'submitFeedback') {
+        $customer = require_customer($pdo, $input);
         $appointmentID = (int)($input['appointmentID'] ?? 0);
         $barberID = (int)($input['barberID'] ?? 0);
-        $userID = (int)($input['userID'] ?? 0);
+        $userID = (int)$customer['user_id'];
         $rating = (int)($input['rating'] ?? 0);
         $comment = trim((string)($input['comment'] ?? ''));
 

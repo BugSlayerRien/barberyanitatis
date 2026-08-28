@@ -9,6 +9,7 @@ require_once __DIR__ . '/ai_gemini_image_helper.php';
 require_once __DIR__ . '/ai_tryon_provider.php';
 require_once __DIR__ . '/ai_service_client.php';
 require_once __DIR__ . '/face_scan_attach.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -233,17 +234,15 @@ function save_jpeg_preview(string $scanSessionId, string $angle, string $base64)
 try {
     $pdo = get_db_connection();
     ensure_face_scan_tables($pdo);
+    $customer = require_customer_or_guest($pdo, $input);
+    $userID = $customer !== null ? (int)$customer['user_id'] : null;
 
     if ($action === 'uploadCaptures') {
         $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
         if ($scanSessionId === '') {
             json_response(['error' => 'scanSessionId required'], 422);
         }
-
-        $userID = isset($input['userID']) ? (int)$input['userID'] : 0;
-        if ($userID <= 0) {
-            $userID = null;
-        }
+        require_scan_session_access($pdo, $scanSessionId, $userID);
 
         $captures = $input['captures'] ?? [];
         if (!is_array($captures)) {
@@ -316,14 +315,10 @@ try {
         $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
         $variantID = (int)($input['variantID'] ?? 0);
         $previews = $input['previews'] ?? [];
-        $userID = isset($input['userID']) ? (int)$input['userID'] : 0;
-        if ($userID <= 0) {
-            $userID = null;
-        }
-
         if ($scanSessionId === '' || $variantID <= 0 || !is_array($previews)) {
             json_response(['error' => 'Invalid preview payload'], 422);
         }
+        require_scan_session_access($pdo, $scanSessionId, $userID);
 
         ensure_scan_session_row(
             $pdo,
@@ -389,6 +384,11 @@ try {
             json_response(['error' => 'Invalid attach payload'], 422);
         }
 
+        $customer = require_customer($pdo, $input);
+        $userID = (int)$customer['user_id'];
+        require_customer_owns_appointment($pdo, $userID, $appointmentID);
+        require_scan_session_access($pdo, $scanSessionId, $userID);
+
         $result = attach_scan_previews_to_appointment(
             $pdo,
             $appointmentID,
@@ -418,6 +418,7 @@ try {
         if ($scanSessionId === '') {
             json_response(['error' => 'scanSessionId required'], 422);
         }
+        require_scan_session_access($pdo, $scanSessionId, $userID);
 
         $captures = capture_paths_for_session($pdo, $scanSessionId);
         if ($captures['front'] === null || $captures['left'] === null || $captures['right'] === null) {
@@ -500,23 +501,20 @@ try {
     if ($action === 'generateStylePreviews') {
         set_time_limit(600);
 
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+        $variantID = (int)($input['variantID'] ?? 0);
+        $force = (bool)($input['forceRegenerate'] ?? false);
+
+        if ($scanSessionId === '' || $variantID <= 0) {
+            json_response(['error' => 'scanSessionId and variantID required'], 422);
+        }
+        require_scan_session_access($pdo, $scanSessionId, $userID);
+
         if (!ai_service_is_available() && !ai_tryon_is_configured()) {
             json_response([
                 'error' => 'AI generation is not configured',
                 'hint' => 'Start ai-service (AI_SERVICE_URL) or set XAI_API_KEY / GEMINI_API_KEY / REPLICATE_API_TOKEN in .env.',
             ], 503);
-        }
-
-        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
-        $variantID = (int)($input['variantID'] ?? 0);
-        $force = (bool)($input['forceRegenerate'] ?? false);
-        $userID = isset($input['userID']) ? (int)$input['userID'] : 0;
-        if ($userID <= 0) {
-            $userID = null;
-        }
-
-        if ($scanSessionId === '' || $variantID <= 0) {
-            json_response(['error' => 'scanSessionId and variantID required'], 422);
         }
 
         if (!$force) {
@@ -729,13 +727,6 @@ try {
     }
 
     if ($action === 'generateReplicatePreview') {
-        if (!replicate_is_configured()) {
-            json_response([
-                'error' => 'Replicate is not configured',
-                'hint' => 'Set REPLICATE_API_TOKEN in .env on the server.',
-            ], 503);
-        }
-
         $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
         $styleName = trim((string)($input['styleName'] ?? 'Selected haircut'));
         $angle = trim((string)($input['angle'] ?? 'front'));
@@ -744,6 +735,14 @@ try {
         }
         if (!in_array($angle, ['front', 'left', 'right'], true)) {
             json_response(['error' => 'angle must be front, left, or right'], 422);
+        }
+        require_scan_session_access($pdo, $scanSessionId, $userID);
+
+        if (!replicate_is_configured()) {
+            json_response([
+                'error' => 'Replicate is not configured',
+                'hint' => 'Set REPLICATE_API_TOKEN in .env on the server.',
+            ], 503);
         }
 
         $captureStmt = $pdo->prepare(
