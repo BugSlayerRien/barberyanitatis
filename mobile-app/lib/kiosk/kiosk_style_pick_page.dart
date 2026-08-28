@@ -205,34 +205,19 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
               controller: _searchController,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
+              style: const TextStyle(color: KioskColors.textPrimary),
+              decoration: kioskInputDecoration(
                 hintText: 'Search hairstyles',
-                hintStyle: const TextStyle(color: Colors.white38),
-                prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                prefixIcon: const Icon(Icons.search, color: KioskColors.textMuted),
                 suffixIcon: _searchQuery.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, color: Colors.white54),
+                        icon: const Icon(Icons.clear, color: KioskColors.textMuted),
                         onPressed: () {
                           _searchController.clear();
                           _runSearch('');
                         },
                       )
                     : null,
-                filled: true,
-                fillColor: KioskColors.panel,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: KioskColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: KioskColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.white),
-                ),
               ),
               textInputAction: TextInputAction.search,
               onSubmitted: _runSearch,
@@ -246,13 +231,13 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
           if (_searchLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: LinearProgressIndicator(color: Colors.white, minHeight: 2),
+              child: LinearProgressIndicator(color: KioskColors.gold, minHeight: 2),
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
                 : _error != null && styles.isEmpty
-                    ? Center(child: Text(_error!, style: const TextStyle(color: Colors.white70)))
+                    ? Center(child: Text(_error!, style: const TextStyle(color: KioskColors.textMuted)))
                     : styles.isEmpty
                         ? Center(
                             child: Text(
@@ -304,7 +289,7 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
-                                            color: Colors.white,
+                                            color: KioskColors.textPrimary,
                                             fontWeight: FontWeight.w600,
                                             fontSize: 13,
                                           ),

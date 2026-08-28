@@ -147,13 +147,13 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
     return KioskScaffold(
       title: 'Choose your barber',
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
+          ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
           : _error != null
               ? Center(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(_error!, style: const TextStyle(color: Colors.white70)),
+                      Text(_error!, style: const TextStyle(color: KioskColors.textMuted)),
                       const SizedBox(height: 12),
                       TextButton(onPressed: _load, child: const Text('Retry')),
                     ],
@@ -178,12 +178,12 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.content_cut, color: Colors.white70, size: 20),
+                            const Icon(Icons.content_cut, color: KioskColors.gold, size: 20),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 'Style: ${KioskSession.selectedStyleName}',
-                                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                style: const TextStyle(color: KioskColors.textPrimary, fontWeight: FontWeight.w600),
                               ),
                             ),
                           ],
@@ -249,24 +249,24 @@ class _BarberTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? const Color(0xFF1F1F1F) : KioskColors.panel,
+      color: selected ? KioskColors.goldTint : KioskColors.panel,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: selected ? Colors.white : KioskColors.border, width: selected ? 1.5 : 1),
-          ),
+          decoration: kioskCardDecoration(selected: selected),
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: Colors.white12,
+                backgroundColor: selected ? KioskColors.gold : KioskColors.panelAlt,
                 child: Text(
                   name.isNotEmpty ? name[0].toUpperCase() : 'B',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    color: selected ? Colors.black : KioskColors.textPrimary,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
@@ -274,7 +274,7 @@ class _BarberTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+                    Text(name, style: const TextStyle(color: KioskColors.textPrimary, fontWeight: FontWeight.w700)),
                     if (specialty.isNotEmpty)
                       Text(specialty, style: const TextStyle(color: KioskColors.textDim, fontSize: 11)),
                     const SizedBox(height: 4),
@@ -296,7 +296,7 @@ class _BarberTile extends StatelessWidget {
               ),
               Icon(
                 selected ? Icons.check_circle : Icons.circle_outlined,
-                color: selected ? Colors.white : Colors.white38,
+                color: selected ? KioskColors.gold : KioskColors.textMuted,
               ),
             ],
           ),

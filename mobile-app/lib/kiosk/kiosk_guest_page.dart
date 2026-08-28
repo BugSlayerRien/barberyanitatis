@@ -52,24 +52,9 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
             TextField(
               controller: _nameController,
               textCapitalization: TextCapitalization.words,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
+              style: const TextStyle(color: KioskColors.textPrimary),
+              decoration: kioskInputDecoration(
                 hintText: 'Your name (at least 4 letters)',
-                hintStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: KioskColors.panel,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: KioskColors.border),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: KioskColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Colors.white),
-                ),
               ),
               onSubmitted: (_) => _continue(),
             ),

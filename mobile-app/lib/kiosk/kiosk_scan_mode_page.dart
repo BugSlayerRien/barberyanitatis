@@ -125,20 +125,19 @@ class _ModeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? const Color(0xFF1F1F1F) : KioskColors.panel,
+      color: selected ? KioskColors.goldTint : KioskColors.panel,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(14),
         child: Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
+          decoration: kioskCardDecoration(selected: selected).copyWith(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: selected ? Colors.white : KioskColors.border, width: selected ? 1.5 : 1),
           ),
           child: Row(
             children: [
-              Icon(icon, color: selected ? Colors.white : KioskColors.textDim, size: 32),
+              Icon(icon, color: selected ? KioskColors.gold : KioskColors.textDim, size: 32),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -147,7 +146,7 @@ class _ModeCard extends StatelessWidget {
                     Text(
                       title,
                       style: TextStyle(
-                        color: selected ? Colors.white : KioskColors.textMuted,
+                        color: selected ? KioskColors.textPrimary : KioskColors.textMuted,
                         fontWeight: FontWeight.w700,
                         fontSize: 16,
                       ),
@@ -159,7 +158,7 @@ class _ModeCard extends StatelessWidget {
               ),
               Icon(
                 selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selected ? Colors.white : Colors.white38,
+                color: selected ? KioskColors.gold : KioskColors.textMuted,
               ),
             ],
           ),
