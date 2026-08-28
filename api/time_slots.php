@@ -8,6 +8,7 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/slot_recommendation.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
@@ -205,6 +206,7 @@ try {
     }
 
     if ($action === 'suggestBestSlot') {
+        $customer = require_customer($pdo, $input);
         $appointmentFilter = barber_channel_filter_sql('appointment', 'b.barber_channel');
         $leadStart = shop_next_bookable_slot_start();
         $leadDate = $leadStart->format('Y-m-d');
@@ -262,7 +264,7 @@ try {
             return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         };
 
-        $userId = (int)($input['userID'] ?? $input['userId'] ?? 0);
+        $userId = (int)$customer['user_id'];
         $profile = slot_recommendation_build_profile([]);
         if ($userId > 0) {
             $profile = slot_recommendation_build_profile(

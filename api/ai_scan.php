@@ -6,13 +6,13 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/ai_gemini_helper.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
 require_once __DIR__ . '/variant_ranking.php';
+require_once __DIR__ . '/customer_auth.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? ($_POST['action'] ?? 'rankByFeatures')));
 
-$userID = isset($input['userID']) ? (int)$input['userID'] : (isset($_POST['userID']) ? (int)$_POST['userID'] : 0);
 $faceShape = trim((string)($input['faceShape'] ?? ($_POST['faceShape'] ?? '')));
 $hairTexture = trim((string)($input['hairTexture'] ?? ($_POST['hairTexture'] ?? '')));
 $hairDensity = trim((string)($input['hairDensity'] ?? ($_POST['hairDensity'] ?? '')));
@@ -664,7 +664,9 @@ PROMPT;
 }
 
 try {
-    with_pdo_retry(function (PDO $pdo) use ($action, $userID, $faceShape, $hairTexture, $hairDensity, $rankingOptions): void {
+    with_pdo_retry(function (PDO $pdo) use ($action, $input, $faceShape, $hairTexture, $hairDensity, $rankingOptions): void {
+    $customer = require_customer_or_guest($pdo, $input);
+    $userID = $customer !== null ? (int)$customer['user_id'] : 0;
     $recommendations = enrich_recommendations_with_match_display(
         fetch_live_recommendations($pdo, $faceShape, $hairTexture, $rankingOptions),
         $faceShape,

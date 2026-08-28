@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api_config.dart';
+import '../customer_api.dart';
 import '../user_session.dart';
 
 /// Thrown when the server refuses a new AI hairstyle generation because the user has
@@ -63,6 +64,8 @@ class FaceScanService {
     await prefs.setBool(_consentKey, true);
   }
 
+  static Future<Map<String, String>> _headers() => CustomerApi.headers();
+
   static Future<Map<String, dynamic>> uploadCaptures({
     required String scanSessionId,
     required int? userId,
@@ -73,7 +76,7 @@ class FaceScanService {
   }) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _headers(),
       body: jsonEncode({
         'action': 'uploadCaptures',
         'scanSessionId': scanSessionId,
@@ -177,7 +180,7 @@ class FaceScanService {
         downrankVariantIds ?? await UserSession.loadLastRecommendedVariantIds(userId: userId);
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _headers(),
       body: jsonEncode(_rankingRequestBody(
         action: 'rankByFeatures',
         faceShape: faceShape,
@@ -353,7 +356,7 @@ class FaceScanService {
         downrankVariantIds ?? await UserSession.loadLastRecommendedVariantIds(userId: userId);
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _headers(),
       body: jsonEncode(_rankingRequestBody(
         action: 'recommendWithInsights',
         faceShape: faceShape,
@@ -414,7 +417,7 @@ class FaceScanService {
     final response = await http
         .post(
           Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-          headers: {'Content-Type': 'application/json'},
+          headers: await _headers(),
           body: jsonEncode({
             'action': 'analyzeCaptures',
             'scanSessionId': scanSessionId,
@@ -448,7 +451,7 @@ class FaceScanService {
     final response = await http
         .post(
           Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-          headers: {'Content-Type': 'application/json'},
+          headers: await _headers(),
           body: jsonEncode({
             'action': 'generateStylePreviews',
             'scanSessionId': scanSessionId,
@@ -522,7 +525,7 @@ class FaceScanService {
   }) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _headers(),
       body: jsonEncode({
         'action': 'savePreviews',
         'scanSessionId': scanSessionId,
@@ -625,7 +628,7 @@ class FaceScanService {
 
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-      headers: {'Content-Type': 'application/json'},
+      headers: await _headers(),
       body: jsonEncode(body),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {

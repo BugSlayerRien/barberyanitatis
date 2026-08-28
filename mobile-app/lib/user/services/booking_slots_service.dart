@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../api_config.dart';
+import '../customer_api.dart';
 import '../user_session.dart';
 
 /// Result of `time_slots.php` → `suggestBestSlot`.
@@ -60,7 +61,7 @@ class BookingSlotsService {
       final response = await http
           .post(
             uri,
-            headers: {'Content-Type': 'application/json'},
+            headers: await CustomerApi.headers(),
             body: jsonEncode({
               'action': 'suggestBestSlot',
               if (resolvedUserId != null && resolvedUserId > 0)

@@ -1414,7 +1414,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await CustomerApi.headers(),
         body: jsonEncode({
           'action': 'submitFeedback',
           'appointmentID': appointmentID,

@@ -381,6 +381,76 @@ function require_customer(PDO $pdo, ?array $input = null): array
 }
 
 /**
+ * Walk-in kiosk / guest: no token and no claimed userID → null.
+ * Any claimed userID or presented token uses the same identity rules as require_customer().
+ *
+ * @param array<string, mixed>|null $input
+ * @return array{user_id: int, email: string, supabase_sub: string}|null
+ */
+function resolve_customer_or_guest(PDO $pdo, ?array $input = null): ?array
+{
+    $token = customer_bearer_token_from_request();
+    $claimed = customer_claimed_user_id($input);
+    if ($token === '' && $claimed <= 0) {
+        return null;
+    }
+
+    return resolve_authenticated_customer($pdo, $input);
+}
+
+/**
+ * @param array<string, mixed>|null $input
+ * @return array{user_id: int, email: string, supabase_sub: string}|null
+ */
+function require_customer_or_guest(PDO $pdo, ?array $input = null): ?array
+{
+    try {
+        return resolve_customer_or_guest($pdo, $input);
+    } catch (CustomerAuthException $e) {
+        json_response(['error' => $e->getMessage()], $e->httpStatus);
+    }
+}
+
+function assert_scan_session_access(PDO $pdo, string $scanSessionId, ?int $customerUserId): void
+{
+    if ($scanSessionId === '') {
+        return;
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT user_id
+         FROM face_scan_sessions
+         WHERE scan_session_id = :scan_session_id
+         LIMIT 1'
+    );
+    $stmt->execute([':scan_session_id' => $scanSessionId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return;
+    }
+
+    $ownerId = (int)($row['user_id'] ?? 0);
+    if ($ownerId <= 0) {
+        return;
+    }
+    if ($customerUserId === null || $customerUserId <= 0) {
+        throw new CustomerAuthException('Customer authentication required.', 401);
+    }
+    if ($ownerId !== $customerUserId) {
+        throw new CustomerAuthException('You are not authorized to access this scan.', 403);
+    }
+}
+
+function require_scan_session_access(PDO $pdo, string $scanSessionId, ?int $customerUserId): void
+{
+    try {
+        assert_scan_session_access($pdo, $scanSessionId, $customerUserId);
+    } catch (CustomerAuthException $e) {
+        json_response(['error' => $e->getMessage()], $e->httpStatus);
+    }
+}
+
+/**
  * @return array<string, mixed>
  */
 function assert_customer_owns_appointment(PDO $pdo, int $customerUserId, int $appointmentId): array

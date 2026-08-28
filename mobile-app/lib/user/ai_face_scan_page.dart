@@ -20,6 +20,7 @@ import 'widgets/ai_chatbot_fab.dart';
 import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'booking_guard.dart';
+import 'customer_api.dart';
 import 'haircuts_list_page.dart';
 import '../main.dart';
 import 'scanner/overlay_models.dart';
@@ -1176,7 +1177,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await CustomerApi.headers(),
         body: jsonEncode({
           'action': 'rankByFeatures',
           'faceShape': _faceShape,
@@ -1283,7 +1284,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/ai_scan.php'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await CustomerApi.headers(),
         body: jsonEncode({
           'action': 'rankByFeatures',
           'faceShape': _faceShape,

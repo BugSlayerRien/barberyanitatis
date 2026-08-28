@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/customer_auth.php';
 
 function ai_funnel_is_direct_request(): bool
 {
@@ -224,13 +225,13 @@ try {
     $pdo = get_db_connection();
     ensure_ai_funnel_tables($pdo);
 
-    $userIDRaw = $input['userID'] ?? null;
-    $userID = $userIDRaw !== null ? (int)$userIDRaw : null;
-    if ($userID !== null && $userID <= 0) {
-        $userID = null;
-    }
+    $customer = require_customer($pdo, $input);
+    $userID = (int)$customer['user_id'];
 
     $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
+    if ($scanSessionId !== '') {
+        require_scan_session_access($pdo, $scanSessionId, $userID);
+    }
     $faceShape = normalize_face_shape(isset($input['faceShape']) ? (string)$input['faceShape'] : null);
     $hairTexture = normalize_hair_texture(isset($input['hairTexture']) ? (string)$input['hairTexture'] : null);
     $hairDensity = normalize_hair_density(isset($input['hairDensity']) ? (string)$input['hairDensity'] : null);
@@ -238,9 +239,7 @@ try {
 
     if ($action === 'trackScan') {
         $recommendationCount = (int)($input['recommendationCount'] ?? 0);
-        if ($userID !== null) {
-            upsert_user_profile($pdo, $userID, $faceShape, $hairTexture, $hairDensity, $hairLength);
-        }
+        upsert_user_profile($pdo, $userID, $faceShape, $hairTexture, $hairDensity, $hairLength);
         insert_event(
             $pdo,
             'scan_completed',
@@ -261,10 +260,6 @@ try {
     }
 
     if ($action === 'saveSelection') {
-        if ($userID === null) {
-            json_response(['error' => 'Invalid userID'], 422);
-        }
-
         $variantID = (int)($input['variantID'] ?? 0);
         if ($variantID <= 0) {
             json_response(['error' => 'Invalid variantID'], 422);
@@ -332,15 +327,12 @@ try {
         json_response(['message' => 'Selection saved']);
     }
 
-    if ($userID === null) {
-        json_response(['error' => 'Invalid userID'], 422);
-    }
-
     $variantID = (int)($input['variantID'] ?? 0);
     $appointmentID = (int)($input['appointmentID'] ?? 0);
     if ($variantID <= 0 || $appointmentID <= 0) {
         json_response(['error' => 'Invalid booking tracking payload'], 422);
     }
+    require_customer_owns_appointment($pdo, $userID, $appointmentID);
 
     $serviceID = (int)($input['serviceID'] ?? 0);
     if ($serviceID <= 0) {

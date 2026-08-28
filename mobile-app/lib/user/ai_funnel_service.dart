@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
+import 'customer_api.dart';
 
 class AiFunnelService {
   static Future<void> trackScan({
@@ -86,7 +87,7 @@ class AiFunnelService {
     try {
       await http.post(
         Uri.parse('${ApiConfig.baseUrl}/ai_funnel.php'),
-        headers: {'Content-Type': 'application/json'},
+        headers: await CustomerApi.headers(),
         body: jsonEncode(payload),
       );
     } catch (_) {
