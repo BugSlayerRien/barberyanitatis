@@ -80,20 +80,33 @@ function ensure_week_seeded_for_barber(PDO $pdo, int $barberID, ?int $windowDays
     $start = $today->format('Y-m-d');
     $end = $today->modify('+' . ($windowDays - 1) . ' day')->format('Y-m-d');
 
-    $check = $pdo->prepare(
-        'SELECT COUNT(*) FROM time_slots
+    $existingStmt = $pdo->prepare(
+        'SELECT DISTINCT slot_date FROM time_slots
          WHERE barber_id = :barber_id AND slot_date BETWEEN :start AND :end'
     );
-    $check->execute([
+    $existingStmt->execute([
         ':barber_id' => $barberID,
         ':start' => $start,
         ':end' => $end,
     ]);
-    if ((int)$check->fetchColumn() > 0) {
-        return;
+    $have = [];
+    foreach ($existingStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $ymd = shop_pdo_date_ymd($row['slot_date'] ?? '');
+        if ($ymd !== '') {
+            $have[$ymd] = true;
+        }
     }
 
-    seed_week_for_barber($pdo, $barberID, $windowDays);
+    $missing = [];
+    for ($offset = 0; $offset < $windowDays; $offset++) {
+        $date = $today->modify('+' . $offset . ' day')->format('Y-m-d');
+        if (!isset($have[$date])) {
+            $missing[] = $date;
+        }
+    }
+    if ($missing !== []) {
+        seed_slots_for_barber_dates($pdo, $barberID, $missing);
+    }
 }
 
 /**
@@ -225,7 +238,7 @@ try {
                 $breakHours[] = $hour;
             }
         }
-        $breakFilter = $breakHours === [] ? '' : ' AND EXTRACT(HOUR FROM ts.slot_time) NOT IN (' . implode(',', $breakHours) . ')';
+        $breakFilter = $breakHours === [] ? '' : ' AND EXTRACT(HOUR FROM (ts.slot_time::time)) NOT IN (' . implode(',', $breakHours) . ')';
         $breakFilter2 = str_replace('ts.slot_time', 'ts2.slot_time', $breakFilter);
         $closedDates = array_keys(shop_schedule_config()['closed_dates']);
         $closedFilter = $closedDates === []
@@ -239,7 +252,7 @@ try {
                     AND ts.slot_date <= :window_end_date{$closedFilter}
                     AND " . bookable_slot_sql_clause() . "
                     AND EXTRACT(MINUTE FROM ts.slot_time) = 0
-                    AND EXTRACT(HOUR FROM ts.slot_time) BETWEEN {$envelopeHours}{$breakFilter}";
+                    AND EXTRACT(HOUR FROM (ts.slot_time::time)) BETWEEN {$envelopeHours}{$breakFilter}";
 
         $selectCols = "SELECT ts.barber_id, b.full_name AS barber_name, b.specialty, ts.slot_date, ts.slot_time,
                         (
@@ -249,7 +262,7 @@ try {
                                AND ts2.slot_date = ts.slot_date
                                AND ts2.status = 'Available'
                                AND EXTRACT(MINUTE FROM ts2.slot_time) = 0
-                               AND EXTRACT(HOUR FROM ts2.slot_time) BETWEEN {$envelopeHours}{$breakFilter2}
+                               AND EXTRACT(HOUR FROM (ts2.slot_time::time)) BETWEEN {$envelopeHours}{$breakFilter2}
                         ) AS available_count";
 
         $baseParams = [
@@ -282,10 +295,7 @@ try {
             $profile,
             $cfg
         ): array {
-            $rows = $runSlotQuery(
-                $selectCols . $baseFrom . ' ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 30',
-                $baseParams
-            );
+            $rows = [];
 
             $preferredBarber = (int)($profile['preferred_barber_id'] ?? 0);
             if ($preferredBarber > 0) {
@@ -306,7 +316,7 @@ try {
             if ($bucketHours !== []) {
                 $hourList = implode(',', array_map('intval', $bucketHours));
                 $rows = array_merge($rows, $runSlotQuery(
-                    $selectCols . $baseFrom . " AND EXTRACT(HOUR FROM ts.slot_time) IN ({$hourList}) ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 40",
+                    $selectCols . $baseFrom . " AND EXTRACT(HOUR FROM (ts.slot_time::time)) IN ({$hourList}) ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 40",
                     $baseParams
                 ));
             }
@@ -319,6 +329,11 @@ try {
                     $params
                 ));
             }
+
+            $rows = array_merge($rows, $runSlotQuery(
+                $selectCols . $baseFrom . ' ORDER BY ts.slot_date ASC, ts.slot_time ASC LIMIT 30',
+                $baseParams
+            ));
 
             return slot_recommendation_dedupe_candidates($rows, (int)$cfg['candidate_cap']);
         };
@@ -339,17 +354,16 @@ try {
         }
 
         $normalized = [];
+        $nowTs = shop_now();
         foreach ($candidates as $row) {
-            $slotDateRaw = $row['slot_date'] ?? '';
-            $slotDate = $slotDateRaw instanceof DateTimeInterface
-                ? $slotDateRaw->format('Y-m-d')
-                : substr((string)$slotDateRaw, 0, 10);
-            $timeRaw = $row['slot_time'] ?? '';
-            $timeStr = $timeRaw instanceof DateTimeInterface
-                ? $timeRaw->format('H:i:s')
-                : (string)$timeRaw;
+            $slotDate = shop_pdo_date_ymd($row['slot_date'] ?? '');
+            $timeStr = shop_pdo_time_hms($row['slot_time'] ?? '');
             $slotTime = shop_normalize_slot_time($timeStr, $slotDate);
-            if ($slotDate === '' || $slotTime === null || !shop_is_suggestable_slot($slotDate, $slotTime)) {
+            if ($slotDate === '' || $slotTime === null) {
+                continue;
+            }
+            $slotDt = shop_slot_start_datetime($slotDate, $slotTime);
+            if ($slotDt === null || $slotDt < $nowTs || !shop_is_suggestable_slot($slotDate, $slotTime)) {
                 continue;
             }
             $row['slot_date'] = $slotDate;
@@ -391,17 +405,14 @@ try {
                 $i++;
             }
             $occStmt = $pdo->prepare(
-                'SELECT barber_id, slot_date, EXTRACT(HOUR FROM slot_time)::int AS hour, status
+                'SELECT barber_id, slot_date, EXTRACT(HOUR FROM (slot_time::time))::int AS hour, status
                    FROM time_slots
                   WHERE (' . implode(' OR ', $pairSql) . ")
                     AND EXTRACT(MINUTE FROM slot_time) = 0"
             );
             $occStmt->execute($occParams);
             foreach ($occStmt->fetchAll(PDO::FETCH_ASSOC) as $occ) {
-                $occDateRaw = $occ['slot_date'] ?? '';
-                $occDate = $occDateRaw instanceof DateTimeInterface
-                    ? $occDateRaw->format('Y-m-d')
-                    : substr((string)$occDateRaw, 0, 10);
+                $occDate = shop_pdo_date_ymd($occ['slot_date'] ?? '');
                 $key = (int)$occ['barber_id'] . '|' . $occDate;
                 $knownOccupancyDays[$key] = true;
                 if (strcasecmp((string)$occ['status'], 'Available') === 0) {
@@ -468,8 +479,8 @@ try {
                AND slot_date <= :window_end_date
                AND " . calendar_bookable_slot_sql_clause() . "
                AND EXTRACT(MINUTE FROM slot_time) = 0
-               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
-               AND EXTRACT(HOUR FROM slot_time) <> 12
+               AND EXTRACT(HOUR FROM (slot_time::time)) BETWEEN 9 AND 19
+               AND EXTRACT(HOUR FROM (slot_time::time)) <> 12
              GROUP BY slot_date"
         );
         $stmt->execute([
@@ -482,7 +493,11 @@ try {
         ]);
         $availableMap = [];
         foreach ($stmt->fetchAll() as $row) {
-            $availableMap[(string)$row['slot_date']] = (int)$row['available_count'];
+            $ymd = shop_pdo_date_ymd($row['slot_date'] ?? '');
+            if ($ymd === '') {
+                continue;
+            }
+            $availableMap[$ymd] = (int)$row['available_count'];
         }
 
         $bookedStmt = $pdo->prepare(
@@ -493,8 +508,8 @@ try {
                AND slot_date >= :start_date
                AND slot_date < :end_date
                AND EXTRACT(MINUTE FROM slot_time) = 0
-               AND EXTRACT(HOUR FROM slot_time) BETWEEN 9 AND 19
-               AND EXTRACT(HOUR FROM slot_time) <> 12
+               AND EXTRACT(HOUR FROM (slot_time::time)) BETWEEN 9 AND 19
+               AND EXTRACT(HOUR FROM (slot_time::time)) <> 12
              GROUP BY slot_date"
         );
         $bookedStmt->execute([
@@ -504,7 +519,11 @@ try {
         ]);
         $bookedMap = [];
         foreach ($bookedStmt->fetchAll() as $row) {
-            $bookedMap[(string)$row['slot_date']] = (int)$row['booked_count'];
+            $ymd = shop_pdo_date_ymd($row['slot_date'] ?? '');
+            if ($ymd === '') {
+                continue;
+            }
+            $bookedMap[$ymd] = (int)$row['booked_count'];
         }
 
         $availability = [];

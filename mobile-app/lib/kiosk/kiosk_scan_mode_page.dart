@@ -72,7 +72,10 @@ class _KioskScanModePageState extends State<KioskScanModePage> {
               style: TextStyle(color: KioskColors.textMuted, fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 20),
-            _ModeCard(
+            Expanded(
+              child: ListView(
+                children: [
+              _ModeCard(
               title: '3-angle capture',
               subtitle:
                   'Capture front, left, and right photos. AI analyzes your face, recommends matching styles, and can generate previews when you pick a cut.',
@@ -90,6 +93,9 @@ class _KioskScanModePageState extends State<KioskScanModePage> {
                 onTap: () => _select(KioskScanMode.liveOnly),
               ),
             ],
+                ],
+              ),
+            ),
           ],
         ),
       ),

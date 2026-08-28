@@ -116,7 +116,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
         final mapped = <String, _DayAvailability>{};
         for (final row in rows) {
-          final key = row['slotDate']?.toString() ?? '';
+          final key = _calendarDateKey(row['slotDate']?.toString() ?? '');
           if (key.isNotEmpty) {
             mapped[key] = _DayAvailability.fromJson(row);
           }
@@ -289,6 +289,8 @@ class _CalendarPageState extends State<CalendarPage> {
     final bookingWindowEnd = todayDate.add(Duration(days: _bookingWindowDays - 1));
     final currentMonthKey = DateTime(today.year, today.month);
     final canGoPrev = _currentMonth.isAfter(currentMonthKey);
+    final nextMonthStart = DateTime(_currentMonth.year, _currentMonth.month + 1, 1);
+    final canGoNext = !nextMonthStart.isAfter(bookingWindowEnd);
     final slotsBooked = _bookedSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _bookedSlots);
     final slotsOpen = _availableSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _availableSlots);
     final usageColor = _slotUsageColor(slotsBooked, _totalSlots);
@@ -357,11 +359,13 @@ class _CalendarPageState extends State<CalendarPage> {
                             icon: Icon(Icons.chevron_left, color: canGoPrev ? Colors.white : Colors.white24),
                           ),
                           IconButton(
-                            onPressed: () {
-                              setState(() => _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1));
-                              _loadMonthAvailability();
-                            },
-                            icon: const Icon(Icons.chevron_right, color: Colors.white),
+                            onPressed: canGoNext
+                                ? () {
+                                    setState(() => _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1));
+                                    _loadMonthAvailability();
+                                  }
+                                : null,
+                            icon: Icon(Icons.chevron_right, color: canGoNext ? Colors.white : Colors.white24),
                           ),
                         ],
                       ),
@@ -704,6 +708,11 @@ class _CalendarPageState extends State<CalendarPage> {
 
   String _formatDate(DateTime date) {
     return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _calendarDateKey(String raw) {
+    final value = raw.trim();
+    return value.length >= 10 ? value.substring(0, 10) : value;
   }
 
   String _monthLabel(DateTime date) {
