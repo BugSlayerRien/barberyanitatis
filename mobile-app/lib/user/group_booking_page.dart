@@ -139,9 +139,9 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
   Future<void> _confirmBooking() async {
     final option = _selectedOption;
     if (option == null) return;
-    if (UserSession.userId == null || UserSession.selectedVariantId == null) {
+    if (UserSession.userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in and select a hairstyle first.')),
+        const SnackBar(content: Text('Please log in first.')),
       );
       return;
     }
