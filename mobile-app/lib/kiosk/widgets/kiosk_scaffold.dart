@@ -19,6 +19,7 @@ class KioskScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final compact = MediaQuery.sizeOf(context).shortestSide < 600;
     return Scaffold(
       backgroundColor: KioskColors.background,
       appBar: AppTopBar(
@@ -34,9 +35,11 @@ class KioskScaffold extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
               child: Text(
                 title!,
-                style: const TextStyle(
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
                   color: KioskColors.textPrimary,
-                  fontSize: 24,
+                  fontSize: compact ? 18 : 24,
                   fontWeight: FontWeight.w700,
                 ),
               ),

@@ -428,6 +428,8 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                             ? (appointment['displayTitle'] as String? ??
                                                 appointment['service'] as String)
                                             : appointment['service'] as String,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,
@@ -437,6 +439,8 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                       const SizedBox(height: 4),
                                       Text(
                                         appointment['barber'] as String,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(
                                             color: Colors.white70,
                                             fontSize: 12),
@@ -496,11 +500,15 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           const Icon(Icons.calendar_today,
                                               color: Colors.white, size: 16),
                                           const SizedBox(width: 8),
-                                          Text(
+                                          Flexible(
+                                            child: Text(
                                             appointment['date'] as String,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 12),
+                                          ),
                                           ),
                                         ],
                                       ),
@@ -510,11 +518,15 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           const Icon(Icons.access_time,
                                               color: Colors.white, size: 16),
                                           const SizedBox(width: 8),
-                                          Text(
+                                          Flexible(
+                                            child: Text(
                                             appointment['time'] as String,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
                                                 color: Colors.white70,
                                                 fontSize: 12),
+                                          ),
                                           ),
                                         ],
                                       ),
@@ -564,22 +576,27 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                             const Divider(color: Colors.white10, height: 1),
                             const SizedBox(height: 12),
                             Row(
-                              mainAxisAlignment:
-                                  MainAxisAlignment.spaceBetween,
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if (appointment['rating'] != null)
-                                  Text(
-                                    appointment['rating'] as String,
-                                    style: const TextStyle(
-                                      color: Color(0xFFA99941),
-                                      fontWeight: FontWeight.bold,
-                                      fontSize: 12,
+                                  Padding(
+                                    padding: const EdgeInsets.only(right: 8, top: 10),
+                                    child: Text(
+                                      appointment['rating'] as String,
+                                      style: const TextStyle(
+                                        color: Color(0xFFA99941),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
                                     ),
-                                  )
-                                else
-                                  const SizedBox.shrink(),
-                                Row(
-                                  children: [
+                                  ),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 8,
+                                    alignment: WrapAlignment.end,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
                                     if (isUpcoming) ...[
                                       TextButton(
                                         onPressed: () {
@@ -608,12 +625,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(width: 6),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 8,
-                                        children: [
-                                          if (paymentState != 'Paid')
+                                      if (paymentState != 'Paid')
                                             ElevatedButton(
                                               onPressed: isProcessing
                                                   ? null
@@ -622,6 +634,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                               style: ElevatedButton.styleFrom(
                                                 backgroundColor: Colors.white,
                                                 foregroundColor: Colors.black,
+                                                visualDensity: VisualDensity.compact,
                                                 padding:
                                                     const EdgeInsets.symmetric(
                                                         horizontal: 12,
@@ -650,6 +663,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                   appointment['canReschedule'] == true
                                                       ? const Color(0xFFA99941)
                                                       : Colors.white38,
+                                              visualDensity: VisualDensity.compact,
                                               side: BorderSide(
                                                   color: appointment['canReschedule'] == true
                                                       ? const Color(0xFFA99941)
@@ -678,6 +692,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor:
                                                   const Color(0xFFE74C3C),
+                                              visualDensity: VisualDensity.compact,
                                               side: const BorderSide(
                                                   color: Color(0xFFE74C3C),
                                                   width: 1),
@@ -708,11 +723,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                     ),
                                                   ),
                                           ),
-                                        ],
-                                      ),
-                                    ] else
-                                      Row(
-                                        children: [
+                                    ] else ...[
                                           ElevatedButton(
                                             onPressed: isProcessing
                                                 ? null
@@ -749,7 +760,6 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                     ),
                                                   ),
                                           ),
-                                          const SizedBox(width: 8),
                                           TextButton(
                                             onPressed: () {
                                               Navigator.of(context)
@@ -763,6 +773,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                             style: TextButton.styleFrom(
                                               foregroundColor:
                                                   const Color(0xFFA99941),
+                                              visualDensity: VisualDensity.compact,
                                               padding:
                                                   const EdgeInsets.symmetric(
                                                       horizontal: 12,
@@ -775,7 +786,6 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                   fontSize: 11),
                                             ),
                                           ),
-                                          const SizedBox(width: 6),
                                           OutlinedButton(
                                             onPressed: isProcessing
                                                 ? null
@@ -783,6 +793,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                     context, appointment),
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor: Colors.white,
+                                              visualDensity: VisualDensity.compact,
                                               side: const BorderSide(
                                                   color: Colors.white24),
                                               padding:
@@ -800,9 +811,9 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                   fontSize: 11),
                                             ),
                                           ),
-                                        ],
-                                      ),
-                                  ],
+                                    ],
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),

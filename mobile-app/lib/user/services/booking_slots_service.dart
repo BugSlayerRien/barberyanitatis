@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../api_config.dart';
 import '../customer_api.dart';
+import '../time_format_utils.dart';
 import '../user_session.dart';
 
 /// Result of `time_slots.php` → `suggestBestSlot`.
@@ -77,7 +78,17 @@ class BookingSlotsService {
           final alternatives = (data['alternatives'] as List<dynamic>? ?? [])
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item))
+              .where(_isFutureSuggestion)
               .toList();
+          if (!_isFutureSuggestion(suggestion)) {
+            if (alternatives.isNotEmpty) {
+              return SuggestSlotResult.success(
+                alternatives.first,
+                alternatives: alternatives.skip(1).toList(),
+              );
+            }
+            return SuggestSlotResult.noSlots();
+          }
           return SuggestSlotResult.success(
             suggestion,
             alternatives: alternatives,
@@ -119,5 +130,14 @@ class BookingSlotsService {
         'Unable to check available times right now. Please try again.',
       );
     }
+  }
+
+  static bool _isFutureSuggestion(Map<String, dynamic> slot) {
+    final date = slot['slotDate']?.toString() ?? '';
+    final time = slot['slotTime']?.toString() ?? '';
+    if (date.isEmpty || time.isEmpty) {
+      return false;
+    }
+    return !isPastOrInvalidSuggestion(date: date, time: time);
   }
 }

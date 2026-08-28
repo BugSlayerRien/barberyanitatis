@@ -63,7 +63,10 @@ class KioskIntentPage extends StatelessWidget {
               style: TextStyle(color: KioskColors.textMuted, fontSize: 14, height: 1.4),
             ),
             const SizedBox(height: 20),
-            _IntentCard(
+            Expanded(
+              child: ListView(
+                children: [
+              _IntentCard(
               title: 'Scan face for recommendations',
               subtitle:
                   'AI suggests styles that suit you. Capture front, left, and right photos for recommendations and previews.',
@@ -83,6 +86,9 @@ class KioskIntentPage extends StatelessWidget {
               subtitle: 'Skip scanning and go straight to barber availability.',
               icon: Icons.schedule_outlined,
               onTap: () => _goKnownStyle(context),
+            ),
+                ],
+              ),
             ),
           ],
         ),

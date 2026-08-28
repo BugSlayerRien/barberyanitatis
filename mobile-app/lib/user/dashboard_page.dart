@@ -296,6 +296,13 @@ class _DashboardPageState extends State<DashboardPage>
     }
 
     if (suggestion == null) return;
+    final slotDate = suggestion['slotDate']?.toString() ?? '';
+    final slotTime = suggestion['slotTime']?.toString() ?? '';
+    if (slotDate.isEmpty ||
+        slotTime.isEmpty ||
+        isPastOrInvalidSuggestion(date: slotDate, time: slotTime)) {
+      return;
+    }
     setState(() {
       _slotSuggestion = suggestion;
       _slotAlternatives = alternatives;
@@ -579,7 +586,7 @@ class _DashboardPageState extends State<DashboardPage>
     final now = DateTime.now();
     final today =
         '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-    return slotDate == today;
+    return slotDate == today || normalizeSqlDate(slotDate) == today;
   }
 
   String _slotTeaserLine(Map<String, dynamic> suggestion) {

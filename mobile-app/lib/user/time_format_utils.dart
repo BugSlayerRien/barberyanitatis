@@ -161,3 +161,37 @@ DateTime? tryParseSlotDateTime({
 
   return DateTime(date.year, date.month, date.day, hour, minute, second);
 }
+
+String normalizeSqlDate(String raw) {
+  final value = raw.trim();
+  return value.length >= 10 ? value.substring(0, 10) : value;
+}
+
+/// Suggestion slots must be strictly in the future with the 2-hour Smart Appointment lead.
+bool isSuggestableSlotDateTime(DateTime slotDateTime) {
+  return slotDateTime.isAfter(DateTime.now().add(const Duration(hours: 2)));
+}
+
+bool isPastOrInvalidSuggestion({required String date, required String time}) {
+  final ymd = normalizeSqlDate(date);
+  final parts = ymd.split('-');
+  if (parts.length != 3) {
+    return true;
+  }
+  final year = int.tryParse(parts[0]);
+  final month = int.tryParse(parts[1]);
+  final day = int.tryParse(parts[2]);
+  if (year == null || month == null || day == null) {
+    return true;
+  }
+
+  final slotDateTime = tryParseSlotDateTime(
+    date: DateTime(year, month, day),
+    time: time,
+  );
+  if (slotDateTime == null) {
+    return true;
+  }
+
+  return !isSuggestableSlotDateTime(slotDateTime);
+}

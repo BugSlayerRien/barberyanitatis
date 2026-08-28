@@ -35,7 +35,6 @@ class SuggestedAppointmentPage extends StatefulWidget {
 }
 
 class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
-  static const Duration _bookingLeadTime = Duration(hours: 2);
   bool _booking = false;
   bool _refreshingSuggestion = false;
   bool _retriedAfterConflict = false;
@@ -94,26 +93,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   }
 
   bool _isPastOrInvalidSlot({required String date, required String time}) {
-    final dateParts = date.split('-');
-    if (dateParts.length != 3) {
-      return true;
-    }
-    final year = int.tryParse(dateParts[0]);
-    final month = int.tryParse(dateParts[1]);
-    final day = int.tryParse(dateParts[2]);
-    if (year == null || month == null || day == null) {
-      return true;
-    }
-
-    final slotDateTime = tryParseSlotDateTime(
-      date: DateTime(year, month, day),
-      time: time,
-    );
-    if (slotDateTime == null) {
-      return true;
-    }
-
-    return !slotDateTime.isAfter(DateTime.now().add(_bookingLeadTime));
+    return isPastOrInvalidSuggestion(date: date, time: time);
   }
 
   Future<Map<String, dynamic>?> _loadDefaultService() async {

@@ -773,7 +773,6 @@ Keep the total response under 24 words.
                             ),
                           );
                           Navigator.of(context).pop(true);
-                          Navigator.of(context).pop(true);
                           return;
                         } on CustomerApiException catch (e) {
                           if (!context.mounted) return;

@@ -229,6 +229,41 @@ function shop_today(): string
     return shop_now()->format('Y-m-d');
 }
 
+/** Normalize a PDO DATE / timestamp value to Y-m-d in shop timezone. */
+function shop_pdo_date_ymd(mixed $raw): string
+{
+    if ($raw instanceof DateTimeInterface) {
+        return (new DateTimeImmutable('@' . $raw->getTimestamp()))
+            ->setTimezone(new DateTimeZone(shop_timezone()))
+            ->format('Y-m-d');
+    }
+
+    $value = trim((string)$raw);
+    if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $value, $matches) === 1) {
+        return $matches[1];
+    }
+
+    return substr($value, 0, 10);
+}
+
+/** Normalize a PDO TIME / timestamp value to H:i:s (no timezone shift). */
+function shop_pdo_time_hms(mixed $raw): string
+{
+    if ($raw instanceof DateTimeInterface) {
+        return $raw->format('H:i:s');
+    }
+
+    $value = trim((string)$raw);
+    if (preg_match('/(\d{1,2}:\d{2}:\d{2})/', $value, $matches) === 1) {
+        return $matches[1];
+    }
+    if (preg_match('/(\d{1,2}:\d{2})/', $value, $matches) === 1) {
+        return $matches[1] . ':00';
+    }
+
+    return $value;
+}
+
 function ensure_unavailability_requests_table(PDO $pdo): void
 {
     static $ready = false;
