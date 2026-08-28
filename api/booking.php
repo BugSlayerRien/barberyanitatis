@@ -8,6 +8,7 @@ require_once __DIR__ . '/appointment_notifications.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
+require_once __DIR__ . '/booking_codes.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/face_scan_attach.php';
 require_once __DIR__ . '/customer_auth.php';
@@ -261,10 +262,14 @@ try {
         }
 
         if (!is_array($items)) {
-            $variantID = (int)($input['variantID'] ?? 0);
+            $variantID = resolve_group_booking_variant_id(
+                $pdo,
+                $userID,
+                (int)($input['variantID'] ?? 0)
+            );
             $serviceIDs = $input['serviceIDs'] ?? [];
             if ($variantID <= 0) {
-                json_response(['error' => 'Missing variantID'], 422);
+                json_response(['error' => 'No hairstyle is available for group booking'], 422);
             }
             if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
                 $defaultServiceId = (int)$pdo->query(
@@ -481,27 +486,40 @@ try {
 
         $pdo->beginTransaction();
 
-        $countStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = :appointment_date');
-        $countStmt->execute([':appointment_date' => $appointmentDate]);
-        $sequence = (int)$countStmt->fetchColumn() + 1;
-        $bookingCode = 'APP-' . date('Ymd', strtotime($appointmentDate)) . '-' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT);
-
         $stmt = $pdo->prepare(
               'INSERT INTO appointments (booking_code, user_id, barber_id, appointment_date, start_time, end_time, status)
                VALUES (:booking_code, :user_id, :barber_id, :appointment_date, :start_time, :end_time, :status)
              RETURNING appointment_id'
         );
-        $stmt->execute([
-            ':booking_code' => $bookingCode,
-            ':user_id' => $userID,
-            ':barber_id' => $barberID,
-            ':appointment_date' => $appointmentDate,
-            ':start_time' => $startTime,
-            ':end_time' => $endTime,
-            ':status' => 'PendingPayment',
-        ]);
+        $inserted = insert_appointment_with_unique_code(
+            $pdo,
+            $appointmentDate,
+            static function (string $bookingCode) use (
+                $stmt,
+                $userID,
+                $barberID,
+                $appointmentDate,
+                $startTime,
+                $endTime
+            ): array {
+                $stmt->execute([
+                    ':booking_code' => $bookingCode,
+                    ':user_id' => $userID,
+                    ':barber_id' => $barberID,
+                    ':appointment_date' => $appointmentDate,
+                    ':start_time' => $startTime,
+                    ':end_time' => $endTime,
+                    ':status' => 'PendingPayment',
+                ]);
 
-        $appointmentID = (int)$stmt->fetchColumn();
+                return [
+                    'id' => (int)$stmt->fetchColumn(),
+                    'code' => $bookingCode,
+                ];
+            }
+        );
+        $appointmentID = (int)$inserted['id'];
+        $bookingCode = (string)$inserted['code'];
 
         $detailStmt = $pdo->prepare(
             'INSERT INTO appointment_details (appointment_id, service_id, variant_id, selected_view, final_price)

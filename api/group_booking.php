@@ -7,6 +7,7 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/appointment_notifications.php';
 require_once __DIR__ . '/schema_cache.php';
+require_once __DIR__ . '/booking_codes.php';
 
 function ensure_group_booking_schema(PDO $pdo): void
 {
@@ -573,28 +574,45 @@ function create_group_booking(
                 $memberName = 'Guest';
             }
 
-            $countStmt = $pdo->prepare('SELECT COUNT(*) FROM appointments WHERE appointment_date = :d');
-            $countStmt->execute([':d' => $slotDate]);
-            $sequence = (int)$countStmt->fetchColumn() + 1;
-            $bookingCode = 'APP-' . date('Ymd', strtotime($slotDate)) . '-' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT);
-
             $insertAppt = $pdo->prepare(
                 "INSERT INTO appointments (booking_code, user_id, barber_id, appointment_date, start_time, end_time, status, booking_group_id, group_member_name, group_sequence)
                  VALUES (:code, :user_id, :barber_id, :date, :start, :end, 'PendingPayment', :group_id, :member_name, :seq)
                  RETURNING appointment_id"
             );
-            $insertAppt->execute([
-                ':code' => $bookingCode,
-                ':user_id' => $userId,
-                ':barber_id' => $barberId,
-                ':date' => $slotDate,
-                ':start' => $time,
-                ':end' => $endTime,
-                ':group_id' => $groupId,
-                ':member_name' => $memberName,
-                ':seq' => $index + 1,
-            ]);
-            $appointmentId = (int)$insertAppt->fetchColumn();
+            $inserted = insert_appointment_with_unique_code(
+                $pdo,
+                $slotDate,
+                static function (string $bookingCode) use (
+                    $insertAppt,
+                    $userId,
+                    $barberId,
+                    $slotDate,
+                    $time,
+                    $endTime,
+                    $groupId,
+                    $memberName,
+                    $index
+                ): array {
+                    $insertAppt->execute([
+                        ':code' => $bookingCode,
+                        ':user_id' => $userId,
+                        ':barber_id' => $barberId,
+                        ':date' => $slotDate,
+                        ':start' => $time,
+                        ':end' => $endTime,
+                        ':group_id' => $groupId,
+                        ':member_name' => $memberName,
+                        ':seq' => $index + 1,
+                    ]);
+
+                    return [
+                        'id' => (int)$insertAppt->fetchColumn(),
+                        'code' => $bookingCode,
+                    ];
+                }
+            );
+            $appointmentId = (int)$inserted['id'];
+            $bookingCode = (string)$inserted['code'];
             $appointmentIds[] = $appointmentId;
             $bookingCodes[] = $bookingCode;
 
