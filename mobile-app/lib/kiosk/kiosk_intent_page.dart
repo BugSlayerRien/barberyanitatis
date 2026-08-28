@@ -126,7 +126,7 @@ class _IntentCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(icon, color: Colors.white, size: 32),
+              Icon(icon, color: KioskColors.gold, size: 32),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -135,7 +135,7 @@ class _IntentCard extends StatelessWidget {
                     Text(
                       title,
                       style: const TextStyle(
-                        color: Colors.white,
+                        color: KioskColors.textPrimary,
                         fontWeight: FontWeight.w700,
                         fontSize: 15,
                       ),
@@ -148,7 +148,7 @@ class _IntentCard extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: Colors.white54),
+              const Icon(Icons.chevron_right, color: KioskColors.textMuted),
             ],
           ),
         ),

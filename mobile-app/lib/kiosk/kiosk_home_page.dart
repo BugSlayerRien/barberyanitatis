@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../user/app_brand.dart';
 import 'kiosk_api.dart';
 import 'kiosk_guest_page.dart';
 import 'kiosk_session.dart';
@@ -137,13 +138,13 @@ class _WalkInQueuePanel extends StatelessWidget {
           const SizedBox(height: 16),
           Expanded(
             child: loading
-                ? const Center(child: CircularProgressIndicator(color: Colors.white))
+                ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
                 : error != null
                     ? Center(
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(error!, style: const TextStyle(color: Colors.white70)),
+                            Text(error!, style: const TextStyle(color: KioskColors.textMuted)),
                             TextButton(onPressed: onRetry, child: const Text('Retry')),
                           ],
                         ),
@@ -181,7 +182,7 @@ class _WalkInQueuePanel extends StatelessWidget {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: Colors.white,
+                                        color: KioskColors.gold,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Text(
@@ -201,7 +202,7 @@ class _WalkInQueuePanel extends StatelessWidget {
                                           Text(
                                             name,
                                             style: const TextStyle(
-                                              color: Colors.white,
+                                              color: KioskColors.textPrimary,
                                               fontWeight: FontWeight.w700,
                                               fontSize: 16,
                                             ),
@@ -264,17 +265,8 @@ class _StartWalkInPanel extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Image.asset('assets/images/TATIS.png', height: 90),
-              const SizedBox(height: 20),
-              const Text(
-                'Walk-In Kiosk',
-                style: TextStyle(
-                  color: KioskColors.textPrimary,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 10),
+              const BrandWordmark(logoHeight: 90, tagline: 'Walk-In Kiosk'),
+              const SizedBox(height: 16),
               const Text(
                 'Get a haircut recommendation, pick your barber, and join the queue — no account needed.',
                 textAlign: TextAlign.center,

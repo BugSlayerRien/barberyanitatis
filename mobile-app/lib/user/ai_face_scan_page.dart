@@ -11,6 +11,7 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 
 import 'api_config.dart';
+import 'app_brand.dart';
 import 'ai_funnel_service.dart';
 import '../services/calibration_api.dart';
 import 'appointments_page.dart';
@@ -2255,8 +2256,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               LinearProgressIndicator(
                 value: progress.clamp(0.0, 1.0),
                 minHeight: 8,
-                backgroundColor: Colors.white12,
-                color: Colors.white,
+                backgroundColor: AppBrand.goldTint,
+                color: AppBrand.gold,
               ),
               const SizedBox(height: 16),
               Expanded(child: _stageStatusRow(vertical: true)),
@@ -2278,10 +2279,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           height: 52,
           child: ElevatedButton(
             onPressed: _continueKioskFromLivePreview,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-            ),
+            style: AppBrand.primaryButton,
             child: const Text('Continue to barber selection', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ),
@@ -2777,9 +2775,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                           Checkbox(
                             value: _consentFormAgreed,
                             onChanged: (v) => setState(() => _consentFormAgreed = v ?? false),
-                            activeColor: Colors.white,
+                            activeColor: widget.kioskMode ? AppBrand.gold : Colors.white,
                             checkColor: Colors.black,
-                            side: const BorderSide(color: Colors.white54),
+                            side: BorderSide(
+                              color: widget.kioskMode ? AppBrand.gold : Colors.white54,
+                            ),
                           ),
                           Expanded(
                             child: Padding(
@@ -2811,13 +2811,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                             setState(() => _consentAccepted = true);
                           }
                         : null,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: Colors.black,
-                      disabledBackgroundColor: Colors.white24,
-                      disabledForegroundColor: Colors.white38,
-                      minimumSize: const Size.fromHeight(48),
-                    ),
+                    style: widget.kioskMode
+                        ? AppBrand.primaryButton
+                        : ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            disabledBackgroundColor: Colors.white24,
+                            disabledForegroundColor: Colors.white38,
+                            minimumSize: const Size.fromHeight(48),
+                          ),
                     child: const Text('Continue to capture', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),

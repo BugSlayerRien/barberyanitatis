@@ -1,17 +1,60 @@
 import 'package:flutter/material.dart';
 
-/// Shared kiosk colors (matches customer app dark theme).
+import '../user/app_brand.dart';
+
+/// Shared kiosk colors — same tokens as the customer app.
 class KioskColors {
   KioskColors._();
 
-  static const background = Color(0xFF0A0A0A);
-  static const panel = Color(0xFF141414);
-  static const panelAlt = Color(0xFF1A1A1A);
-  static const border = Colors.white24;
-  static const textPrimary = Colors.white;
-  static const textMuted = Colors.white70;
-  static const textDim = Colors.white54;
-  static const gold = Color(0xFFA99941);
+  static const background = AppBrand.background;
+  static const panel = AppBrand.panel;
+  static const panelAlt = AppBrand.surfaceAlt;
+  static const border = AppBrand.border;
+  static const borderStrong = AppBrand.borderStrong;
+  static const textPrimary = AppBrand.text;
+  static const textMuted = AppBrand.textMuted;
+  static const textDim = AppBrand.textMuted;
+  static const gold = AppBrand.gold;
+  static const goldTint = AppBrand.goldTint;
+  static const goldLine = AppBrand.goldLine;
+}
+
+InputDecoration kioskInputDecoration({
+  required String hintText,
+  Widget? prefixIcon,
+  Widget? suffixIcon,
+}) {
+  return InputDecoration(
+    hintText: hintText,
+    hintStyle: const TextStyle(color: KioskColors.textMuted),
+    prefixIcon: prefixIcon,
+    suffixIcon: suffixIcon,
+    filled: true,
+    fillColor: KioskColors.panel,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: KioskColors.border),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: KioskColors.border),
+    ),
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(10),
+      borderSide: const BorderSide(color: KioskColors.gold),
+    ),
+  );
+}
+
+BoxDecoration kioskCardDecoration({bool selected = false}) {
+  return BoxDecoration(
+    color: selected ? KioskColors.goldTint : KioskColors.panel,
+    borderRadius: BorderRadius.circular(12),
+    border: Border.all(
+      color: selected ? KioskColors.gold : KioskColors.border,
+      width: selected ? 1.5 : 1,
+    ),
+  );
 }
 
 class KioskPrimaryButton extends StatelessWidget {
@@ -33,11 +76,8 @@ class KioskPrimaryButton extends StatelessWidget {
       height: 52,
       child: ElevatedButton(
         onPressed: loading ? null : onPressed,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-          disabledBackgroundColor: Colors.white24,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        style: AppBrand.primaryButton.copyWith(
+          minimumSize: const WidgetStatePropertyAll(Size.fromHeight(52)),
         ),
         child: loading
             ? const SizedBox(
@@ -64,10 +104,8 @@ class KioskOutlineButton extends StatelessWidget {
       height: 52,
       child: OutlinedButton(
         onPressed: onPressed,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.white,
-          side: const BorderSide(color: Colors.white24),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        style: AppBrand.outlineButton.copyWith(
+          minimumSize: const WidgetStatePropertyAll(Size.fromHeight(52)),
         ),
         child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
       ),

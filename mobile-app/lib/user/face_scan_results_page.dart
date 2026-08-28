@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
+import 'app_brand.dart';
 import 'feature_flags.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
@@ -1387,12 +1388,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _selected == null || _bookingInFlight ? null : _bookSelected,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  disabledBackgroundColor: Colors.white24,
-                  minimumSize: const Size.fromHeight(50),
-                ),
+                style: widget.kioskMode
+                    ? AppBrand.primaryButton.copyWith(
+                        minimumSize: const WidgetStatePropertyAll(Size.fromHeight(50)),
+                      )
+                    : ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        disabledBackgroundColor: Colors.white24,
+                        minimumSize: const Size.fromHeight(50),
+                      ),
                 child: _bookingInFlight
                     ? const SizedBox(
                         width: 20,
@@ -1524,9 +1529,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       padding: const EdgeInsets.only(bottom: 8),
         child: Container(
           decoration: BoxDecoration(
-            color: selected ? const Color(0xFF1F1F1F) : const Color(0xFF141414),
+            color: selected
+                ? (widget.kioskMode ? AppBrand.goldTint : const Color(0xFF1F1F1F))
+                : const Color(0xFF141414),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: selected ? Colors.white : Colors.white10, width: selected ? 1.5 : 1),
+            border: Border.all(
+              color: selected
+                  ? (widget.kioskMode ? AppBrand.gold : Colors.white)
+                  : Colors.white10,
+              width: selected ? 1.5 : 1,
+            ),
           ),
           child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -52,15 +52,18 @@ class AppBrand {
 class BrandWordmark extends StatelessWidget {
   final double logoHeight;
   final bool showTagline;
+  final String? tagline;
 
   const BrandWordmark({
     super.key,
     this.logoHeight = 96,
     this.showTagline = false,
+    this.tagline,
   });
 
   @override
   Widget build(BuildContext context) {
+    final caption = tagline ?? (showTagline ? 'AI Hairstyle Recommender' : null);
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -79,11 +82,12 @@ class BrandWordmark extends StatelessWidget {
             letterSpacing: 1.4,
           ),
         ),
-        if (showTagline) ...[
+        if (caption != null) ...[
           const SizedBox(height: 6),
-          const Text(
-            'AI Hairstyle Recommender',
-            style: TextStyle(color: AppBrand.gold, fontSize: 12, letterSpacing: 0.4),
+          Text(
+            caption,
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: AppBrand.gold, fontSize: 12, letterSpacing: 0.4),
           ),
         ],
       ],

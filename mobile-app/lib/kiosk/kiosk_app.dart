@@ -49,19 +49,36 @@ class KioskApp extends StatelessWidget {
     final centuryPrimaryTextTheme =
         base.primaryTextTheme.apply(fontFamily: 'CenturyGothic');
     return MaterialApp(
-      title: 'Tatis Walk-In Kiosk',
+      title: 'Barberya ni Tatis',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: KioskColors.background,
+        colorScheme: const ColorScheme.dark(
+          primary: KioskColors.gold,
+          onPrimary: Colors.black,
+          surface: KioskColors.panel,
+          onSurface: KioskColors.textPrimary,
+        ),
         fontFamily: 'CenturyGothic',
         textTheme: centuryTextTheme,
         primaryTextTheme: centuryPrimaryTextTheme,
         appBarTheme: base.appBarTheme.copyWith(
+          backgroundColor: KioskColors.background,
           titleTextStyle: centuryTextTheme.titleLarge,
           toolbarTextStyle: centuryTextTheme.bodyMedium,
+        ),
+        progressIndicatorTheme: const ProgressIndicatorThemeData(
+          color: KioskColors.gold,
+        ),
+        dividerTheme: const DividerThemeData(color: KioskColors.border),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            foregroundColor: KioskColors.gold,
+            textStyle: const TextStyle(fontFamily: 'CenturyGothic'),
+          ),
         ),
         elevatedButtonTheme: ElevatedButtonThemeData(
           style: ElevatedButton.styleFrom(
@@ -77,11 +94,6 @@ class KioskApp extends StatelessWidget {
               fontFamily: 'CenturyGothic',
               fontWeight: FontWeight.w600,
             ),
-          ),
-        ),
-        textButtonTheme: TextButtonThemeData(
-          style: TextButton.styleFrom(
-            textStyle: const TextStyle(fontFamily: 'CenturyGothic'),
           ),
         ),
       ),
