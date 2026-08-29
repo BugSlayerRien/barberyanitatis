@@ -79,7 +79,7 @@ try {
                 'appointmentID' => (int)$row['appointment_id'],
                 'bookingGroupID' => $row['booking_group_id'] !== null ? (int)$row['booking_group_id'] : null,
                 'groupSequence' => $row['group_sequence'] !== null ? (int)$row['group_sequence'] : null,
-                'appointmentDate' => (string)$row['appointment_date'],
+                'appointmentDate' => shop_pdo_date_ymd($row['appointment_date'] ?? ''),
                 'startTime' => (string)$row['start_time'],
                 'endTime' => (string)$row['end_time'],
                 'status' => (string)$row['status'],
@@ -94,7 +94,7 @@ try {
                 'is_group' => (bool)($row['isGroup'] ?? false),
                 'people_count' => (int)($row['peopleCount'] ?? 1),
                 'display_title' => (string)($row['displayTitle'] ?? $row['customerName'] ?? 'Customer'),
-                'appointment_date' => (string)($row['appointmentDate'] ?? ''),
+                'appointment_date' => shop_pdo_date_ymd($row['appointmentDate'] ?? ''),
                 'start_time' => (string)($row['startTime'] ?? ''),
                 'end_time' => (string)($row['endTime'] ?? ''),
                 'time_range' => (string)($row['timeRange'] ?? ''),
@@ -117,12 +117,33 @@ try {
             ':start_date' => $startDate,
             ':end_date' => $endDate,
         ]);
-        $requests = $reqStmt->fetchAll();
+        $requests = array_map(static function (array $row): array {
+            $row['request_date'] = shop_pdo_date_ymd($row['request_date'] ?? '');
+            return $row;
+        }, $reqStmt->fetchAll());
+
+        $daysInMonth = (int)date('t', strtotime($startDate));
+        $year = (int)substr($startDate, 0, 4);
+        $month = (int)substr($startDate, 5, 2);
+        $closures = [];
+        for ($day = 1; $day <= $daysInMonth; $day++) {
+            $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
+            $closure = shop_closure_details($date);
+            $closures[$date] = [
+                'isClosed' => $closure['isClosed'],
+                'closureStatus' => $closure['status'],
+                'closureReason' => $closure['reason'],
+                'closureMessage' => $closure['customerMessage'],
+            ];
+        }
 
         json_response([
             'slots' => $slots,
             'appointments' => $appointments,
             'requests' => $requests,
+            'closures' => $closures,
+            'bookingWindowDays' => shop_booking_window_days(),
+            'bookingWindowEnd' => shop_window_end_date(),
         ]);
     }
 

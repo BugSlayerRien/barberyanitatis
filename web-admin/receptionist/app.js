@@ -639,6 +639,7 @@ function buildTracking(appointments, walkins) {
     items.push({
       kind: "appointment",
       appointmentId: item.appointment_id,
+      appointmentDate: calendarDateYmd(item.appointment_date),
       name: item.name,
       memberLabel: item.member_label || item.name,
       isGroup: item.is_group === true,
@@ -891,7 +892,14 @@ function renderTracking(items, listId) {
     card.className = "card queue-card";
     const pct = Math.round((item.progress || 0) * 100);
     const canCancel = item.status !== "COMPLETED";
-    const canComplete = item.status !== "COMPLETED" && item.status !== "PENDING PAYMENT";
+    const futureAppointment = item.kind === "appointment"
+      && item.appointmentDate
+      && item.appointmentDate > localTodayYmd()
+      && item.rawStatus !== "InProgress"
+      && item.rawStatus !== "CheckedIn";
+    const canComplete = item.status !== "COMPLETED"
+      && item.status !== "PENDING PAYMENT"
+      && !futureAppointment;
     const canStartWalkin =
       item.kind === "walkin" &&
       item.queueId > 0 &&

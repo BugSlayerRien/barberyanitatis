@@ -125,6 +125,9 @@ function merge_barber_slots_for_date(array $dbRows, int $capacity = 10, ?string 
         $existing = $byTime[$normalized] ?? null;
         $status = (string)($row['status'] ?? 'Available');
         $bookedCount = (int)($row['booked_count'] ?? 0);
+        if ($bookedCount > 0 && strtolower($status) === 'available') {
+            $status = 'Booked';
+        }
 
         if ($existing === null) {
             $byTime[$normalized] = [
@@ -149,6 +152,9 @@ function merge_barber_slots_for_date(array $dbRows, int $capacity = 10, ?string 
             ];
         } elseif ($existingStatus === 'Available' && $status === 'Available' && $bookedCount > $existingBooked) {
             $byTime[$normalized]['booked_count'] = $bookedCount;
+            if ($bookedCount > 0) {
+                $byTime[$normalized]['status'] = 'Booked';
+            }
         }
     }
 
@@ -469,8 +475,12 @@ try {
         $minTime = $minBookable->format('H:i:s');
         $daysInMonth = (int)date('t', strtotime($startDate));
 
+        $hourFilter = "EXTRACT(MINUTE FROM slot_time) = 0
+               AND EXTRACT(HOUR FROM (slot_time::time)) BETWEEN 9 AND 19
+               AND EXTRACT(HOUR FROM (slot_time::time)) <> 12";
+
         $stmt = $pdo->prepare(
-            "SELECT slot_date, COUNT(*) AS available_count
+            "SELECT slot_date, slot_time
              FROM time_slots
              WHERE barber_id = :barber_id
                AND status = 'Available'
@@ -478,10 +488,7 @@ try {
                AND slot_date < :end_date
                AND slot_date <= :window_end_date
                AND " . calendar_bookable_slot_sql_clause() . "
-               AND EXTRACT(MINUTE FROM slot_time) = 0
-               AND EXTRACT(HOUR FROM (slot_time::time)) BETWEEN 9 AND 19
-               AND EXTRACT(HOUR FROM (slot_time::time)) <> 12
-             GROUP BY slot_date"
+               AND {$hourFilter}"
         );
         $stmt->execute([
             ':barber_id' => $barberID,
@@ -491,47 +498,69 @@ try {
             ':min_date' => $minDate,
             ':min_time' => $minTime,
         ]);
-        $availableMap = [];
+        $availableTimes = [];
         foreach ($stmt->fetchAll() as $row) {
             $ymd = shop_pdo_date_ymd($row['slot_date'] ?? '');
-            if ($ymd === '') {
+            $time = shop_normalize_slot_time((string)($row['slot_time'] ?? ''), $ymd !== '' ? $ymd : null);
+            if ($ymd === '' || $time === null) {
                 continue;
             }
-            $availableMap[$ymd] = (int)$row['available_count'];
+            $availableTimes[$ymd][$time] = true;
         }
 
         $bookedStmt = $pdo->prepare(
-            "SELECT slot_date, COUNT(*) AS booked_count
+            "SELECT slot_date, slot_time
              FROM time_slots
              WHERE barber_id = :barber_id
                AND LOWER(status) = 'booked'
                AND slot_date >= :start_date
                AND slot_date < :end_date
-               AND EXTRACT(MINUTE FROM slot_time) = 0
-               AND EXTRACT(HOUR FROM (slot_time::time)) BETWEEN 9 AND 19
-               AND EXTRACT(HOUR FROM (slot_time::time)) <> 12
-             GROUP BY slot_date"
+               AND {$hourFilter}"
         );
         $bookedStmt->execute([
             ':barber_id' => $barberID,
             ':start_date' => $startDate,
             ':end_date' => $endDate,
         ]);
-        $bookedMap = [];
+        $bookedTimes = [];
         foreach ($bookedStmt->fetchAll() as $row) {
             $ymd = shop_pdo_date_ymd($row['slot_date'] ?? '');
-            if ($ymd === '') {
+            $time = shop_normalize_slot_time((string)($row['slot_time'] ?? ''), $ymd !== '' ? $ymd : null);
+            if ($ymd === '' || $time === null) {
                 continue;
             }
-            $bookedMap[$ymd] = (int)$row['booked_count'];
+            $bookedTimes[$ymd][$time] = true;
+        }
+
+        $occupiedStmt = $pdo->prepare(
+            "SELECT appointment_date, start_time
+             FROM appointments
+             WHERE barber_id = :barber_id
+               AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
+               AND appointment_date >= :start_date
+               AND appointment_date < :end_date"
+        );
+        $occupiedStmt->execute([
+            ':barber_id' => $barberID,
+            ':start_date' => $startDate,
+            ':end_date' => $endDate,
+        ]);
+        foreach ($occupiedStmt->fetchAll() as $row) {
+            $ymd = shop_pdo_date_ymd($row['appointment_date'] ?? '');
+            $time = shop_normalize_slot_time((string)($row['start_time'] ?? ''), $ymd !== '' ? $ymd : null);
+            if ($ymd === '' || $time === null) {
+                continue;
+            }
+            $bookedTimes[$ymd][$time] = true;
+            unset($availableTimes[$ymd][$time]);
         }
 
         $availability = [];
         for ($day = 1; $day <= $daysInMonth; $day++) {
             $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
             $closure = shop_closure_details($date);
-            $availableCount = $closure['isClosed'] ? 0 : (int)($availableMap[$date] ?? 0);
-            $bookedCount = (int)($bookedMap[$date] ?? 0);
+            $availableCount = $closure['isClosed'] ? 0 : count($availableTimes[$date] ?? []);
+            $bookedCount = count($bookedTimes[$date] ?? []);
             $defaultTotal = $closure['isClosed'] ? 0 : count(shop_default_slot_times($date));
             $totalSlots = max($defaultTotal, $availableCount + $bookedCount);
 
@@ -592,7 +621,7 @@ try {
          LEFT JOIN (
             SELECT barber_id, appointment_date, start_time, COUNT(*) AS booked_count
             FROM appointments
-            WHERE status IN ('Scheduled', 'CheckedIn', 'InProgress', 'Completed')
+            WHERE status IN ('Scheduled', 'CheckedIn', 'InProgress')
             GROUP BY barber_id, appointment_date, start_time
          ) appt
            ON appt.barber_id = ts.barber_id
@@ -627,6 +656,39 @@ try {
     }
 
     $merged = merge_barber_slots_for_date($rows, $capacity, $slotDate);
+
+    $holdStmt = $pdo->prepare(
+        "SELECT start_time, COUNT(*) AS booked_count
+         FROM appointments
+         WHERE barber_id = :barber_id
+           AND appointment_date = :slot_date
+           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')
+         GROUP BY start_time"
+    );
+    $holdStmt->execute([
+        ':barber_id' => $barberID,
+        ':slot_date' => $slotDate,
+    ]);
+    $heldByTime = [];
+    foreach ($holdStmt->fetchAll() as $hold) {
+        $time = shop_normalize_slot_time((string)($hold['start_time'] ?? ''), $slotDate);
+        if ($time === null) {
+            continue;
+        }
+        $heldByTime[$time] = (int)$hold['booked_count'];
+    }
+    foreach ($merged as &$slot) {
+        $time = (string)($slot['slot_time'] ?? '');
+        if (!isset($heldByTime[$time])) {
+            continue;
+        }
+        $slot['booked_count'] = max((int)($slot['booked_count'] ?? 0), $heldByTime[$time]);
+        if (strtolower((string)($slot['status'] ?? '')) === 'available') {
+            $slot['status'] = 'Booked';
+        }
+    }
+    unset($slot);
+
     $minBookable = shop_earliest_bookable_slot_start();
     foreach ($merged as &$slot) {
         $time = (string)($slot['slot_time'] ?? '');
