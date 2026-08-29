@@ -538,8 +538,11 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       'frontViewUrl': front,
       'sideViewUrl': side,
       'backViewUrl': back,
-      'variantId': variant['variant_id'],
-      'serviceId': variant['service_id'] ?? variant['serviceID'],
+      'variantId': int.tryParse(variant['variant_id']?.toString() ?? '') ??
+          int.tryParse(variant['variantId']?.toString() ?? ''),
+      'serviceId': int.tryParse(variant['service_id']?.toString() ?? '') ??
+          int.tryParse(variant['serviceID']?.toString() ?? ''),
+      'estimatedMinutes': int.tryParse(variant['estimated_minutes']?.toString() ?? ''),
     };
   }
 
@@ -665,8 +668,9 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   }
 
   Future<void> _useStyleDirectly(BuildContext context, Map<String, dynamic> style) async {
-    final variantId = style['variantId'] as int?;
-    if (variantId == null) {
+    final variantId = int.tryParse(style['variantId']?.toString() ?? '') ??
+        int.tryParse(style['variantID']?.toString() ?? '');
+    if (variantId == null || variantId <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('This haircut cannot be booked yet.')),
       );
@@ -701,7 +705,8 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
 
     UserSession.selectedVariantId = variantId;
     UserSession.selectedStyleName = style['name']?.toString();
-    UserSession.selectedEstimatedMinutes = style['estimatedMinutes'] as int?;
+    UserSession.selectedEstimatedMinutes =
+        int.tryParse(style['estimatedMinutes']?.toString() ?? '');
     UserSession.selectedPreviewImages = {
       'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
       'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
@@ -732,6 +737,9 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
         const SnackBar(content: Text('No available slots found. Please choose manually.')),
       );
       await BookingDraftService.saveFromSession(step: 'barber');
+      if (!context.mounted) {
+        return;
+      }
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
       );
@@ -739,6 +747,9 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     }
 
     await BookingDraftService.saveFromSession(step: 'barber');
+    if (!context.mounted) {
+      return;
+    }
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SuggestedAppointmentPage(

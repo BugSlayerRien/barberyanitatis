@@ -73,8 +73,9 @@ class BookingSlotsService {
 
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final suggestion = data['suggestion'];
-        if (suggestion is Map<String, dynamic>) {
+        final rawSuggestion = data['suggestion'];
+        if (rawSuggestion is Map) {
+          final suggestion = Map<String, dynamic>.from(rawSuggestion);
           final alternatives = (data['alternatives'] as List<dynamic>? ?? [])
               .whereType<Map>()
               .map((item) => Map<String, dynamic>.from(item))

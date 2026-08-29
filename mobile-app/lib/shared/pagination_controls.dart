@@ -21,60 +21,99 @@ class PaginationControls extends StatelessWidget {
     }
 
     final safeCurrentPage = currentPage.clamp(1, totalPages);
-    final pages = _visiblePages(safeCurrentPage, totalPages, maxVisiblePages);
 
     return Padding(
       padding: const EdgeInsets.only(top: 14),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          OutlinedButton(
-            onPressed: safeCurrentPage > 1
-                ? () => onPageChanged(safeCurrentPage - 1)
-                : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white24),
-            ),
-            child: const Text('Previous'),
-          ),
-          const SizedBox(width: 8),
-          ...pages.map((page) {
-            final isActive = page == safeCurrentPage;
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: SizedBox(
-                width: 34,
-                child: ElevatedButton(
-                  onPressed: isActive ? null : () => onPageChanged(page),
-                  style: ElevatedButton.styleFrom(
-                    elevation: 0,
-                    backgroundColor:
-                        isActive ? Colors.white : const Color(0xFF1A1A1A),
-                    foregroundColor: isActive ? Colors.black : Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    side: BorderSide(
-                        color: isActive ? Colors.white : Colors.white24),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 400;
+          final visible = compact
+              ? (maxVisiblePages > 3 ? 3 : maxVisiblePages)
+              : maxVisiblePages;
+          final pages = _visiblePages(safeCurrentPage, totalPages, visible);
+
+          Widget prevButton() {
+            final enabled = safeCurrentPage > 1;
+            if (compact) {
+              return IconButton(
+                onPressed: enabled ? () => onPageChanged(safeCurrentPage - 1) : null,
+                icon: const Icon(Icons.chevron_left),
+                color: Colors.white,
+                disabledColor: Colors.white24,
+                tooltip: 'Previous',
+              );
+            }
+            return OutlinedButton(
+              onPressed: enabled ? () => onPageChanged(safeCurrentPage - 1) : null,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white24),
+              ),
+              child: const Text('Previous'),
+            );
+          }
+
+          Widget nextButton() {
+            final enabled = safeCurrentPage < totalPages;
+            if (compact) {
+              return IconButton(
+                onPressed: enabled ? () => onPageChanged(safeCurrentPage + 1) : null,
+                icon: const Icon(Icons.chevron_right),
+                color: Colors.white,
+                disabledColor: Colors.white24,
+                tooltip: 'Next',
+              );
+            }
+            return OutlinedButton(
+              onPressed: enabled ? () => onPageChanged(safeCurrentPage + 1) : null,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white24),
+              ),
+              child: const Text('Next'),
+            );
+          }
+
+          return Row(
+            children: [
+              prevButton(),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: pages.map((page) {
+                      final isActive = page == safeCurrentPage;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: SizedBox(
+                          width: 34,
+                          child: ElevatedButton(
+                            onPressed: isActive ? null : () => onPageChanged(page),
+                            style: ElevatedButton.styleFrom(
+                              elevation: 0,
+                              backgroundColor:
+                                  isActive ? Colors.white : const Color(0xFF1A1A1A),
+                              foregroundColor: isActive ? Colors.black : Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              side: BorderSide(
+                                  color: isActive ? Colors.white : Colors.white24),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8)),
+                            ),
+                            child: Text('$page'),
+                          ),
+                        ),
+                      );
+                    }).toList(),
                   ),
-                  child: Text('$page'),
                 ),
               ),
-            );
-          }),
-          const SizedBox(width: 8),
-          OutlinedButton(
-            onPressed: safeCurrentPage < totalPages
-                ? () => onPageChanged(safeCurrentPage + 1)
-                : null,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.white,
-              side: const BorderSide(color: Colors.white24),
-            ),
-            child: const Text('Next'),
-          ),
-        ],
+              nextButton(),
+            ],
+          );
+        },
       ),
     );
   }

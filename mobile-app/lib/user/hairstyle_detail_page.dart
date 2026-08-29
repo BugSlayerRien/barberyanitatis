@@ -472,17 +472,18 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(result.errorMessage!)),
         );
-        return;
       }
 
-      if (!result.isSuccess) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'No open times available right now. You can still pick a barber manually.',
+      if (!result.isSuccess || result.suggestion == null) {
+        if (result.errorMessage == null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'No open times available right now. You can still pick a barber manually.',
+              ),
             ),
-          ),
-        );
+          );
+        }
         Navigator.of(context).push(
           MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
         );
@@ -496,6 +497,16 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
             alternatives: result.alternatives,
           ),
         ),
+      );
+    } catch (e) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not continue booking. Please pick a barber manually.')),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
       );
     } finally {
       if (mounted) {

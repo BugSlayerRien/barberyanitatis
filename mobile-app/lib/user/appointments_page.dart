@@ -543,11 +543,15 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           const Icon(Icons.timer,
                                               color: Colors.white, size: 16),
                                           const SizedBox(width: 8),
-                                          Text(
-                                            appointment['duration'] as String,
-                                            style: const TextStyle(
-                                                color: Colors.white70,
-                                                fontSize: 12),
+                                          Flexible(
+                                            child: Text(
+                                              appointment['duration'] as String,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(
+                                                  color: Colors.white70,
+                                                  fontSize: 12),
+                                            ),
                                           ),
                                         ],
                                       ),
