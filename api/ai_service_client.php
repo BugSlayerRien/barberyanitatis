@@ -14,18 +14,13 @@ function ai_service_base_url(): string
     return rtrim($url, '/');
 }
 
-function ai_service_is_available(): bool
+function ai_service_health_ok(string $base): bool
 {
-    $base = ai_service_base_url();
-    if ($base === '') {
-        return false;
-    }
-
     $ch = curl_init($base . '/health');
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => 8,
-        CURLOPT_CONNECTTIMEOUT => 4,
+        CURLOPT_TIMEOUT => 12,
+        CURLOPT_CONNECTTIMEOUT => 6,
     ] + api_curl_ssl_options());
     $raw = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -37,6 +32,26 @@ function ai_service_is_available(): bool
 
     $data = json_decode($raw, true);
     return is_array($data) && ($data['ok'] ?? false) === true;
+}
+
+function ai_service_is_available(): bool
+{
+    $base = ai_service_base_url();
+    if ($base === '') {
+        return false;
+    }
+
+    $attempts = 3;
+    for ($i = 0; $i < $attempts; $i++) {
+        if (ai_service_health_ok($base)) {
+            return true;
+        }
+        if ($i < $attempts - 1) {
+            usleep(400000 * ($i + 1));
+        }
+    }
+
+    return false;
 }
 
 /**

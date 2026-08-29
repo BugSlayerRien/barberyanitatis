@@ -7,6 +7,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/service_channel.php';
+require_once __DIR__ . '/kiosk_guest_name.php';
 
 require_method('POST');
 
@@ -133,8 +134,8 @@ try {
             json_response(['error' => 'Missing serviceIDs'], 422);
         }
 
-        if ($guestName === '') {
-            json_response(['error' => 'guestName is required'], 422);
+        if (!kiosk_guest_name_is_valid($guestName)) {
+            json_response(['error' => kiosk_guest_name_error()], 422);
         }
 
         if ($variantID <= 0) {

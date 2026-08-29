@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'kiosk_intent_page.dart';
 import 'kiosk_session.dart';
@@ -23,9 +24,9 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
 
   void _continue() {
     final name = _nameController.text.trim();
-    if (name.length < 4) {
+    if (!KioskSession.isValidGuestName(name)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter at least 4 letters for your name')),
+        const SnackBar(content: Text(KioskSession.guestNameError)),
       );
       return;
     }
@@ -52,9 +53,12 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
             TextField(
               controller: _nameController,
               textCapitalization: TextCapitalization.words,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[\p{L} ]', unicode: true)),
+              ],
               style: const TextStyle(color: KioskColors.textPrimary),
               decoration: kioskInputDecoration(
-                hintText: 'Your name (at least 4 letters)',
+                hintText: KioskSession.guestNameHint,
               ),
               onSubmitted: (_) => _continue(),
             ),

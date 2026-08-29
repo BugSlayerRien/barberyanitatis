@@ -13,6 +13,18 @@ enum KioskEntryPath {
 class KioskSession {
   KioskSession._();
 
+  static const String guestNameHint = 'Your name (letters and spaces)';
+  static const String guestNameError =
+      'Enter at least 2 letters. Letters and spaces only.';
+
+  static bool isValidGuestName(String raw) {
+    final name = raw.trim();
+    if (name.isEmpty) return false;
+    final allowed = RegExp(r'^[\p{L} ]+$', unicode: true);
+    if (!allowed.hasMatch(name)) return false;
+    return RegExp(r'\p{L}', unicode: true).allMatches(name).length >= 2;
+  }
+
   static String? guestName;
   static KioskEntryPath? entryPath;
   static KioskScanMode? scanMode;

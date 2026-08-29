@@ -81,6 +81,8 @@ class _CalendarPageState extends State<CalendarPage> {
   String _selectedClosureReason = '';
   bool _loadingSlots = false;
   bool _loadingMonthAvailability = false;
+  bool _hasLoadedMonthOnce = false;
+  int _monthLoadSeq = 0;
   bool _continuing = false;
   Map<String, _DayAvailability> _dayByDate = {};
 
@@ -95,7 +97,13 @@ class _CalendarPageState extends State<CalendarPage> {
   }
 
   Future<void> _loadMonthAvailability() async {
-    setState(() => _loadingMonthAvailability = true);
+    final seq = ++_monthLoadSeq;
+    final year = _currentMonth.year;
+    final month = _currentMonth.month;
+    setState(() {
+      _loadingMonthAvailability = true;
+      _dayByDate = {};
+    });
     try {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/time_slots.php'),
@@ -103,10 +111,14 @@ class _CalendarPageState extends State<CalendarPage> {
         body: jsonEncode({
           'action': 'availabilityByBarberMonth',
           'barberID': widget.barberId,
-          'year': _currentMonth.year,
-          'month': _currentMonth.month,
+          'year': year,
+          'month': month,
         }),
       );
+
+      if (seq != _monthLoadSeq || !mounted) {
+        return;
+      }
 
       if (response.statusCode == 200 && response.body.isNotEmpty) {
         final data = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
@@ -122,7 +134,6 @@ class _CalendarPageState extends State<CalendarPage> {
           }
         }
 
-        if (!mounted) return;
         setState(() {
           _dayByDate = mapped;
         });
@@ -130,8 +141,11 @@ class _CalendarPageState extends State<CalendarPage> {
     } catch (_) {
       // ignore
     } finally {
-      if (mounted) {
-        setState(() => _loadingMonthAvailability = false);
+      if (mounted && seq == _monthLoadSeq) {
+        setState(() {
+          _loadingMonthAvailability = false;
+          _hasLoadedMonthOnce = true;
+        });
       }
     }
   }
@@ -264,7 +278,7 @@ class _CalendarPageState extends State<CalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    final showInitialSkeleton = _loadingMonthAvailability && _dayByDate.isEmpty;
+    final showInitialSkeleton = !_hasLoadedMonthOnce && _loadingMonthAvailability && _dayByDate.isEmpty;
     if (showInitialSkeleton) {
       return Scaffold(
         backgroundColor: const Color(0xFF0A0A0A),
@@ -288,9 +302,10 @@ class _CalendarPageState extends State<CalendarPage> {
     final todayDate = DateTime(today.year, today.month, today.day);
     final bookingWindowEnd = todayDate.add(Duration(days: _bookingWindowDays - 1));
     final currentMonthKey = DateTime(today.year, today.month);
-    final canGoPrev = _currentMonth.isAfter(currentMonthKey);
-    final nextMonthStart = DateTime(_currentMonth.year, _currentMonth.month + 1, 1);
-    final canGoNext = !nextMonthStart.isAfter(bookingWindowEnd);
+    final viewingThisMonth =
+        _currentMonth.year == currentMonthKey.year && _currentMonth.month == currentMonthKey.month;
+    final canGoPrev = !viewingThisMonth;
+    final canGoNext = viewingThisMonth;
     final slotsBooked = _bookedSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _bookedSlots);
     final slotsOpen = _availableSlots.clamp(0, _totalSlots > 0 ? _totalSlots : _availableSlots);
     final usageColor = _slotUsageColor(slotsBooked, _totalSlots);
@@ -435,7 +450,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                   border = isClosed
                                       ? Border.all(color: const Color(0xFFFF8A80), width: 1.5)
                                       : null;
-                                } else if (isPast || isBeyondWindow) {
+                                } else if (isPast || isBeyondWindow || dayInfo == null) {
                                   fill = Colors.white12;
                                   textColor = Colors.white38;
                                   border = Border.all(color: Colors.white12);
