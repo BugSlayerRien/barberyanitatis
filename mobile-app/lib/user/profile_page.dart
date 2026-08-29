@@ -35,6 +35,7 @@ class _ProfilePageState extends State<ProfilePage> {
   int _haircutsDone = 0;
   String _gender = '';
   String _hairTexture = '';
+  Map<String, String?> _bookingPreferences = {};
   String _profileImageUrl = '';
   Uint8List? _profileImageBytes;
   XFile? _profileImage;
@@ -99,6 +100,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String gender,
     required String hairTexture,
     required String profileImageUrl,
+    Map<String, String?>? bookingPreferences,
     Uint8List? profileImageBytes,
   }) {
     setState(() {
@@ -109,6 +111,9 @@ class _ProfilePageState extends State<ProfilePage> {
       _gender = _genderForUi(gender);
       _hairTexture = _hairTextureForUi(hairTexture);
       _haircutsDone = haircutsDone;
+      if (bookingPreferences != null) {
+        _bookingPreferences = bookingPreferences;
+      }
       _profileImageUrl = profileImageUrl;
       _profileImageBytes = profileImageBytes;
       _nameController.text = _fullName;
@@ -129,6 +134,28 @@ class _ProfilePageState extends State<ProfilePage> {
       throw const CustomerApiException('Profile response was invalid');
     }
     return Map<String, dynamic>.from(profile);
+  }
+
+  Map<String, String?> _bookingPreferencesFromProfile(Map<String, dynamic> profile) {
+    final raw = profile['bookingPreferences'];
+    if (raw is! Map) {
+      return {};
+    }
+    String? label(dynamic value) {
+      final text = value?.toString().trim() ?? '';
+      return text.isEmpty ? null : text;
+    }
+
+    return {
+      'usualBookingTime': label(raw['usualBookingTime']),
+      'usualBarber': label(raw['usualBarber']),
+      'usualBookingDay': label(raw['usualBookingDay']),
+    };
+  }
+
+  String _preferenceDisplay(String key) {
+    final value = _bookingPreferences[key]?.trim() ?? '';
+    return value.isEmpty ? 'Not enough history yet' : value;
   }
 
   Future<Map<String, dynamic>> _saveProfileToApi({
@@ -203,6 +230,7 @@ class _ProfilePageState extends State<ProfilePage> {
             gender: profile['gender']?.toString().trim() ?? '',
             hairTexture: profile['hairTexture']?.toString().trim() ?? '',
             profileImageUrl: profile['profileImage']?.toString().trim() ?? '',
+            bookingPreferences: _bookingPreferencesFromProfile(profile),
           );
           return;
         }
@@ -341,6 +369,12 @@ class _ProfilePageState extends State<ProfilePage> {
               _editCard('Mobile Number', _phoneController, hint: 'Enter mobile number'),
               const SizedBox(height: 16),
               _infoCard('Haircuts Done', _haircutsDone.toString()),
+              const SizedBox(height: 16),
+              _infoCard('Usual booking time', _preferenceDisplay('usualBookingTime')),
+              const SizedBox(height: 16),
+              _infoCard('Usual barber', _preferenceDisplay('usualBarber')),
+              const SizedBox(height: 16),
+              _infoCard('Usual booking day', _preferenceDisplay('usualBookingDay')),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _saving ? null : _saveProfile,
@@ -483,6 +517,7 @@ class _ProfilePageState extends State<ProfilePage> {
           gender: saved['gender']?.toString().trim() ?? newGender,
           hairTexture: saved['hairTexture']?.toString().trim() ?? newHairTexture,
           profileImageUrl: saved['profileImage']?.toString().trim() ?? _profileImageUrl,
+          bookingPreferences: _bookingPreferencesFromProfile(saved),
           profileImageBytes: newProfileImageBytes ?? _profileImageBytes,
         );
         setState(() {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/customer_auth.php';
+require_once __DIR__ . '/slot_recommendation.php';
 
 require_method('POST');
 
@@ -110,6 +111,24 @@ function profile_payload_from_row(array $row): array
     ];
 }
 
+function profile_booking_preferences(PDO $pdo, int $userId): array
+{
+    $history = slot_recommendation_load_history($pdo, $userId);
+    $rated = slot_recommendation_load_rated_favorite($pdo, $userId);
+
+    return slot_recommendation_profile_display(
+        slot_recommendation_build_profile($history, $rated)
+    );
+}
+
+function profile_payload(PDO $pdo, array $row): array
+{
+    $payload = profile_payload_from_row($row);
+    $payload['bookingPreferences'] = profile_booking_preferences($pdo, (int)$row['user_id']);
+
+    return $payload;
+}
+
 try {
     with_pdo_retry(function (PDO $pdo) use ($action, $data): void {
     $customer = require_customer($pdo, $data);
@@ -171,7 +190,7 @@ try {
 
         json_response([
             'message' => 'Profile updated',
-            'profile' => profile_payload_from_row($updated),
+            'profile' => profile_payload($pdo, $updated),
         ], 200);
     }
 
@@ -180,7 +199,7 @@ try {
         json_response(['error' => 'User not found'], 404);
     }
 
-    json_response(['profile' => profile_payload_from_row($row)], 200);
+    json_response(['profile' => profile_payload($pdo, $row)], 200);
     });
 } catch (InvalidArgumentException $e) {
     json_response(['error' => $e->getMessage()], 422);
