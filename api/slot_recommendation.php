@@ -210,6 +210,44 @@ function slot_recommendation_build_profile(array $history, ?array $ratedFavorite
     ];
 }
 
+/**
+ * Read-only Profile labels from the same usual-* flags ranking uses.
+ * Modes from a single visit are not shown (that would be guessing).
+ *
+ * @param array<string, mixed> $profile from slot_recommendation_build_profile()
+ * @return array{
+ *   visitCount: int,
+ *   usualBookingTime: ?string,
+ *   usualBarber: ?string,
+ *   usualBookingDay: ?string
+ * }
+ */
+function slot_recommendation_profile_display(array $profile): array
+{
+    $time = null;
+    if (!empty($profile['preferred_bucket_usual']) && !empty($profile['preferred_bucket'])) {
+        $time = ucfirst(slot_recommendation_bucket_label((string)$profile['preferred_bucket']));
+    }
+
+    $barber = null;
+    if (!empty($profile['preferred_barber_usual'])) {
+        $name = trim((string)($profile['preferred_barber_name'] ?? ''));
+        $barber = $name !== '' ? $name : null;
+    }
+
+    $day = null;
+    if (!empty($profile['preferred_weekday_usual']) && $profile['preferred_weekday'] !== null) {
+        $day = slot_recommendation_weekday_label((int)$profile['preferred_weekday']);
+    }
+
+    return [
+        'visitCount' => (int)($profile['visit_count'] ?? 0),
+        'usualBookingTime' => $time,
+        'usualBarber' => $barber,
+        'usualBookingDay' => $day,
+    ];
+}
+
 function slot_recommendation_is_usual(int $modeCount, int $visitCount, array $cfg): bool
 {
     if ($visitCount < (int)$cfg['usual_min_visits'] || $modeCount <= 0) {
