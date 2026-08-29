@@ -17,13 +17,21 @@ class BarberCalendarPage extends StatefulWidget {
 }
 
 class _BarberCalendarPageState extends State<BarberCalendarPage> {
+  static const int _bookingWindowDays = 30;
+  static const Color _closedHolidayFill = Color(0xFF3A1F1F);
+  static const Color _closedHolidayText = Color(0xFFFFB4B4);
+  static const Color _closedWeeklyFill = Color(0xFF1C1C1C);
+
   late DateTime _currentMonth;
   late DateTime _selectedDate;
   bool _loading = true;
+  bool _hasLoadedOnce = false;
+  int _loadSeq = 0;
   String? _error;
   List<Map<String, dynamic>> _appointments = [];
   Map<String, int> _bookedByDate = {};
   Map<String, String> _requestStatusByDate = {};
+  Map<String, Map<String, dynamic>> _closureByDate = {};
 
   @override
   void initState() {
@@ -46,13 +54,24 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
     return '${months[month.month - 1]} ${month.year}';
   }
 
+  String _dateKey(String raw) {
+    final value = raw.trim();
+    return value.length >= 10 ? value.substring(0, 10) : value;
+  }
+
   Future<void> _load() async {
     final barberId = UserSession.userId;
     if (barberId == null) return;
 
+    final seq = ++_loadSeq;
+    final year = _currentMonth.year;
+    final month = _currentMonth.month;
     setState(() {
       _loading = true;
       _error = null;
+      _bookedByDate = {};
+      _requestStatusByDate = {};
+      _closureByDate = {};
     });
 
     try {
@@ -62,18 +81,23 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         body: jsonEncode({
           'action': 'listMonth',
           'barberID': barberId,
-          'year': _currentMonth.year,
-          'month': _currentMonth.month,
+          'year': year,
+          'month': month,
         }),
       );
       final data = response.body.isNotEmpty
           ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
           : <String, dynamic>{};
 
+      if (seq != _loadSeq || !mounted) {
+        return;
+      }
+
       if (response.statusCode != 200) {
         setState(() {
           _error = data['error']?.toString() ?? 'Failed to load schedule';
           _loading = false;
+          _hasLoadedOnce = true;
         });
         return;
       }
@@ -87,28 +111,42 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
 
       final booked = <String, int>{};
       for (final appt in appointments) {
-        final key = appt['appointment_date']?.toString() ?? '';
+        final key = _dateKey(appt['appointment_date']?.toString() ?? '');
         if (key.isEmpty) continue;
         booked[key] = (booked[key] ?? 0) + 1;
       }
 
       final requestMap = <String, String>{};
       for (final req in requests) {
-        final key = req['request_date']?.toString() ?? '';
+        final key = _dateKey(req['request_date']?.toString() ?? '');
         if (key.isEmpty) continue;
         requestMap[key] = req['status']?.toString() ?? 'Pending';
+      }
+
+      final closures = <String, Map<String, dynamic>>{};
+      final rawClosures = data['closures'];
+      if (rawClosures is Map) {
+        rawClosures.forEach((key, value) {
+          final dateKey = _dateKey(key.toString());
+          if (dateKey.isEmpty || value is! Map) return;
+          closures[dateKey] = Map<String, dynamic>.from(value);
+        });
       }
 
       setState(() {
         _appointments = appointments;
         _bookedByDate = booked;
         _requestStatusByDate = requestMap;
+        _closureByDate = closures;
         _loading = false;
+        _hasLoadedOnce = true;
       });
     } catch (e) {
+      if (seq != _loadSeq || !mounted) return;
       setState(() {
         _error = '$e';
         _loading = false;
+        _hasLoadedOnce = true;
       });
     }
   }
@@ -116,7 +154,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
   List<Map<String, dynamic>> _appointmentsForSelectedDay() {
     final key = _formatDate(_selectedDate);
     return _appointments
-        .where((a) => a['appointment_date']?.toString() == key)
+        .where((a) => _dateKey(a['appointment_date']?.toString() ?? '') == key)
         .toList();
   }
 
@@ -277,7 +315,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    if (_loading && !_hasLoadedOnce) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A0A0A),
         body: Center(child: CircularProgressIndicator(color: Colors.white)),
@@ -296,8 +334,12 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
     final weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
     final today = DateTime.now();
     final todayDate = DateTime(today.year, today.month, today.day);
+    final bookingWindowEnd = todayDate.add(Duration(days: _bookingWindowDays - 1));
     final currentMonthKey = DateTime(today.year, today.month);
-    final canGoPrev = _currentMonth.isAfter(currentMonthKey);
+    final viewingThisMonth =
+        _currentMonth.year == currentMonthKey.year && _currentMonth.month == currentMonthKey.month;
+    final canGoPrev = !viewingThisMonth;
+    final canGoNext = viewingThisMonth;
     final dayAppointments = _appointmentsForSelectedDay();
 
     return Scaffold(
@@ -356,13 +398,15 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                             icon: Icon(Icons.chevron_left, color: canGoPrev ? Colors.white : Colors.white24),
                           ),
                           IconButton(
-                            onPressed: () {
-                              setState(() {
-                                _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
-                              });
-                              _load();
-                            },
-                            icon: const Icon(Icons.chevron_right, color: Colors.white),
+                            onPressed: canGoNext
+                                ? () {
+                                    setState(() {
+                                      _currentMonth = DateTime(_currentMonth.year, _currentMonth.month + 1);
+                                    });
+                                    _load();
+                                  }
+                                : null,
+                            icon: Icon(Icons.chevron_right, color: canGoNext ? Colors.white : Colors.white24),
                           ),
                         ],
                       ),
@@ -403,25 +447,32 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                             _selectedDate.month == date.month &&
                             _selectedDate.day == date.day;
                         final isPast = date.isBefore(todayDate);
+                        final isBeyondWindow = date.isAfter(bookingWindowEnd);
                         final booked = _bookedByDate[dateKey] ?? 0;
                         final reqStatus = _requestStatusByDate[dateKey];
                         final isApprovedOff = reqStatus == 'Approved';
                         final isPending = reqStatus == 'Pending';
+                        final closure = _closureByDate[dateKey];
+                        final isClosed = closure?['isClosed'] == true;
+                        final isHolidayClosed = closure?['closureStatus']?.toString() == 'closed_holiday';
 
                         Color bg;
                         Color fg;
-                        if (isApprovedOff) {
+                        if (isSelected) {
+                          bg = isClosed ? _closedHolidayFill : _kGold;
+                          fg = Colors.white;
+                        } else if (isPast || isBeyondWindow) {
                           bg = Colors.white12;
                           fg = Colors.white38;
-                        } else if (isSelected) {
-                          bg = _kGold;
-                          fg = Colors.white;
+                        } else if (isClosed) {
+                          bg = isHolidayClosed ? _closedHolidayFill : _closedWeeklyFill;
+                          fg = isHolidayClosed ? _closedHolidayText : Colors.white54;
+                        } else if (isApprovedOff) {
+                          bg = Colors.white12;
+                          fg = Colors.white38;
                         } else if (booked > 0) {
                           bg = Colors.white;
                           fg = Colors.black;
-                        } else if (isPast) {
-                          bg = Colors.white10;
-                          fg = Colors.white38;
                         } else {
                           bg = const Color(0xFF2A2A2A);
                           fg = Colors.white;
@@ -470,8 +521,9 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                     runSpacing: 6,
                     children: const [
                       _LegendDot(color: Colors.white, label: 'Has bookings'),
+                      _LegendDot(color: Color(0xFF3A1F1F), label: 'Closed'),
                       _LegendDot(color: _kGold, label: 'Pending off'),
-                      _LegendDot(color: Colors.white38, label: 'Approved off'),
+                      _LegendDot(color: Colors.white38, label: 'Approved off / unavailable'),
                     ],
                   ),
                 ],

@@ -229,6 +229,23 @@ function shop_today(): string
     return shop_now()->format('Y-m-d');
 }
 
+/**
+ * Receptionist may complete an appointment only on/after its shop calendar day,
+ * or while it is already being served (CheckedIn / InProgress).
+ */
+function shop_appointment_may_complete_now(string $appointmentDateYmd, string $status): bool
+{
+    $ymd = shop_pdo_date_ymd($appointmentDateYmd);
+    if ($ymd === '') {
+        return false;
+    }
+    if ($ymd <= shop_today()) {
+        return true;
+    }
+
+    return in_array($status, ['CheckedIn', 'InProgress'], true);
+}
+
 /** Normalize a PDO DATE / timestamp value to Y-m-d in shop timezone. */
 function shop_pdo_date_ymd(mixed $raw): string
 {

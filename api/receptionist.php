@@ -246,7 +246,7 @@ try {
         ensure_group_booking_schema($pdo);
 
         $apptLookupStmt = $pdo->prepare(
-            'SELECT appointment_id, user_id, barber_id, booking_code, appointment_date, start_time, booking_group_id
+            'SELECT appointment_id, user_id, barber_id, booking_code, appointment_date, start_time, booking_group_id, status
              FROM appointments
              WHERE appointment_id = :appointment_id
              LIMIT 1'
@@ -255,6 +255,12 @@ try {
         $appt = $apptLookupStmt->fetch();
         if (!$appt) {
             json_response(['error' => 'Appointment not found'], 404);
+        }
+
+        if ($status === 'Completed'
+            && !shop_appointment_may_complete_now((string)$appt['appointment_date'], (string)($appt['status'] ?? ''))
+        ) {
+            json_response(['error' => 'This appointment is scheduled for a future date and cannot be marked completed yet.'], 422);
         }
 
         $groupId = (int)($appt['booking_group_id'] ?? 0);
