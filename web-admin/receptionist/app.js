@@ -542,9 +542,16 @@ function mapBarberCards(barbers, channel) {
 
 function parsePersistedTimestamp(raw) {
   if (!raw) return null;
-  const normalized = String(raw).trim().replace(" ", "T");
+  let normalized = String(raw).trim();
   if (!normalized) return null;
-  const parsed = new Date(normalized);
+  normalized = normalized.replace(" ", "T");
+  normalized = normalized.replace(/([+-])(\d{2})(\d{2})$/, "$1$2:$3");
+  normalized = normalized.replace(/([+-]\d{2})$/, "$1:00");
+  let parsed = new Date(normalized);
+  if (!Number.isNaN(parsed.getTime())) return parsed;
+  if (!/[zZ]|[+-]\d{2}/.test(normalized)) {
+    parsed = new Date(`${normalized}Z`);
+  }
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -608,7 +615,8 @@ function buildTracking(appointments, walkins) {
     let color = "#2196F3";
 
     if (status === "InProgress") {
-      const start = parsePersistedTimestamp(item.checkin_time);
+      const start = parsePersistedTimestamp(item.actual_start)
+        || parsePersistedTimestamp(item.checkin_time);
       const estimatedMinutes = estimatedMinutesOf(item, 60);
       displayStatus = "IN PROGRESS";
       color = "#4CAF50";
@@ -680,6 +688,10 @@ function buildTracking(appointments, walkins) {
 
     const queueLabel = item.queue_number ? String(item.queue_number) : "";
     const waitLabel = item.waitTime || "Waiting";
+    const inService = status === "InProgress";
+    const schedule = queueLabel
+      ? (inService ? `Queue ${queueLabel}` : `Queue ${queueLabel} • ${waitLabel}`)
+      : (inService ? "Walk-in" : `Walk-in • ${waitLabel}`);
 
     items.push({
       kind: "walkin",
@@ -689,9 +701,7 @@ function buildTracking(appointments, walkins) {
       name: item.name,
       service: item.service || "Walk-in",
       barber: item.barber || "",
-      schedule: queueLabel
-        ? `Queue ${queueLabel} • ${waitLabel}`
-        : `Walk-in • ${waitLabel}`,
+      schedule,
       status: displayStatus,
       progress,
       timeRemaining,
@@ -888,7 +898,7 @@ function renderTracking(items, listId) {
       (item.rawStatus === "Waiting" || item.rawStatus === "Assigned");
     const timing = String(item.timeRemaining ?? "");
     const timingMeta = [];
-    if (item.status === "IN PROGRESS" && pct > 0) timingMeta.push(`${pct}%`);
+    if (item.status === "IN PROGRESS") timingMeta.push(`${pct}%`);
     if (item.status === "COMPLETING" && !/auto-complet/i.test(timing)) {
       timingMeta.push("Auto-completing shortly");
     }

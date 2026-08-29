@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -414,25 +415,60 @@ class FaceScanService {
   static Future<Map<String, dynamic>> analyzeCaptures({
     required String scanSessionId,
   }) async {
-    final response = await http
-        .post(
-          Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
-          headers: await _headers(),
-          body: jsonEncode({
-            'action': 'analyzeCaptures',
-            'scanSessionId': scanSessionId,
-          }),
-        )
-        .timeout(const Duration(seconds: 90));
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        final response = await http
+            .post(
+              Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
+              headers: await _headers(),
+              body: jsonEncode({
+                'action': 'analyzeCaptures',
+                'scanSessionId': scanSessionId,
+              }),
+            )
+            .timeout(const Duration(seconds: 90));
 
-    final data = response.body.isNotEmpty
-        ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
-        : <String, dynamic>{};
+        final data = response.body.isNotEmpty
+            ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
+            : <String, dynamic>{};
 
-    if (response.statusCode != 200) {
-      throw Exception(data['error']?.toString() ?? 'Face analysis failed');
+        if (response.statusCode != 200) {
+          final message = data['error']?.toString() ?? 'Face analysis failed';
+          if (attempt == 0 && _isTransientAiUnavailable(response.statusCode, message)) {
+            await Future<void>.delayed(const Duration(milliseconds: 700));
+            continue;
+          }
+          throw Exception(message);
+        }
+        return data;
+      } on TimeoutException catch (error) {
+        lastError = error;
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 700));
+          continue;
+        }
+        rethrow;
+      } on http.ClientException catch (error) {
+        lastError = error;
+        if (attempt == 0) {
+          await Future<void>.delayed(const Duration(milliseconds: 700));
+          continue;
+        }
+        rethrow;
+      }
     }
-    return data;
+    throw Exception(lastError?.toString() ?? 'Face analysis failed');
+  }
+
+  static bool _isTransientAiUnavailable(int statusCode, String message) {
+    if (statusCode == 502 || statusCode == 503 || statusCode == 504) {
+      return true;
+    }
+    final lower = message.toLowerCase();
+    return lower.contains('temporarily unavailable') ||
+        (lower.contains('ai service') && lower.contains('unavailable')) ||
+        lower.contains('is not running');
   }
 
   /// AI try-on (Gemini, falling back to Replicate) for all 3 capture angles

@@ -612,7 +612,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
       await controller.initialize();
       debugPrint('[AiFaceScan] Camera controller initialized successfully');
-      if (widget.kioskMode) {
+      if (widget.kioskMode && AppOrientation.kioskShouldLockCaptureToLandscape()) {
         final lockTo = CameraFrameOrientation.landscapeLockTarget(controller);
         await controller.lockCaptureOrientation(lockTo);
         debugPrint('[AiFaceScan] Locked capture orientation to $lockTo');
