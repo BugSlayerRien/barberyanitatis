@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth_sync.php';
 require_once __DIR__ . '/admin_auth.php';
+require_once __DIR__ . '/supabase_admin_auth.php';
 
 require_method('POST');
 
@@ -400,6 +401,7 @@ try {
     if ($action === 'login') {
         $email = strtolower(trim((string)($input['email'] ?? '')));
         $password = (string)($input['password'] ?? '');
+        $isMobileClient = strtolower(trim((string)($input['client'] ?? ''))) === 'mobile';
 
         if ($email === '' || $password === '') {
             json_response(['error' => 'Missing email or password'], 422);
@@ -443,12 +445,17 @@ try {
             json_response(['message' => 'Login successful', 'user' => $user, 'portalToken' => $user['portalToken']]);
         }
 
-        if ($barber) {
-            if (password_hash_matches($barber, $password) || ($user && password_hash_matches($user, $password))) {
-                json_response(['message' => 'Login successful', 'user' => build_user_payload('barber', $barber)]);
+        // Mobile customers/barbers authenticate with Supabase Auth, not PHP hashes.
+        // Web Admin/Receptionist login is unchanged. Legacy barber/customer PHP
+        // password login remains only for non-mobile clients.
+        if (!$isMobileClient) {
+            if ($barber) {
+                if (password_hash_matches($barber, $password) || ($user && password_hash_matches($user, $password))) {
+                    json_response(['message' => 'Login successful', 'user' => build_user_payload('barber', $barber)]);
+                }
+            } elseif ($user && password_hash_matches($user, $password)) {
+                json_response(['message' => 'Login successful', 'user' => build_user_payload('customer', $user)]);
             }
-        } elseif ($user && password_hash_matches($user, $password)) {
-            json_response(['message' => 'Login successful', 'user' => build_user_payload('customer', $user)]);
         }
 
         if ($staff) {
@@ -461,7 +468,7 @@ try {
             ], 401);
         }
 
-        if ($barber) {
+        if (!$isMobileClient && $barber) {
             json_response([
                 'error' => empty($barber['password_hash'])
                     ? 'This barber account has no app password yet. Set password_hash in the barbers table, or sign in with barber@tatis.local / Barber123! (demo).'
@@ -471,7 +478,7 @@ try {
             ], 401);
         }
 
-        if ($user) {
+        if (!$isMobileClient && $user) {
             $kind = customer_password_kind((string)($user['password_hash'] ?? ''));
             if ($kind === 'oauth') {
                 json_response([
@@ -755,12 +762,11 @@ try {
     if ($action === 'checkEmailExists') {
         $email = trim((string)($input['email'] ?? ''));
         if (empty($email) || !is_valid_email($email)) {
-            json_response(['exists' => false]);
+            json_response(['exists' => false, 'inPublicUsers' => false, 'inAuth' => false, 'authLookup' => 'skipped', 'providers' => [], 'oauthOnly' => false]);
         }
 
         $pdo = get_db_connection();
-        $account = find_account_by_email($pdo, $email);
-        json_response(['exists' => $account !== null]);
+        json_response(build_check_email_exists_payload($pdo, $email));
     }
 
     if ($action === 'resolveAccount') {

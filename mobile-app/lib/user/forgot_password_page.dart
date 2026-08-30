@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_brand.dart';
 import 'auth_redirect.dart';
+import 'auth_user_messages.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
   const ForgotPasswordPage({super.key});
@@ -50,7 +51,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Reset failed: $e')),
+        SnackBar(content: Text(authFriendlyError(e))),
       );
     } finally {
       if (mounted) setState(() => _isSubmitting = false);

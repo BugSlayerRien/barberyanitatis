@@ -11,6 +11,7 @@ import 'api_config.dart';
 import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_redirect.dart';
+import 'auth_user_messages.dart';
 import 'user_session.dart';
 
 const Color kGoldColor = AppBrand.gold;
@@ -122,8 +123,8 @@ class _AuthPageState extends State<AuthPage> {
     return const <String, dynamic>{};
   }
 
-  /// Staff/barber keep PHP sessions. Returns true when login is finished.
-  /// Customers, Render 5xx/HTML, and network timeouts fall through to Supabase.
+  /// Web staff keep PHP sessions. Returns true when login is finished.
+  /// Customers and barbers always continue to Supabase Auth for the JWT.
   Future<bool> _completePhpStaffLoginIfPossible(
     String email,
     String password,
@@ -136,6 +137,7 @@ class _AuthPageState extends State<AuthPage> {
             headers: {'Content-Type': 'application/json'},
             body: jsonEncode({
               'action': 'login',
+              'client': 'mobile',
               'email': email,
               'password': password,
             }),
@@ -155,14 +157,13 @@ class _AuthPageState extends State<AuthPage> {
         final roles = (phpUser['roles'] as List<dynamic>? ?? const [])
             .map((role) => role.toString().toLowerCase())
             .toList();
-        final isStaffOrBarber = roles.any(
+        final isWebStaff = roles.any(
           (role) =>
               role == 'admin' ||
-              role == 'barber' ||
               role == 'receptionist' ||
               role == 'staff',
         );
-        if (isStaffOrBarber) {
+        if (isWebStaff) {
           AuthBootstrap.applyPhpAuthUser(phpUser);
           if (!mounted) return true;
           AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
@@ -177,9 +178,7 @@ class _AuthPageState extends State<AuthPage> {
       final accountType = phpData['accountType']?.toString() ?? '';
       final message =
           phpData['error']?.toString() ?? 'Invalid email or password.';
-      final isStaffOrBarber =
-          accountType == 'staff' || accountType == 'barber';
-      if (isStaffOrBarber &&
+      if (accountType == 'staff' &&
           (code == 'NO_LOCAL_PASSWORD' ||
               code == 'WRONG_PASSWORD' ||
               code == 'OAUTH_ONLY')) {
@@ -211,8 +210,7 @@ class _AuthPageState extends State<AuthPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Staff/barber stay on PHP. Customers, Render 5xx/HTML, and timeouts
-      // must still reach Supabase Auth — that is what mints the JWT.
+      // Web staff stay on PHP. Customers and barbers use Supabase Auth.
       if (await _completePhpStaffLoginIfPossible(email, password)) {
         return;
       }
@@ -233,7 +231,7 @@ class _AuthPageState extends State<AuthPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_readableLoginError(e, email: email))),
+        SnackBar(content: Text(await _readableLoginError(e, email: email))),
       );
     } finally {
       if (mounted) {
@@ -270,29 +268,18 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
-    // Validation 3: Check for duplicate email
+    // Validation 3: Duplicate email in app tables and Supabase Auth
     try {
-      final response = await http.post(
-        Uri.parse('$_apiBaseUrl/auth.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'action': 'checkEmailExists',
-          'email': email,
-        }),
-      );
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        if (data['exists'] == true) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('This email is already registered. Try signing in instead.')),
-          );
-          return;
-        }
+      final lookup = await _lookupEmail(email);
+      if (lookup['exists'] == true) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_duplicateSignupMessage(lookup))),
+        );
+        return;
       }
     } catch (_) {
-      // Email check failed; continue anyway (service might be down)
+      // Lookup failed; signUp still rejects existing Auth users.
     }
 
     // Validation 4: Password strength
@@ -371,7 +358,7 @@ class _AuthPageState extends State<AuthPage> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Registration failed: $e')),
+        SnackBar(content: Text(authFriendlyError(e))),
       );
     } finally {
       if (mounted) {
@@ -950,19 +937,56 @@ class _AuthPageState extends State<AuthPage> {
     return null;
   }
 
-  String _readableLoginError(Object error, {required String email}) {
+  Future<Map<String, dynamic>> _lookupEmail(String email) async {
+    final response = await http
+        .post(
+          Uri.parse('$_apiBaseUrl/auth.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'checkEmailExists',
+            'email': email,
+          }),
+        )
+        .timeout(const Duration(seconds: 12));
+    if (response.statusCode != 200) {
+      return const <String, dynamic>{};
+    }
+    return _tryDecodeJsonMap(response.body);
+  }
+
+  String _duplicateSignupMessage(Map<String, dynamic> lookup) {
+    if (lookup['oauthOnly'] == true) {
+      final providers = (lookup['providers'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList();
+      return authOauthOnlySignInMessage(providers);
+    }
+    return 'This email is already registered. Try signing in instead.';
+  }
+
+  Future<String> _readableLoginError(Object error, {required String email}) async {
     final raw = error.toString().replaceFirst('Exception:', '').trim();
     final lower = raw.toLowerCase();
-    if (lower.contains('invalid_grant') ||
-        lower.contains('grant') ||
-        lower.contains('invalid login credentials')) {
+    if (lower.contains('over_email_send_rate_limit') ||
+        lower.contains('rate limit') ||
+        lower.contains('429')) {
+      return authFriendlyError(error);
+    }
+    if (authLooksLikeInvalidCredentials(error)) {
+      try {
+        final lookup = await _lookupEmail(email);
+        if (lookup['oauthOnly'] == true) {
+          final providers = (lookup['providers'] as List<dynamic>? ?? const [])
+              .map((item) => item.toString())
+              .toList();
+          return authOauthOnlySignInMessage(providers);
+        }
+      } catch (_) {}
       if (email.endsWith('@tatis.local')) {
-        return '@tatis.local accounts log in via your API (Postgres + auth.php), not Supabase. '
-            'This message means API login failed, then Supabase had no match. '
-            'Fix: ensure seed_minimum_pg.php ran (or set password_hash on your row). '
-            'Demo: barber@tatis.local / Barber123!, customer@tatis.local / Customer123!, '
-            'receptionist@tatis.local / Reception123!, admin@tatis.local / Admin123!. '
-            'Also verify the app ApiConfig URL reaches auth.php.';
+        return '@tatis.local staff accounts log in via the API (auth.php). '
+            'Customer and barber demo emails must exist in Supabase Auth. '
+            'Web staff demo: receptionist@tatis.local / Reception123!, '
+            'admin@tatis.local / Admin123!.';
       }
       return 'Invalid email or password. If you registered with Google or Facebook, use those buttons. If you registered with email, confirm your email first or reset your password.';
     }

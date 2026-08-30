@@ -6,7 +6,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_brand.dart';
 import 'api_config.dart';
+import 'auth_redirect.dart';
+import 'auth_user_messages.dart';
 import 'password_policy.dart';
+import 'supabase_password_identity.dart';
 import 'user_session.dart';
 
 class ChangePasswordPage extends StatefulWidget {
@@ -26,6 +29,15 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   bool _obscureConfirm = true;
   bool _submitting = false;
   String? _formError;
+  late final bool _hasPasswordIdentity;
+
+  @override
+  void initState() {
+    super.initState();
+    _hasPasswordIdentity = supabaseUserHasPasswordIdentity(
+      Supabase.instance.client.auth.currentUser,
+    );
+  }
 
   @override
   void dispose() {
@@ -42,7 +54,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
 
     setState(() => _formError = null);
 
-    if (current.isEmpty) {
+    if (_hasPasswordIdentity && current.isEmpty) {
       setState(() => _formError = 'Current password is required.');
       return;
     }
@@ -62,7 +74,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       return;
     }
 
-    if (current == next) {
+    if (_hasPasswordIdentity && current == next) {
       setState(() => _formError = 'New password must be different from your current password.');
       return;
     }
@@ -77,6 +89,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
           email: email,
           currentPassword: current,
           newPassword: next,
+          requireCurrentPassword: _hasPasswordIdentity,
         );
         if (updated) {
           if (!mounted) return;
@@ -113,30 +126,65 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
     required String email,
     required String currentPassword,
     required String newPassword,
+    required bool requireCurrentPassword,
   }) async {
     try {
-      await Supabase.instance.client.auth.signInWithPassword(
-        email: email,
-        password: currentPassword,
-      );
+      if (requireCurrentPassword) {
+        await Supabase.instance.client.auth.signInWithPassword(
+          email: email,
+          password: currentPassword,
+        );
+      }
       await Supabase.instance.client.auth.updateUser(
         UserAttributes(password: newPassword),
       );
       return true;
     } on AuthException catch (e) {
-      final lower = e.message.toLowerCase();
-      final message = (lower.contains('invalid') ||
-              lower.contains('credentials') ||
-              lower.contains('grant'))
-          ? 'Current password is incorrect. If you signed in with Google or Facebook, use those buttons. You can set an email password with Forgot password.'
-          : (e.message.trim().isEmpty
-              ? 'Could not change password.'
-              : e.message);
+      final message = authLooksLikeInvalidCredentials(e)
+          ? 'Current password is incorrect.'
+          : authFriendlyError(e);
       setState(() => _formError = message);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
       }
       return false;
+    }
+  }
+
+  Future<void> _sendPasswordSetupEmail() async {
+    final email = (UserSession.email ?? '').trim();
+    if (email.isEmpty) {
+      setState(() => _formError = 'No email is available on this session.');
+      return;
+    }
+    setState(() {
+      _submitting = true;
+      _formError = null;
+    });
+    try {
+      AuthRedirect.prepareWebOAuthReturn();
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        email,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'If this account can receive email, a password setup link was sent.',
+          ),
+        ),
+      );
+    } catch (e) {
+      final message = authFriendlyError(e);
+      setState(() => _formError = message);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _submitting = false);
+      }
     }
   }
 
@@ -206,18 +254,22 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          const Text(
-            'Update the password for your account. Use a strong password you have not used here before.',
-            style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+          Text(
+            _hasPasswordIdentity
+                ? 'Update the password for your account. Use a strong password you have not used here before.'
+                : 'This account signed in with Google or Facebook and has no email password yet. Set one here while you are signed in, or email yourself a recovery link.',
+            style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 20),
-          _field(
-            controller: _currentController,
-            label: 'Current password',
-            obscure: _obscureCurrent,
-            onToggle: () => setState(() => _obscureCurrent = !_obscureCurrent),
-          ),
-          const SizedBox(height: 14),
+          if (_hasPasswordIdentity) ...[
+            _field(
+              controller: _currentController,
+              label: 'Current password',
+              obscure: _obscureCurrent,
+              onToggle: () => setState(() => _obscureCurrent = !_obscureCurrent),
+            ),
+            const SizedBox(height: 14),
+          ],
           _field(
             controller: _newController,
             label: 'New password',
@@ -251,11 +303,21 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                   )
-                : const Text(
-                    'Update password',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                : Text(
+                    _hasPasswordIdentity ? 'Update password' : 'Set password',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
           ),
+          if (!_hasPasswordIdentity) ...[
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _submitting ? null : _sendPasswordSetupEmail,
+              child: const Text(
+                'Email me a password setup link instead',
+                style: TextStyle(color: Colors.white70),
+              ),
+            ),
+          ],
         ],
       ),
     );

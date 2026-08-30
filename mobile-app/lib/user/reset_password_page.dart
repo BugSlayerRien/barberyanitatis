@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_brand.dart';
 import 'auth_bootstrap.dart';
+import 'auth_user_messages.dart';
 import 'password_policy.dart';
 
 class ResetPasswordPage extends StatefulWidget {
@@ -98,6 +99,10 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
   }
 
   String _readableError(Object error) {
+    final friendly = authFriendlyError(error);
+    if (friendly.contains('Too many emails')) {
+      return friendly;
+    }
     final raw = error.toString().replaceFirst('Exception:', '').trim();
     final lower = raw.toLowerCase();
     if (lower.contains('expired')) {
