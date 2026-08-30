@@ -4,6 +4,8 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/barber_channel.php';
+require_once __DIR__ . '/auth_sync.php';
+require_once __DIR__ . '/supabase_admin_auth.php';
 
 function normalize_bool(mixed $value): bool
 {
@@ -141,7 +143,6 @@ function promote_customer_to_barber(PDO $pdo, int $userId, string $fullName, str
     }
 
     $barberCode = generate_barber_code($pdo, $userId);
-    $defaultBarberPassword = password_hash('ChangeMe123!', PASSWORD_BCRYPT);
     $insert = $pdo->prepare(
         "INSERT INTO barbers (barber_code, full_name, email, password_hash, specialty, years_experience, rating, is_active)
          VALUES (:barber_code, :full_name, :email, :password_hash, :specialty, :years_experience, 5.00, TRUE)
@@ -149,7 +150,7 @@ function promote_customer_to_barber(PDO $pdo, int $userId, string $fullName, str
     );
     $insert->execute([
         ':barber_code' => $barberCode,
-        ':password_hash' => $defaultBarberPassword,
+        ':password_hash' => USER_PASSWORD_HASH_SUPABASE,
         ':full_name' => $fullName,
         ':email' => $normalizedEmail,
         ':specialty' => 'General',
@@ -402,6 +403,16 @@ function create_account(PDO $pdo, array $input): array
 
     assert_email_unique_across_tables($pdo, $email);
     $hash = password_hash($password, PASSWORD_BCRYPT);
+
+    if ($kind === 'barber') {
+        $authEnsure = supabase_admin_ensure_user($email, $password, $fullName);
+        if (!$authEnsure['ok'] && ($authEnsure['error'] ?? '') !== 'not_configured') {
+            json_response([
+                'error' => 'Could not create the barber login in Supabase Auth. Use an email that already has a customer account, or try again.',
+            ], 502);
+        }
+        $hash = USER_PASSWORD_HASH_SUPABASE;
+    }
 
     if ($kind === 'customer') {
         $phone = trim((string)($input['phone'] ?? ''));
