@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -29,14 +30,26 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   bool _obscureConfirm = true;
   bool _submitting = false;
   String? _formError;
-  late final bool _hasPasswordIdentity;
+  bool _identityReady = false;
+  bool _hasPasswordIdentity = false;
 
   @override
   void initState() {
     super.initState();
-    _hasPasswordIdentity = supabaseUserHasPasswordIdentity(
-      Supabase.instance.client.auth.currentUser,
+    unawaited(_loadPasswordIdentity());
+  }
+
+  Future<void> _loadPasswordIdentity() async {
+    final hasPassword = await resolveHasPasswordIdentity(
+      email: UserSession.email,
     );
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _hasPasswordIdentity = hasPassword;
+      _identityReady = true;
+    });
   }
 
   @override
@@ -136,8 +149,14 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
         );
       }
       await Supabase.instance.client.auth.updateUser(
-        UserAttributes(password: newPassword),
+        UserAttributes(
+          password: newPassword,
+          data: const {'has_email_password': true},
+        ),
       );
+      try {
+        await Supabase.instance.client.auth.refreshSession();
+      } catch (_) {}
       return true;
     } on AuthException catch (e) {
       final message = authLooksLikeInvalidCredentials(e)
@@ -251,7 +270,11 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
           onPressed: _submitting ? null : () => Navigator.of(context).pop(),
         ),
       ),
-      body: ListView(
+      body: !_identityReady
+          ? const Center(
+              child: CircularProgressIndicator(color: AppBrand.gold),
+            )
+          : ListView(
         padding: const EdgeInsets.all(20),
         children: [
           Text(

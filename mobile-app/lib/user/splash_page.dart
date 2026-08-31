@@ -25,10 +25,10 @@ class _SplashPageState extends State<SplashPage> {
     super.initState();
     if (kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base)) {
       _completingOAuth = true;
-      _statusMessage = 'Completing Google sign-in...';
+      _statusMessage = 'Completing sign-in...';
       unawaited(_routeNext());
     } else {
-      _routeTimer = Timer(const Duration(milliseconds: 1200), _routeNext);
+      _routeTimer = Timer(const Duration(milliseconds: 400), _routeNext);
     }
   }
 
@@ -46,8 +46,28 @@ class _SplashPageState extends State<SplashPage> {
     if (kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base)) {
       setState(() {
         _completingOAuth = true;
-        _statusMessage = 'Completing Google sign-in...';
+        _statusMessage = 'Completing sign-in...';
       });
+    }
+
+    for (var i = 0; i < 25; i++) {
+      if (AuthBootstrap.didNavigateAfterSignIn) {
+        return;
+      }
+      if (AuthBootstrap.isHandlingAuthCallback ||
+          AuthBootstrap.passwordRecoveryActive) {
+        if (mounted && !_completingOAuth) {
+          setState(() {
+            _completingOAuth = true;
+            _statusMessage = AuthBootstrap.passwordRecoveryActive
+                ? 'Opening password reset...'
+                : 'Completing sign-in...';
+          });
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        continue;
+      }
+      break;
     }
 
     final restored = await AuthBootstrap.restoreSessionOnColdStart();

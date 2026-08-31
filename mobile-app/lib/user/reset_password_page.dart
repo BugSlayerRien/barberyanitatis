@@ -67,8 +67,17 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
 
     try {
       await Supabase.instance.client.auth.updateUser(
-        UserAttributes(password: newPassword),
+        UserAttributes(
+          password: newPassword,
+          data: const {'has_email_password': true},
+        ),
       );
+
+      AuthBootstrap.clearPasswordRecovery();
+
+      try {
+        await Supabase.instance.client.auth.refreshSession();
+      } catch (_) {}
 
       final session = Supabase.instance.client.auth.currentSession;
       if (session != null) {
@@ -144,7 +153,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Set New Password', style: TextStyle(color: Colors.white)),
+        title: const Text('Change Password', style: TextStyle(color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
@@ -163,7 +172,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Set a new password for your recovery session',
+                    'Set a new password for your account. After this you can sign in with email and password.',
                     style: TextStyle(color: Colors.white70, fontSize: 12),
                   ),
                   const SizedBox(height: 14),
