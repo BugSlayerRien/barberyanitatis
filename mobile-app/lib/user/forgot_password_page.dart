@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_brand.dart';
+import 'auth_bootstrap.dart';
 import 'auth_redirect.dart';
 import 'auth_user_messages.dart';
 
@@ -39,6 +40,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         email,
         redirectTo: AuthRedirect.supabaseRedirectUri,
       );
+      await AuthBootstrap.markRecoveryRequested();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

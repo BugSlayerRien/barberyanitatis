@@ -17,7 +17,7 @@ class SessionLogout {
     }
 
     await UserSession.clear();
-    AuthBootstrap.resetNavigationLock();
+    await AuthBootstrap.onSignedOut();
 
     if (!context.mounted) {
       return;

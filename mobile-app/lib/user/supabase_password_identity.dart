@@ -11,8 +11,14 @@ import 'api_config.dart';
 /// Prefer a fresh [User] from Auth `getUser()`, then the PHP checkEmailExists
 /// boolean (derived server-side from Auth Admin identities/metadata).
 bool supabaseUserHasPasswordIdentity(User? user) {
+  return hasEmailPasswordCredential(user);
+}
+
+/// Authoritative client-side read of whether this Auth user has an
+/// email/password credential. Does not read password hashes.
+bool hasEmailPasswordCredential(User? user) {
   if (user == null) {
-    return true;
+    return false;
   }
 
   final providers = _providersOf(user);
@@ -56,13 +62,17 @@ Set<String> _providersOf(User user) {
 }
 
 Future<bool> resolveHasPasswordIdentity({String? email}) async {
+  return hasEmailPasswordCredentialRemote(email: email);
+}
+
+Future<bool> hasEmailPasswordCredentialRemote({String? email}) async {
   User? user = Supabase.instance.client.auth.currentUser;
   try {
     final response = await Supabase.instance.client.auth.getUser();
     user = response.user ?? user;
   } catch (_) {}
 
-  if (supabaseUserHasPasswordIdentity(user)) {
+  if (hasEmailPasswordCredential(user)) {
     return true;
   }
 
@@ -91,6 +101,23 @@ Future<bool> resolveHasPasswordIdentity({String? email}) async {
   } catch (_) {}
 
   return false;
+}
+
+/// Persists password-capable state in Auth user_metadata after a successful
+/// email/password sign-in or password update. Safe no-op if already set.
+Future<void> confirmEmailPasswordCredential() async {
+  try {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      return;
+    }
+    if (hasEmailPasswordCredential(user)) {
+      return;
+    }
+    await Supabase.instance.client.auth.updateUser(
+      UserAttributes(data: const {'has_email_password': true}),
+    );
+  } catch (_) {}
 }
 
 Map<String, dynamic>? decodeJwtPayload(String token) {

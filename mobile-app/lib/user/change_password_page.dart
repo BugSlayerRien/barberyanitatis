@@ -40,7 +40,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
   }
 
   Future<void> _loadPasswordIdentity() async {
-    final hasPassword = await resolveHasPasswordIdentity(
+    final hasPassword = await hasEmailPasswordCredentialRemote(
       email: UserSession.email,
     );
     if (!mounted) {
@@ -157,6 +157,7 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
       try {
         await Supabase.instance.client.auth.refreshSession();
       } catch (_) {}
+      await confirmEmailPasswordCredential();
       return true;
     } on AuthException catch (e) {
       final message = authLooksLikeInvalidCredentials(e)

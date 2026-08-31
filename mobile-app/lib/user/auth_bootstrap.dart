@@ -10,6 +10,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../app_navigator.dart';
 import '../barber/barber_dashboard_page.dart';
 import 'api_config.dart';
+import 'auth_flow_state.dart';
+import 'auth_intent_store.dart';
 import 'dashboard_page.dart';
 import 'reset_password_page.dart';
 import 'staff_web_portal_page.dart';
@@ -17,38 +19,60 @@ import 'supabase_password_identity.dart';
 import 'user_session.dart';
 import 'web_utils.dart';
 
-/// Central OAuth/session handling so redirects work before [AuthPage] mounts.
+/// Central OAuth / recovery / session bootstrap. Navigation is driven only by
+/// explicit [AuthArrival] values — never by a leftover session + keyboard/resume.
 class AuthBootstrap {
   AuthBootstrap._();
 
-  static bool _didNavigateAfterSignIn = false;
-  static bool _onRecoveryPasswordRoute = false;
-  static bool _passwordRecoveryActive = false;
-  static bool _recoveryCompleted = false;
-  static bool _handlingAuthCallback = false;
+  static final AuthFlowEngine flow = AuthFlowEngine();
+  static Future<void>? _applyLock;
   static String? _lastProcessedAuthCallbackUri;
   static VoidCallback? _pendingNavigation;
   static StreamSubscription<AuthState>? _authSubscription;
   static StreamSubscription<Uri>? _oauthDeepLinkSubscription;
   static _AuthLifecycleObserver? _lifecycleObserver;
+  static bool _handlingAuthCallback = false;
+  static Uri? _startupLink;
 
-  static bool get didNavigateAfterSignIn => _didNavigateAfterSignIn;
+  static bool get didNavigateAfterSignIn => flow.state.didNavigate;
   static bool get isHandlingAuthCallback => _handlingAuthCallback;
-  static bool get passwordRecoveryActive => _passwordRecoveryActive;
+  static bool get passwordRecoveryActive =>
+      flow.state.recoveryActive || flow.state.onRecoveryRoute;
 
   static void resetNavigationLock() {
-    _didNavigateAfterSignIn = false;
-    _onRecoveryPasswordRoute = false;
+    flow.state = flow.state.copyWith(
+      didNavigate: false,
+      onRecoveryRoute: false,
+    );
     _lastProcessedAuthCallbackUri = null;
   }
 
   static void clearPasswordRecovery() {
-    _passwordRecoveryActive = false;
-    _onRecoveryPasswordRoute = false;
-    _recoveryCompleted = true;
+    flow.markRecoveryCompleted();
+    unawaited(AuthIntentStore.clearRecovery());
   }
 
-  /// Applies session from PHP auth.php (staff, barber, receptionist, legacy customer).
+  static Future<void> markRecoveryRequested() async {
+    flow.markRecoveryRequested();
+    await AuthIntentStore.markRecoveryRequested();
+  }
+
+  static void markExpectingOAuth() {
+    flow.markExpectingOAuth();
+  }
+
+  static void markPasswordLogin() {
+    flow.markPasswordLogin();
+  }
+
+  static Future<void> onSignedOut() async {
+    flow.markSignedOut();
+    _pendingNavigation = null;
+    _lastProcessedAuthCallbackUri = null;
+    _handlingAuthCallback = false;
+    await UserSession.clear();
+  }
+
   static void applyPhpAuthUser(Map<String, dynamic> user) {
     final userId = user['userID'] is int
         ? user['userID'] as int
@@ -72,12 +96,18 @@ class AuthBootstrap {
         .where((role) => role.isNotEmpty)
         .toList();
     UserSession.roles = roles.isNotEmpty ? roles : ['customer'];
+    flow.markPasswordLogin();
     resetNavigationLock();
   }
 
-  static Future<void> initialize() async {
+  static Future<void> initialize({Uri? startupLink}) async {
     await _authSubscription?.cancel();
     await _oauthDeepLinkSubscription?.cancel();
+
+    _startupLink = startupLink;
+    if (await AuthIntentStore.isRecoveryPending()) {
+      flow.markRecoveryRequested();
+    }
 
     _lifecycleObserver ??= _AuthLifecycleObserver();
     WidgetsBinding.instance.removeObserver(_lifecycleObserver!);
@@ -85,49 +115,7 @@ class AuthBootstrap {
 
     _authSubscription =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
-      final session = data.session;
-      if (session == null) {
-        if (data.event == AuthChangeEvent.signedOut) {
-          await UserSession.clear();
-          _passwordRecoveryActive = false;
-          _recoveryCompleted = false;
-          resetNavigationLock();
-        }
-        return;
-      }
-
-      if (data.event == AuthChangeEvent.passwordRecovery ||
-          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
-        _recoveryCompleted = false;
-        _passwordRecoveryActive = true;
-        await applySupabaseSession(session);
-        _scheduleNavigation(_navigateToRecoveryPassword);
-        return;
-      }
-
-      if (data.event == AuthChangeEvent.signedIn ||
-          data.event == AuthChangeEvent.tokenRefreshed) {
-        await applySupabaseSession(session);
-        if (_passwordRecoveryActive) {
-          _scheduleNavigation(_navigateToRecoveryPassword);
-          return;
-        }
-        if (data.event == AuthChangeEvent.signedIn) {
-          // Let a trailing passwordRecovery event win over signedIn.
-          Future<void>.delayed(const Duration(milliseconds: 200), () {
-            if (_passwordRecoveryActive) {
-              _scheduleNavigation(_navigateToRecoveryPassword);
-            } else {
-              _scheduleNavigation(() => navigateToSignedInHome());
-            }
-          });
-        }
-      } else if (data.event == AuthChangeEvent.signedOut) {
-        await UserSession.clear();
-        _passwordRecoveryActive = false;
-        _recoveryCompleted = false;
-        resetNavigationLock();
-      }
+      await _onAuthStateChange(data);
     });
 
     final appLinks = AppLinks();
@@ -136,67 +124,138 @@ class AuthBootstrap {
       onError: (_) {},
     );
 
+    Uri? initial = startupLink;
     if (kIsWeb) {
       await handleAuthCallbackUri(Uri.base);
     } else {
-      final initialLink = await appLinks.getInitialAppLink();
-      if (initialLink != null) {
-        await handleAuthCallbackUri(initialLink);
+      initial ??= await appLinks.getInitialAppLink();
+      if (initial != null) {
+        await handleAuthCallbackUri(initial);
       }
     }
   }
 
-  /// Returns true when navigation to a signed-in screen already happened.
+  static Future<void> _onAuthStateChange(AuthState data) async {
+    final eventName = data.event.name;
+    final session = data.session;
+
+    if (session == null || data.event == AuthChangeEvent.signedOut) {
+      if (data.event == AuthChangeEvent.signedOut) {
+        await onSignedOut();
+      }
+      return;
+    }
+
+    if (data.event == AuthChangeEvent.tokenRefreshed ||
+        data.event == AuthChangeEvent.userUpdated) {
+      return;
+    }
+
+    if (data.event == AuthChangeEvent.initialSession) {
+      return;
+    }
+
+    AuthArrival arrival = AuthArrival.none;
+    if (data.event == AuthChangeEvent.passwordRecovery) {
+      arrival = AuthArrival.recoveryCallback;
+      flow.markRecoveryActive();
+    } else if (flow.state.expectingOAuth) {
+      arrival = AuthArrival.oauthCallback;
+    } else if (flow.state.recoveryPending ||
+        sessionLooksLikePasswordRecovery(session)) {
+      arrival = AuthArrival.recoveryCallback;
+      flow.markRecoveryActive();
+    }
+
+    final destination = flow.decide(
+      event: eventName,
+      arrival: arrival,
+      sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+      redirectTypeRecovery: false,
+      hasSession: true,
+      hasUserId: (UserSession.userId ?? 0) > 0,
+    );
+
+    if (destination == AuthDestination.stay) {
+      return;
+    }
+
+    final ready = await applySupabaseSession(session);
+    if (destination == AuthDestination.changePassword) {
+      _queueDestination(AuthDestination.changePassword);
+      return;
+    }
+    if (destination == AuthDestination.dashboard && ready) {
+      _queueDestination(AuthDestination.dashboard);
+    }
+  }
+
+  /// Cold-start only. Never call from AuthPage.
   static Future<bool> restoreSessionOnColdStart() async {
-    if (_didNavigateAfterSignIn) {
+    if (flow.state.didNavigate) {
       return true;
     }
 
     if (kIsWeb && isSupabaseAuthCallbackUri(Uri.base)) {
       final handled = await handleAuthCallbackUri(Uri.base);
-      if (handled || _didNavigateAfterSignIn) {
+      if (handled || flow.state.didNavigate) {
         return true;
       }
     }
 
     if (!kIsWeb) {
-      final initialLink = await AppLinks().getInitialAppLink();
-      if (initialLink != null) {
-        final handled = await handleAuthCallbackUri(initialLink);
-        if (handled || _didNavigateAfterSignIn) {
-          return true;
+      try {
+        final link = _startupLink ?? await AppLinks().getInitialAppLink();
+        if (link != null && isSupabaseAuthCallbackUri(link)) {
+          final handled = await handleAuthCallbackUri(link);
+          if (handled || flow.state.didNavigate) {
+            return true;
+          }
         }
-      }
+      } catch (_) {}
+    }
+
+    if (flow.state.signedOutIdle) {
+      return false;
     }
 
     final session = Supabase.instance.client.auth.currentSession;
-    if (session != null) {
-      await applySupabaseSession(session);
-      if (_passwordRecoveryActive ||
-          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
-        _passwordRecoveryActive = true;
-        _navigateToRecoveryPassword();
-      } else {
-        navigateToSignedInHome();
-      }
-      return true;
+    if (session == null) {
+      return flow.state.didNavigate;
     }
 
-    return _didNavigateAfterSignIn;
+    final recovery = flow.state.recoveryPending ||
+        sessionLooksLikePasswordRecovery(session);
+    final ready = await applySupabaseSession(session);
+    final destination = flow.decide(
+      event: 'signedIn',
+      arrival: recovery
+          ? AuthArrival.recoveryCallback
+          : AuthArrival.splashRestore,
+      sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+      redirectTypeRecovery: false,
+      hasSession: true,
+      hasUserId: ready,
+    );
+
+    if (destination == AuthDestination.changePassword) {
+      _goToRecoveryPassword();
+      return true;
+    }
+    if (destination == AuthDestination.dashboard && ready) {
+      navigateToSignedInHome();
+      return true;
+    }
+    return flow.state.didNavigate;
   }
 
   static bool isSupabaseAuthCallbackUri(Uri uri) {
     if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
       return true;
     }
-
-    // Native OAuth must return via the custom scheme. Do not treat arbitrary
-    // https pages that happen to contain `?code=` (Google intermediate, HTML
-    // error pages) as a PKCE callback — exchanging those yields HTML/JSON errors.
     if (!kIsWeb) {
       return false;
     }
-
     final fragmentParameters = _readAuthCallbackParameters(uri);
     final hasOAuthFragment = fragmentParameters.containsKey('access_token') ||
         fragmentParameters.containsKey('refresh_token') ||
@@ -212,63 +271,90 @@ class AuthBootstrap {
     }
 
     final uriKey = uri.toString();
-    if (_lastProcessedAuthCallbackUri == uriKey) {
-      return _didNavigateAfterSignIn || _onRecoveryPasswordRoute;
+    if (_lastProcessedAuthCallbackUri == uriKey &&
+        (flow.state.didNavigate || flow.state.onRecoveryRoute)) {
+      return true;
     }
     _lastProcessedAuthCallbackUri = uriKey;
     _handlingAuthCallback = true;
 
     try {
-      if (_uriLooksLikeRecovery(uri)) {
-        _passwordRecoveryActive = true;
-        _recoveryCompleted = false;
-      }
+      final uriRecovery = _uriLooksLikeRecovery(uri);
+      var redirectTypeRecovery = false;
 
-      Session? session = Supabase.instance.client.auth.currentSession;
+      Session? session;
+      final hasCode = uri.queryParameters.containsKey('code') ||
+          _readAuthCallbackParameters(uri).containsKey('code');
 
-      if (session == null) {
-        final normalizedUri = _normalizeAuthCallbackUri(uri);
+      if (hasCode || uriRecovery) {
         try {
           final response = await Supabase.instance.client.auth.getSessionFromUrl(
-            normalizedUri,
+            _normalizeAuthCallbackUri(uri),
           );
           session = response.session;
           if (response.redirectType == 'recovery') {
-            _passwordRecoveryActive = true;
-            _recoveryCompleted = false;
+            redirectTypeRecovery = true;
           }
         } catch (e) {
           debugPrint('[AuthBootstrap] getSessionFromUrl failed: $e');
         }
-        session ??= await _recoverSessionFromFragment(uri);
       }
 
+      session ??= await _recoverSessionFromFragment(uri);
       session ??= Supabase.instance.client.auth.currentSession;
 
       if (session == null) {
-        debugPrint('[AuthBootstrap] No session recovered from OAuth callback.');
+        debugPrint('[AuthBootstrap] No session recovered from auth callback.');
         _lastProcessedAuthCallbackUri = null;
         return false;
       }
 
-      if (_uriLooksLikeRecovery(uri) ||
-          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
-        _passwordRecoveryActive = true;
+      final recovery = uriRecovery ||
+          redirectTypeRecovery ||
+          sessionLooksLikePasswordRecovery(session) ||
+          (flow.state.recoveryPending && !flow.state.expectingOAuth);
+
+      if (recovery) {
+        flow.markRecoveryActive();
+      } else {
+        flow.markExpectingOAuth();
       }
 
-      await applySupabaseSession(session);
+      final ready = await applySupabaseSession(session);
       if (kIsWeb) {
         try {
           clearUrlFragment();
         } catch (_) {}
       }
 
-      if (_passwordRecoveryActive) {
-        _scheduleNavigation(_navigateToRecoveryPassword);
-      } else {
-        _scheduleNavigation(() => navigateToSignedInHome());
+      final destination = flow.decide(
+        event: recovery ? 'passwordRecovery' : 'signedIn',
+        arrival: recovery
+            ? AuthArrival.recoveryCallback
+            : AuthArrival.oauthCallback,
+        sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+        redirectTypeRecovery: redirectTypeRecovery,
+        hasSession: true,
+        hasUserId: ready,
+      );
+
+      if (destination == AuthDestination.changePassword) {
+        _queueDestination(AuthDestination.changePassword);
+        return true;
       }
-      return true;
+      if (destination == AuthDestination.dashboard) {
+        if (ready) {
+          _queueDestination(AuthDestination.dashboard);
+          return true;
+        }
+        _pendingNavigation = () {
+          if ((UserSession.userId ?? 0) > 0) {
+            navigateToSignedInHome();
+          }
+        };
+        return false;
+      }
+      return false;
     } catch (e, stack) {
       debugPrint('[AuthBootstrap] OAuth callback failed: $e\n$stack');
       _lastProcessedAuthCallbackUri = null;
@@ -299,7 +385,22 @@ class AuthBootstrap {
     }
   }
 
-  static Future<void> applySupabaseSession(Session session) async {
+  /// Returns true when [UserSession.userId] is usable for customer/barber APIs.
+  static Future<bool> applySupabaseSession(Session session) async {
+    while (_applyLock != null) {
+      await _applyLock;
+    }
+    final gate = Completer<void>();
+    _applyLock = gate.future;
+    try {
+      return await _applySupabaseSessionBody(session);
+    } finally {
+      gate.complete();
+      _applyLock = null;
+    }
+  }
+
+  static Future<bool> _applySupabaseSessionBody(Session session) async {
     final user = session.user;
     final metadata = user.userMetadata ?? <String, dynamic>{};
     final appMetadata = user.appMetadata;
@@ -314,12 +415,13 @@ class AuthBootstrap {
             ? nameValue.toString().trim()
             : (user.email ?? '');
 
-    UserSession.userId = null;
     UserSession.fullName = resolvedFullName;
     UserSession.email = user.email;
-    UserSession.roles = role != null && role.isNotEmpty
-        ? [role.toLowerCase()]
-        : ['customer'];
+    if (UserSession.roles.isEmpty) {
+      UserSession.roles = role != null && role.isNotEmpty
+          ? [role.toLowerCase()]
+          : ['customer'];
+    }
 
     final email = (user.email ?? '').trim();
     await _resolveAccountFromServer(user, fallbackFullName: resolvedFullName);
@@ -328,25 +430,41 @@ class AuthBootstrap {
       await _syncCustomerProfile(email, resolvedFullName);
       await _resolveAccountFromServer(user, fallbackFullName: resolvedFullName);
     }
+
+    return (UserSession.userId ?? 0) > 0;
   }
 
   static void navigateToSignedInHome({bool showSnackBar = false}) {
-    if (_passwordRecoveryActive) {
-      _navigateToRecoveryPassword();
-      return;
+    if (flow.state.recoveryActive && !flow.state.signedOutIdle) {
+      if (flow.decide(
+            event: 'passwordRecovery',
+            arrival: AuthArrival.recoveryCallback,
+            sessionIsRecovery: true,
+            redirectTypeRecovery: true,
+            hasSession: true,
+            hasUserId: true,
+          ) ==
+          AuthDestination.changePassword) {
+        _goToRecoveryPassword();
+        return;
+      }
     }
 
-    if (_didNavigateAfterSignIn) {
+    if ((UserSession.userId ?? 0) <= 0) {
+      debugPrint('[AuthBootstrap] Refusing dashboard without userId.');
       return;
     }
 
     final navigator = navigatorKey.currentState;
     if (navigator == null) {
-      _scheduleNavigation(() => navigateToSignedInHome(showSnackBar: showSnackBar));
+      _pendingNavigation = () => navigateToSignedInHome(showSnackBar: showSnackBar);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _pendingNavigation?.call();
+      });
       return;
     }
 
-    _didNavigateAfterSignIn = true;
+    flow.markNavigatedToDashboard();
     _pendingNavigation = null;
 
     Widget destination;
@@ -377,20 +495,33 @@ class AuthBootstrap {
     }
   }
 
-  static void _navigateToRecoveryPassword() {
-    if (_onRecoveryPasswordRoute) {
+  static void _queueDestination(AuthDestination destination) {
+    if (destination == AuthDestination.changePassword) {
+      _pendingNavigation = _goToRecoveryPassword;
+      _goToRecoveryPassword();
+      return;
+    }
+    if (destination == AuthDestination.dashboard) {
+      _pendingNavigation = () => navigateToSignedInHome();
+      navigateToSignedInHome();
+    }
+  }
+
+  static void _goToRecoveryPassword() {
+    if (flow.state.onRecoveryRoute) {
       return;
     }
 
     final navigator = navigatorKey.currentState;
     if (navigator == null) {
-      _scheduleNavigation(_navigateToRecoveryPassword);
+      _pendingNavigation = _goToRecoveryPassword;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _pendingNavigation?.call();
+      });
       return;
     }
 
-    _passwordRecoveryActive = true;
-    _onRecoveryPasswordRoute = true;
-    _didNavigateAfterSignIn = true;
+    flow.markNavigatedToRecovery();
     _pendingNavigation = null;
     navigator.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const ResetPasswordPage()),
@@ -400,42 +531,17 @@ class AuthBootstrap {
 
   static void flushPendingNavigation() {
     final pending = _pendingNavigation;
-    if (pending != null) {
-      pending();
-    } else if (_passwordRecoveryActive && !_onRecoveryPasswordRoute) {
-      _navigateToRecoveryPassword();
-    } else if (!_didNavigateAfterSignIn &&
-        Supabase.instance.client.auth.currentSession != null &&
-        !_passwordRecoveryActive) {
-      navigateToSignedInHome();
+    if (pending == null) {
+      return;
     }
-    WidgetsBinding.instance.scheduleFrame();
-  }
-
-  static void _scheduleNavigation(VoidCallback navigate) {
-    _pendingNavigation = navigate;
-    void attempt() {
-      final pending = _pendingNavigation;
-      if (pending == null) {
-        return;
-      }
-      pending();
-    }
-
-    WidgetsBinding.instance.addPostFrameCallback((_) => attempt());
-    WidgetsBinding.instance.ensureVisualUpdate();
-    WidgetsBinding.instance.scheduleFrame();
-    Future<void>.delayed(Duration.zero, attempt);
-    Future<void>.delayed(const Duration(milliseconds: 80), attempt);
-    Future<void>.delayed(const Duration(milliseconds: 300), attempt);
+    pending();
   }
 
   static bool _uriLooksLikeRecovery(Uri uri) {
-    final params = {
-      ...uri.queryParameters,
-      ..._readAuthCallbackParameters(uri),
-    };
-    return (params['type'] ?? '').toLowerCase() == 'recovery';
+    return AuthFlowEngine.uriLooksLikeRecovery(
+      query: uri.queryParameters,
+      fragment: _readAuthCallbackParameters(uri),
+    );
   }
 
   static Map<String, String> _readAuthCallbackParameters(Uri uri) {
@@ -443,13 +549,11 @@ class AuthBootstrap {
     if (fragment.isEmpty) {
       return const <String, String>{};
     }
-
     final normalizedFragment =
         fragment.startsWith('?') ? fragment.substring(1) : fragment;
     if (normalizedFragment.isEmpty) {
       return const <String, String>{};
     }
-
     try {
       return Uri.splitQueryString(normalizedFragment);
     } catch (_) {
@@ -462,7 +566,6 @@ class AuthBootstrap {
     if (fragmentParameters.isEmpty) {
       return uri;
     }
-
     return uri.replace(
       fragment: '',
       queryParameters: {
@@ -517,17 +620,16 @@ class AuthBootstrap {
         UserSession.fullName = mappedFullName;
       }
 
-      final resolvedRoles = (account['roles'] as List<dynamic>? ?? const ['authenticated'])
-          .map((roleValue) => roleValue.toString().toLowerCase())
-          .toList();
+      final resolvedRoles =
+          (account['roles'] as List<dynamic>? ?? const ['authenticated'])
+              .map((roleValue) => roleValue.toString().toLowerCase())
+              .toList();
       if (resolvedRoles.isNotEmpty) {
         UserSession.roles = resolvedRoles;
       } else {
         UserSession.roles = ['customer'];
       }
-    } catch (_) {
-      // Keep fallback session values when account resolution is unavailable.
-    }
+    } catch (_) {}
   }
 
   static Future<void> _syncCustomerProfile(String email, String fullName) async {
@@ -542,7 +644,9 @@ class AuthBootstrap {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'email': normalizedEmail,
-          'full_name': fullName.trim().isNotEmpty ? fullName.trim() : normalizedEmail.split('@').first,
+          'full_name': fullName.trim().isNotEmpty
+              ? fullName.trim()
+              : normalizedEmail.split('@').first,
         }),
       );
 
@@ -561,9 +665,7 @@ class AuthBootstrap {
           UserSession.roles = ['customer'];
         }
       }
-    } catch (_) {
-      // Best effort only.
-    }
+    } catch (_) {}
   }
 }
 

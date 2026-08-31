@@ -5,6 +5,7 @@ import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_user_messages.dart';
 import 'password_policy.dart';
+import 'supabase_password_identity.dart';
 
 class ResetPasswordPage extends StatefulWidget {
   const ResetPasswordPage({super.key});
@@ -74,6 +75,7 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       );
 
       AuthBootstrap.clearPasswordRecovery();
+      await confirmEmailPasswordCredential();
 
       try {
         await Supabase.instance.client.auth.refreshSession();
