@@ -32,6 +32,12 @@ Future<void> main() async {
     await AppOrientation.lockForCustomer();
   }
   await ApiConfig.ensureInitialized();
+  Uri? startupLink;
+  if (!kIsWeb) {
+    try {
+      startupLink = await AppLinks().getInitialAppLink();
+    } catch (_) {}
+  }
   if (kIsWeb) {
     // Use path-based routing so OAuth fragments (#access_token=...) are not
     // interpreted as Flutter route paths.
@@ -47,7 +53,7 @@ Future<void> main() async {
     ),
   );
 
-  await AuthBootstrap.initialize();
+  await AuthBootstrap.initialize(startupLink: startupLink);
 
   // Preload haircut overlay PNGs in background (reduces scanner/results lag).
   unawaited(OverlayAssetCache.preload());

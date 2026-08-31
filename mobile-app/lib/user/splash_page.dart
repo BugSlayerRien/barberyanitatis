@@ -16,26 +16,13 @@ class SplashPage extends StatefulWidget {
 }
 
 class _SplashPageState extends State<SplashPage> {
-  Timer? _routeTimer;
-  bool _completingOAuth = false;
+  bool _busy = false;
   String _statusMessage = '';
 
   @override
   void initState() {
     super.initState();
-    if (kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base)) {
-      _completingOAuth = true;
-      _statusMessage = 'Completing sign-in...';
-      unawaited(_routeNext());
-    } else {
-      _routeTimer = Timer(const Duration(milliseconds: 400), _routeNext);
-    }
-  }
-
-  @override
-  void dispose() {
-    _routeTimer?.cancel();
-    super.dispose();
+    unawaited(_routeNext());
   }
 
   Future<void> _routeNext() async {
@@ -43,44 +30,41 @@ class _SplashPageState extends State<SplashPage> {
       return;
     }
 
-    if (kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base)) {
+    final callback = kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base);
+    if (callback || AuthBootstrap.isHandlingAuthCallback || AuthBootstrap.passwordRecoveryActive) {
       setState(() {
-        _completingOAuth = true;
-        _statusMessage = 'Completing sign-in...';
+        _busy = true;
+        _statusMessage = AuthBootstrap.passwordRecoveryActive
+            ? 'Opening password reset...'
+            : 'Completing sign-in...';
       });
     }
 
-    for (var i = 0; i < 25; i++) {
-      if (AuthBootstrap.didNavigateAfterSignIn) {
-        return;
-      }
-      if (AuthBootstrap.isHandlingAuthCallback ||
-          AuthBootstrap.passwordRecoveryActive) {
-        if (mounted && !_completingOAuth) {
-          setState(() {
-            _completingOAuth = true;
-            _statusMessage = AuthBootstrap.passwordRecoveryActive
-                ? 'Opening password reset...'
-                : 'Completing sign-in...';
-          });
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 80));
-        continue;
-      }
-      break;
+    while (AuthBootstrap.isHandlingAuthCallback && mounted) {
+      await Future<void>.delayed(const Duration(milliseconds: 16));
     }
 
-    final restored = await AuthBootstrap.restoreSessionOnColdStart();
+    if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
+      return;
+    }
+
+    bool restored = false;
+    try {
+      restored = await AuthBootstrap.restoreSessionOnColdStart();
+    } catch (_) {
+      restored = false;
+    }
     if (!mounted || restored || AuthBootstrap.didNavigateAfterSignIn) {
       return;
     }
 
-    if (kIsWeb && AuthBootstrap.isSupabaseAuthCallbackUri(Uri.base)) {
+    if (callback) {
       setState(() {
+        _busy = true;
         _statusMessage =
             'Sign-in callback received but session was not restored. In Supabase → Auth → URL: set Site URL to your Flutter origin (e.g. http://localhost — or match the address bar), not the .supabase.co URL. Add redirect: ${AuthRedirect.oauthCallbackPageBaseUri}** and http://localhost:*';
       });
-      await Future<void>.delayed(const Duration(seconds: 2));
+      return;
     }
 
     if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
@@ -101,7 +85,7 @@ class _SplashPageState extends State<SplashPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             const BrandWordmark(logoHeight: 120, showTagline: true),
-            if (_completingOAuth) ...[
+            if (_busy) ...[
               const SizedBox(height: 24),
               const SizedBox(
                 width: 28,

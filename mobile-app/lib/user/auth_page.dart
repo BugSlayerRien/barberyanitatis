@@ -12,6 +12,7 @@ import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_redirect.dart';
 import 'auth_user_messages.dart';
+import 'supabase_password_identity.dart';
 import 'user_session.dart';
 
 const Color kGoldColor = AppBrand.gold;
@@ -61,7 +62,6 @@ class _AuthPageState extends State<AuthPage> {
     _regPass.addListener(_onRegisterPasswordFieldsChanged);
     _confirm.addListener(_onRegisterPasswordFieldsChanged);
     _regPassFocus.addListener(_onRegPassFocusChanged);
-    unawaited(_resumeIfAlreadySignedIn());
   }
 
   void _onRegisterPasswordFieldsChanged() {
@@ -88,23 +88,6 @@ class _AuthPageState extends State<AuthPage> {
     _regPass.dispose();
     _confirm.dispose();
     super.dispose();
-  }
-
-  Future<void> _resumeIfAlreadySignedIn() async {
-    if (AuthBootstrap.didNavigateAfterSignIn) {
-      return;
-    }
-
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session == null) {
-      return;
-    }
-
-    await AuthBootstrap.applySupabaseSession(session);
-    if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
-      return;
-    }
-    AuthBootstrap.navigateToSignedInHome();
   }
 
   Map<String, dynamic> _tryDecodeJsonMap(String body) {
@@ -226,7 +209,9 @@ class _AuthPageState extends State<AuthPage> {
       }
 
       await AuthBootstrap.applySupabaseSession(session);
+      await confirmEmailPasswordCredential();
       if (!mounted) return;
+      AuthBootstrap.markPasswordLogin();
       AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
     } catch (e) {
       if (!mounted) return;
@@ -327,6 +312,8 @@ class _AuthPageState extends State<AuthPage> {
       if (session != null) {
         // Signup succeeded and user is signed in
         await AuthBootstrap.applySupabaseSession(session);
+        await confirmEmailPasswordCredential();
+        AuthBootstrap.markPasswordLogin();
         
         // Sync the new user to public.users table
         try {
@@ -452,6 +439,7 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseGoogle() async {
     setState(() => _isLoading = true);
     try {
+      AuthBootstrap.markExpectingOAuth();
       AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.google,
@@ -483,6 +471,7 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseFacebook() async {
     setState(() => _isLoading = true);
     try {
+      AuthBootstrap.markExpectingOAuth();
       AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(
         OAuthProvider.facebook,
