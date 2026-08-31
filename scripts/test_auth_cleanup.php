@@ -90,8 +90,30 @@ cleanup_ok(
     $lookup['lookup'] . ($lookup['detail'] !== '' ? ' ' . $lookup['detail'] : '')
 );
 
-if ($lookup['lookup'] === 'error') {
-    echo "NOTE  Auth admin GET /admin/users?email= returned an error. Duplicate signup may rely on signUp collision until this is resolved.\n";
+try {
+    $googleWithPasswordMeta = [
+        'identities' => [['provider' => 'google']],
+        'app_metadata' => ['providers' => ['google']],
+        'user_metadata' => ['has_email_password' => true],
+        'encrypted_password' => 'should-never-be-read',
+    ];
+    cleanup_ok(
+        'password identity uses metadata not hash field',
+        supabase_admin_user_has_password_identity($googleWithPasswordMeta) === true
+    );
+    $stripped = supabase_admin_sanitize_user_record($googleWithPasswordMeta);
+    cleanup_ok(
+        'admin user record drops encrypted_password',
+        !array_key_exists('encrypted_password', $stripped)
+    );
+    $payloadKeys = array_keys(build_check_email_exists_payload(get_db_connection(), 'auth-cleanup-probe-missing@example.com'));
+    $forbidden = array_intersect($payloadKeys, ['encrypted_password', 'user', 'identities', 'hashed_password']);
+    cleanup_ok(
+        'checkEmailExists JSON has no auth secret fields',
+        $forbidden === []
+    );
+} catch (Throwable $e) {
+    cleanup_ok('checkEmailExists JSON has no auth secret fields', false, $e->getMessage());
 }
 
 if ($failures > 0) {

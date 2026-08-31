@@ -13,6 +13,7 @@ import 'api_config.dart';
 import 'dashboard_page.dart';
 import 'reset_password_page.dart';
 import 'staff_web_portal_page.dart';
+import 'supabase_password_identity.dart';
 import 'user_session.dart';
 import 'web_utils.dart';
 
@@ -21,15 +22,30 @@ class AuthBootstrap {
   AuthBootstrap._();
 
   static bool _didNavigateAfterSignIn = false;
+  static bool _onRecoveryPasswordRoute = false;
+  static bool _passwordRecoveryActive = false;
+  static bool _recoveryCompleted = false;
+  static bool _handlingAuthCallback = false;
   static String? _lastProcessedAuthCallbackUri;
+  static VoidCallback? _pendingNavigation;
   static StreamSubscription<AuthState>? _authSubscription;
   static StreamSubscription<Uri>? _oauthDeepLinkSubscription;
+  static _AuthLifecycleObserver? _lifecycleObserver;
 
   static bool get didNavigateAfterSignIn => _didNavigateAfterSignIn;
+  static bool get isHandlingAuthCallback => _handlingAuthCallback;
+  static bool get passwordRecoveryActive => _passwordRecoveryActive;
 
   static void resetNavigationLock() {
     _didNavigateAfterSignIn = false;
+    _onRecoveryPasswordRoute = false;
     _lastProcessedAuthCallbackUri = null;
+  }
+
+  static void clearPasswordRecovery() {
+    _passwordRecoveryActive = false;
+    _onRecoveryPasswordRoute = false;
+    _recoveryCompleted = true;
   }
 
   /// Applies session from PHP auth.php (staff, barber, receptionist, legacy customer).
@@ -63,27 +79,53 @@ class AuthBootstrap {
     await _authSubscription?.cancel();
     await _oauthDeepLinkSubscription?.cancel();
 
+    _lifecycleObserver ??= _AuthLifecycleObserver();
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver!);
+    WidgetsBinding.instance.addObserver(_lifecycleObserver!);
+
     _authSubscription =
         Supabase.instance.client.auth.onAuthStateChange.listen((data) async {
       final session = data.session;
       if (session == null) {
+        if (data.event == AuthChangeEvent.signedOut) {
+          await UserSession.clear();
+          _passwordRecoveryActive = false;
+          _recoveryCompleted = false;
+          resetNavigationLock();
+        }
         return;
       }
 
-      if (data.event == AuthChangeEvent.passwordRecovery) {
+      if (data.event == AuthChangeEvent.passwordRecovery ||
+          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
+        _recoveryCompleted = false;
+        _passwordRecoveryActive = true;
         await applySupabaseSession(session);
-        _scheduleNavigation(() => _navigateToResetPassword());
+        _scheduleNavigation(_navigateToRecoveryPassword);
         return;
       }
 
       if (data.event == AuthChangeEvent.signedIn ||
           data.event == AuthChangeEvent.tokenRefreshed) {
         await applySupabaseSession(session);
-        if (data.event != AuthChangeEvent.tokenRefreshed) {
-          _scheduleNavigation(() => navigateToSignedInHome());
+        if (_passwordRecoveryActive) {
+          _scheduleNavigation(_navigateToRecoveryPassword);
+          return;
+        }
+        if (data.event == AuthChangeEvent.signedIn) {
+          // Let a trailing passwordRecovery event win over signedIn.
+          Future<void>.delayed(const Duration(milliseconds: 200), () {
+            if (_passwordRecoveryActive) {
+              _scheduleNavigation(_navigateToRecoveryPassword);
+            } else {
+              _scheduleNavigation(() => navigateToSignedInHome());
+            }
+          });
         }
       } else if (data.event == AuthChangeEvent.signedOut) {
         await UserSession.clear();
+        _passwordRecoveryActive = false;
+        _recoveryCompleted = false;
         resetNavigationLock();
       }
     });
@@ -130,7 +172,13 @@ class AuthBootstrap {
     final session = Supabase.instance.client.auth.currentSession;
     if (session != null) {
       await applySupabaseSession(session);
-      navigateToSignedInHome();
+      if (_passwordRecoveryActive ||
+          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
+        _passwordRecoveryActive = true;
+        _navigateToRecoveryPassword();
+      } else {
+        navigateToSignedInHome();
+      }
       return true;
     }
 
@@ -165,36 +213,47 @@ class AuthBootstrap {
 
     final uriKey = uri.toString();
     if (_lastProcessedAuthCallbackUri == uriKey) {
-      return _didNavigateAfterSignIn;
+      return _didNavigateAfterSignIn || _onRecoveryPasswordRoute;
     }
     _lastProcessedAuthCallbackUri = uriKey;
+    _handlingAuthCallback = true;
 
     try {
-      final currentSession = Supabase.instance.client.auth.currentSession;
-      if (currentSession != null) {
-        await applySupabaseSession(currentSession);
-        _scheduleNavigation(() => navigateToSignedInHome());
-        return true;
+      if (_uriLooksLikeRecovery(uri)) {
+        _passwordRecoveryActive = true;
+        _recoveryCompleted = false;
       }
 
-      final normalizedUri = _normalizeAuthCallbackUri(uri);
-      Session? session;
+      Session? session = Supabase.instance.client.auth.currentSession;
 
-      try {
-        final response = await Supabase.instance.client.auth.getSessionFromUrl(
-          normalizedUri,
-        );
-        session = response.session;
-      } catch (e) {
-        debugPrint('[AuthBootstrap] getSessionFromUrl failed: $e');
+      if (session == null) {
+        final normalizedUri = _normalizeAuthCallbackUri(uri);
+        try {
+          final response = await Supabase.instance.client.auth.getSessionFromUrl(
+            normalizedUri,
+          );
+          session = response.session;
+          if (response.redirectType == 'recovery') {
+            _passwordRecoveryActive = true;
+            _recoveryCompleted = false;
+          }
+        } catch (e) {
+          debugPrint('[AuthBootstrap] getSessionFromUrl failed: $e');
+        }
+        session ??= await _recoverSessionFromFragment(uri);
       }
 
-      session ??= await _recoverSessionFromFragment(uri);
+      session ??= Supabase.instance.client.auth.currentSession;
 
       if (session == null) {
         debugPrint('[AuthBootstrap] No session recovered from OAuth callback.');
         _lastProcessedAuthCallbackUri = null;
         return false;
+      }
+
+      if (_uriLooksLikeRecovery(uri) ||
+          (!_recoveryCompleted && sessionLooksLikePasswordRecovery(session))) {
+        _passwordRecoveryActive = true;
       }
 
       await applySupabaseSession(session);
@@ -204,12 +263,18 @@ class AuthBootstrap {
         } catch (_) {}
       }
 
-      _scheduleNavigation(() => navigateToSignedInHome());
+      if (_passwordRecoveryActive) {
+        _scheduleNavigation(_navigateToRecoveryPassword);
+      } else {
+        _scheduleNavigation(() => navigateToSignedInHome());
+      }
       return true;
     } catch (e, stack) {
       debugPrint('[AuthBootstrap] OAuth callback failed: $e\n$stack');
       _lastProcessedAuthCallbackUri = null;
       return false;
+    } finally {
+      _handlingAuthCallback = false;
     }
   }
 
@@ -266,6 +331,11 @@ class AuthBootstrap {
   }
 
   static void navigateToSignedInHome({bool showSnackBar = false}) {
+    if (_passwordRecoveryActive) {
+      _navigateToRecoveryPassword();
+      return;
+    }
+
     if (_didNavigateAfterSignIn) {
       return;
     }
@@ -277,6 +347,7 @@ class AuthBootstrap {
     }
 
     _didNavigateAfterSignIn = true;
+    _pendingNavigation = null;
 
     Widget destination;
     if (UserSession.roles.contains('admin') ||
@@ -306,35 +377,65 @@ class AuthBootstrap {
     }
   }
 
-  static void _navigateToResetPassword() {
-    if (_didNavigateAfterSignIn) {
+  static void _navigateToRecoveryPassword() {
+    if (_onRecoveryPasswordRoute) {
       return;
     }
 
     final navigator = navigatorKey.currentState;
     if (navigator == null) {
-      _scheduleNavigation(_navigateToResetPassword);
+      _scheduleNavigation(_navigateToRecoveryPassword);
       return;
     }
 
+    _passwordRecoveryActive = true;
+    _onRecoveryPasswordRoute = true;
     _didNavigateAfterSignIn = true;
+    _pendingNavigation = null;
     navigator.pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const ResetPasswordPage()),
       (route) => false,
     );
   }
 
+  static void flushPendingNavigation() {
+    final pending = _pendingNavigation;
+    if (pending != null) {
+      pending();
+    } else if (_passwordRecoveryActive && !_onRecoveryPasswordRoute) {
+      _navigateToRecoveryPassword();
+    } else if (!_didNavigateAfterSignIn &&
+        Supabase.instance.client.auth.currentSession != null &&
+        !_passwordRecoveryActive) {
+      navigateToSignedInHome();
+    }
+    WidgetsBinding.instance.scheduleFrame();
+  }
+
   static void _scheduleNavigation(VoidCallback navigate) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      navigate();
-      if (!_didNavigateAfterSignIn) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_didNavigateAfterSignIn) {
-            navigate();
-          }
-        });
+    _pendingNavigation = navigate;
+    void attempt() {
+      final pending = _pendingNavigation;
+      if (pending == null) {
+        return;
       }
-    });
+      pending();
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => attempt());
+    WidgetsBinding.instance.ensureVisualUpdate();
+    WidgetsBinding.instance.scheduleFrame();
+    Future<void>.delayed(Duration.zero, attempt);
+    Future<void>.delayed(const Duration(milliseconds: 80), attempt);
+    Future<void>.delayed(const Duration(milliseconds: 300), attempt);
+  }
+
+  static bool _uriLooksLikeRecovery(Uri uri) {
+    final params = {
+      ...uri.queryParameters,
+      ..._readAuthCallbackParameters(uri),
+    };
+    return (params['type'] ?? '').toLowerCase() == 'recovery';
   }
 
   static Map<String, String> _readAuthCallbackParameters(Uri uri) {
@@ -462,6 +563,15 @@ class AuthBootstrap {
       }
     } catch (_) {
       // Best effort only.
+    }
+  }
+}
+
+class _AuthLifecycleObserver with WidgetsBindingObserver {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      AuthBootstrap.flushPendingNavigation();
     }
   }
 }

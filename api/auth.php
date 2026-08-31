@@ -762,7 +762,7 @@ try {
     if ($action === 'checkEmailExists') {
         $email = trim((string)($input['email'] ?? ''));
         if (empty($email) || !is_valid_email($email)) {
-            json_response(['exists' => false, 'inPublicUsers' => false, 'inAuth' => false, 'authLookup' => 'skipped', 'providers' => [], 'oauthOnly' => false]);
+            json_response(['exists' => false, 'inPublicUsers' => false, 'inAuth' => false, 'authLookup' => 'skipped', 'providers' => [], 'oauthOnly' => false, 'hasPassword' => false]);
         }
 
         $pdo = get_db_connection();

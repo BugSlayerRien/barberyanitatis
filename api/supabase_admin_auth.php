@@ -71,6 +71,57 @@ function supabase_admin_providers_from_user(array $user): array
 }
 
 /**
+ * Whether the Auth Admin user record indicates an email/password credential.
+ * Uses identities / app_metadata providers and user_metadata only — never
+ * encrypted_password or other auth.users columns.
+ *
+ * @param array<string, mixed> $user
+ */
+function supabase_admin_user_has_password_identity(array $user): bool
+{
+    $providers = supabase_admin_providers_from_user($user);
+    if (in_array('email', $providers, true)) {
+        return true;
+    }
+
+    $userMeta = $user['user_metadata'] ?? $user['raw_user_meta_data'] ?? null;
+    if (is_array($userMeta)) {
+        $flagged = $userMeta['has_email_password'] ?? null;
+        if ($flagged === true || $flagged === 1 || $flagged === 'true' || $flagged === '1') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Drop credential/token fields if an Auth Admin payload ever includes them.
+ *
+ * @param array<string, mixed> $user
+ * @return array<string, mixed>
+ */
+function supabase_admin_sanitize_user_record(array $user): array
+{
+    $denied = [
+        'encrypted_password',
+        'hashed_password',
+        'confirmation_token',
+        'recovery_token',
+        'email_change_token',
+        'email_change_token_new',
+        'email_change_token_current',
+        'reauthentication_token',
+        'phone_change_token',
+    ];
+    foreach ($denied as $key) {
+        unset($user[$key]);
+    }
+
+    return $user;
+}
+
+/**
  * @return array{ok: bool, status: int, body: mixed, raw: string, error: ?string}
  */
 function supabase_admin_http(string $method, string $pathWithQuery, ?array $payload = null): array
@@ -252,6 +303,7 @@ function supabase_admin_find_user_by_email(string $email): array
         return $empty;
     }
 
+    $user = supabase_admin_sanitize_user_record($user);
     $providers = supabase_admin_providers_from_user($user);
 
     return [
@@ -336,6 +388,9 @@ function public_email_exists_in_app_tables(PDO $pdo, string $email): bool
 }
 
 /**
+ * Public JSON for checkEmailExists. Never includes Auth user records,
+ * identities blobs, or credential material.
+ *
  * @return array<string, mixed>
  */
 function build_check_email_exists_payload(PDO $pdo, string $email): array
@@ -344,7 +399,11 @@ function build_check_email_exists_payload(PDO $pdo, string $email): array
     $auth = supabase_admin_find_user_by_email($email);
     $inAuth = $auth['lookup'] === 'ok';
     $providers = $inAuth ? $auth['providers'] : [];
-    $oauthOnly = $inAuth && $auth['oauthOnly'];
+    $hasPassword = false;
+    if ($inAuth && is_array($auth['user'])) {
+        $hasPassword = supabase_admin_user_has_password_identity($auth['user']);
+    }
+    $oauthOnly = $inAuth && supabase_admin_is_oauth_only($providers) && !$hasPassword;
 
     return [
         'exists' => $inPublic || $inAuth,
@@ -353,5 +412,6 @@ function build_check_email_exists_payload(PDO $pdo, string $email): array
         'authLookup' => $auth['lookup'],
         'providers' => $providers,
         'oauthOnly' => $oauthOnly,
+        'hasPassword' => $hasPassword,
     ];
 }

@@ -52,11 +52,10 @@ Future<void> main() async {
   // Preload haircut overlay PNGs in background (reduces scanner/results lag).
   unawaited(OverlayAssetCache.preload());
 
-  // Setup deep link listener to handle app scheme callbacks (payment return)
+  // Payment return deep links only. OAuth/recovery is handled in AuthBootstrap.
   final AppLinks _appLinks = AppLinks();
   _appLinks.uriLinkStream.listen((uri) {
     if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
-      unawaited(AuthBootstrap.handleAuthCallbackUri(uri));
       return;
     }
     if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
