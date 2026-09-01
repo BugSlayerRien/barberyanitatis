@@ -123,9 +123,9 @@ class AuthBootstrap {
       provider: provider.name,
     );
 
-    final redirectTo = kIsWeb
-        ? AuthRedirect.supabaseRedirectUri
-        : OAuthPkceCoordinator.nativeRedirectTo(attemptId);
+    // Must be the exact allowlisted deep link. Extra query (oauth_attempt)
+    // is not in Redirect URLs, so GoTrue substitutes Site URL (localhost).
+    final redirectTo = AuthRedirect.supabaseRedirectUri;
 
     AuthRedirect.prepareWebOAuthReturn();
 
@@ -135,8 +135,7 @@ class AuthBootstrap {
 
     _authLog(
       'oauth start provider=${provider.name} attempt=$attemptId '
-      'redirectHost=${Uri.tryParse(redirectTo)?.host} '
-      'redirectPath=${Uri.tryParse(redirectTo)?.path}',
+      'redirectTo=$redirectTo',
     );
 
     final response = await Supabase.instance.client.auth.getOAuthSignInUrl(
@@ -145,7 +144,29 @@ class AuthBootstrap {
       queryParams: queryParams.isEmpty ? null : queryParams,
     );
 
-    await _launchOAuthAuthorizeUrl(Uri.parse(response.url));
+    final authorizeUri = Uri.parse(response.url);
+    final encodedRedirect = authorizeUri.queryParameters['redirect_to'];
+    _authLog(
+      'oauth authorize host=${authorizeUri.host} path=${authorizeUri.path} '
+      'queryKeys=${authorizeUri.queryParameters.keys.toList()} '
+      'redirect_to=${encodedRedirect ?? "(missing)"}',
+    );
+    if (!kIsWeb &&
+        (encodedRedirect == null ||
+            encodedRedirect.contains('localhost') ||
+            !encodedRedirect.startsWith(
+                'io.supabase.flutter://login-callback'))) {
+      _authLog(
+        'oauth authorize redirect_to is not the app deep link; refusing to launch',
+      );
+      OAuthPkceCoordinator.completeAttempt();
+      throw StateError(
+        'OAuth redirect_to was not io.supabase.flutter://login-callback '
+        '(got ${encodedRedirect ?? "none"}). Check Supabase Auth URL config.',
+      );
+    }
+
+    await _launchOAuthAuthorizeUrl(authorizeUri);
   }
 
   static Future<void> _launchOAuthAuthorizeUrl(Uri uri) async {
