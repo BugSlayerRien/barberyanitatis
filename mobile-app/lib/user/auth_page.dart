@@ -439,13 +439,7 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseGoogle() async {
     setState(() => _isLoading = true);
     try {
-      AuthBootstrap.markExpectingOAuth();
-      AuthRedirect.prepareWebOAuthReturn();
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: AuthRedirect.supabaseRedirectUri,
-        authScreenLaunchMode: LaunchMode.externalApplication,
-      );
+      await AuthBootstrap.startProviderOAuth(OAuthProvider.google);
       if (!mounted) return;
       if (kIsWeb) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -471,13 +465,7 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseFacebook() async {
     setState(() => _isLoading = true);
     try {
-      AuthBootstrap.markExpectingOAuth();
-      AuthRedirect.prepareWebOAuthReturn();
-      await Supabase.instance.client.auth.signInWithOAuth(
-        OAuthProvider.facebook,
-        redirectTo: AuthRedirect.supabaseRedirectUri,
-        authScreenLaunchMode: LaunchMode.externalApplication,
-      );
+      await AuthBootstrap.startProviderOAuth(OAuthProvider.facebook);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
     } catch (e) {
