@@ -7,12 +7,16 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../app_navigator.dart';
 import '../barber/barber_dashboard_page.dart';
 import 'api_config.dart';
 import 'auth_flow_state.dart';
 import 'auth_intent_store.dart';
+import 'auth_redirect.dart';
 import 'dashboard_page.dart';
+import 'oauth_pkce_coordinator.dart';
 import 'reset_password_page.dart';
 import 'staff_web_portal_page.dart';
 import 'supabase_password_identity.dart';
@@ -106,6 +110,71 @@ class AuthBootstrap {
     flow.markExpectingOAuth();
   }
 
+  /// Starts one Google/Facebook PKCE authorize + browser session.
+  /// A new attempt id is bound to the verifier written by [getOAuthSignInUrl].
+  static Future<void> startProviderOAuth(OAuthProvider provider) async {
+    markExpectingOAuth();
+    _lastProcessedAuthCallbackUri = null;
+    _pendingNavigation = null;
+
+    final attemptId = OAuthPkceCoordinator.newAttemptId();
+    OAuthPkceCoordinator.beginAttempt(
+      attemptId: attemptId,
+      provider: provider.name,
+    );
+
+    final redirectTo = kIsWeb
+        ? AuthRedirect.supabaseRedirectUri
+        : OAuthPkceCoordinator.nativeRedirectTo(attemptId);
+
+    AuthRedirect.prepareWebOAuthReturn();
+
+    final queryParams = <String, String>{
+      if (provider == OAuthProvider.google) 'prompt': 'select_account',
+    };
+
+    _authLog(
+      'oauth start provider=${provider.name} attempt=$attemptId '
+      'redirectHost=${Uri.tryParse(redirectTo)?.host} '
+      'redirectPath=${Uri.tryParse(redirectTo)?.path}',
+    );
+
+    final response = await Supabase.instance.client.auth.getOAuthSignInUrl(
+      provider: provider,
+      redirectTo: redirectTo,
+      queryParams: queryParams.isEmpty ? null : queryParams,
+    );
+
+    await _launchOAuthAuthorizeUrl(Uri.parse(response.url));
+  }
+
+  static Future<void> _launchOAuthAuthorizeUrl(Uri uri) async {
+    if (kIsWeb) {
+      await launchUrl(
+        uri,
+        mode: LaunchMode.platformDefault,
+        webOnlyWindowName: '_self',
+      );
+      return;
+    }
+
+    // Chrome Custom Tabs load the *current* authorize URL. External Chrome
+    // often resumes the previous supabase.co tab and returns a code that does
+    // not match this attempt's PKCE verifier (flow_state_not_found).
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      try {
+        final opened = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+        if (opened) {
+          return;
+        }
+      } catch (e) {
+        _authLog('inAppBrowserView launch failed: $e');
+      }
+    }
+
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   static void markPasswordLogin() {
     flow.markPasswordLogin();
   }
@@ -121,6 +190,7 @@ class AuthBootstrap {
     _lastProcessedAuthCallbackUri = null;
     _handlingAuthCallback = false;
     _clearRecoveryBinding();
+    OAuthPkceCoordinator.clearOnLogout();
     await UserSession.clear();
   }
 
@@ -356,8 +426,38 @@ class AuthBootstrap {
     _authLog(
       'callback received coldStart=$coldStart ${_uriDebug(uri)} '
       'expectingOAuth=${flow.state.expectingOAuth} '
-      'recoveryPending=${flow.state.recoveryPending}',
+      'recoveryPending=${flow.state.recoveryPending} '
+      'oauthAttempt=${OAuthPkceCoordinator.attemptIdFromUri(uri) ?? "(none)"} '
+      'activeAttempt=${OAuthPkceCoordinator.activeAttemptId ?? "(none)"}',
     );
+
+    final uriRecovery = _uriLooksLikeRecovery(uri);
+    final recoveryIntent = uriRecovery ||
+        (flow.state.recoveryPending && !flow.state.expectingOAuth);
+    final disposition = OAuthPkceCoordinator.dispositionFor(
+      uri: uri,
+      recoveryIntent: recoveryIntent,
+      expectingOAuth: flow.state.expectingOAuth,
+    );
+    if (disposition == OAuthCallbackDisposition.ignoreStale) {
+      _authLog(
+        'callback ignored: stale oauth attempt '
+        '(does not match active PKCE flow)',
+      );
+      return false;
+    }
+    if (disposition == OAuthCallbackDisposition.untaggedWhileActive) {
+      _authLog(
+        'callback untagged while oauth attempt is active; '
+        'will exchange once (redirect may have stripped oauth_attempt)',
+      );
+    }
+
+    final authCode = OAuthPkceCoordinator.authCodeFromUri(uri);
+    if (OAuthPkceCoordinator.alreadyFinishedAuthCode(authCode)) {
+      _authLog('callback ignored: auth code already finished');
+      return false;
+    }
 
     final uriKey = uri.toString();
     if (_lastProcessedAuthCallbackUri == uriKey) {
@@ -374,11 +474,8 @@ class AuthBootstrap {
     _handlingAuthCallback = true;
 
     try {
-      final uriRecovery = _uriLooksLikeRecovery(uri);
       final hasCode = uri.queryParameters.containsKey('code') ||
           _readAuthCallbackParameters(uri).containsKey('code');
-      final recoveryIntent = uriRecovery ||
-          (flow.state.recoveryPending && !flow.state.expectingOAuth);
 
       var redirectTypeRecovery = false;
       var exchangedFromUrl = false;
@@ -405,6 +502,7 @@ class AuthBootstrap {
           );
         } catch (e) {
           _authLog('getSessionFromUrl failed: $e');
+          OAuthPkceCoordinator.markAuthCodeFinished(authCode);
         } finally {
           _exchangingAuthCode = false;
         }
@@ -455,6 +553,10 @@ class AuthBootstrap {
 
       final ready = await applySupabaseSession(session);
       _lastProcessedAuthCallbackUri = uriKey;
+      OAuthPkceCoordinator.markAuthCodeFinished(authCode);
+      if (!recovery) {
+        OAuthPkceCoordinator.completeAttempt();
+      }
       if (kIsWeb) {
         try {
           clearUrlFragment();
