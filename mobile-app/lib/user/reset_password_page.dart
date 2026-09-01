@@ -44,6 +44,18 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       return;
     }
 
+    if (!AuthBootstrap.hasVerifiedRecoverySession) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'This reset link is missing or belongs to a different session. '
+            'Request a new password reset email and open that link.',
+          ),
+        ),
+      );
+      return;
+    }
+
     if (newPassword.isEmpty || confirmPassword.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all fields.')),

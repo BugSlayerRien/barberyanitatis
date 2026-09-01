@@ -33,6 +33,48 @@ class AuthBootstrap {
   static _AuthLifecycleObserver? _lifecycleObserver;
   static bool _handlingAuthCallback = false;
   static Uri? _startupLink;
+  static bool _exchangingAuthCode = false;
+  static String? _recoveryBoundEmail;
+  static String? _recoveryBoundUserId;
+  static bool _recoverySessionVerified = false;
+
+  static bool get hasVerifiedRecoverySession =>
+      _recoverySessionVerified &&
+      (_recoveryBoundEmail ?? '').isNotEmpty &&
+      Supabase.instance.client.auth.currentSession != null &&
+      _emailsMatch(
+        Supabase.instance.client.auth.currentUser?.email,
+        _recoveryBoundEmail,
+      ) &&
+      (_recoveryBoundUserId == null ||
+          _recoveryBoundUserId ==
+              Supabase.instance.client.auth.currentUser?.id);
+
+  static void _authLog(String message) {
+    debugPrint('[AuthBootstrap] $message');
+  }
+
+  static bool _emailsMatch(String? a, String? b) {
+    final left = (a ?? '').trim().toLowerCase();
+    final right = (b ?? '').trim().toLowerCase();
+    return left.isNotEmpty && left == right;
+  }
+
+  static void _clearRecoveryBinding() {
+    _recoveryBoundEmail = null;
+    _recoveryBoundUserId = null;
+    _recoverySessionVerified = false;
+  }
+
+  static void _bindRecoverySession(Session session, {required String source}) {
+    final email = (session.user.email ?? '').trim().toLowerCase();
+    _recoveryBoundEmail = email;
+    _recoveryBoundUserId = session.user.id;
+    _recoverySessionVerified = email.isNotEmpty;
+    _authLog(
+      'recovery session bound source=$source email=$email authUser=${session.user.id}',
+    );
+  }
 
   static bool get didNavigateAfterSignIn => flow.state.didNavigate;
   static bool get isHandlingAuthCallback => _handlingAuthCallback;
@@ -52,9 +94,12 @@ class AuthBootstrap {
     unawaited(AuthIntentStore.clearRecovery());
   }
 
-  static Future<void> markRecoveryRequested() async {
+  static Future<void> markRecoveryRequested({String? email}) async {
     flow.markRecoveryRequested();
-    await AuthIntentStore.markRecoveryRequested();
+    final value = (email ?? '').trim();
+    if (value.isNotEmpty) {
+      await AuthIntentStore.markRecoveryRequested(value);
+    }
   }
 
   static void markExpectingOAuth() {
@@ -66,10 +111,16 @@ class AuthBootstrap {
   }
 
   static Future<void> onSignedOut() async {
+    if (_exchangingAuthCode) {
+      await UserSession.clear();
+      _authLog('signedOut during auth-code exchange; keeping recovery/oauth flags');
+      return;
+    }
     flow.markSignedOut();
     _pendingNavigation = null;
     _lastProcessedAuthCallbackUri = null;
     _handlingAuthCallback = false;
+    _clearRecoveryBinding();
     await UserSession.clear();
   }
 
@@ -138,6 +189,14 @@ class AuthBootstrap {
   static Future<void> _onAuthStateChange(AuthState data) async {
     final eventName = data.event.name;
     final session = data.session;
+    _authLog(
+      'auth event=$eventName hasSession=${session != null} '
+      'email=${session?.user.email ?? "(none)"} '
+      'expectingOAuth=${flow.state.expectingOAuth} '
+      'recoveryPending=${flow.state.recoveryPending} '
+      'userId=${UserSession.userId ?? 0} '
+      'exchanging=$_exchangingAuthCode',
+    );
 
     if (session == null || data.event == AuthChangeEvent.signedOut) {
       if (data.event == AuthChangeEvent.signedOut) {
@@ -155,32 +214,44 @@ class AuthBootstrap {
       return;
     }
 
+    final isRecoverySession = sessionLooksLikePasswordRecovery(session);
+
+    if (data.event == AuthChangeEvent.passwordRecovery ||
+        (isRecoverySession && !flow.state.expectingOAuth)) {
+      flow.markRecoveryActive();
+      _bindRecoverySession(session, source: 'auth_event:$eventName');
+      await applySupabaseSession(session);
+      _queueDestination(AuthDestination.changePassword);
+      return;
+    }
+
     AuthArrival arrival = AuthArrival.none;
-    if (data.event == AuthChangeEvent.passwordRecovery) {
-      arrival = AuthArrival.recoveryCallback;
-      flow.markRecoveryActive();
-    } else if (flow.state.expectingOAuth) {
+    if (flow.state.expectingOAuth) {
       arrival = AuthArrival.oauthCallback;
-    } else if (flow.state.recoveryPending ||
-        sessionLooksLikePasswordRecovery(session)) {
-      arrival = AuthArrival.recoveryCallback;
-      flow.markRecoveryActive();
+    }
+
+    // Apply the authenticated profile BEFORE decide(). Repeat OAuth often
+    // arrives as signedIn with an empty UserSession.userId; staying first
+    // left the user on Sign In even though Supabase had a session.
+    var ready = (UserSession.userId ?? 0) > 0;
+    if (arrival == AuthArrival.oauthCallback) {
+      ready = await applySupabaseSession(session);
     }
 
     final destination = flow.decide(
       event: eventName,
       arrival: arrival,
-      sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+      sessionIsRecovery: isRecoverySession,
       redirectTypeRecovery: false,
       hasSession: true,
-      hasUserId: (UserSession.userId ?? 0) > 0,
+      hasUserId: ready,
     );
 
-    if (destination == AuthDestination.stay) {
-      return;
-    }
+    _authLog(
+      'auth decide arrival=$arrival dest=$destination ready=$ready '
+      'userId=${UserSession.userId ?? 0}',
+    );
 
-    final ready = await applySupabaseSession(session);
     if (destination == AuthDestination.changePassword) {
       _queueDestination(AuthDestination.changePassword);
       return;
@@ -224,18 +295,28 @@ class AuthBootstrap {
       return flow.state.didNavigate;
     }
 
-    final recovery = flow.state.recoveryPending ||
-        sessionLooksLikePasswordRecovery(session);
+    // A leftover recovery-requested flag is not a recovery session.
+    // Only AMR recovery (from an exchanged link) may open Change Password.
+    final isRecoverySession = sessionLooksLikePasswordRecovery(session);
+    if (isRecoverySession) {
+      _bindRecoverySession(session, source: 'cold_start_persisted');
+    }
     final ready = await applySupabaseSession(session);
     final destination = flow.decide(
       event: 'signedIn',
-      arrival: recovery
+      arrival: isRecoverySession
           ? AuthArrival.recoveryCallback
           : AuthArrival.splashRestore,
-      sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+      sessionIsRecovery: isRecoverySession,
       redirectTypeRecovery: false,
       hasSession: true,
       hasUserId: ready,
+    );
+
+    _authLog(
+      'cold-start restore dest=$destination recoveryAmr=$isRecoverySession '
+      'recoveryPending=${flow.state.recoveryPending} ready=$ready '
+      'email=${session.user.email}',
     );
 
     if (destination == AuthDestination.changePassword) {
@@ -270,57 +351,110 @@ class AuthBootstrap {
       return false;
     }
 
+    final coldStart = _startupLink != null &&
+        _startupLink.toString() == uri.toString();
+    _authLog(
+      'callback received coldStart=$coldStart ${_uriDebug(uri)} '
+      'expectingOAuth=${flow.state.expectingOAuth} '
+      'recoveryPending=${flow.state.recoveryPending}',
+    );
+
     final uriKey = uri.toString();
-    if (_lastProcessedAuthCallbackUri == uriKey &&
-        (flow.state.didNavigate || flow.state.onRecoveryRoute)) {
+    if (_lastProcessedAuthCallbackUri == uriKey) {
+      _authLog('callback ignored: already exchanged this URI; flushing navigation');
+      if (hasVerifiedRecoverySession) {
+        _queueDestination(AuthDestination.changePassword);
+      } else if ((UserSession.userId ?? 0) > 0) {
+        _queueDestination(AuthDestination.dashboard);
+      } else {
+        flushPendingNavigation();
+      }
       return true;
     }
-    _lastProcessedAuthCallbackUri = uriKey;
     _handlingAuthCallback = true;
 
     try {
       final uriRecovery = _uriLooksLikeRecovery(uri);
-      var redirectTypeRecovery = false;
-
-      Session? session;
       final hasCode = uri.queryParameters.containsKey('code') ||
           _readAuthCallbackParameters(uri).containsKey('code');
+      final recoveryIntent = uriRecovery ||
+          (flow.state.recoveryPending && !flow.state.expectingOAuth);
+
+      var redirectTypeRecovery = false;
+      var exchangedFromUrl = false;
+      Session? session;
+
+      if (recoveryIntent) {
+        await _clearBlockingSessionForRecoveryExchange();
+      }
 
       if (hasCode || uriRecovery) {
+        _exchangingAuthCode = true;
         try {
           final response = await Supabase.instance.client.auth.getSessionFromUrl(
             _normalizeAuthCallbackUri(uri),
           );
           session = response.session;
+          exchangedFromUrl = true;
           if (response.redirectType == 'recovery') {
             redirectTypeRecovery = true;
           }
+          _authLog(
+            'getSessionFromUrl ok redirectType=${response.redirectType} '
+            'email=${session.user.email}',
+          );
         } catch (e) {
-          debugPrint('[AuthBootstrap] getSessionFromUrl failed: $e');
+          _authLog('getSessionFromUrl failed: $e');
+        } finally {
+          _exchangingAuthCode = false;
         }
       }
 
       session ??= await _recoverSessionFromFragment(uri);
-      session ??= Supabase.instance.client.auth.currentSession;
+
+      if (!recoveryIntent && flow.state.expectingOAuth) {
+        session ??= Supabase.instance.client.auth.currentSession;
+        if (session != null && !exchangedFromUrl) {
+          _authLog(
+            'oauth using currentSession after callback '
+            '(code likely consumed) email=${session.user.email}',
+          );
+        }
+      }
 
       if (session == null) {
-        debugPrint('[AuthBootstrap] No session recovered from auth callback.');
-        _lastProcessedAuthCallbackUri = null;
+        _authLog('no session recovered from auth callback');
         return false;
       }
 
+      final isRecoverySession = sessionLooksLikePasswordRecovery(session);
       final recovery = uriRecovery ||
           redirectTypeRecovery ||
-          sessionLooksLikePasswordRecovery(session) ||
-          (flow.state.recoveryPending && !flow.state.expectingOAuth);
+          isRecoverySession ||
+          (recoveryIntent && exchangedFromUrl);
+
+      if (recoveryIntent && !recovery) {
+        _authLog(
+          'rejecting recovery: callback did not establish a recovery session '
+          'email=${session.user.email} amrRecovery=$isRecoverySession '
+          'redirectTypeRecovery=$redirectTypeRecovery exchanged=$exchangedFromUrl',
+        );
+        return false;
+      }
 
       if (recovery) {
         flow.markRecoveryActive();
+        _bindRecoverySession(
+          session,
+          source: exchangedFromUrl ? 'callback_exchange' : 'callback_fragment',
+        );
       } else {
         flow.markExpectingOAuth();
+        _clearRecoveryBinding();
       }
 
       final ready = await applySupabaseSession(session);
+      _lastProcessedAuthCallbackUri = uriKey;
       if (kIsWeb) {
         try {
           clearUrlFragment();
@@ -332,10 +466,15 @@ class AuthBootstrap {
         arrival: recovery
             ? AuthArrival.recoveryCallback
             : AuthArrival.oauthCallback,
-        sessionIsRecovery: sessionLooksLikePasswordRecovery(session),
+        sessionIsRecovery: isRecoverySession,
         redirectTypeRecovery: redirectTypeRecovery,
         hasSession: true,
         hasUserId: ready,
+      );
+
+      _authLog(
+        'callback decide dest=$destination recovery=$recovery ready=$ready '
+        'userId=${UserSession.userId ?? 0} email=${session.user.email}',
       );
 
       if (destination == AuthDestination.changePassword) {
@@ -356,12 +495,38 @@ class AuthBootstrap {
       }
       return false;
     } catch (e, stack) {
-      debugPrint('[AuthBootstrap] OAuth callback failed: $e\n$stack');
+      _authLog('OAuth/recovery callback failed: $e\n$stack');
       _lastProcessedAuthCallbackUri = null;
       return false;
     } finally {
+      _exchangingAuthCode = false;
       _handlingAuthCallback = false;
     }
+  }
+
+  static Future<void> _clearBlockingSessionForRecoveryExchange() async {
+    final current = Supabase.instance.client.auth.currentSession;
+    if (current == null) {
+      return;
+    }
+    // Do NOT Supabase.signOut() here: signOut deletes the PKCE code verifier
+    // required to exchange the recovery/OAuth authorization code.
+    _authLog(
+      'clearing app UserSession before recovery exchange; '
+      'supabase session remains until getSessionFromUrl replaces it '
+      'email=${current.user.email}',
+    );
+    await UserSession.clear();
+  }
+
+  static String _uriDebug(Uri uri) {
+    final fragment = _readAuthCallbackParameters(uri);
+    final type = uri.queryParameters['type'] ?? fragment['type'] ?? '(none)';
+    final hasCode = uri.queryParameters.containsKey('code') ||
+        fragment.containsKey('code');
+    return 'scheme=${uri.scheme} host=${uri.host} path=${uri.path} '
+        'queryKeys=${uri.queryParameters.keys.toList()} '
+        'fragmentKeys=${fragment.keys.toList()} type=$type code=$hasCode';
   }
 
   static Future<Session?> _recoverSessionFromFragment(Uri uri) async {
@@ -435,19 +600,11 @@ class AuthBootstrap {
   }
 
   static void navigateToSignedInHome({bool showSnackBar = false}) {
-    if (flow.state.recoveryActive && !flow.state.signedOutIdle) {
-      if (flow.decide(
-            event: 'passwordRecovery',
-            arrival: AuthArrival.recoveryCallback,
-            sessionIsRecovery: true,
-            redirectTypeRecovery: true,
-            hasSession: true,
-            hasUserId: true,
-          ) ==
-          AuthDestination.changePassword) {
-        _goToRecoveryPassword();
-        return;
-      }
+    if (flow.state.recoveryActive &&
+        hasVerifiedRecoverySession &&
+        !flow.state.signedOutIdle) {
+      _goToRecoveryPassword();
+      return;
     }
 
     if ((UserSession.userId ?? 0) <= 0) {
@@ -508,6 +665,14 @@ class AuthBootstrap {
   }
 
   static void _goToRecoveryPassword() {
+    if (!hasVerifiedRecoverySession) {
+      _authLog(
+        'refusing Change Password: no verified recovery session '
+        'boundEmail=$_recoveryBoundEmail '
+        'current=${Supabase.instance.client.auth.currentUser?.email}',
+      );
+      return;
+    }
     if (flow.state.onRecoveryRoute) {
       return;
     }

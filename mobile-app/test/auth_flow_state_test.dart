@@ -68,6 +68,47 @@ void main() {
     );
   });
 
+  test('recovery pending plus leftover session is not Change Password', () {
+    engine.markRecoveryRequested();
+    expect(
+      engine.decide(
+        event: 'signedIn',
+        arrival: AuthArrival.splashRestore,
+        sessionIsRecovery: false,
+        redirectTypeRecovery: false,
+        hasSession: true,
+        hasUserId: true,
+      ),
+      AuthDestination.dashboard,
+    );
+    expect(
+      engine.decide(
+        event: 'signedIn',
+        arrival: AuthArrival.none,
+        sessionIsRecovery: false,
+        redirectTypeRecovery: false,
+        hasSession: true,
+        hasUserId: true,
+      ),
+      AuthDestination.stay,
+    );
+  });
+
+  test('recovery callback without recovery session signals stays', () {
+    engine.markRecoveryRequested();
+    expect(
+      engine.decide(
+        event: 'signedIn',
+        arrival: AuthArrival.recoveryCallback,
+        sessionIsRecovery: false,
+        redirectTypeRecovery: false,
+        hasSession: true,
+        hasUserId: true,
+      ),
+      AuthDestination.stay,
+    );
+  });
+
   test('password login with userId goes to dashboard', () {
     engine.markPasswordLogin();
     expect(

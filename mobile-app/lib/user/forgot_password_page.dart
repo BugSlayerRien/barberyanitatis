@@ -40,7 +40,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
         email,
         redirectTo: AuthRedirect.supabaseRedirectUri,
       );
-      await AuthBootstrap.markRecoveryRequested();
+      await AuthBootstrap.markRecoveryRequested(email: email);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
