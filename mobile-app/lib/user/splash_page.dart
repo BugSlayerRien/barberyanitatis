@@ -45,6 +45,7 @@ class _SplashPageState extends State<SplashPage> {
     }
 
     if (!mounted || AuthBootstrap.didNavigateAfterSignIn) {
+      AuthBootstrap.flushPendingNavigation();
       return;
     }
 
@@ -55,6 +56,7 @@ class _SplashPageState extends State<SplashPage> {
       restored = false;
     }
     if (!mounted || restored || AuthBootstrap.didNavigateAfterSignIn) {
+      AuthBootstrap.flushPendingNavigation();
       return;
     }
 

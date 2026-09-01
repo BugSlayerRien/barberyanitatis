@@ -130,8 +130,8 @@ class AuthFlowEngine {
             arrival != AuthArrival.passwordLogin) ||
         (state.recoveryPending &&
             !state.expectingOAuth &&
-            (arrival == AuthArrival.recoveryCallback ||
-                arrival == AuthArrival.splashRestore));
+            arrival == AuthArrival.recoveryCallback &&
+            (sessionIsRecovery || redirectTypeRecovery));
 
     if (recoverySignal && arrival != AuthArrival.passwordLogin) {
       return AuthDestination.changePassword;
@@ -140,6 +140,12 @@ class AuthFlowEngine {
     if (event == 'tokenRefreshed' ||
         event == 'initialSession' ||
         event == 'userUpdated') {
+      return AuthDestination.stay;
+    }
+
+    if (state.didNavigate &&
+        !state.onRecoveryRoute &&
+        arrival != AuthArrival.recoveryCallback) {
       return AuthDestination.stay;
     }
 
@@ -155,7 +161,7 @@ class AuthFlowEngine {
     }
 
     if (arrival == AuthArrival.recoveryCallback) {
-      return AuthDestination.changePassword;
+      return AuthDestination.stay;
     }
 
     if (arrival == AuthArrival.oauthCallback ||

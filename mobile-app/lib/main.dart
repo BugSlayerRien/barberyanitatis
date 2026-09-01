@@ -50,6 +50,10 @@ Future<void> main() async {
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
+      // AuthBootstrap owns PKCE/deep-link exchange so the SDK cannot consume
+      // the authorization code before the intended handler (repeat OAuth +
+      // recovery cold start).
+      detectSessionInUri: false,
     ),
   );
 
