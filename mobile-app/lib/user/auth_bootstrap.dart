@@ -531,16 +531,11 @@ class AuthBootstrap {
 
       session ??= await _recoverSessionFromFragment(uri);
 
-      if (!recoveryIntent && flow.state.expectingOAuth) {
-        session ??= Supabase.instance.client.auth.currentSession;
-        if (session != null && !exchangedFromUrl) {
-          _authLog(
-            'oauth using currentSession after callback '
-            '(code likely consumed) email=${session.user.email}',
-          );
-        }
-      }
-
+      // Never fall back to a leftover currentSession when the code exchange
+      // for *this* callback failed — that would silently sign the user into
+      // whatever account happened to be cached instead of surfacing the
+      // failure. Duplicate delivery of an already-exchanged code is already
+      // handled above via _lastProcessedAuthCallbackUri / alreadyFinishedAuthCode.
       if (session == null) {
         _authLog('no session recovered from auth callback');
         return false;
