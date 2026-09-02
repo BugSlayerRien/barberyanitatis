@@ -3,6 +3,28 @@ const errorBox = document.getElementById("error");
 const passwordInput = document.getElementById("password");
 const passwordToggle = document.getElementById("password-toggle");
 
+/**
+ * A signed-in admin/receptionist must not be able to reach Sign In via
+ * browser Back/Forward. Runs on normal load and again on every bfcache
+ * restore (pageshow with persisted=true) — a back/forward navigation into
+ * this page does not otherwise re-execute this script.
+ */
+function redirectIfAlreadySignedIn() {
+  const home = portalHomePathForRoles(portalRolesFromSession());
+  if (home) {
+    window.location.replace(`./${home}`);
+    return true;
+  }
+  return false;
+}
+
+redirectIfAlreadySignedIn();
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    redirectIfAlreadySignedIn();
+  }
+});
+
 passwordToggle?.addEventListener("click", () => {
   if (!(passwordInput instanceof HTMLInputElement)) return;
   const show = passwordInput.type === "password";
