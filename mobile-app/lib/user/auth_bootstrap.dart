@@ -110,6 +110,38 @@ class AuthBootstrap {
     flow.markExpectingOAuth();
   }
 
+  /// Recovery established by an emailed OTP code instead of a recovery link.
+  ///
+  /// [session] must come from a successful `verifyOTP(type: OtpType.recovery)`
+  /// call, which is itself proof the user controls that mailbox. Binding it
+  /// here goes through the same [_bindRecoverySession] path a exchanged
+  /// recovery link uses, so [hasVerifiedRecoverySession] gates Change Password
+  /// identically — without a deep link, a browser round trip, or a PKCE
+  /// exchange. Returns false if the session did not bind (caller should keep
+  /// the user on the OTP screen rather than assuming success).
+  static Future<bool> completeOtpRecovery(Session session) async {
+    // A previously signed-in account's app state must not survive into a
+    // recovery for a different email. Mirrors the link flow's
+    // _clearBlockingSessionForRecoveryExchange protection.
+    await UserSession.clear();
+
+    flow.markRecoveryActive();
+    _bindRecoverySession(session, source: 'email_otp');
+    await applySupabaseSession(session);
+
+    if (!hasVerifiedRecoverySession) {
+      _authLog(
+        'otp recovery rejected: session did not bind '
+        'email=${session.user.email}',
+      );
+      return false;
+    }
+
+    _authLog('otp recovery verified email=${session.user.email}');
+    _queueDestination(AuthDestination.changePassword);
+    return true;
+  }
+
   /// Starts one Google/Facebook PKCE authorize + browser session.
   /// A new attempt id is bound to the verifier written by [getOAuthSignInUrl].
   static Future<void> startProviderOAuth(OAuthProvider provider) async {
@@ -129,6 +161,15 @@ class AuthBootstrap {
 
     AuthRedirect.prepareWebOAuthReturn();
 
+    // 'prompt=select_account' makes Google show its account chooser instead of
+    // silently continuing with the last account, which is what allows the user
+    // to switch Google accounts from the sign-in screen.
+    //
+    // This was briefly removed while investigating repeat-sign-in failures, on
+    // the theory that the extra screen delayed the round trip past a
+    // server-side flow-state window. That theory was disproven (a succeeding
+    // and a failing attempt both took exactly 7s), and the app no longer uses
+    // the PKCE code exchange at all, so round-trip duration is irrelevant here.
     final queryParams = <String, String>{
       if (provider == OAuthProvider.google) 'prompt': 'select_account',
     };
@@ -185,15 +226,25 @@ class AuthBootstrap {
     if (defaultTargetPlatform == TargetPlatform.android) {
       try {
         final opened = await launchUrl(uri, mode: LaunchMode.inAppBrowserView);
+        _authLog('browser launch: inAppBrowserView opened=$opened');
         if (opened) {
           return;
         }
+        _authLog(
+          'browser launch: inAppBrowserView returned opened=false; '
+          'falling back to externalApplication (stale-tab-reuse risk)',
+        );
       } catch (e) {
-        _authLog('inAppBrowserView launch failed: $e');
+        _authLog(
+          'inAppBrowserView launch failed: $e; '
+          'falling back to externalApplication (stale-tab-reuse risk)',
+        );
       }
     }
 
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final externalOpened =
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+    _authLog('browser launch: externalApplication opened=$externalOpened');
   }
 
   static void markPasswordLogin() {
@@ -495,8 +546,18 @@ class AuthBootstrap {
     _handlingAuthCallback = true;
 
     try {
+      final fragmentParameters = _readAuthCallbackParameters(uri);
       final hasCode = uri.queryParameters.containsKey('code') ||
-          _readAuthCallbackParameters(uri).containsKey('code');
+          fragmentParameters.containsKey('code');
+      // Implicit flow returns the session itself in the fragment
+      // (#access_token=...&refresh_token=...) rather than a code to exchange.
+      // getSessionFromUrl handles that shape directly: it builds the session
+      // from the access token. Without this, such a callback fell through to
+      // _recoverSessionFromFragment, which discards the valid access token and
+      // tries to redeem the refresh token instead — that grant fails with
+      // refresh_token_not_found and a good session was thrown away.
+      final hasAccessToken = uri.queryParameters.containsKey('access_token') ||
+          fragmentParameters.containsKey('access_token');
 
       var redirectTypeRecovery = false;
       var exchangedFromUrl = false;
@@ -506,10 +567,10 @@ class AuthBootstrap {
         await _clearBlockingSessionForRecoveryExchange();
       }
 
-      if (hasCode || uriRecovery) {
+      if (hasCode || hasAccessToken || uriRecovery) {
         _exchangingAuthCode = true;
         try {
-          final response = await Supabase.instance.client.auth.getSessionFromUrl(
+          final response = await _exchangeAuthCallbackUrl(
             _normalizeAuthCallbackUri(uri),
           );
           session = response.session;
@@ -619,6 +680,40 @@ class AuthBootstrap {
     } finally {
       _exchangingAuthCode = false;
       _handlingAuthCallback = false;
+    }
+  }
+
+  /// Exchanges the callback URL for a session. `flow_state_not_found` (404)
+  /// means GoTrue's server has no PKCE flow state for this code.
+  ///
+  /// Root cause is UNRESOLVED and is believed to be server-side, not a client
+  /// bug. Ruled out by testing against Supabase Auth logs: elapsed time (a
+  /// succeeding and a failing attempt both took exactly 7s authorize→callback),
+  /// Custom Tabs vs. external browser (`inAppBrowserView opened=true` on both),
+  /// stale browser cookies (cleared, still failed), and client-side verifier
+  /// storage (verified against gotrue SDK source — a fresh verifier is written
+  /// and read on every attempt). The observed pattern is that the first OAuth
+  /// sign-in of an app session succeeds and the next one fails deterministically.
+  ///
+  /// This retry does not fix that pattern. It is kept only as a cheap safety
+  /// net for a genuinely transient failure: one retry after a short pause,
+  /// nothing more. Every other error fails immediately, and a repeat of the
+  /// same error is not retried again.
+  static Future<AuthSessionUrlResponse> _exchangeAuthCallbackUrl(
+    Uri uri,
+  ) async {
+    try {
+      return await Supabase.instance.client.auth.getSessionFromUrl(uri);
+    } on AuthException catch (e) {
+      if (e.code != 'flow_state_not_found') {
+        rethrow;
+      }
+      _authLog(
+        'getSessionFromUrl flow_state_not_found on first try; '
+        'retrying once in case of a server-side propagation delay',
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      return await Supabase.instance.client.auth.getSessionFromUrl(uri);
     }
   }
 

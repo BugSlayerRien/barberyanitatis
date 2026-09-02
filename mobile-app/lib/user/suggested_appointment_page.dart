@@ -609,7 +609,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                             side: const BorderSide(color: Colors.white, width: 1),
                             minimumSize: const Size.fromHeight(48),
                           ),
-                          child: const Text('Choose Manually'),
+                          child: const Text('Pick Date & Time'),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -627,7 +627,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                                   height: 18,
                                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                                 )
-                              : const Text('Yes, Proceed'),
+                              : const Text('Continue'),
                         ),
                       ),
                     ],
