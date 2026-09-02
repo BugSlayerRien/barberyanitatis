@@ -203,15 +203,9 @@ async function postJson(url, payload, loadingMessage = false) {
 }
 
 function requireReceptionist() {
-  const rolesRaw = sessionStorage.getItem("roles");
-  if (!rolesRaw) {
-    window.location.href = "../login.html";
-    return false;
-  }
-
-  const roles = JSON.parse(rolesRaw).map((role) => role.toLowerCase());
+  const roles = portalRolesFromSession();
   if (!roles.includes("receptionist") && !roles.includes("admin")) {
-    window.location.href = "../login.html";
+    window.location.replace("../login.html");
     return false;
   }
 
@@ -1765,3 +1759,12 @@ async function init() {
 }
 
 init();
+
+// Re-validate on every bfcache restore (browser Back/Forward), which does
+// not re-execute this script otherwise — closes the gap where a signed-out
+// or wrong-role session could still see this page's last rendered state.
+window.addEventListener("pageshow", (event) => {
+  if (event.persisted) {
+    requireReceptionist();
+  }
+});

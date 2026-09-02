@@ -109,6 +109,28 @@ function storePortalSession(data) {
   }
 }
 
+/** Lower-cased portal roles from the current tab's session, or []. */
+function portalRolesFromSession() {
+  try {
+    const raw = sessionStorage.getItem("roles");
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map((role) => String(role).toLowerCase()) : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Portal entry page for a set of roles, relative to the web-admin/ root
+ * (e.g. "admin/index.html"). Null when no role grants portal access.
+ */
+function portalHomePathForRoles(roles) {
+  if (roles.includes("admin")) return "admin/index.html";
+  if (roles.includes("receptionist")) return "receptionist/index.html";
+  return null;
+}
+
 async function fetchWithRetry(url, options = {}, attempts = API_RETRY_ATTEMPTS) {
   let lastError = null;
 
