@@ -506,6 +506,7 @@ class AuthBootstrap {
     final uriRecovery = _uriLooksLikeRecovery(uri);
     final recoveryIntent = uriRecovery ||
         (flow.state.recoveryPending && !flow.state.expectingOAuth);
+
     final disposition = OAuthPkceCoordinator.dispositionFor(
       uri: uri,
       recoveryIntent: recoveryIntent,
@@ -567,7 +568,31 @@ class AuthBootstrap {
         await _clearBlockingSessionForRecoveryExchange();
       }
 
-      if (hasCode || hasAccessToken || uriRecovery) {
+      // detectSessionInUri is true, so the SDK's own deep-link observer is
+      // also handling this callback and has usually already exchanged the
+      // code by the time we get here. An authorization code is single-use:
+      // whichever consumer runs second gets flow_state_not_found. So adopt
+      // the session the SDK just created instead of racing it for a code
+      // that is already spent.
+      //
+      // Gated to the OAuth path only. A recovery callback must never adopt an
+      // ambient session — it has to bind to the account the link was issued
+      // for, which _bindRecoverySession enforces after a real exchange.
+      // expectingOAuth is only true between tapping a provider button and its
+      // callback, and logout nulls currentSession, so this cannot pick up a
+      // previously signed-in account.
+      if (!recoveryIntent && flow.state.expectingOAuth) {
+        final sdkSession = Supabase.instance.client.auth.currentSession;
+        if (sdkSession != null) {
+          session = sdkSession;
+          _authLog(
+            'oauth adopting session already established by the SDK observer '
+            'email=${sdkSession.user.email}',
+          );
+        }
+      }
+
+      if (session == null && (hasCode || hasAccessToken || uriRecovery)) {
         _exchangingAuthCode = true;
         try {
           final response = await _exchangeAuthCallbackUrl(
