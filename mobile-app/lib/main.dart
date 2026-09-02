@@ -49,10 +49,26 @@ Future<void> main() async {
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
     authOptions: const FlutterAuthClientOptions(
-      authFlowType: AuthFlowType.pkce,
-      // AuthBootstrap owns PKCE/deep-link exchange so the SDK cannot consume
-      // the authorization code before the intended handler (repeat OAuth +
-      // recovery cold start).
+      // Implicit, not PKCE. On this project the PKCE exchange is broken
+      // server-side for every OAuth attempt after the first in an app run:
+      // GoTrue creates the auth.flow_state row at /authorize, fills in
+      // auth_code at /callback, then answers /token with 404
+      // flow_state_not_found for that same auth_code — verified by querying
+      // auth.flow_state directly and finding the row present, un-expired,
+      // with user_id set. It affects Google and Facebook identically, so it
+      // is not provider-specific, and no client change fixes it (fresh
+      // verifier, bare redirect, Custom Tabs, cookie clearing and a retry
+      // were all ruled out against logs).
+      //
+      // Implicit returns the session in the deep-link fragment instead of an
+      // authorization code, so no flow_state row is created or looked up and
+      // this failure cannot occur. Trade-off: tokens travel in the callback
+      // URL fragment rather than being exchanged for a code, which is weaker
+      // than PKCE. Revisit if Supabase resolves the server-side defect.
+      authFlowType: AuthFlowType.implicit,
+      // AuthBootstrap owns deep-link handling so the SDK cannot consume the
+      // callback before the intended handler (repeat OAuth + recovery cold
+      // start).
       detectSessionInUri: false,
     ),
   );
