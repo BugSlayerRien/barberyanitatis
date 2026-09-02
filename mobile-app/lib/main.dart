@@ -49,27 +49,23 @@ Future<void> main() async {
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
     authOptions: const FlutterAuthClientOptions(
-      // Implicit, not PKCE. On this project the PKCE exchange is broken
-      // server-side for every OAuth attempt after the first in an app run:
-      // GoTrue creates the auth.flow_state row at /authorize, fills in
-      // auth_code at /callback, then answers /token with 404
-      // flow_state_not_found for that same auth_code — verified by querying
-      // auth.flow_state directly and finding the row present, un-expired,
-      // with user_id set. It affects Google and Facebook identically, so it
-      // is not provider-specific, and no client change fixes it (fresh
-      // verifier, bare redirect, Custom Tabs, cookie clearing and a retry
-      // were all ruled out against logs).
+      authFlowType: AuthFlowType.pkce,
+      // detectSessionInUri is intentionally left at its default (true): the
+      // SDK's own deep-link observer performs the OAuth code exchange.
       //
-      // Implicit returns the session in the deep-link fragment instead of an
-      // authorization code, so no flow_state row is created or looked up and
-      // this failure cannot occur. Trade-off: tokens travel in the callback
-      // URL fragment rather than being exchanged for a code, which is weaker
-      // than PKCE. Revisit if Supabase resolves the server-side defect.
-      authFlowType: AuthFlowType.implicit,
-      // AuthBootstrap owns deep-link handling so the SDK cannot consume the
-      // callback before the intended handler (repeat OAuth + recovery cold
-      // start).
-      detectSessionInUri: false,
+      // History worth keeping: on 2026-09-01 this was set to false so that
+      // AuthBootstrap could own the exchange, as an attempted fix for OAuth
+      // sign-ins hanging on the splash screen. That hang was a *navigation*
+      // timing bug, not an auth bug — the session was being created fine and
+      // only appeared after a lifecycle resume flushed the pending route.
+      // Taking over the exchange broke working authentication: every OAuth
+      // attempt after the first failed with flow_state_not_found. Verified by
+      // checking out 3e1976e (2026-08-30), where the stock SDK exchange signs
+      // in repeatedly without error.
+      //
+      // The navigation bug is now fixed properly in AuthBootstrap
+      // (AuthFlowEngine + _queueDestination + flushPendingNavigation), so the
+      // exchange can go back to the SDK where it worked.
     ),
   );
 

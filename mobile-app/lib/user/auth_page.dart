@@ -439,7 +439,22 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseGoogle() async {
     setState(() => _isLoading = true);
     try {
-      await AuthBootstrap.startProviderOAuth(OAuthProvider.google);
+      // Stock SDK sign-in. signInWithOAuth forces LaunchMode.externalApplication
+      // for Google on Android internally ("Google login has to be performed on
+      // external browser window on Android"), and the SDK's own deep-link
+      // observer completes the code exchange. Driving that exchange ourselves
+      // is what broke repeat sign-ins with flow_state_not_found.
+      //
+      // markExpectingOAuth() must stay: it is what makes AuthBootstrap treat
+      // the resulting signedIn event as AuthArrival.oauthCallback and route to
+      // the dashboard. Without it the session is created but nothing navigates.
+      AuthBootstrap.markExpectingOAuth();
+      AuthRedirect.prepareWebOAuthReturn();
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+        authScreenLaunchMode: LaunchMode.externalApplication,
+      );
       if (!mounted) return;
       if (kIsWeb) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -465,7 +480,13 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseFacebook() async {
     setState(() => _isLoading = true);
     try {
-      await AuthBootstrap.startProviderOAuth(OAuthProvider.facebook);
+      AuthBootstrap.markExpectingOAuth();
+      AuthRedirect.prepareWebOAuthReturn();
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.facebook,
+        redirectTo: AuthRedirect.supabaseRedirectUri,
+        authScreenLaunchMode: LaunchMode.externalApplication,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening browser for Facebook sign-in...')));
     } catch (e) {
