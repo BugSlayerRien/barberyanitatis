@@ -2048,6 +2048,41 @@ function renderBarberTable(metrics) {
   }).join("");
 }
 
+function starGlyphs(rating) {
+  const value = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)));
+  return "★".repeat(value) + "☆".repeat(5 - value);
+}
+
+/**
+ * admin_analytics.php already computes this (barber name, rating, comment,
+ * date) and returns it as data.recentFeedback — it just had nowhere to render.
+ * Written feedback comments were reaching the API response and stopping there;
+ * admin only ever saw the aggregate star average in the barber table above.
+ */
+function renderRecentFeedback(recentFeedback) {
+  const el = document.getElementById("analytics-recent-feedback");
+  if (!el) return;
+  const rows = Array.isArray(recentFeedback) ? recentFeedback : [];
+
+  if (!rows.length) {
+    el.innerHTML = '<div class="meta">No feedback in this period.</div>';
+    return;
+  }
+
+  el.innerHTML = rows.map((row) => {
+    const when = row.createdAt ? new Date(row.createdAt).toLocaleString() : "";
+    const comment = escapeAnalyticsText(row.comment || "").trim();
+    return `
+      <div class="analytics-stack-item">
+        <strong>${escapeAnalyticsText(row.barberName)}</strong>
+        <span style="color:#e9c559;letter-spacing:1px;">${starGlyphs(row.rating)}</span>
+        ${comment ? `<div style="margin-top:4px;">${comment}</div>` : '<div class="meta" style="margin-top:4px;">No comment left.</div>'}
+        <div class="meta" style="margin-top:4px;">${escapeAnalyticsText(when)}</div>
+      </div>
+    `;
+  }).join("");
+}
+
 function renderOperations(metrics) {
   const el = document.getElementById("analytics-ops-kpis");
   if (!el) return;
@@ -2116,6 +2151,7 @@ function renderAnalyticsDashboard(data) {
   renderAnalyticsKpis(metrics);
   renderAnalyticsCharts(metrics);
   renderBarberTable(metrics);
+  renderRecentFeedback(data?.recentFeedback);
   renderOperations(metrics);
   renderCustomers(metrics);
   renderAiBrief(data?.summary, data?.aiInsights);

@@ -222,10 +222,31 @@ try {
         $ratingCountStmt->execute([':barber_id' => $resolvedBarberID]);
         $ratingCount = (int)($ratingCountStmt->fetchColumn() ?: 0);
 
+        // Feedback comments were stored on submission but no endpoint ever
+        // returned them to the barber they were about — this page previously
+        // showed only the aggregate rating/ratingCount above. Customer identity
+        // is intentionally not included.
+        $feedbackStmt = $pdo->prepare(
+            'SELECT rating, comment, created_at
+             FROM barber_feedback
+             WHERE barber_id = :barber_id
+             ORDER BY created_at DESC
+             LIMIT 20'
+        );
+        $feedbackStmt->execute([':barber_id' => $resolvedBarberID]);
+        $recentFeedback = array_map(static function (array $row): array {
+            return [
+                'rating' => (int)$row['rating'],
+                'comment' => $row['comment'] !== null ? (string)$row['comment'] : null,
+                'createdAt' => (string)$row['created_at'],
+            ];
+        }, $feedbackStmt->fetchAll());
+
         json_response([
             'barber' => $barber,
             'appointmentsToday' => $todayCount,
             'ratingCount' => $ratingCount,
+            'recentFeedback' => $recentFeedback,
         ]);
     }
 
