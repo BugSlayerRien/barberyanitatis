@@ -568,8 +568,13 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                     const SizedBox(height: 12),
                   if (_alternatives.isNotEmpty) ...[
                     _slotChoiceCard(_recommended, recommended: true),
+                    // One alternative only. The backend often returns several
+                    // slots from the same barber on the same day an hour apart,
+                    // which read as duplicates and just add scrolling. "Pick
+                    // Date & Time" covers anyone who wants the full list.
                     ..._alternatives
                         .where((slot) => _slotKey(slot) != _slotKey(_recommended))
+                        .take(1)
                         .map((slot) => _slotChoiceCard(slot, recommended: false)),
                   ] else ...[
                     _detailRow('Barber', barberName),

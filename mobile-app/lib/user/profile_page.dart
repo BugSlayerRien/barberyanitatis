@@ -352,13 +352,10 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 16),
               _infoCard('Email', _email.isNotEmpty ? _email : '—'),
               const SizedBox(height: 16),
-              _dropdownCard(
-                label: 'Gender',
-                value: _gender.isEmpty ? 'Prefer not to tell' : _gender,
-                options: _genderOptions,
-                onChanged: (value) => setState(() => _gender = value ?? 'Prefer not to tell'),
-              ),
-              const SizedBox(height: 16),
+              // Gender is hidden from the profile UI — it is not needed for
+              // anything the customer app does. The stored value is still
+              // loaded and saved untouched so existing records keep their
+              // value instead of being overwritten.
               _dropdownCard(
                 label: 'Hair Texture',
                 value: _hairTexture.isEmpty ? _hairTextureOptions.first : _hairTexture,
