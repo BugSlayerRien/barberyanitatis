@@ -729,7 +729,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           ),
         ),
         child: Text(
-          hasAiPreview ? 'AI try-on' : 'Your scan photo',
+          hasAiPreview ? 'AI try-on' : 'Scanned photos',
           style: TextStyle(
             color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white70,
             fontSize: 11,
@@ -1157,7 +1157,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
             const Text(
-              'Your AI Hair Recommendations',
+              'AI Hair Recommendations',
               style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 10),
@@ -1287,19 +1287,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ),
             ],
             const SizedBox(height: 8),
-            if (_selected != null && !_previewGenerating) ...[
-              Center(
-                child: TextButton.icon(
-                  onPressed: _previewUrlsForVariant(variantId) != null
-                      ? _onRegeneratePreviewPressed
-                      : null,
-                  icon: const Icon(Icons.refresh, size: 18),
-                  label: const Text('Regenerate preview'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.white70),
-                ),
-              ),
-              const SizedBox(height: 4),
-            ],
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: List.generate(_angleLabels.length, (i) {

@@ -254,6 +254,31 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     }
   }
 
+  /// The history tab holds Completed, Cancelled and NoShow appointments, so the
+  /// badge has to reflect the real status. It used to be hardcoded to
+  /// "Completed", which showed cancelled appointments as completed.
+  String _historyStatusLabel(String status) {
+    switch (status) {
+      case 'Cancelled':
+        return 'Cancelled';
+      case 'NoShow':
+        return 'No Show';
+      default:
+        return 'Completed';
+    }
+  }
+
+  Color _historyStatusColor(String status) {
+    switch (status) {
+      case 'Cancelled':
+        return const Color(0xFFE57373);
+      case 'NoShow':
+        return const Color(0xFFE67E22);
+      default:
+        return const Color(0xFF999999);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final allAppointments =
@@ -460,7 +485,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                                 .withOpacity(0.2)
                                             : const Color(0xFF4CAF50)
                                                 .withOpacity(0.2))
-                                        : const Color(0xFF666666)
+                                        : _historyStatusColor(statusText)
                                             .withOpacity(0.2),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
@@ -469,13 +494,13 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                         ? (isPendingPayment
                                             ? 'Pending Payment'
                                             : 'Confirmed')
-                                        : 'Completed',
+                                        : _historyStatusLabel(statusText),
                                     style: TextStyle(
                                       color: isUpcoming
                                           ? (isPendingPayment
                                               ? const Color(0xFFE67E22)
                                               : const Color(0xFF4CAF50))
-                                          : const Color(0xFF999999),
+                                          : _historyStatusColor(statusText),
                                       fontWeight: FontWeight.bold,
                                       fontSize: 10,
                                     ),

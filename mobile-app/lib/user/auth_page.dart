@@ -721,12 +721,9 @@ class _AuthPageState extends State<AuthPage> {
           style: const TextStyle(color: Colors.white),
           decoration: _fieldDecoration('Enter your email', helperText: 'Format: yourname@example.com'),
         ),
-        const SizedBox(height: 12),
-        TextField(
-            controller: _phone,
-            style: const TextStyle(color: Colors.white),
-            decoration: _fieldDecoration('Enter phone number', helperText: 'PH format: 09123456789 or 02-1234567'),
-            keyboardType: TextInputType.phone),
+        // Phone is intentionally not collected at registration — it keeps
+        // sign-up short and is not needed to create an account. Customers can
+        // add or edit it any time under Profile → Mobile Number.
         const SizedBox(height: 12),
         TextField(
             controller: _regPass,
