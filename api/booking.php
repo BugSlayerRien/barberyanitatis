@@ -93,6 +93,14 @@ function ensure_reschedule_count_column(PDO $pdo): void
     );
 }
 
+function ensure_cancel_reason_column(PDO $pdo): void
+{
+    $pdo->exec(
+        'ALTER TABLE appointments
+         ADD COLUMN IF NOT EXISTS cancel_reason TEXT'
+    );
+}
+
 function derive_payment_state(?string $paymentStatus, ?string $intentStatus): string
 {
     $payment = $paymentStatus !== null ? trim((string)$paymentStatus) : '';
@@ -224,6 +232,12 @@ try {
     ensure_appointments_status_constraint($pdo);
     ensure_barber_channel_column($pdo);
     ensure_group_booking_schema($pdo);
+    // Unconditional (not skipped for read-only actions like reschedule_count is
+    // below): listByCustomer's SELECT references cancel_reason directly, and on
+    // a fresh deploy no 'cancel' action may have run yet to create the column —
+    // that would otherwise break the whole appointments list with a SQL error
+    // until someone happened to cancel something first.
+    ensure_cancel_reason_column($pdo);
     $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile', 'getCustomerHomeInsights'];
     if (!in_array($action, $readOnlyActions, true)) {
         ensure_appointment_detail_image_columns($pdo);
@@ -835,7 +849,7 @@ try {
 
         $stmt = $pdo->prepare(
             "SELECT a.appointment_id, a.booking_code, a.booking_group_id, a.group_member_name, a.group_sequence,
-                    a.appointment_date, a.start_time, a.end_time, a.status,
+                    a.appointment_date, a.start_time, a.end_time, a.status, a.cancel_reason,
                     COALESCE(a.reschedule_count, 0) AS reschedule_count,
                     b.barber_id, b.full_name AS barber_name,
                     u.full_name AS customer_name,
@@ -951,6 +965,7 @@ try {
                 'startTime' => $row['start_time'],
                 'endTime' => $row['end_time'],
                 'status' => $appointmentStatus,
+                'cancelReason' => $row['cancel_reason'] !== null ? (string)$row['cancel_reason'] : null,
                 'barberID' => (int)$row['barber_id'],
                 'barberName' => $row['barber_name'],
                 'paymentState' => $paymentState,
@@ -996,11 +1011,16 @@ try {
     if ($action === 'cancel') {
         $appointmentID = (int)($input['appointmentID'] ?? 0);
         $userID = (int)$customer['user_id'];
+        // The app has always sent this (see mobile-app appointments_page.dart's
+        // cancel-reason dropdown), but it was never read here — collected from
+        // the customer and then silently discarded on every cancellation.
+        $cancelReason = trim((string)($input['reason'] ?? ''));
         if ($appointmentID <= 0) {
             json_response(['error' => 'Invalid appointmentID'], 422);
         }
 
         ensure_group_booking_schema($pdo);
+        ensure_cancel_reason_column($pdo);
 
         $apptStmt = $pdo->prepare(
             'SELECT appointment_id, user_id, barber_id, appointment_date, start_time, status, booking_group_id
@@ -1028,11 +1048,14 @@ try {
         if ($groupId > 0) {
             $cancelStmt = $pdo->prepare(
                 "UPDATE appointments
-                 SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+                 SET status = 'Cancelled', cancel_reason = :cancel_reason, updated_at = CURRENT_TIMESTAMP
                  WHERE booking_group_id = :group_id
                    AND status NOT IN ('Cancelled', 'NoShow', 'Completed')"
             );
-            $cancelStmt->execute([':group_id' => $groupId]);
+            $cancelStmt->execute([
+                ':group_id' => $groupId,
+                ':cancel_reason' => $cancelReason !== '' ? $cancelReason : null,
+            ]);
 
             $membersStmt = $pdo->prepare(
                 "SELECT appointment_id FROM appointments WHERE booking_group_id = :group_id"
@@ -1056,10 +1079,13 @@ try {
         } else {
             $stmt = $pdo->prepare(
                 "UPDATE appointments
-                 SET status = 'Cancelled', updated_at = CURRENT_TIMESTAMP
+                 SET status = 'Cancelled', cancel_reason = :cancel_reason, updated_at = CURRENT_TIMESTAMP
                  WHERE appointment_id = :appointment_id"
             );
-            $stmt->execute([':appointment_id' => $appointmentID]);
+            $stmt->execute([
+                ':appointment_id' => $appointmentID,
+                ':cancel_reason' => $cancelReason !== '' ? $cancelReason : null,
+            ]);
             release_slots_for_appointment($pdo, $appointmentID);
 
             $expireIntent = $pdo->prepare(
@@ -1081,11 +1107,22 @@ try {
             ':message' => 'Your appointment on ' . (string)$appt['appointment_date'] . ' at ' . (string)$appt['start_time'] . ' was cancelled.',
         ]);
 
+        // Reason is stored on the appointment (cancel_reason) for any screen to
+        // read later, and also pushed to receptionist/admin immediately here so
+        // it's visible right away without needing a UI change to surface it.
+        $staffLabel = $cancelReason !== '' ? " Reason: {$cancelReason}" : ' No reason given.';
+        notify_receptionist_staff(
+            $pdo,
+            'Appointment cancelled',
+            'Customer cancelled ' . (string)$appt['appointment_date'] . ' ' . (string)$appt['start_time'] . '.' . $staffLabel
+        );
+
         // Log appointment cancellation to audit trail
         audit_log($pdo, 'CANCEL', 'appointments', (string)$appointmentID, [
             'status' => $appt['status'],
         ], [
             'status' => 'Cancelled',
+            'cancel_reason' => $cancelReason !== '' ? $cancelReason : null,
         ], (int)$appt['user_id']);
 
         $pdo->commit();
@@ -1316,7 +1353,7 @@ try {
         $inClause = implode(',', array_fill(0, count($appointmentIds), '?'));
 
         $detailStmt = $pdo->prepare(
-            "SELECT ad.appointment_id,
+            "SELECT ad.appointment_id, ad.special_instructions,
                     hs.style_name AS hairstyle_name,
                     s.service_name,
                     COALESCE(ad.customer_front_url, hv.front_view_url) AS front_view_url,
@@ -1331,6 +1368,11 @@ try {
         $detailStmt->execute($appointmentIds);
         $detailRows = $detailStmt->fetchAll();
 
+        // Customers can attach special instructions per service at booking time
+        // (booking.php 'create'/'createGroup'), but no barber-facing endpoint ever
+        // read them back — the barber performing the service never saw what the
+        // customer asked for. A single appointment can have more than one service
+        // row; concatenate any non-empty instructions across all of them.
         $detailMap = [];
         foreach ($detailRows as $row) {
             $aid = (int)$row['appointment_id'];
@@ -1341,7 +1383,12 @@ try {
                     'frontViewUrl' => $row['front_view_url'],
                     'sideViewUrl' => $row['side_view_url'],
                     'backViewUrl' => $row['back_view_url'],
+                    'specialInstructions' => [],
                 ];
+            }
+            $instruction = trim((string)($row['special_instructions'] ?? ''));
+            if ($instruction !== '') {
+                $detailMap[$aid]['specialInstructions'][] = $instruction;
             }
         }
 
@@ -1365,6 +1412,9 @@ try {
                 'frontViewUrl' => $details['frontViewUrl'] ?? null,
                 'sideViewUrl' => $details['sideViewUrl'] ?? null,
                 'backViewUrl' => $details['backViewUrl'] ?? null,
+                'specialInstructions' => !empty($details['specialInstructions'])
+                    ? implode(' / ', $details['specialInstructions'])
+                    : null,
             ];
         }, $appointments);
 

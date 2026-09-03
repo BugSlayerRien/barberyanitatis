@@ -63,6 +63,8 @@ $imageModel = match ($tryonProvider) {
 
 $styleLimitRaw = env_str('AI_TRYON_STYLE_LIMIT', '3');
 $styleLimit = ctype_digit($styleLimitRaw) ? (int)$styleLimitRaw : 3;
+$kioskLimitRaw = env_str('AI_TRYON_KIOSK_LIMIT', '5');
+$kioskLimit = ctype_digit($kioskLimitRaw) ? (int)$kioskLimitRaw : 5;
 $unlimited = in_array(strtolower(env_str('AI_TRYON_UNLIMITED')), ['1', 'true', 'yes', 'on'], true);
 $allowFallback = in_array(strtolower(env_str('AI_TRYON_ALLOW_FALLBACK')), ['1', 'true', 'yes', 'on'], true);
 
@@ -97,6 +99,7 @@ json_response([
         'model' => $imageModel,
         'configured' => $providerConfigured,
         'styleLimit' => $styleLimit,
+        'kioskLimit' => $kioskLimit,
         'unlimited' => $unlimited,
         'allowFallback' => $allowFallback,
         'availableProviders' => [
