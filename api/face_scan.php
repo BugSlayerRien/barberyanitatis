@@ -542,7 +542,9 @@ try {
                         'backViewUrl' => $cached['right_url'],
                         'provider' => 'cache',
                         'cached' => true,
-                        'quota' => ai_tryon_quota_status($pdo, $userID),
+                        'quota' => $userID !== null
+                            ? ai_tryon_quota_status($pdo, $userID)
+                            : ai_tryon_kiosk_quota_status($pdo, $scanSessionId),
                     ]);
                 }
             }
@@ -550,10 +552,26 @@ try {
 
         // Quota is enforced only on a genuine new generation call (cache hits above are
         // free, and a regenerate of a style the user already has never costs a new slot).
-        if ($userID !== null && !ai_tryon_unlimited()) {
-            $styleLimit = ai_tryon_style_limit();
-            $stylesUsed = ai_tryon_styles_used($pdo, $userID);
-            if ($stylesUsed >= $styleLimit && !ai_tryon_user_has_generated_variant($pdo, $userID, $variantID)) {
+        //
+        // Mobile app (userID set, signed in) uses AI_TRYON_STYLE_LIMIT, counted per
+        // account across all of that user's scans — unchanged from before.
+        //
+        // Kiosk / guest (userID null — no login at a walk-in kiosk) uses the separate
+        // AI_TRYON_KIOSK_LIMIT, counted per scan session, since a walk-in has no
+        // persistent identity to count against across visits. Previously this branch
+        // did not exist at all, so kiosk generations were unmetered.
+        if (!ai_tryon_unlimited()) {
+            if ($userID !== null) {
+                $styleLimit = ai_tryon_style_limit();
+                $stylesUsed = ai_tryon_styles_used($pdo, $userID);
+                $alreadyGenerated = ai_tryon_user_has_generated_variant($pdo, $userID, $variantID);
+            } else {
+                $styleLimit = ai_tryon_kiosk_limit();
+                $stylesUsed = ai_tryon_kiosk_styles_used($pdo, $scanSessionId);
+                $alreadyGenerated = ai_tryon_kiosk_has_generated_variant($pdo, $scanSessionId, $variantID);
+            }
+
+            if ($stylesUsed >= $styleLimit && !$alreadyGenerated) {
                 json_response([
                     'error' => "You've reached your free AI hairstyle generation limit ({$styleLimit} styles).",
                     'quotaExceeded' => true,
@@ -722,7 +740,9 @@ try {
             'lengthNote' => $lengthNote,
             'cached' => false,
             'previewDiagnostics' => $previewDiagnostics,
-            'quota' => ai_tryon_quota_status($pdo, $userID),
+            'quota' => $userID !== null
+                ? ai_tryon_quota_status($pdo, $userID)
+                : ai_tryon_kiosk_quota_status($pdo, $scanSessionId),
         ]);
     }
 

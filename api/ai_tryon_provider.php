@@ -229,3 +229,61 @@ function ai_tryon_quota_status(PDO $pdo, ?int $userId): array
         'unlimited' => $unlimited,
     ];
 }
+
+/**
+ * Kiosk / guest quota — a separate limit from the mobile app's per-account quota
+ * above, because a kiosk walk-in has no login and therefore no persistent user_id
+ * to count against. Scoped per scan session (one kiosk visit) instead of per user.
+ * Default 5, independent of AI_TRYON_STYLE_LIMIT (mobile, default 2).
+ */
+function ai_tryon_kiosk_limit(): int
+{
+    $raw = trim((string)(getenv('AI_TRYON_KIOSK_LIMIT') ?: ($_ENV['AI_TRYON_KIOSK_LIMIT'] ?? '')));
+    $limit = $raw !== '' ? (int)$raw : 5;
+    return $limit > 0 ? $limit : 5;
+}
+
+/** Distinct hairstyles generated within this one kiosk scan session so far. */
+function ai_tryon_kiosk_styles_used(PDO $pdo, string $scanSessionId): int
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(DISTINCT variant_id)
+         FROM face_scan_previews
+         WHERE scan_session_id = :scan_session_id
+           AND variant_id IS NOT NULL'
+    );
+    $stmt->execute([':scan_session_id' => $scanSessionId]);
+
+    return (int)$stmt->fetchColumn();
+}
+
+function ai_tryon_kiosk_has_generated_variant(PDO $pdo, string $scanSessionId, int $variantId): bool
+{
+    $stmt = $pdo->prepare(
+        'SELECT COUNT(*)
+         FROM face_scan_previews
+         WHERE scan_session_id = :scan_session_id
+           AND variant_id = :variant_id'
+    );
+    $stmt->execute([':scan_session_id' => $scanSessionId, ':variant_id' => $variantId]);
+
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+/**
+ * @return array{limit: int, used: int, remaining: int, unlimited: bool}
+ */
+function ai_tryon_kiosk_quota_status(PDO $pdo, string $scanSessionId): array
+{
+    $unlimited = ai_tryon_unlimited();
+    $limit = ai_tryon_kiosk_limit();
+    $used = ai_tryon_kiosk_styles_used($pdo, $scanSessionId);
+    $remaining = $unlimited ? $limit : max(0, $limit - $used);
+
+    return [
+        'limit' => $limit,
+        'used' => $used,
+        'remaining' => $remaining,
+        'unlimited' => $unlimited,
+    ];
+}

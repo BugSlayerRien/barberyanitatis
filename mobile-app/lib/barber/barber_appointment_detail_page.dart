@@ -22,6 +22,8 @@ class BarberAppointmentDetailPage extends StatelessWidget {
     final endTime = formatTo12Hour(appointment['endTime']?.toString() ?? '-');
     final status = appointment['status']?.toString() ?? 'Unknown';
     final bookingCode = appointment['bookingCode']?.toString() ?? '-';
+    final specialInstructions =
+        appointment['specialInstructions']?.toString().trim() ?? '';
     final previewImages = previewImagesFromAppointment(appointment);
 
     return Scaffold(
@@ -47,6 +49,14 @@ class BarberAppointmentDetailPage extends StatelessWidget {
           _card(title: 'End Time', value: endTime),
           const SizedBox(height: 12),
           _card(title: 'Status', value: status),
+          if (specialInstructions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _card(
+              title: 'Customer Note',
+              value: specialInstructions,
+              highlight: true,
+            ),
+          ],
           if (previewImages.isNotEmpty) ...[
             const SizedBox(height: 20),
             AppointmentPreviewCarousel(images: previewImages),
@@ -56,13 +66,19 @@ class BarberAppointmentDetailPage extends StatelessWidget {
     );
   }
 
-  Widget _card({required String title, required String value}) {
+  Widget _card({
+    required String title,
+    required String value,
+    bool highlight = false,
+  }) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF121212),
+        color: highlight ? const Color(0xFF2A2410) : const Color(0xFF121212),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(
+          color: highlight ? const Color(0xFFA99941) : Colors.white12,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

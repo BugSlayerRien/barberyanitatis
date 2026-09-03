@@ -177,6 +177,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
           'status': isPaymentOverride && forcedState == 'Paid'
               ? 'Scheduled'
               : status,
+          'cancelReason': appt['cancelReason']?.toString(),
           'paymentState': isPaymentOverride && forcedState != null
               ? forcedState
               : appt['paymentState']?.toString() ??
@@ -472,6 +473,25 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                       ),
                                       const SizedBox(height: 6),
                                       paymentChip,
+                                      if (!isUpcoming &&
+                                          statusText == 'Cancelled' &&
+                                          (appointment['cancelReason']
+                                                  as String?)
+                                              ?.trim()
+                                              .isNotEmpty ==
+                                              true) ...[
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          'Reason: ${appointment['cancelReason']}',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Color(0xFFE57373),
+                                            fontSize: 11,
+                                            fontStyle: FontStyle.italic,
+                                          ),
+                                        ),
+                                      ],
                                     ],
                                   ),
                                 ),
