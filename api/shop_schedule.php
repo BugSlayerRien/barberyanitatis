@@ -1204,6 +1204,8 @@ function run_tracking_automation(PDO $pdo, bool $force = true): array
         $events[] = ['action' => 'completed', 'kind' => 'walkin', 'label' => $label];
     }
 
+    shop_recompute_walkin_wait_minutes($pdo);
+
     return [
         'events' => $events,
         'counts' => [
@@ -1213,6 +1215,95 @@ function run_tracking_automation(PDO $pdo, bool $force = true): array
             'completedWalkins' => $completedWalkins,
         ],
     ];
+}
+
+/**
+ * Recompute and persist wait_time_minutes for every active walk-in queue entry.
+ *
+ * Previously this column was written once at check-in (shop_walkin_duration_minutes
+ * per position, at that moment) and never touched again, so the kiosk/receptionist
+ * screens showed a frozen number for a person's entire wait regardless of how much
+ * time actually passed or how the queue moved. This mirrors the same math
+ * shop_estimate_walkin_barber_wait_minutes uses for a brand-new walk-in — remaining
+ * time of the in-progress client, plus each still-waiting person's position ahead in
+ * that barber's queue, plus that barber's remaining appointments today — but computed
+ * per existing entry instead of "if someone joined the back of the line right now".
+ *
+ * Called from run_tracking_automation, which every wait-time reader (kiosk.php,
+ * receptionist.php, booking.php) already calls before it queries the queue, so this
+ * needs no separate wiring and updates on the same 10s cadence the kiosk already polls.
+ */
+function shop_recompute_walkin_wait_minutes(PDO $pdo): void
+{
+    require_once __DIR__ . '/barber_channel.php';
+    ensure_barber_channel_column($pdo);
+
+    $walkinMinutes = shop_walkin_duration_minutes();
+    $appointmentMinutes = shop_appointment_duration_minutes();
+
+    $walkInFilter = barber_channel_filter_sql('walk_in');
+    $barberIds = $pdo
+        ->query("SELECT barber_id FROM barbers WHERE is_active = TRUE{$walkInFilter}")
+        ->fetchAll(PDO::FETCH_COLUMN);
+
+    $inProgressStmt = $pdo->prepare(
+        "SELECT actual_start, created_at
+         FROM walkin_queue
+         WHERE barber_id = :barber_id
+           AND DATE(created_at) = CURRENT_DATE
+           AND status = 'InProgress'
+         ORDER BY COALESCE(actual_start, created_at) ASC
+         LIMIT 1"
+    );
+    $apptStmt = $pdo->prepare(
+        "SELECT COUNT(*)::int
+         FROM appointments
+         WHERE appointment_date = CURRENT_DATE
+           AND barber_id = :barber_id
+           AND status IN ('Scheduled', 'CheckedIn', 'InProgress')"
+    );
+    $queueStmt = $pdo->prepare(
+        "SELECT queue_id
+         FROM walkin_queue
+         WHERE barber_id = :barber_id
+           AND DATE(created_at) = CURRENT_DATE
+           AND status IN ('Waiting', 'Assigned')
+         ORDER BY queue_id ASC"
+    );
+    $updateStmt = $pdo->prepare(
+        'UPDATE walkin_queue SET wait_time_minutes = :wait WHERE queue_id = :queue_id'
+    );
+
+    foreach ($barberIds as $barberIdRaw) {
+        $barberId = (int)$barberIdRaw;
+        $base = 0;
+
+        $inProgressStmt->execute([':barber_id' => $barberId]);
+        $inProgress = $inProgressStmt->fetch(PDO::FETCH_ASSOC);
+        if ($inProgress) {
+            $startRaw = $inProgress['actual_start'] ?? $inProgress['created_at'];
+            $startTs = $startRaw ? strtotime((string)$startRaw) : false;
+            if ($startTs !== false) {
+                $remainingSeconds = ($startTs + ($walkinMinutes * 60)) - time();
+                $base += max(0, (int)ceil($remainingSeconds / 60));
+            } else {
+                $base += $walkinMinutes;
+            }
+        }
+
+        $apptStmt->execute([':barber_id' => $barberId]);
+        $base += (int)$apptStmt->fetchColumn() * $appointmentMinutes;
+
+        $queueStmt->execute([':barber_id' => $barberId]);
+        $position = 0;
+        foreach ($queueStmt->fetchAll(PDO::FETCH_COLUMN) as $queueId) {
+            $updateStmt->execute([
+                ':wait' => $base + ($position * $walkinMinutes),
+                ':queue_id' => (int)$queueId,
+            ]);
+            $position++;
+        }
+    }
 }
 
 /**

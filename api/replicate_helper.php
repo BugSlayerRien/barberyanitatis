@@ -152,6 +152,7 @@ function replicate_build_hair_only_prompt(
         . 'Completely remove the old hairstyle everywhere, not just the tips or one side; the new '
         . 'cut silhouette must look clearly different from the original. Do not paste extra hair '
         . 'onto forehead skin, cheeks, or neck. '
+        . replicate_glasses_preservation_clause()
         . 'STRICT IDENTITY LOCK — do not change: face shape, facial features, facial expression, '
         . 'skin tone and texture, blemishes or marks, eyebrows, eyes, eyeglasses if present, ears, '
         . 'neck, body proportions, age, or gender. This must remain the exact same person, not a '
@@ -163,13 +164,45 @@ function replicate_build_hair_only_prompt(
         . $colorClause;
 }
 
-/** @return array<string, string> */
+/**
+ * Stated as its own leading sentence rather than left as one item inside the long
+ * "STRICT IDENTITY LOCK" list (still kept there too, for reinforcement). A hair edit
+ * naturally repaints the temple/sideburn area where glasses arms sit, and a
+ * mid-13-item list clause was not enough to reliably stop the model from dropping
+ * eyeglasses in that region. Unconditional and harmless when the person has none.
+ */
+function replicate_glasses_preservation_clause(): string
+{
+    return 'If the person in the photo is wearing eyeglasses, KEEP THE EXACT SAME '
+        . 'EYEGLASSES in the output — same frame shape, color, lens tint, and '
+        . 'position on the face. Do not remove them, change their style, or generate '
+        . 'the person without glasses. ';
+}
+
+/**
+ * Per-angle instructions for the three-view try-on. These state what the OUTPUT
+ * pose must be, not just what the input is — a reported failure mode was the model
+ * defaulting the left/right outputs toward a front-facing pose (sometimes producing
+ * two visually similar "front-ish" results instead of three distinct angles), which
+ * a hint that only describes the input does nothing to prevent.
+ *
+ * @return array<string, string>
+ */
 function replicate_view_angle_hints(): array
 {
     return [
-        'front' => 'Front view: keep the subject looking straight at the camera.',
-        'left' => 'This run uses your LEFT-profile photo only.',
-        'right' => 'This run uses your RIGHT-profile photo only (different head turn than the left photo).',
+        'front' => 'This is the FRONT view. Output must show the subject facing the '
+            . 'camera directly, matching the input framing exactly.',
+        'left' => 'This is the LEFT-profile view: a side/turned head shot, NOT a '
+            . 'front-facing photo. The output MUST keep this same left head turn. Do '
+            . 'not straighten the head to face the camera and do not output a '
+            . 'front-facing result for this angle.',
+        'right' => 'This is the RIGHT-profile view: a side/turned head shot, NOT a '
+            . 'front-facing photo, and its head turn is the OPPOSITE direction from '
+            . 'the left-profile photo. The output MUST keep this same right head turn '
+            . 'and must look visibly different from the left-profile result — do not '
+            . 'straighten the head to face the camera and do not reuse or copy the '
+            . 'left-profile output.',
     ];
 }
 
@@ -432,8 +465,12 @@ function replicate_generate_three_view_previews(
     if ($feasibleToday) {
         $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
     } else {
+        // This branch previously had no eyeglasses instruction at all — the
+        // feasible-today prompt above got one, this one did not, so an
+        // aspirational-length preview had no protection against dropping glasses.
         $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
             . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
+            . replicate_glasses_preservation_clause()
             . "Identity and background must match the input.{$profileNote}";
     }
 
@@ -453,16 +490,7 @@ function replicate_generate_three_view_previews(
         $resultImages[$viewKey] = $generated['bytes'];
     }
 
-    if (isset($resultImages['left'], $resultImages['right'])
-        && hash('sha256', $resultImages['left']) === hash('sha256', $resultImages['right'])) {
-        $absoluteRight = replicate_absolute_path_from_relative((string)$capturePaths['right']);
-        $retryExtra = ' CRITICAL: The right-profile output must NOT match the left-profile output. '
-            . 'This input is RIGHT profile only: nose must stay toward the LEFT side of the frame.';
-        $retry = replicate_generate_view_image($absoluteRight, $basePrompt, 'right', $retryExtra);
-        if ($retry['ok']) {
-            $resultImages['right'] = $retry['bytes'];
-        }
-    }
+    replicate_retry_duplicate_views($resultImages, $capturePaths, $basePrompt);
 
     return [
         'ok' => true,
@@ -471,6 +499,58 @@ function replicate_generate_three_view_previews(
         'lengthNote' => $lengthNote,
         'error' => '',
     ];
+}
+
+/**
+ * Detects an angle whose bytes are byte-identical to another angle's — e.g. left
+ * and right both coming back the same, or a profile output identical to front — and
+ * retries just that one angle with an explicit anti-duplicate instruction.
+ *
+ * This only catches an exact byte match. It is a safety net for a genuinely
+ * duplicated response, not a general pose-correctness check — two independent
+ * stochastic generations that are both wrongly front-facing will usually differ at
+ * the pixel level even though they show the same wrong pose, so most of what fixes
+ * that class of failure is the anti-front-facing wording in
+ * replicate_view_angle_hints(), not this retry.
+ *
+ * @param array<string, string> $resultImages front/left/right bytes, mutated in place
+ * @param array{front: string, left: string, right: string} $capturePaths relative paths
+ */
+function replicate_retry_duplicate_views(array &$resultImages, array $capturePaths, string $basePrompt): void
+{
+    $pairs = [
+        'left' => ['front', 'right'],
+        'right' => ['front', 'left'],
+    ];
+
+    foreach ($pairs as $angle => $others) {
+        if (!isset($resultImages[$angle])) {
+            continue;
+        }
+        $duplicateOf = null;
+        foreach ($others as $other) {
+            if (isset($resultImages[$other])
+                && hash('sha256', $resultImages[$angle]) === hash('sha256', $resultImages[$other])) {
+                $duplicateOf = $other;
+                break;
+            }
+        }
+        if ($duplicateOf === null) {
+            continue;
+        }
+
+        $absolute = replicate_absolute_path_from_relative((string)$capturePaths[$angle]);
+        $side = $angle === 'left' ? 'LEFT' : 'RIGHT';
+        $oppositeSide = $angle === 'left' ? 'right (nose toward the right)' : 'left (nose toward the left)';
+        $retryExtra = " CRITICAL: This output was a duplicate of the {$duplicateOf} view — that is WRONG. "
+            . "This input is {$side} profile only: the head must be turned, nose pointing away from "
+            . "the {$oppositeSide} side of the frame, clearly different from a straight-on or "
+            . 'opposite-side photo.';
+        $retry = replicate_generate_view_image($absolute, $basePrompt, $angle, $retryExtra);
+        if ($retry['ok']) {
+            $resultImages[$angle] = $retry['bytes'];
+        }
+    }
 }
 
 /**

@@ -166,8 +166,11 @@ function grok_generate_three_view_previews(
     if ($feasibleToday) {
         $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
     } else {
+        // Previously had no eyeglasses instruction at all — see the same fix in
+        // replicate_generate_three_view_previews.
         $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
             . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
+            . replicate_glasses_preservation_clause()
             . "Identity and background must match the input.{$profileNote}";
     }
 
@@ -189,17 +192,7 @@ function grok_generate_three_view_previews(
         $resultImages[$viewKey] = $generated['bytes'];
     }
 
-    if (isset($resultImages['left'], $resultImages['right'])
-        && hash('sha256', $resultImages['left']) === hash('sha256', $resultImages['right'])) {
-        $absoluteRight = replicate_absolute_path_from_relative((string)$capturePaths['right']);
-        $retryPrompt = $basePrompt . ' ' . ($hints['right'] ?? '')
-            . ' CRITICAL: The right-profile output must NOT match the left-profile output. '
-            . 'This input is RIGHT profile only: nose must stay toward the LEFT side of the frame.';
-        $retry = grok_generate_image_edit($absoluteRight, $retryPrompt);
-        if ($retry['ok']) {
-            $resultImages['right'] = $retry['bytes'];
-        }
-    }
+    grok_retry_duplicate_views($resultImages, $capturePaths, $basePrompt, $hints);
 
     return [
         'ok' => true,
@@ -208,4 +201,52 @@ function grok_generate_three_view_previews(
         'lengthNote' => $lengthNote,
         'error' => '',
     ];
+}
+
+/**
+ * Grok equivalent of replicate_retry_duplicate_views() — same exact-byte-match
+ * safety net, widened to check both profile angles against front as well as
+ * against each other, not just left-vs-right. See that function's doc comment for
+ * why this only catches literal duplicate bytes, not general pose correctness.
+ *
+ * @param array<string, string> $resultImages front/left/right bytes, mutated in place
+ * @param array{front: string, left: string, right: string} $capturePaths relative paths
+ * @param array<string, string> $hints from replicate_view_angle_hints()
+ */
+function grok_retry_duplicate_views(array &$resultImages, array $capturePaths, string $basePrompt, array $hints): void
+{
+    $pairs = [
+        'left' => ['front', 'right'],
+        'right' => ['front', 'left'],
+    ];
+
+    foreach ($pairs as $angle => $others) {
+        if (!isset($resultImages[$angle])) {
+            continue;
+        }
+        $duplicateOf = null;
+        foreach ($others as $other) {
+            if (isset($resultImages[$other])
+                && hash('sha256', $resultImages[$angle]) === hash('sha256', $resultImages[$other])) {
+                $duplicateOf = $other;
+                break;
+            }
+        }
+        if ($duplicateOf === null) {
+            continue;
+        }
+
+        $absolute = replicate_absolute_path_from_relative((string)$capturePaths[$angle]);
+        $side = $angle === 'left' ? 'LEFT' : 'RIGHT';
+        $oppositeSide = $angle === 'left' ? 'right (nose toward the right)' : 'left (nose toward the left)';
+        $retryPrompt = $basePrompt . ' ' . ($hints[$angle] ?? '')
+            . " CRITICAL: This output was a duplicate of the {$duplicateOf} view — that is WRONG. "
+            . "This input is {$side} profile only: the head must be turned, nose pointing away from "
+            . "the {$oppositeSide} side of the frame, clearly different from a straight-on or "
+            . 'opposite-side photo.';
+        $retry = grok_generate_image_edit($absolute, $retryPrompt);
+        if ($retry['ok']) {
+            $resultImages[$angle] = $retry['bytes'];
+        }
+    }
 }
