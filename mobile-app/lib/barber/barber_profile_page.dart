@@ -25,6 +25,11 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
   int _ratingCount = 0;
   String _profileImageUrl = '';
   XFile? _pickedImage;
+  // Previously nothing showed these — this page only ever displayed the
+  // aggregate rating/ratingCount above, so a barber had no way to read what
+  // any customer actually wrote, even though feedback comments were being
+  // stored since submission.
+  List<Map<String, dynamic>> _recentFeedback = [];
 
   @override
   void initState() {
@@ -91,6 +96,9 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
         }
         _ratingCount = (data['ratingCount'] as num?)?.toInt() ?? 0;
         _profileImageUrl = _barberImageField(barber);
+        _recentFeedback = (data['recentFeedback'] as List<dynamic>? ?? [])
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
         _loading = false;
       });
     } catch (_) {
@@ -289,9 +297,80 @@ class _BarberProfilePageState extends State<BarberProfilePage> {
               ),
               const SizedBox(height: 16),
               _infoCard('Account ID', '${UserSession.userId ?? '-'}'),
+              const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Recent feedback',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (_recentFeedback.isEmpty)
+                const Text(
+                  'No feedback yet.',
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
+                )
+              else
+                ..._recentFeedback.map(_feedbackCard),
             ],
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _feedbackCard(Map<String, dynamic> feedback) {
+    final rating = (feedback['rating'] as num?)?.toInt() ?? 0;
+    final comment = feedback['comment']?.toString().trim() ?? '';
+    final createdAt = feedback['createdAt']?.toString() ?? '';
+    final when = DateTime.tryParse(createdAt);
+    final whenLabel = when != null
+        ? '${when.year}-${when.month.toString().padLeft(2, '0')}-${when.day.toString().padLeft(2, '0')}'
+        : '';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                '★' * rating.clamp(0, 5) + '☆' * (5 - rating.clamp(0, 5)),
+                style: const TextStyle(color: Color(0xFFE9C559), fontSize: 14),
+              ),
+              const Spacer(),
+              if (whenLabel.isNotEmpty)
+                Text(
+                  whenLabel,
+                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                ),
+            ],
+          ),
+          if (comment.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              comment,
+              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+            ),
+          ],
+        ],
       ),
     );
   }
