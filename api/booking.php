@@ -535,9 +535,14 @@ try {
         $appointmentID = (int)$inserted['id'];
         $bookingCode = (string)$inserted['code'];
 
+        // Single bookings send one note for the whole appointment (the flat
+        // serviceIDs path builds items without a per-item key), while group
+        // bookings can still carry per-item instructions. Per-item wins.
+        $bookingNote = trim((string)($input['specialInstructions'] ?? ''));
+
         $detailStmt = $pdo->prepare(
-            'INSERT INTO appointment_details (appointment_id, service_id, variant_id, selected_view, final_price)
-             VALUES (:appointment_id, :service_id, :variant_id, :selected_view, :final_price)'
+            'INSERT INTO appointment_details (appointment_id, service_id, variant_id, selected_view, special_instructions, final_price)
+             VALUES (:appointment_id, :service_id, :variant_id, :selected_view, :special_instructions, :final_price)'
         );
 
         foreach ($validatedItems as $item) {
@@ -545,17 +550,23 @@ try {
             $variantIDItem = (int)($item['variantID'] ?? 0);
             $selectedView = trim((string)($item['selectedView'] ?? 'Front'));
             $specialInstructions = trim((string)($item['specialInstructions'] ?? ''));
+            if ($specialInstructions === '') {
+                $specialInstructions = $bookingNote;
+            }
             $finalPrice = $item['finalPrice'] ?? null;
 
             if ($serviceID <= 0 || $variantIDItem <= 0) {
                 continue;
             }
 
+            // $specialInstructions was previously extracted here and then never
+            // bound, so anything the customer sent was silently discarded.
             $detailStmt->execute([
                 ':appointment_id' => $appointmentID,
                 ':service_id' => $serviceID,
                 ':variant_id' => $variantIDItem,
                 ':selected_view' => $selectedView !== '' ? $selectedView : 'Front',
+                ':special_instructions' => $specialInstructions !== '' ? $specialInstructions : null,
                 ':final_price' => $finalPrice,
             ]);
         }

@@ -449,6 +449,13 @@ try {
         }
 
         $data = $analysis['data'];
+        // The sidecar returns HTTP 200 with placeholder values when the face
+        // landmarker is unavailable (e.g. libGL/GLES failure on a headless
+        // host). Without this check those placeholders were passed through as a
+        // normal result, so the app recorded scanSucceeded=true and downstream
+        // features (Library hair-texture guidance) trusted fabricated data.
+        $analysisDegraded = ($data['degraded'] ?? false) === true
+            || (string)($data['landmarker'] ?? '') === 'unavailable';
         $faceShape = (string)($data['face_shape'] ?? 'oval');
         $hairTexture = (string)($data['hair_texture'] ?? 'Wavy');
         $allowedTextures = ['Straight', 'Wavy', 'Curly'];
@@ -494,7 +501,13 @@ try {
             'hairColorRgb' => $data['hair_color_rgb'] ?? null,
             'topStyles' => $data['top_styles'] ?? [],
             'achievableStyles' => $data['achievable_styles'] ?? [],
-            'provider' => 'ai-service',
+            'degraded' => $analysisDegraded,
+            'degradedReason' => $analysisDegraded
+                ? (string)($data['degraded_reason'] ?? 'face_landmarker_unavailable')
+                : null,
+            // 'fallback' when the values are placeholders — the app keys its
+            // scanSucceeded flag off this, so it must not claim 'ai-service'.
+            'provider' => $analysisDegraded ? 'fallback' : 'ai-service',
         ]);
     }
 
@@ -635,6 +648,13 @@ try {
 
         // Explicit gemini/grok in AI_TRYON_PROVIDER always wins over the Python sidecar
         // for image generation (sidecar remains used for face analysis only).
+        //
+        // Which of the two generation paths below runs is config-dependent, and
+        // both are reachable — the sidecar branch is NOT dead code:
+        //   AI_TRYON_PROVIDER=grok|gemini  -> cloud branch (current production)
+        //   AI_TRYON_PROVIDER=replicate    -> sidecar /generate branch, if reachable
+        //   AI_TRYON_PROVIDER unset/blank  -> sidecar /generate branch, if reachable
+        // With the sidecar unreachable it always falls through to the cloud branch.
         $useCloudTryOn = ai_tryon_prefers_cloud_provider() || !ai_service_is_available();
 
         if (!$useCloudTryOn && ai_service_is_available()) {
@@ -683,13 +703,26 @@ try {
                     || stripos($err, 'insufficient credit') !== false
                     || stripos($err, 'billing') !== false
                     || stripos($err, 'quota') !== false
-                    || stripos($err, 'resource_exhausted') !== false;
+                    || stripos($err, 'resource_exhausted') !== false
+                    || stripos($err, '429') !== false;
+                // Name the provider that actually failed and whether fallback was
+                // even permitted. With AI_TRYON_PROVIDER set explicitly and
+                // AI_TRYON_ALLOW_FALLBACK off (the default), a single provider
+                // outage fails the whole request instead of trying another —
+                // that is intentional (it avoids spending on a second provider),
+                // but it was previously indistinguishable from a hard error.
+                $failedProvider = (string)($generated['provider'] ?? $provider ?? 'unknown');
+                $fallbackAllowed = ai_tryon_allow_fallback();
                 json_response([
                     'error' => $isBilling
-                        ? 'The AI provider has no credits/quota left for haircut generation right now.'
+                        ? "The AI provider ({$failedProvider}) has no credits/quota left for haircut generation right now."
                         : $err,
+                    'provider' => $failedProvider,
+                    'fallbackAllowed' => $fallbackAllowed,
                     'hint' => $isBilling
-                        ? 'Check your Gemini/Grok/Replicate billing and quota, wait a few minutes, then try again.'
+                        ? ($fallbackAllowed
+                            ? "Every configured provider was tried and all are out of quota. Check billing for {$failedProvider}, then retry."
+                            : "Only {$failedProvider} is used because AI_TRYON_PROVIDER is set explicitly and AI_TRYON_ALLOW_FALLBACK is off. Top up {$failedProvider}, or set AI_TRYON_ALLOW_FALLBACK=true to let it try another configured provider.")
                         : 'Check server logs for details.',
                 ], $isBilling ? 402 : 502);
             }

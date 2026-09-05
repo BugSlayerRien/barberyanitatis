@@ -1463,12 +1463,21 @@ async def analyze_face(
             "top_styles": [{"key": s, "name": STYLE_NAMES.get(s, s)} for s in top_styles],
             "profiles_received": ["front", "left", "right"],
             "landmarker": "unavailable" if _face_landmarker_unusable else "ok",
+            # True when the landmarker never loaded, so face-shape came from a
+            # degraded path rather than real landmarks. Callers should not treat
+            # a degraded result as a confirmed scan.
+            "degraded": bool(_face_landmarker_unusable),
         }
     except Exception as e:
         message = str(e)
         if "GLESv2" in message or "libGL" in message:
             logger.exception("analyze-face GLES failure; returning safe defaults")
             return {
+                # These are placeholders, not measurements. "degraded" must stay
+                # in the payload: callers use it to avoid presenting fabricated
+                # values as a real scan result (see face_scan.php analyzeCaptures).
+                "degraded": True,
+                "degraded_reason": "face_landmarker_unavailable",
                 "face_shape": "oval",
                 "hair_texture": "Wavy",
                 "hair_texture_score": 0.0,

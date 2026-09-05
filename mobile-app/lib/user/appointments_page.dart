@@ -1256,7 +1256,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: () => Navigator.of(ctx).pop(false),
+                    onPressed: () {
+                      FocusScope.of(ctx).unfocus();
+                      Navigator.of(ctx).pop(false);
+                    },
                     style:
                         OutlinedButton.styleFrom(foregroundColor: Colors.white),
                     child: const Text('Keep'),
@@ -1265,7 +1268,15 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                 const SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () => Navigator.of(ctx).pop(true),
+                    // Drop focus before popping. Popping this sheet while the
+                    // note TextField still holds focus (keyboard open) tears the
+                    // focus/InheritedWidget tree down in the same frame as the
+                    // route, which trips a '_dependents.isEmpty' assertion in
+                    // the framework.
+                    onPressed: () {
+                      FocusScope.of(ctx).unfocus();
+                      Navigator.of(ctx).pop(true);
+                    },
                     style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
                         foregroundColor: Colors.black),
