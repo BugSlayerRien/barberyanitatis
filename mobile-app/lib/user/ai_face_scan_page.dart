@@ -1999,8 +1999,22 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       noHairDetected = analysis['noHairDetected'] == true;
       hairColorLabel = analysis['hairColor']?.toString() ?? '';
       pythonTopStyles = analysis['topStyles'] as List<dynamic>? ?? [];
+      // A degraded response is HTTP 200 but carries placeholder values, not a
+      // real measurement. Treat it as a failed scan so hair-texture guidance
+      // does not present fabricated data as confirmed.
+      final degraded = analysis['degraded'] == true;
       if (mounted) {
         setState(() => _hairTexture = analyzedHairTexture);
+        if (degraded) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'AI analysis could not read your photos this time. Showing an '
+                'estimate only — style suitability will not be checked.',
+              ),
+            ),
+          );
+        }
       }
       UserSession.lastScan = {
         'userId': UserSession.userId,
@@ -2011,7 +2025,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         'hairLengthLevel': hairLengthLevel,
         'analysisProvider': analysisProvider,
         'hairTextureScore': hairTextureScore,
-        'scanSucceeded': true,
+        'scanSucceeded': !degraded,
         'noHairDetected': noHairDetected,
         'hairColor': hairColorLabel,
         'pythonTopStyles': pythonTopStyles,

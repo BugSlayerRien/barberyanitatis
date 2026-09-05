@@ -54,6 +54,16 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   bool _bookingInFlight = false;
   late DateTime _activeDate;
   bool _autoShiftedDate = false;
+  /// Optional note the customer can leave for the barber. Sent as
+  /// specialInstructions on booking.php 'create' and shown to the barber on the
+  /// appointment detail screen.
+  final TextEditingController _noteController = TextEditingController();
+
+  @override
+  void dispose() {
+    _noteController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -732,6 +742,32 @@ Keep the total response under 24 words.
                 child: const Text('Try Haircut'),
               ),
             ],
+            if (!_isRescheduleMode) ...[
+              const SizedBox(height: 24),
+              const Text(
+                'Note for your barber (optional)',
+                style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _noteController,
+                maxLines: 3,
+                maxLength: 300,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+                decoration: const InputDecoration(
+                  hintText: 'e.g. scissors only, sensitive scalp, keep the length on top',
+                  hintStyle: TextStyle(color: Colors.white38, fontSize: 12),
+                  counterStyle: TextStyle(color: Colors.white38),
+                  enabledBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+
             const SizedBox(height: 32),
 
             // Book Button
@@ -844,6 +880,7 @@ Keep the total response under 24 words.
                           'endTime': endTime,
                           'serviceIDs': [serviceId],
                           'variantID': UserSession.selectedVariantId,
+                          'specialInstructions': _noteController.text.trim(),
                           ...FaceScanService.bookingPreviewPayload(),
                         }, okStatusCodes: {201});
                       } on CustomerApiException catch (e) {
