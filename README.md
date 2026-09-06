@@ -124,7 +124,7 @@ For a physical device, pass your PC's current LAN IP:
 flutter run --dart-define=LAN_HOST=192.168.1.x
 ```
 
-To run against the deployed Render API instead:
+To run against the deployed Render API instead (from `mobile-app/`):
 
 ```bash
 .\scripts\run_production.ps1
@@ -134,6 +134,29 @@ Release build:
 
 ```bash
 .\scripts\build_apk_production.ps1
+```
+
+### 4b. Kiosk app
+
+The kiosk is a separate Flutter project that depends on `mobile-app/` by path,
+so it picks up the same `ApiConfig`. Run these from `kiosk/`:
+
+```bash
+.\scripts\run_production.ps1
+```
+
+Release build (add `-SplitPerAbi` for smaller per-device APKs):
+
+```bash
+.\scripts\build_apk_production.ps1
+```
+
+Output: `kiosk/build/app/outputs/flutter-apk/app-release.apk`
+
+To point the kiosk at a local XAMPP API on the shop LAN instead of Render:
+
+```bash
+.\scripts\run_production.ps1 -LanHost 192.168.1.3
 ```
 
 ### 5. AI sidecar (optional locally)
