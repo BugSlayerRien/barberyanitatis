@@ -251,6 +251,28 @@ class AuthBootstrap {
     flow.markPasswordLogin();
   }
 
+  /// Waits briefly for supabase_flutter's own deep-link observer to finish the
+  /// PKCE exchange and publish a session.
+  ///
+  /// Returns the session, or null if the SDK did not produce one in time (in
+  /// which case the caller should do the exchange itself). The window is short
+  /// because it only covers one local HTTP round trip; a real failure falls
+  /// through quickly rather than hanging the callback.
+  static Future<Session?> _awaitSdkOAuthSession({
+    Duration timeout = const Duration(seconds: 4),
+    Duration pollInterval = const Duration(milliseconds: 100),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session != null) {
+        return session;
+      }
+      await Future<void>.delayed(pollInterval);
+    }
+    return Supabase.instance.client.auth.currentSession;
+  }
+
   static Future<void> onSignedOut() async {
     if (_exchangingAuthCode) {
       await UserSession.clear();
@@ -582,13 +604,25 @@ class AuthBootstrap {
       // callback, and logout nulls currentSession, so this cannot pick up a
       // previously signed-in account.
       if (!recoveryIntent && flow.state.expectingOAuth) {
-        final sdkSession = Supabase.instance.client.auth.currentSession;
-        if (sdkSession != null) {
-          session = sdkSession;
+        // Checking currentSession only once is a race, and it is the race that
+        // made the SECOND sign-in of a run fail. On the first attempt the SDK
+        // has usually finished by the time this runs, so a session is already
+        // there. After a logout currentSession is null, so on the next attempt
+        // this check finds nothing, we fall through and exchange the code
+        // ourselves -- at the same moment the SDK is exchanging it. The loser
+        // of that race gets flow_state_not_found, because an authorization code
+        // is single-use and the winner already consumed the PKCE flow state.
+        //
+        // Waiting briefly makes the ordering deterministic: let the SDK finish,
+        // and only exchange ourselves if it produced nothing at all.
+        session = await _awaitSdkOAuthSession();
+        if (session != null) {
           _authLog(
-            'oauth adopting session already established by the SDK observer '
-            'email=${sdkSession.user.email}',
+            'oauth adopting session established by the SDK observer '
+            'email=${session.user.email}',
           );
+        } else {
+          _authLog('sdk observer produced no session in time; exchanging here');
         }
       }
 

@@ -81,6 +81,20 @@ _hair_segmenter_failures = 0
 # whole lifetime.
 HAIR_SEGMENTER_MAX_FAILURES = 3
 
+# Short-range face detector. FaceLandmarker needs a fairly frontal face and
+# returns nothing on a hard profile -- exactly the images the try-on generator
+# produces -- which made the orientation check silently skip the views it most
+# needed to check. BlazeFace still locates the face and its nose keypoint at
+# those angles, so it backs the landmarker up for orientation only.
+FACE_DETECTOR_MODEL_PATH = MODEL_DIR / "blaze_face_short_range.tflite"
+FACE_DETECTOR_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/face_detector/"
+    "blaze_face_short_range/float16/latest/blaze_face_short_range.tflite"
+)
+_face_detector = None
+_face_detector_failures = 0
+FACE_DETECTOR_MAX_FAILURES = 3
+
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
 
@@ -1735,6 +1749,72 @@ def health():
     }
 
 
+def get_face_detector():
+    """Lazy BlazeFace detector, or None when unavailable."""
+    global _face_detector, _face_detector_failures
+    if _face_detector is not None:
+        return _face_detector
+    if _face_detector_failures >= FACE_DETECTOR_MAX_FAILURES:
+        return None
+    try:
+        MODEL_DIR.mkdir(exist_ok=True)
+        if not (FACE_DETECTOR_MODEL_PATH.exists() and FACE_DETECTOR_MODEL_PATH.stat().st_size > 1000):
+            with httpx.Client(timeout=120, follow_redirects=True, verify=httpx_ssl_verify()) as client:
+                resp = client.get(FACE_DETECTOR_MODEL_URL)
+                resp.raise_for_status()
+                FACE_DETECTOR_MODEL_PATH.write_bytes(resp.content)
+        base_kwargs = {"model_asset_path": str(FACE_DETECTOR_MODEL_PATH)}
+        delegate_enum = getattr(mp_tasks.BaseOptions, "Delegate", None)
+        if delegate_enum is not None and hasattr(delegate_enum, "CPU"):
+            base_kwargs["delegate"] = delegate_enum.CPU
+        options = vision.FaceDetectorOptions(
+            base_options=mp_tasks.BaseOptions(**base_kwargs),
+            running_mode=vision.RunningMode.IMAGE,
+            min_detection_confidence=0.3,
+        )
+        _face_detector = vision.FaceDetector.create_from_options(options)
+        return _face_detector
+    except Exception:
+        _face_detector_failures += 1
+        logger.exception("Face detector init failed (%s/%s).", _face_detector_failures, FACE_DETECTOR_MAX_FAILURES)
+        return None
+
+
+def _detector_yaw(image_path: Path) -> float | None:
+    """Yaw in [-1,1] from BlazeFace's nose keypoint within the face box."""
+    detector = get_face_detector()
+    if detector is None:
+        return None
+    try:
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if not rgb.flags["C_CONTIGUOUS"]:
+            rgb = np.ascontiguousarray(rgb)
+        result = detector.detect(mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb))
+        if not result.detections:
+            return None
+        detection = result.detections[0]
+        box = detection.bounding_box
+        keypoints = getattr(detection, "keypoints", None)
+        if not keypoints or len(keypoints) < 3:
+            return None
+
+        width = img.shape[1]
+        left = box.origin_x / width
+        right = (box.origin_x + box.width) / width
+        if right - left < 1e-6:
+            return None
+        # Keypoint 2 is the nose tip; where it sits across the face box tracks
+        # head yaw the same way the landmark nose/ear ratio does.
+        position = (keypoints[2].x - left) / (right - left)
+        return float(np.clip((position - 0.5) * 2.0, -1.0, 1.0))
+    except Exception:
+        logger.exception("Face detector yaw failed.")
+        return None
+
+
 def face_yaw_direction(image_path: Path) -> dict[str, object]:
     """Which way the head is turned, from landmark geometry.
 
@@ -1743,25 +1823,34 @@ def face_yaw_direction(image_path: Path) -> dict[str, object]:
     closer to one ear than the other. Sign is in image space, so it is stable
     regardless of how the capture was labelled.
     """
+    yaw: float | None = None
+    source = "landmarks"
+
     img, landmarks = _landmarks_for_image(image_path)
-    if img is None or landmarks is None:
-        return {"ok": False, "direction": "unknown", "yaw": 0.0}
+    if img is not None and landmarks is not None:
+        h, w = img.shape[:2]
 
-    h, w = img.shape[:2]
+        def point(idx: int) -> np.ndarray:
+            return np.array([landmarks[idx].x * w, landmarks[idx].y * h], dtype=np.float32)
 
-    def point(idx: int) -> np.ndarray:
-        return np.array([landmarks[idx].x * w, landmarks[idx].y * h], dtype=np.float32)
+        left_ear_x = float(point(234)[0])
+        right_ear_x = float(point(454)[0])
+        span = right_ear_x - left_ear_x
+        if abs(span) >= 1e-3:
+            # 0 = nose at the left ear, 1 = at the right ear, 0.5 = front on.
+            position = (float(point(1)[0]) - left_ear_x) / span
+            yaw = float(np.clip((position - 0.5) * 2.0, -1.0, 1.0))
 
-    nose_x = float(point(1)[0])
-    left_ear_x = float(point(234)[0])
-    right_ear_x = float(point(454)[0])
-    span = right_ear_x - left_ear_x
-    if abs(span) < 1e-3:
-        return {"ok": False, "direction": "unknown", "yaw": 0.0}
+    if yaw is None:
+        # The landmarker gives up on hard profiles, which is precisely the case
+        # this check exists for: a generated view turned too far returned
+        # "unknown" and the orientation correction was skipped instead of
+        # applied. BlazeFace still resolves those.
+        yaw = _detector_yaw(image_path)
+        source = "detector"
 
-    # 0 = nose at the left ear, 1 = at the right ear, 0.5 = centred/front on.
-    position = (nose_x - left_ear_x) / span
-    yaw = float(np.clip((position - 0.5) * 2.0, -1.0, 1.0))
+    if yaw is None:
+        return {"ok": False, "direction": "unknown", "yaw": 0.0, "source": "none"}
 
     # Threshold chosen so a mild head tilt still reads as "front"; only a real
     # profile turn is called left/right.
@@ -1772,7 +1861,7 @@ def face_yaw_direction(image_path: Path) -> dict[str, object]:
     else:
         direction = "front"
 
-    return {"ok": True, "direction": direction, "yaw": round(yaw, 4)}
+    return {"ok": True, "direction": direction, "yaw": round(yaw, 4), "source": source}
 
 
 @app.post("/face-orientation")
