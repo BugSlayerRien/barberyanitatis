@@ -15,18 +15,22 @@ try {
     $pdo = get_db_connection();
 
     if ($method === 'GET') {
-        $stmt = $pdo->query(
-            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
-                    hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.created_at,
-                    COUNT(hv.variant_id) AS variant_count,
-                    -- Textures live on the variants, not the style. Aggregate them
-                    -- so the admin list can filter by texture without a second query.
-                    STRING_AGG(DISTINCT hv.hair_texture, ',' ORDER BY hv.hair_texture) AS hair_textures
-             FROM hairstyles hs
-             LEFT JOIN hairstyle_variants hv ON hv.hairstyle_id = hs.hairstyle_id
+        $stmt = $pdo->query(<<<'SQL'
+            SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
+                   hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.created_at,
+                   COUNT(hv.variant_id) AS variant_count,
+                   -- Textures live on the variants, not the style. Aggregate them
+                   -- so the admin list can filter by texture without a second query.
+                   -- Nowdoc, not a single-quoted string: the ',' separator below
+                   -- would otherwise close the string and become a second
+                   -- argument to PDO::query().
+                   STRING_AGG(DISTINCT hv.hair_texture, ',') AS hair_textures
+              FROM hairstyles hs
+              LEFT JOIN hairstyle_variants hv ON hv.hairstyle_id = hs.hairstyle_id
              GROUP BY hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
                       hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.created_at
-             ORDER BY hs.style_name'
+             ORDER BY hs.style_name
+            SQL
         );
         $rows = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
