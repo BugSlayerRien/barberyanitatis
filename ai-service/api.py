@@ -103,20 +103,23 @@ STYLE_PROMPTS = {
     "curly_short_crop": "curly short crop hairstyle, short tight curls",
     "curly_crew_cut": "curly crew cut hairstyle, short curly uniform",
     "curly_edgar": "curly edgar hairstyle, curly hair straight fringe",
+    "crew_cut": "classic crew cut, short tapered sides, short textured top",
+    "pompadour": "pompadour hairstyle, volume swept up and back, faded sides",
 }
 
 FACE_SHAPE_STYLES = {
     "oval": [
         "buzz_cut", "french_crop", "two_block", "messy_quiff", "curly_taper",
         "blowout_taper", "wavy_burst_fade", "modern_curtains", "wavy_messy_top",
+        "crew_cut",
     ],
     "round": [
         "edgar_cut", "low_fade", "french_crop", "blowout_taper", "curly_mid_fade",
-        "textured_crop", "caesar_cut", "wavy_fringe",
+        "textured_crop", "caesar_cut", "wavy_fringe", "pompadour",
     ],
     "square": [
         "two_block", "messy_quiff", "modern_curtains", "wavy_side_sweep",
-        "curly_modern_mullet", "wavy_side_sweep", "curly_short_crop",
+        "curly_modern_mullet", "curly_short_crop", "pompadour",
     ],
 }
 
@@ -146,6 +149,8 @@ STYLE_MIN_LENGTH = {
     "wavy_mod_cut": 2,
     "modern_mullet": 2,
     "curly_modern_mullet": 3,
+    "crew_cut": 0,
+    "pompadour": 2,
 }
 
 HAIR_LENGTH_LABELS = {0: "very short", 1: "short", 2: "medium", 3: "long"}
@@ -183,6 +188,8 @@ STYLE_NAMES = {
     "curly_short_crop": "Curly Short Crop",
     "curly_crew_cut": "Curly Crew Cut",
     "curly_edgar": "Curly Edgar",
+    "crew_cut": "Crew Cut",
+    "pompadour": "Pompadour",
 }
 
 def ensure_face_landmarker_model() -> Path:
