@@ -6,8 +6,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libzip-dev \
         zlib1g-dev \
         libcurl4-openssl-dev \
+        libpng-dev \
+        libjpeg62-turbo-dev \
+        libfreetype6-dev \
         ca-certificates \
-    && docker-php-ext-install -j$(nproc) pdo_pgsql pgsql zip \
+    && docker-php-ext-configure gd --with-jpeg --with-freetype \
+    && docker-php-ext-install -j$(nproc) pdo_pgsql pgsql zip gd \
     && a2enmod rewrite headers setenvif \
     && rm -rf /var/lib/apt/lists/*
 
