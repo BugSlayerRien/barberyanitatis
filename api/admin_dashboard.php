@@ -46,7 +46,10 @@ try {
         'stats' => [
             ['title' => 'Total Users', 'value' => (string)$totalUsers, 'change' => '', 'changeType' => 'success'],
             ['title' => 'Active Services', 'value' => (string)$activeServices, 'change' => '', 'changeType' => 'success'],
-            ['title' => 'Monthly Revenue', 'value' => '₱' . number_format($monthlyRevenue, 2), 'change' => '', 'changeType' => 'success'],
+            // Calendar month to date. Analytics reports a rolling window for its
+            // selected period, so the two figures legitimately differ -- the title
+            // says which this one is.
+            ['title' => 'Revenue This Month', 'value' => '₱' . number_format($monthlyRevenue, 2), 'change' => '', 'changeType' => 'success'],
             ['title' => 'Pending Appointments', 'value' => (string)$pendingAppointments, 'change' => '', 'changeType' => 'warning'],
         ],
         'activities' => $activities,

@@ -50,6 +50,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   Map<String, dynamic>? _defaultService;
   bool _loadingWeatherAdvice = false;
   String? _weatherSummary;
+  /// Hour-of-day (0-23) -> rain probability % / temperature C for the selected
+  /// date. Empty when the forecast call failed or returned no hourly series.
+  Map<int, double> _hourlyRain = const {};
+  Map<int, double> _hourlyTemp = const {};
   String? _timeAdvice;
   bool _bookingInFlight = false;
   late DateTime _activeDate;
@@ -175,7 +179,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
     try {
       final response = await http.get(
         Uri.parse(
-          'https://api.open-meteo.com/v1/forecast?latitude=$_shopLatitude&longitude=$_shopLongitude&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_mean&timezone=auto&start_date=$date&end_date=$date',
+          'https://api.open-meteo.com/v1/forecast?latitude=$_shopLatitude&longitude=$_shopLongitude'
+          '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_mean'
+          // Hourly series is what makes a per-slot recommendation possible: with
+          // only the daily mean, every slot scored identically on weather and
+          // the choice fell through to "nearest to midday" / earliest.
+          '&hourly=precipitation_probability,temperature_2m'
+          '&timezone=auto&start_date=$date&end_date=$date',
         ),
       );
 
@@ -200,6 +210,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
           .isNotEmpty
           ? double.tryParse('${(daily['precipitation_probability_mean'] as List<dynamic>).first}')
           : null;
+
+      final hourly = data['hourly'] as Map<String, dynamic>? ?? <String, dynamic>{};
+      _hourlyRain = _parseHourlySeries(hourly, 'precipitation_probability');
+      _hourlyTemp = _parseHourlySeries(hourly, 'temperature_2m');
 
       final weatherSummary = _buildWeatherSummary(maxTemp, minTemp, rainChance);
       final recommendedSlot = _pickMostBufferedSlot(
@@ -1155,9 +1169,26 @@ Keep the total response under 24 words.
       );
       final centerScore = -(minute - (12 * 60)).abs();
 
-      if (nearestBuffer > bestBuffer ||
-          (nearestBuffer == bestBuffer && weatherScore > bestWeatherScore) ||
-          (nearestBuffer == bestBuffer && weatherScore == bestWeatherScore && centerScore > bestCenterScore)) {
+      // With real hourly forecast data, weather leads and schedule buffer breaks
+      // ties. Buffer led before, but on an empty day every slot has the same
+      // (infinite) buffer, so the weather score never got to matter at all.
+      final weatherLeads = _hourlyRain.isNotEmpty;
+      final bool better;
+      if (weatherLeads) {
+        better = weatherScore > bestWeatherScore ||
+            (weatherScore == bestWeatherScore && nearestBuffer > bestBuffer) ||
+            (weatherScore == bestWeatherScore &&
+                nearestBuffer == bestBuffer &&
+                centerScore > bestCenterScore);
+      } else {
+        better = nearestBuffer > bestBuffer ||
+            (nearestBuffer == bestBuffer && weatherScore > bestWeatherScore) ||
+            (nearestBuffer == bestBuffer &&
+                weatherScore == bestWeatherScore &&
+                centerScore > bestCenterScore);
+      }
+
+      if (better) {
         best = candidate;
         bestBuffer = nearestBuffer;
         bestWeatherScore = weatherScore;
@@ -1168,11 +1199,55 @@ Keep the total response under 24 words.
     return best ?? availableSlots.first;
   }
 
+  /// Parses an Open-Meteo hourly series into hour-of-day -> value.
+  Map<int, double> _parseHourlySeries(Map<String, dynamic> hourly, String key) {
+    final times = hourly['time'] as List<dynamic>? ?? const [];
+    final values = hourly[key] as List<dynamic>? ?? const [];
+    if (times.isEmpty || values.length != times.length) return const {};
+
+    final out = <int, double>{};
+    for (var i = 0; i < times.length; i++) {
+      // Entries look like "2026-09-09T14:00".
+      final stamp = times[i]?.toString() ?? '';
+      final tIndex = stamp.indexOf('T');
+      if (tIndex < 0 || stamp.length < tIndex + 3) continue;
+      final hour = int.tryParse(stamp.substring(tIndex + 1, tIndex + 3));
+      final value = double.tryParse('${values[i]}');
+      if (hour != null && value != null) out[hour] = value;
+    }
+    return out;
+  }
+
+  /// Weather desirability for one slot, higher is better.
+  ///
+  /// Scores each slot against the forecast for *its own hour*. Previously this
+  /// only saw the whole-day rain mean, so every slot scored identically on
+  /// weather and the pick collapsed to "closest to midday" -- which is why a
+  /// day with an 88% daily rain chance still recommended the earliest slot
+  /// without ever considering that the rain might be confined to the morning.
   int _weatherTieBreakerScore({
     required int slotMinute,
     required double? maxTemp,
     required double? rainChance,
   }) {
+    final hour = slotMinute ~/ 60;
+    final hourRain = _hourlyRain[hour];
+    final hourTemp = _hourlyTemp[hour];
+
+    if (hourRain != null) {
+      // Rain probability dominates: a dry hour is worth far more than a
+      // marginally cooler or more central one. Scaled by 10 so temperature and
+      // midday preference only separate slots with similar rain.
+      var score = -(hourRain.round() * 10);
+      if (hourTemp != null && hourTemp >= 33) {
+        score -= ((hourTemp - 33) * 5).round();
+      }
+      // Gentle nudge toward the middle of the day among equally dry slots.
+      score -= ((slotMinute - (12 * 60)).abs() ~/ 60);
+      return score;
+    }
+
+    // No hourly data: fall back to the original whole-day heuristics.
     if (rainChance != null && rainChance >= 60) {
       return -slotMinute;
     }

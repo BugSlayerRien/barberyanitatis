@@ -1531,13 +1531,11 @@ function openHaircutEditor(hairstyle, variants = []) {
     <label>Description
       <input class="input" id="hc-description" value="${hairstyle?.description ?? ""}" />
     </label>
-    <label>Gender
-      <select class="select" id="hc-gender">
-        ${["Male", "Female", "Unisex"]
-          .map((g) => `<option value="${g}" ${(hairstyle?.gender ?? "Unisex") === g ? "selected" : ""}>${g}</option>`)
-          .join("")}
-      </select>
-    </label>
+    <!-- Gender is hidden: every style in this shop is offered to anyone, and
+         nothing in the recommendation pipeline reads it. Kept as a hidden input
+         so saving preserves whatever value the row already has instead of
+         silently rewriting it to "Unisex". -->
+    <input type="hidden" id="hc-gender" value="${hairstyle?.gender ?? "Unisex"}" />
     <label>Difficulty
       <select class="select" id="hc-difficulty">
         ${["Easy", "Medium", "Hard"]
@@ -1860,7 +1858,15 @@ function renderAnalyticsKpis(metrics) {
   if (!grid) return;
   const kpis = metrics?.kpis || {};
   const cards = [
-    { title: "Total Revenue", value: formatPeso(kpis.totalRevenue) },
+    {
+      // The Dashboard's "Monthly Revenue" is the CALENDAR month to date, while
+      // this figure covers the selected rolling period (30d = the last 30 days,
+      // not September 1st onward). Both were right; both were labelled as if
+      // they measured the same thing, so they looked like a fetching bug.
+      title: "Total Revenue",
+      value: formatPeso(kpis.totalRevenue),
+      meta: metrics?.periodLabel ? String(metrics.periodLabel) : "Selected period",
+    },
     { title: "Total Appointments", value: String(kpis.totalAppointments ?? 0) },
     { title: "Completed", value: String(kpis.completedAppointments ?? 0) },
     {
