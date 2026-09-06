@@ -1311,10 +1311,29 @@ async function loadHaircuts() {
   renderHaircuts();
 }
 
+// hair_textures arrives from admin_hairstyles.php as a comma-joined list of the
+// distinct textures across a style's variants (empty when it has no variants).
+function haircutTextures(row) {
+  return String(row.hair_textures || "")
+    .split(",")
+    .map((t) => t.trim())
+    .filter(Boolean);
+}
+
 function renderHaircuts() {
   const query = document.getElementById("haircuts-search")?.value || "";
-  const normalized = (state.haircuts || []).map((row) => ({
+  const texture = document.getElementById("haircuts-texture")?.value || "";
+  const source = (state.haircuts || []).filter((row) => {
+    if (!texture) return true;
+    const textures = haircutTextures(row);
+    // "none" surfaces styles with no variants at all — these never reach the
+    // app, so they are worth being able to isolate.
+    if (texture === "none") return textures.length === 0;
+    return textures.includes(texture);
+  });
+  const normalized = source.map((row) => ({
     ...row,
+    texture_list: haircutTextures(row).join(", ") || '<span class="status status--warning">None</span>',
     overlay_status: row.has_overlay_assets
       ? '<span class="status status--success">Ready</span>'
       : '<span class="status status--warning">Missing PNGs</span>',
@@ -1327,6 +1346,7 @@ function renderHaircuts() {
       { key: "style_name", label: "Name" },
       { key: "style_code", label: "Code" },
       { key: "gender", label: "Gender" },
+      { key: "texture_list", label: "Texture" },
       { key: "variant_count", label: "Variants" },
       { key: "overlay_status", label: "Overlays" },
       { key: "is_active", label: "Active" },
@@ -2829,6 +2849,11 @@ document.getElementById("services-search")?.addEventListener("input", () => {
 
 document.getElementById("services-add")?.addEventListener("click", () => openServiceEditor(null));
 document.getElementById("haircuts-add")?.addEventListener("click", () => openHaircutEditor(null));
+document.getElementById("haircuts-texture")?.addEventListener("change", () => {
+  resetPagination(["haircuts-table"]);
+  renderHaircuts();
+});
+
 document.getElementById("haircuts-search")?.addEventListener("input", () => {
   resetPagination(["haircuts-table"]);
   renderHaircuts();
