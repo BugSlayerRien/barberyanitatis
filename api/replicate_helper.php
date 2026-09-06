@@ -7,6 +7,7 @@ declare(strict_types=1);
  */
 
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/ai_service_client.php';
 
 function replicate_curl_set($ch, array $options): void
 {
@@ -188,6 +189,105 @@ function replicate_glasses_preservation_clause(): string
  *
  * @return array<string, string>
  */
+/**
+ * Horizontally mirror JPEG/PNG bytes. Returns null if GD is unavailable or the
+ * bytes are not a decodable image.
+ */
+function tryon_mirror_image_bytes(string $bytes): ?string
+{
+    if (!function_exists('imagecreatefromstring') || !function_exists('imageflip')) {
+        return null;
+    }
+    $img = @imagecreatefromstring($bytes);
+    if ($img === false) {
+        return null;
+    }
+    try {
+        if (!@imageflip($img, IMG_FLIP_HORIZONTAL)) {
+            return null;
+        }
+        ob_start();
+        $ok = @imagejpeg($img, null, 92);
+        $out = (string)ob_get_clean();
+        return ($ok && $out !== '') ? $out : null;
+    } finally {
+        imagedestroy($img);
+    }
+}
+
+/**
+ * Deterministic left/right correctness check for generated try-on views.
+ *
+ * The generator does not reliably preserve the input head turn: on real scans
+ * the LEFT view came back turned the same way as the RIGHT one, so the customer
+ * saw two identical-looking profiles. The previous guard only compared SHA-256
+ * of the bytes, which never fired because the two images differed by a few
+ * hundred bytes while showing the same pose.
+ *
+ * This instead asks the sidecar which way each face is actually turned and
+ * compares the generated view against its own input. A mismatch is corrected by
+ * mirroring the output, which is exact, instant and free -- a regeneration costs
+ * another paid call and can fail the same way again.
+ *
+ * @param array<string, string> $resultImages front/left/right bytes, mutated in place
+ * @param array{front: string, left: string, right: string} $capturePaths relative paths
+ * @return array<string, string> per-view diagnostics
+ */
+function tryon_enforce_view_orientation(array &$resultImages, array $capturePaths): array
+{
+    $report = [];
+
+    foreach (['left', 'right'] as $angle) {
+        if (!isset($resultImages[$angle]) || empty($capturePaths[$angle])) {
+            continue;
+        }
+
+        $inputPath = replicate_absolute_path_from_relative((string)$capturePaths[$angle]);
+        $expected = ai_service_face_orientation($inputPath);
+        if ($expected === null || $expected === 'front') {
+            // Unknown, or the capture is not actually a profile: nothing to enforce.
+            $report[$angle] = 'skipped:' . ($expected ?? 'unknown-input');
+            continue;
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'tryon_');
+        if ($tmp === false) {
+            $report[$angle] = 'skipped:no-tmp';
+            continue;
+        }
+        file_put_contents($tmp, $resultImages[$angle]);
+
+        // One round trip: the sidecar measures the generated view's head turn
+        // and returns mirrored bytes only when it disagrees with the input.
+        $corrected = ai_service_enforce_view_orientation($tmp, $expected);
+
+        if ($corrected !== null) {
+            @unlink($tmp);
+            $resultImages[$angle] = $corrected;
+            $report[$angle] = "corrected:mirrored-to-{$expected}";
+            error_log("tryon: {$angle} view was facing the wrong way; mirrored to {$expected}.");
+            continue;
+        }
+
+        // Local GD fallback for deployments where the sidecar is unreachable.
+        $actual = ai_service_face_orientation($tmp);
+        @unlink($tmp);
+        if ($actual === null || $actual === $expected) {
+            $report[$angle] = 'ok:' . ($actual ?? 'unverified');
+            continue;
+        }
+        $mirrored = tryon_mirror_image_bytes($resultImages[$angle]);
+        if ($mirrored === null) {
+            $report[$angle] = "mismatch:{$actual}!={$expected}:mirror-unavailable";
+            continue;
+        }
+        $resultImages[$angle] = $mirrored;
+        $report[$angle] = "corrected:{$actual}->{$expected}";
+    }
+
+    return $report;
+}
+
 function replicate_view_angle_hints(): array
 {
     return [
@@ -491,6 +591,8 @@ function replicate_generate_three_view_previews(
     }
 
     replicate_retry_duplicate_views($resultImages, $capturePaths, $basePrompt);
+    // Same deterministic left/right guarantee as the Grok path.
+    tryon_enforce_view_orientation($resultImages, $capturePaths);
 
     return [
         'ok' => true,

@@ -193,10 +193,15 @@ function grok_generate_three_view_previews(
     }
 
     grok_retry_duplicate_views($resultImages, $capturePaths, $basePrompt, $hints);
+    // Byte-identical duplicates are rare; the real failure is a view that comes
+    // back turned the wrong way. Verify each profile against its own input and
+    // mirror it when the generator flipped the head.
+    $orientationReport = tryon_enforce_view_orientation($resultImages, $capturePaths);
 
     return [
         'ok' => true,
         'images' => $resultImages,
+        'orientation' => $orientationReport,
         'feasibleToday' => $feasibleToday,
         'lengthNote' => $lengthNote,
         'error' => '',

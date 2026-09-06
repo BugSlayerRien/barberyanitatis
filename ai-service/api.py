@@ -61,6 +61,26 @@ MODEL_URL = (
 _face_landmarker: vision.FaceLandmarker | None = None
 _face_landmarker_unusable = False
 
+# Pixel-level hair segmentation. The previous mask was a convex hull of face
+# landmarks plus a 19x19 dilation, which had no idea where hair actually ended:
+# on a busy background it swallowed walls and furniture, and every downstream
+# measurement (texture energy, colour, coverage, length) then described the
+# background instead of the hair. This model gives a real per-pixel hair mask.
+HAIR_MODEL_PATH = MODEL_DIR / "hair_segmenter.tflite"
+HAIR_MODEL_URL = (
+    "https://storage.googleapis.com/mediapipe-models/image_segmenter/"
+    "hair_segmenter/float32/latest/hair_segmenter.tflite"
+)
+# Category index for hair in the MediaPipe hair segmenter (0 = background).
+HAIR_SEGMENT_INDEX = 1
+
+_hair_segmenter: "vision.ImageSegmenter | None" = None
+_hair_segmenter_failures = 0
+# Unlike the landmarker's permanent latch, retry a few times: a single transient
+# failure (cold start, slow model read) should not degrade the process for its
+# whole lifetime.
+HAIR_SEGMENTER_MAX_FAILURES = 3
+
 REPLICATE_API_TOKEN = os.environ.get("REPLICATE_API_TOKEN", "")
 
 
@@ -240,6 +260,132 @@ def ensure_face_landmarker_model() -> Path:
         f"Save it manually to {MODEL_PATH} from {MODEL_URL}. "
         f"Last error: {last_error}"
     ) from last_error
+
+
+def ensure_hair_segmenter_model() -> Path:
+    """Hair model is committed and baked into the image; download is a fallback."""
+    MODEL_DIR.mkdir(exist_ok=True)
+    if HAIR_MODEL_PATH.exists() and HAIR_MODEL_PATH.stat().st_size > 1000:
+        return HAIR_MODEL_PATH
+
+    logger.info("Downloading hair_segmenter.tflite (one-time, ~0.8 MB)...")
+    try:
+        import certifi
+        import urllib.request
+
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        with urllib.request.urlopen(HAIR_MODEL_URL, context=ctx, timeout=120) as response:
+            HAIR_MODEL_PATH.write_bytes(response.read())
+        return HAIR_MODEL_PATH
+    except Exception:
+        pass
+
+    with httpx.Client(timeout=120, follow_redirects=True, verify=httpx_ssl_verify()) as client:
+        response = client.get(HAIR_MODEL_URL)
+        response.raise_for_status()
+        HAIR_MODEL_PATH.write_bytes(response.content)
+    return HAIR_MODEL_PATH
+
+
+def get_hair_segmenter():
+    """Lazy MediaPipe ImageSegmenter for hair, or None when unavailable."""
+    global _hair_segmenter, _hair_segmenter_failures
+    if _hair_segmenter is not None:
+        return _hair_segmenter
+    if _hair_segmenter_failures >= HAIR_SEGMENTER_MAX_FAILURES:
+        return None
+    try:
+        model_path = ensure_hair_segmenter_model()
+        base_kwargs = {"model_asset_path": str(model_path)}
+        delegate_enum = getattr(mp_tasks.BaseOptions, "Delegate", None)
+        if delegate_enum is not None and hasattr(delegate_enum, "CPU"):
+            base_kwargs["delegate"] = delegate_enum.CPU
+        options = vision.ImageSegmenterOptions(
+            base_options=mp_tasks.BaseOptions(**base_kwargs),
+            running_mode=vision.RunningMode.IMAGE,
+            output_category_mask=True,
+        )
+        _hair_segmenter = vision.ImageSegmenter.create_from_options(options)
+        return _hair_segmenter
+    except Exception:
+        _hair_segmenter_failures += 1
+        logger.exception(
+            "Hair segmenter init failed (%s/%s); falling back to the geometric mask.",
+            _hair_segmenter_failures,
+            HAIR_SEGMENTER_MAX_FAILURES,
+        )
+        return None
+
+
+# analyze-face asks for the same mask ~12 times per scan (texture, colour,
+# length and coverage each re-derive it for each of the three captures).
+# Segmentation inference is the expensive step, so memoise per file identity.
+_hair_mask_cache: "dict[tuple[str, float, int], np.ndarray | None]" = {}
+_HAIR_MASK_CACHE_MAX = 12
+
+
+def _hair_mask_cache_key(image_path: Path) -> tuple[str, float, int] | None:
+    try:
+        stat = image_path.stat()
+    except OSError:
+        return None
+    return (str(image_path), stat.st_mtime, stat.st_size)
+
+
+def segment_hair_mask(image_path: Path) -> np.ndarray | None:
+    """Per-pixel hair mask in [0,1] from the segmentation model, else None."""
+    key = _hair_mask_cache_key(image_path)
+    if key is not None and key in _hair_mask_cache:
+        return _hair_mask_cache[key]
+    mask = _segment_hair_mask_uncached(image_path)
+    if key is not None:
+        if len(_hair_mask_cache) >= _HAIR_MASK_CACHE_MAX:
+            _hair_mask_cache.clear()
+        _hair_mask_cache[key] = mask
+    return mask
+
+
+def _segment_hair_mask_uncached(image_path: Path) -> np.ndarray | None:
+    segmenter = get_hair_segmenter()
+    if segmenter is None:
+        return None
+    try:
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        if not rgb.flags["C_CONTIGUOUS"]:
+            rgb = np.ascontiguousarray(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+        result = segmenter.segment(mp_image)
+
+        category_mask = getattr(result, "category_mask", None)
+        if category_mask is not None:
+            mask = category_mask.numpy_view()
+            hair = (mask == HAIR_SEGMENT_INDEX).astype(np.float32)
+        else:
+            confidence = getattr(result, "confidence_masks", None)
+            if not confidence or len(confidence) <= HAIR_SEGMENT_INDEX:
+                return None
+            hair = np.asarray(
+                confidence[HAIR_SEGMENT_INDEX].numpy_view(), dtype=np.float32
+            )
+
+        if hair.shape[:2] != img.shape[:2]:
+            hair = cv2.resize(
+                hair, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR
+            )
+        # A trace of hair pixels means the model found nothing usable (bald, or a
+        # failed segmentation); let the caller fall back rather than measure noise.
+        if float(np.mean(hair > 0.5)) < 0.002:
+            return None
+        # Light smoothing removes single-pixel speckle at the hairline without
+        # pulling the boundary out into the background the way dilation did.
+        hair = cv2.GaussianBlur(hair, (5, 5), 0)
+        return np.clip(hair, 0.0, 1.0)
+    except Exception:
+        logger.exception("Hair segmentation failed; using geometric fallback.")
+        return None
 
 
 def get_face_landmarker() -> vision.FaceLandmarker | None:
@@ -485,6 +631,25 @@ def prepare_image_bytes(image_path: Path, max_side: int = 1280) -> bytes:
 
 
 def create_hair_mask(image_path: Path) -> np.ndarray | None:
+    """Hair mask for the analysis pipeline.
+
+    Prefers the segmentation model, which marks actual hair pixels. Falls back
+    to the landmark-hull approximation only when segmentation is unavailable --
+    that path is a rough head-shaped region, so anything derived from it (hair
+    colour especially) should be treated as low confidence.
+    """
+    segmented = segment_hair_mask(image_path)
+    if segmented is not None:
+        return segmented
+    return _geometric_hair_mask(image_path)
+
+
+def hair_mask_is_segmented(image_path: Path) -> bool:
+    """True when the mask came from the model rather than the hull fallback."""
+    return segment_hair_mask(image_path) is not None
+
+
+def _geometric_hair_mask(image_path: Path) -> np.ndarray | None:
     img = cv2.imread(str(image_path))
     if img is None:
         return None
@@ -1003,17 +1168,33 @@ def detect_hair_length(image_path: Path) -> tuple[int, str, float]:
             side_cover, (cols_right[-1] + int(right_ear_x) - right_ear_x) / face_height
         )
 
-    score = crown_depth * 0.45 + coverage * 4.0 + side_cover * 0.3
+    # Scale-invariant signals. The previous score was dominated by `coverage`
+    # (hair pixels / WHOLE FRAME, weighted 4.0), which is a function of how close
+    # the phone was held: the same haircut read "short" at arm's length and
+    # "long" in a close crop. Both signals below are normalised by face size, so
+    # framing no longer changes the answer.
+    #
+    #   below_chin  how far the lowest hair pixel sits past the chin, in face
+    #               heights. Negative = hair ends above the chin (short).
+    #   face_area   hair area / face bounding-box area.
+    #
+    # Measured on real short-hair captures: below_chin -0.60..-0.30,
+    # face_area 0.62..1.00.
+    face_width = max(abs(right_ear_x - left_ear_x), 1.0)
+    hair_area = float(np.count_nonzero(hair_pixels))
+    face_area = hair_area / max(face_height * face_width, 1.0)
+    below_chin = (float(rows[-1]) - chin_y) / face_height
 
-    if coverage < 0.006 and crown_depth < 0.06:
+    if face_area < 0.35 and crown_depth < 0.55:
         level = 0
-    elif score < 0.10 or (crown_depth < 0.10 and coverage < 0.015):
+    elif below_chin < -0.15:
         level = 1
-    elif score < 0.22 or crown_depth < 0.18:
+    elif below_chin < 0.15:
         level = 2
     else:
         level = 3
 
+    score = float(below_chin)
     return level, HAIR_LENGTH_LABELS[level], round(score, 3)
 
 
@@ -1047,8 +1228,33 @@ def combined_hair_length(image_paths: list[Path]) -> tuple[int, str, float]:
 
 
 # Laplacian variance on hair-mask pixels (tune with shop lighting).
+# Legacy absolute Laplacian-variance cutoffs. Kept only for the fallback path.
+# These were never resolution- or exposure-independent: on 480x640 captures the
+# measured hair energy was 405-522, so EVERY scan exceeded 175 and every user
+# was classified Curly regardless of their actual hair.
 TEXTURE_STRAIGHT_MAX = 85.0
 TEXTURE_WAVY_MAX = 175.0
+
+# Preferred metric: hair edge energy divided by the energy of a skin patch from
+# the same photo. Dividing by an in-frame control cancels camera sharpness,
+# resolution, exposure and noise, which the absolute numbers above could not.
+# Measured on real straight-haired captures: 2.37, 2.84, 3.59.
+# The wavy/curly boundaries are informed estimates, not measured -- there is one
+# subject in the calibration set. Both are env-tunable so they can be corrected
+# from real customer scans without a code change; the computed ratio is logged
+# on every scan to make that calibration possible.
+TEXTURE_RATIO_STRAIGHT_MAX = float(
+    os.environ.get("TEXTURE_RATIO_STRAIGHT_MAX", "4.5")
+)
+TEXTURE_RATIO_WAVY_MAX = float(os.environ.get("TEXTURE_RATIO_WAVY_MAX", "7.0"))
+
+# |yaw| above this counts as a real profile turn rather than a slight tilt.
+FACE_YAW_PROFILE_MIN = float(os.environ.get("FACE_YAW_PROFILE_MIN", "0.12"))
+
+# Value (HSV) below which hair reads as black. Measured medians for black hair
+# on segmented masks were 40-46, so the previous cutoff of 45 sat exactly inside
+# the real range and labelled black hair "dark brown".
+HAIR_COLOR_BLACK_MAX_V = float(os.environ.get("HAIR_COLOR_BLACK_MAX_V", "68"))
 TEXTURE_CURLY_MAX = 280.0
 # Fraction of image pixels with hair mask above threshold (very low = bald/buzzed).
 BALD_MASK_COVERAGE_MAX = 0.012
@@ -1082,6 +1288,70 @@ def _hair_region_texture_energy(image_path: Path) -> float | None:
     return energy
 
 
+def _skin_control_energy(image_path: Path, lap: np.ndarray, hair: np.ndarray) -> float | None:
+    """Laplacian variance of a bare skin patch, used to normalise hair energy.
+
+    Skin is smooth, so its edge energy reflects the camera and lighting rather
+    than any structure. Dividing hair energy by it removes the resolution and
+    sharpness dependence that made the absolute thresholds meaningless.
+    """
+    img, landmarks = _landmarks_for_image(image_path)
+    if img is None or landmarks is None:
+        return None
+    h, w = img.shape[:2]
+
+    def point(idx: int) -> np.ndarray:
+        return np.array([landmarks[idx].x * w, landmarks[idx].y * h], dtype=np.float32)
+
+    try:
+        # Cheek patch: between the eyes and the jaw, inside the face oval.
+        left_cheek = point(234)
+        right_cheek = point(454)
+        eye_y = float(point(168)[1])
+        chin_y = float(point(152)[1])
+    except Exception:
+        return None
+
+    top = int(np.clip(eye_y + (chin_y - eye_y) * 0.25, 0, h - 1))
+    bottom = int(np.clip(eye_y + (chin_y - eye_y) * 0.70, top + 1, h))
+    span = right_cheek[0] - left_cheek[0]
+    left = int(np.clip(left_cheek[0] + span * 0.22, 0, w - 1))
+    right = int(np.clip(right_cheek[0] - span * 0.22, left + 1, w))
+    if bottom <= top or right <= left:
+        return None
+
+    skin = np.zeros((h, w), dtype=bool)
+    skin[top:bottom, left:right] = True
+    skin &= ~hair
+    if int(np.count_nonzero(skin)) < 200:
+        return None
+    return float(np.var(lap[skin]))
+
+
+def hair_texture_ratio(image_path: Path) -> float | None:
+    """Hair edge energy relative to a skin control patch from the same photo."""
+    img = cv2.imread(str(image_path))
+    mask = create_hair_mask(image_path)
+    if img is None or mask is None:
+        return None
+    hair = np.clip(mask.astype(np.float32), 0.0, 1.0) > 0.5
+    if not np.any(hair):
+        return None
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    hair_energy = float(np.var(lap[hair]))
+
+    control = _skin_control_energy(image_path, lap, hair)
+    if control is None or control <= 1.0:
+        # No usable skin patch: fall back to whole-frame energy, which still
+        # cancels most of the resolution/sharpness effect.
+        control = float(np.var(lap))
+        if control <= 1.0:
+            return None
+    return hair_energy / control
+
+
 def combined_hair_mask_coverage(image_paths: list[Path]) -> float:
     coverages: list[float] = []
     for path in image_paths:
@@ -1098,7 +1368,7 @@ def _rgb_to_hair_color_label(r: float, g: float, b: float) -> str:
     bgr = np.uint8([[[int(round(b)), int(round(g)), int(round(r))]]])
     h, s, v = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)[0, 0]
 
-    if v < 45:
+    if v < HAIR_COLOR_BLACK_MAX_V:
         return "black"
     if s < 35 and v < 130:
         return "gray"
@@ -1136,9 +1406,13 @@ def detect_hair_color(image_paths: list[Path]) -> dict[str, object]:
         hair = mask > 0.25
         if not np.any(hair):
             continue
+        # Median, not mean. Hair carries specular highlights that are far
+        # brighter than the hair itself; averaging them in lifted black hair to
+        # "dark brown". On real captures the mean read V=59-65 while the median
+        # read V=40-46, which is the difference between "dark brown" and "black".
         bgr = img[hair]
-        mean_b, mean_g, mean_r = np.mean(bgr, axis=0)
-        samples.append((float(mean_r), float(mean_g), float(mean_b)))
+        med_b, med_g, med_r = np.median(bgr, axis=0)
+        samples.append((float(med_r), float(med_g), float(med_b)))
 
     if not samples:
         return {"label": "", "rgb": None}
@@ -1158,18 +1432,41 @@ def detect_hair_texture(image_paths: list[Path]) -> tuple[str, float]:
     Classify visible hair texture from capture photos.
     Returns Straight, Wavy, or Curly.
     """
+    ratios: list[float] = []
+    for path in image_paths:
+        ratio = hair_texture_ratio(path)
+        if ratio is not None:
+            ratios.append(ratio)
+
+    if ratios:
+        ratio = float(np.median(ratios))
+        # Logged so the thresholds can be calibrated from real scans: collect
+        # these alongside the customer's actual hair type, then set
+        # TEXTURE_RATIO_STRAIGHT_MAX / TEXTURE_RATIO_WAVY_MAX accordingly.
+        logger.info(
+            "hair texture ratio=%.2f (straight<%.2f wavy<%.2f) samples=%s",
+            ratio,
+            TEXTURE_RATIO_STRAIGHT_MAX,
+            TEXTURE_RATIO_WAVY_MAX,
+            [round(r, 2) for r in ratios],
+        )
+        if ratio < TEXTURE_RATIO_STRAIGHT_MAX:
+            return "Straight", round(ratio, 2)
+        if ratio < TEXTURE_RATIO_WAVY_MAX:
+            return "Wavy", round(ratio, 2)
+        return "Curly", round(ratio, 2)
+
+    # Fallback: absolute energy. Resolution-dependent and known to over-report
+    # Curly, so only used when no ratio could be computed at all.
     energies: list[float] = []
     for path in image_paths:
         energy = _hair_region_texture_energy(path)
         if energy is not None:
             energies.append(energy)
-
-    coverage = combined_hair_mask_coverage(image_paths)
     if not energies:
         return "Straight", 0.0
 
     energy = float(np.median(energies))
-
     if energy < TEXTURE_STRAIGHT_MAX:
         return "Straight", round(energy, 2)
     if energy < TEXTURE_WAVY_MAX:
@@ -1430,7 +1727,114 @@ def health():
         "face_landmarker": (
             "unavailable" if _face_landmarker_unusable else ("ready" if _face_landmarker is not None else "lazy")
         ),
+        "hair_segmenter": (
+            "unavailable"
+            if _hair_segmenter_failures >= HAIR_SEGMENTER_MAX_FAILURES
+            else ("ready" if _hair_segmenter is not None else "lazy")
+        ),
     }
+
+
+def face_yaw_direction(image_path: Path) -> dict[str, object]:
+    """Which way the head is turned, from landmark geometry.
+
+    Used to verify that a generated try-on kept its input's head turn. Compares
+    how far the nose sits from each ear: on a left-turned head the nose is much
+    closer to one ear than the other. Sign is in image space, so it is stable
+    regardless of how the capture was labelled.
+    """
+    img, landmarks = _landmarks_for_image(image_path)
+    if img is None or landmarks is None:
+        return {"ok": False, "direction": "unknown", "yaw": 0.0}
+
+    h, w = img.shape[:2]
+
+    def point(idx: int) -> np.ndarray:
+        return np.array([landmarks[idx].x * w, landmarks[idx].y * h], dtype=np.float32)
+
+    nose_x = float(point(1)[0])
+    left_ear_x = float(point(234)[0])
+    right_ear_x = float(point(454)[0])
+    span = right_ear_x - left_ear_x
+    if abs(span) < 1e-3:
+        return {"ok": False, "direction": "unknown", "yaw": 0.0}
+
+    # 0 = nose at the left ear, 1 = at the right ear, 0.5 = centred/front on.
+    position = (nose_x - left_ear_x) / span
+    yaw = float(np.clip((position - 0.5) * 2.0, -1.0, 1.0))
+
+    # Threshold chosen so a mild head tilt still reads as "front"; only a real
+    # profile turn is called left/right.
+    if yaw <= -FACE_YAW_PROFILE_MIN:
+        direction = "left"
+    elif yaw >= FACE_YAW_PROFILE_MIN:
+        direction = "right"
+    else:
+        direction = "front"
+
+    return {"ok": True, "direction": direction, "yaw": round(yaw, 4)}
+
+
+@app.post("/face-orientation")
+async def face_orientation(image: UploadFile = File(...)):
+    """Report head-turn direction for one image. Used by the try-on view check."""
+    path = UPLOAD_DIR / "orientation_probe.jpg"
+    await save_upload(image, path)
+    try:
+        return face_yaw_direction(path)
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+@app.post("/enforce-view-orientation")
+async def enforce_view_orientation(
+    image: UploadFile = File(...),
+    expected: str = Form(...),
+):
+    """Return the image, mirrored if its head turn does not match `expected`.
+
+    The try-on generator does not reliably preserve the input head turn, so a
+    LEFT profile can come back turned like the RIGHT one. Mirroring is exact and
+    free, where regenerating costs another paid call and can fail identically.
+    Done here rather than in PHP because this service already has OpenCV; the
+    PHP image has no GD extension.
+    """
+    path = UPLOAD_DIR / "orientation_fix.jpg"
+    await save_upload(image, path)
+    try:
+        probe = face_yaw_direction(path)
+        actual = str(probe.get("direction", "unknown"))
+        wanted = (expected or "").strip().lower()
+
+        if not probe.get("ok") or actual == "unknown" or wanted not in ("left", "right"):
+            return {"ok": False, "corrected": False, "direction": actual, "image": None}
+
+        if actual == wanted:
+            return {"ok": True, "corrected": False, "direction": actual, "image": None}
+
+        img = cv2.imread(str(path))
+        if img is None:
+            return {"ok": False, "corrected": False, "direction": actual, "image": None}
+        flipped = cv2.flip(img, 1)
+        ok, buf = cv2.imencode(".jpg", flipped, [int(cv2.IMWRITE_JPEG_QUALITY), 92])
+        if not ok:
+            return {"ok": False, "corrected": False, "direction": actual, "image": None}
+
+        return {
+            "ok": True,
+            "corrected": True,
+            "direction": actual,
+            "expected": wanted,
+            "image": base64.b64encode(buf.tobytes()).decode("ascii"),
+        }
+    finally:
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 @app.post("/analyze-face")
@@ -1470,6 +1874,9 @@ async def analyze_face(
             "hair_length_level": length_level,
             "hair_length_score": length_score,
             "hair_mask_coverage": round(mask_coverage, 4),
+            # "model" = per-pixel segmentation; "geometric" = landmark-hull
+            # fallback, whose colour/texture numbers are much less reliable.
+            "hair_mask_source": "model" if hair_mask_is_segmented(front_path) else "geometric",
             "no_hair_detected": no_hair_detected,
             "hair_color": hair_color.get("label", ""),
             "hair_color_rgb": hair_color.get("rgb"),

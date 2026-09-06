@@ -79,6 +79,81 @@ function ai_service_analyze_face(array $absolutePaths): array
 }
 
 /**
+ * Ask the sidecar to verify a generated view's head turn and mirror it if the
+ * generator flipped it. Returns corrected JPEG bytes, or null when nothing
+ * needed changing / the check could not run.
+ *
+ * Mirroring lives in the sidecar because it already has OpenCV; the PHP image
+ * ships without the GD extension, so imageflip() is not available there.
+ */
+function ai_service_enforce_view_orientation(string $absolutePath, string $expected): ?string
+{
+    $base = ai_service_base_url();
+    if ($base === '' || !is_readable($absolutePath)) {
+        return null;
+    }
+    if (!in_array($expected, ['left', 'right'], true)) {
+        return null;
+    }
+
+    $file = ai_service_curl_file($absolutePath, basename($absolutePath));
+    if ($file === null) {
+        return null;
+    }
+
+    $result = ai_service_multipart_post(
+        $base . '/enforce-view-orientation',
+        ['image' => $file, 'expected' => $expected],
+        45
+    );
+    if (!($result['ok'] ?? false)) {
+        return null;
+    }
+
+    $data = $result['data'] ?? [];
+    if (($data['corrected'] ?? false) !== true) {
+        return null;
+    }
+    $encoded = (string)($data['image'] ?? '');
+    if ($encoded === '') {
+        return null;
+    }
+    $bytes = base64_decode($encoded, true);
+    return ($bytes !== false && $bytes !== '') ? $bytes : null;
+}
+
+/**
+ * Head-turn direction for one image, via the sidecar's landmark geometry.
+ *
+ * Returns 'left', 'right', 'front', or null when it could not be determined
+ * (sidecar down, no face found). Callers must treat null as "unknown" and skip
+ * the check rather than assuming a direction.
+ */
+function ai_service_face_orientation(string $absolutePath): ?string
+{
+    $base = ai_service_base_url();
+    if ($base === '' || !is_readable($absolutePath)) {
+        return null;
+    }
+
+    $file = ai_service_curl_file($absolutePath, basename($absolutePath));
+    if ($file === null) {
+        return null;
+    }
+
+    $result = ai_service_multipart_post($base . '/face-orientation', ['image' => $file], 30);
+    if (!($result['ok'] ?? false)) {
+        return null;
+    }
+    $data = $result['data'] ?? [];
+    if (($data['ok'] ?? false) !== true) {
+        return null;
+    }
+    $direction = (string)($data['direction'] ?? '');
+    return in_array($direction, ['left', 'right', 'front'], true) ? $direction : null;
+}
+
+/**
  * @param array{front: string, left: string, right: string} $absolutePaths
  * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, styleKey: string, previewDiagnostics: array<string, array<string, mixed>>, error: string}
  */
