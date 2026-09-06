@@ -150,12 +150,72 @@ class _ProfilePageState extends State<ProfilePage> {
       'usualBookingTime': label(raw['usualBookingTime']),
       'usualBarber': label(raw['usualBarber']),
       'usualBookingDay': label(raw['usualBookingDay']),
+      'visitCount': '${raw['visitCount'] ?? 0}',
+      'usualMinVisits': '${raw['usualMinVisits'] ?? 2}',
+      'usualMinShare': '${raw['usualMinShare'] ?? 0.5}',
     };
   }
 
   String _preferenceDisplay(String key) {
     final value = _bookingPreferences[key]?.trim() ?? '';
     return value.isEmpty ? 'Not enough history yet' : value;
+  }
+
+  int get _visitCount =>
+      int.tryParse(_bookingPreferences['visitCount'] ?? '') ?? 0;
+
+  int get _usualMinVisits =>
+      int.tryParse(_bookingPreferences['usualMinVisits'] ?? '') ?? 2;
+
+  /// Explains what the card is showing, or exactly what is still missing.
+  /// Mirrors slot_recommendation_is_usual(): a pattern counts as "usual" once
+  /// the customer has at least [_usualMinVisits] completed visits AND the most
+  /// common value either repeats that many times or covers at least the
+  /// configured share of their visits.
+  String _preferenceExplanation(String key, String what) {
+    final visits = _visitCount;
+    final needed = _usualMinVisits;
+    final share = ((double.tryParse(_bookingPreferences['usualMinShare'] ?? '') ?? 0.5) * 100)
+        .round();
+    final hasValue = (_bookingPreferences[key]?.trim() ?? '').isNotEmpty;
+
+    if (hasValue) {
+      return 'This is your most frequent $what across your '
+          '$visits completed appointment${visits == 1 ? '' : 's'}. '
+          'It is used to suggest booking slots for you.';
+    }
+
+    if (visits < needed) {
+      final remaining = needed - visits;
+      return 'We need at least $needed completed appointments to spot a '
+          'pattern. You have $visits, so $remaining more to go.\n\n'
+          'Cancelled and no-show bookings do not count.';
+    }
+
+    return 'You have $visits completed appointments, but no clear favourite '
+        '$what yet. One option needs to repeat at least $needed times, or '
+        'cover $share% of your bookings.\n\n'
+        'Keep booking and this will fill in on its own.';
+  }
+
+  void _showPreferenceInfo(String title, String body) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: Text(title, style: const TextStyle(color: Colors.white, fontSize: 16)),
+        content: Text(
+          body,
+          style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<Map<String, dynamic>> _saveProfileToApi({
@@ -367,11 +427,17 @@ class _ProfilePageState extends State<ProfilePage> {
               const SizedBox(height: 16),
               _infoCard('Haircuts Done', _haircutsDone.toString()),
               const SizedBox(height: 16),
-              _infoCard('Usual booking time', _preferenceDisplay('usualBookingTime')),
+              _infoCard('Usual booking time', _preferenceDisplay('usualBookingTime'),
+                  onInfo: () => _showPreferenceInfo('Usual booking time',
+                      _preferenceExplanation('usualBookingTime', 'time of day'))),
               const SizedBox(height: 16),
-              _infoCard('Usual barber', _preferenceDisplay('usualBarber')),
+              _infoCard('Usual barber', _preferenceDisplay('usualBarber'),
+                  onInfo: () => _showPreferenceInfo('Usual barber',
+                      _preferenceExplanation('usualBarber', 'barber'))),
               const SizedBox(height: 16),
-              _infoCard('Usual booking day', _preferenceDisplay('usualBookingDay')),
+              _infoCard('Usual booking day', _preferenceDisplay('usualBookingDay'),
+                  onInfo: () => _showPreferenceInfo('Usual booking day',
+                      _preferenceExplanation('usualBookingDay', 'day of the week'))),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _saving ? null : _saveProfile,
@@ -618,12 +684,29 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _infoCard(String label, String value) {
+  Widget _infoCard(String label, String value, {VoidCallback? onInfo}) {
     return _cardShell(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Row(
+            children: [
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              ),
+              if (onInfo != null)
+                GestureDetector(
+                  onTap: onInfo,
+                  // Padding keeps the tap target usable; the icon alone is
+                  // smaller than the minimum comfortable touch size.
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 8, bottom: 4),
+                    child: Icon(Icons.info_outline, color: Colors.white54, size: 16),
+                  ),
+                ),
+            ],
+          ),
           const SizedBox(height: 10),
           Text(
             value,

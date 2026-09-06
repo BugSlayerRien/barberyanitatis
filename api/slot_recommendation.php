@@ -240,11 +240,18 @@ function slot_recommendation_profile_display(array $profile): array
         $day = slot_recommendation_weekday_label((int)$profile['preferred_weekday']);
     }
 
+    $cfg = slot_recommendation_config();
+
     return [
         'visitCount' => (int)($profile['visit_count'] ?? 0),
         'usualBookingTime' => $time,
         'usualBarber' => $barber,
         'usualBookingDay' => $day,
+        // Surfaced so the app can explain *why* a card is still empty instead of
+        // only saying "Not enough history yet", and so the rule lives in one
+        // place rather than being restated as a magic number in the UI.
+        'usualMinVisits' => (int)$cfg['usual_min_visits'],
+        'usualMinShare' => (float)$cfg['usual_min_share'],
     ];
 }
 
