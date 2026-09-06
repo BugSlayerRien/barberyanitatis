@@ -232,14 +232,23 @@ class FaceScanService {
     return unique;
   }
 
-  static String _categorizeStyleName(String name) {
-    final lower = name.toLowerCase();
-    if (RegExp(r'mullet|edgar|quiff|burst|messy|curtains|pompadour|curly|wavy|modern')
-        .hasMatch(lower)) {
-      return 'alternative';
-    }
+  /// A style's category comes from the server (`hairstyles.category`), so it is
+  /// the same on every request. The name-based rules below are only a fallback
+  /// for rows served before that column existed.
+  static String _categorizeRow(Map<String, dynamic> row) {
+    final stored =
+        (row['style_category'] ?? row['category'] ?? '').toString().trim().toLowerCase();
+    if (stored == 'formal' || stored == 'alternative') return stored;
+
+    // Specific cut words are tested first on purpose: the old order matched
+    // 'curly'/'wavy' before 'fade'/'taper', so every texture-prefixed style was
+    // labelled 'alternative' no matter what the cut actually was.
+    final lower = (row['style_name']?.toString() ?? '').toLowerCase();
     if (RegExp(r'crop|taper|fade|buzz|caesar|french|classic|two.?block').hasMatch(lower)) {
       return 'formal';
+    }
+    if (RegExp(r'mullet|edgar|quiff|burst|messy|curtains|pompadour').hasMatch(lower)) {
+      return 'alternative';
     }
     return 'alternative';
   }
@@ -309,8 +318,7 @@ class FaceScanService {
     for (final row in rankings) {
       final id = '${row['variant_id'] ?? row['variantId'] ?? ''}'.trim();
       if (id.isEmpty || used.contains(id)) continue;
-      final name = row['style_name']?.toString() ?? 'Style';
-      final cat = _categorizeStyleName(name);
+      final cat = _categorizeRow(row);
       if (categories[cat]!.length >= 2) continue;
       used.add(id);
       categories[cat]!.add({

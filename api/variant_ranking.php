@@ -178,6 +178,10 @@ SELECT
     hv.styling_products,
     hv.estimated_minutes,
     hs.style_name,
+    -- Stable per-style category (see hairstyle_categories_and_catalog.sql).
+    -- Replaces the old regex-over-style_name classification, which forced every
+    -- 'Curly *' / 'Wavy *' cut into 'alternative' regardless of the actual cut.
+    hs.category AS style_category,
     hs.style_code,
     hs.description,
     (

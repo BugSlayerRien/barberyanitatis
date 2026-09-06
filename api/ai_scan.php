@@ -311,12 +311,26 @@ function variant_catalog_line(array $row): string
 
 function categorize_variant_rule(array $row): string
 {
-    $name = strtolower((string)($row['style_name'] ?? ''));
-    if (preg_match('/mullet|edgar|quiff|burst|messy|curtains|pompadour|curly|wavy|modern/', $name) === 1) {
-        return 'alternative';
+    // Authoritative: the category stored on the hairstyle row. A cut's category
+    // is a property of the cut, so it must not change between requests.
+    $stored = strtolower(trim((string)($row['style_category'] ?? $row['category'] ?? '')));
+    if ($stored === 'formal' || $stored === 'alternative') {
+        return $stored;
     }
+
+    // Fallback for rows predating hairstyle_categories_and_catalog.sql.
+    //
+    // Known-bad, kept only so an un-migrated database still returns something:
+    // the 'alternative' test runs first and matches 'curly'/'wavy', so every
+    // texture-prefixed style lands in 'alternative' however clean the cut is
+    // ("Curly Mid Fade" and "Curly Taper Fade" are fades, not statement cuts).
+    // Check the specific cut words first so that at least stops happening.
+    $name = strtolower((string)($row['style_name'] ?? ''));
     if (preg_match('/crop|taper|fade|buzz|caesar|french|classic|two.?block/', $name) === 1) {
         return 'formal';
+    }
+    if (preg_match('/mullet|edgar|quiff|burst|messy|curtains|pompadour/', $name) === 1) {
+        return 'alternative';
     }
 
     return 'alternative';
