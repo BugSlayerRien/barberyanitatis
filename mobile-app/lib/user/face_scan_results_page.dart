@@ -113,8 +113,13 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
     _restoreCachedPreviewsFromSession();
-    // Keep restored recommendations until the reload finishes / replaces them.
-    _loadRecommendations();
+    // Re-entering this page must not re-rank. The second stage of
+    // _loadRecommendations calls the AI reranker, which is non-deterministic,
+    // so every return trip produced a different Top Picks order. Reuse the
+    // ranking already computed for this scan; only fetch when there is none.
+    if (!_restoreCachedRecommendations()) {
+      _loadRecommendations();
+    }
   }
 
   /// Rehydrate AI try-ons from session memory after navigation recreates this page.
@@ -337,6 +342,61 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     return raw.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
+  /// Returns true when a ranking for this exact scan was already computed and
+  /// has been restored, so no network call is needed.
+  bool _restoreCachedRecommendations() {
+    final key = UserSession.recommendationCacheKey(_faceShape, _hairTexture);
+    final cached = UserSession.recommendationsForKey(key);
+    if (cached == null) return false;
+
+    final topPicks = _mapList(cached['topPicks']);
+    if (topPicks.isEmpty) return false;
+
+    final cats = cached['categories'] as Map<String, dynamic>? ?? {};
+    _topPicks = topPicks;
+    _categories = {
+      'formal': _mapList(cats['formal']),
+      'alternative': _mapList(cats['alternative']),
+    };
+    _aiSummary = cached['aiSummary']?.toString() ?? '';
+    _aiPowered = cached['aiPowered'] == true;
+    _recommendationsLoading = false;
+    _categoriesLoading = false;
+
+    final sessionVariantId = UserSession.selectedVariantId;
+    if (sessionVariantId != null && sessionVariantId > 0) {
+      for (final row in [
+        ..._topPicks,
+        ..._categories['formal']!,
+        ..._categories['alternative']!,
+      ]) {
+        if ((int.tryParse('${row['variant_id'] ?? row['variantId']}') ?? 0) ==
+            sessionVariantId) {
+          _selected = row;
+          break;
+        }
+      }
+    }
+    _selected ??= widget.presetRecommendation ?? _topPicks.first;
+    return true;
+  }
+
+  void _cacheRecommendations() {
+    UserSession.cacheRecommendations(
+      UserSession.recommendationCacheKey(_faceShape, _hairTexture),
+      {
+        'topPicks': _topPicks,
+        'categories': {
+          'formal': _categories['formal'] ?? const <Map<String, dynamic>>[],
+          'alternative':
+              _categories['alternative'] ?? const <Map<String, dynamic>>[],
+        },
+        'aiSummary': _aiSummary,
+        'aiPowered': _aiPowered,
+      },
+    );
+  }
+
   void _applyRecommendationPayload({
     required List<Map<String, dynamic>> topPicks,
     required Map<String, List<Map<String, dynamic>>> categories,
@@ -398,6 +458,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     };
     UserSession.lastRecommendations = List<Map<String, dynamic>>.from(topPicks);
     UserSession.hasRecentRecommendations = topPicks.isNotEmpty;
+    // Freeze this ranking for the current scan so returning to the page shows
+    // the same order rather than triggering another AI rerank.
+    _cacheRecommendations();
     if (UserSession.capturedFaceImages == null ||
         UserSession.capturedFaceImages!.isEmpty) {
       UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
@@ -659,19 +722,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       default:
         return null;
     }
-  }
-
-  String _displaySummary() {
-    if (!_aiPowered || _aiSummary.trim().isEmpty) {
-      return 'Based on your $_faceShape face and $_hairTexture hair, we grouped styles into formal and alternative options.';
-    }
-    final trimmed = _aiSummary.trim();
-    final dot = trimmed.indexOf('.');
-    final first = dot > 0 ? trimmed.substring(0, dot + 1) : trimmed;
-    if (first.length > 140) {
-      return '${first.substring(0, 137)}...';
-    }
-    return first;
   }
 
   String _resolvedPreviewNetworkUrl(String path) {
@@ -1168,14 +1218,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 _chip('Face: $_faceShape'),
                 _chip('Hair: $_hairTexture'),
                 _chip('Length: ${widget.hairLengthLabel}'),
-                if ((_hairColorLabel ?? '').trim().isNotEmpty)
-                  _chip('Color: ${_hairColorLabel!.trim()}'),
+                // Colour chip removed: the detected value is sampled from a
+                // geometric hair mask that also picks up background, so it was
+                // frequently wrong. The try-on model reads colour straight from
+                // the photo, so nothing downstream depends on showing it.
               ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              _displaySummary(),
-              style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
             ),
             const SizedBox(height: 8),
             _buildHairTypeAdjustment(),
@@ -1306,12 +1353,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               }),
             ),
             const SizedBox(height: 8),
-            if (_selected != null) ...[
-            Text(
-                'Preview: $_selectedStyleName',
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-            ] else
+            if (_selected == null)
               const Text(
                 'Select a style below, expand for details, then tap Generate preview.',
                 style: TextStyle(color: Colors.white70, fontSize: 13),

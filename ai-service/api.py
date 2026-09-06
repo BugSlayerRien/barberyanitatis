@@ -935,10 +935,17 @@ def detect_face_shape(image_path: Path) -> tuple[str, list[str]]:
         jaw_ratio = jaw_width / cheekbone_width if cheekbone_width > 0 else 1.0
         forehead_ratio = forehead_width / cheekbone_width if cheekbone_width > 0 else 1.0
 
-        if jaw_ratio > 0.9 and forehead_ratio > 0.9:
+        # A wide jaw AND wide forehead relative to cheekbones = square, but only
+        # if the face is not notably long; a long face with a strong jaw reads
+        # as oval, not square.
+        if jaw_ratio > 0.9 and forehead_ratio > 0.9 and ratio < 1.35:
             shape = "square"
         elif forehead_ratio > 1.1 and jaw_ratio < 0.85:
-            shape = "round" if ratio < 1.35 else "square"
+            # Tapered jaw with a broad forehead. Previously this branch assigned
+            # "square" whenever ratio >= 1.35 -- i.e. a LONG, NARROW face was
+            # labelled square, which is the opposite shape. Long + tapered is
+            # oval; only short + tapered reads round.
+            shape = "round" if ratio < 1.35 else "oval"
         elif ratio < 1.2:
             shape = "round"
         else:
