@@ -1356,7 +1356,7 @@ function renderHaircuts() {
       ...row,
       actions: `
         <button class="btn secondary btn-haircut" data-id="${row.hairstyle_id}" type="button">Manage</button>
-        <button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Delete</button>
+        <button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Deactivate</button>
       `,
     })),
   );

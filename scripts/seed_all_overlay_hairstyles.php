@@ -102,8 +102,12 @@ try {
         }
 
         $hairstyleId = upsert_hairstyle($pdo, $code, $displayName, $description);
+        // All three shapes the classifier can return. Square was missing here,
+        // so detect_face_shape() could return "square" for a user who then had
+        // no variants to recommend at all.
         upsert_variant($pdo, $hairstyleId, 'Oval', $texture, $pathsMap[$key]);
         upsert_variant($pdo, $hairstyleId, 'Round', $texture, $pathsMap[$key]);
+        upsert_variant($pdo, $hairstyleId, 'Square', $texture, $pathsMap[$key]);
         $seeded[] = $displayName;
     }
 
