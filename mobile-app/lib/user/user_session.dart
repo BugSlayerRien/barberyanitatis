@@ -30,6 +30,36 @@ class UserSession {
 
   static Map<String, dynamic>? lastScan;
   static List<Map<String, dynamic>> lastRecommendations = [];
+
+  /// Completed recommendation payload for the current scan, kept so that
+  /// re-entering the results page shows the SAME ranking instead of re-running
+  /// the AI rerank (which is non-deterministic and reshuffles Top Picks on
+  /// every visit). Keyed by [recommendationCacheKey]; cleared by resetScanState.
+  static Map<String, dynamic>? cachedRecommendations;
+  static String? cachedRecommendationsKey;
+
+  /// Identifies which scan a cached ranking belongs to. Changing face shape or
+  /// hair texture (including the manual "Adjust hair type" control) invalidates
+  /// the cache, because the ranking is derived from both.
+  static String recommendationCacheKey(String faceShape, String hairTexture) {
+    final session = activeScanSessionId ?? '';
+    return '$session|${faceShape.toLowerCase()}|${hairTexture.toLowerCase()}';
+  }
+
+  static void cacheRecommendations(String key, Map<String, dynamic> payload) {
+    cachedRecommendationsKey = key;
+    cachedRecommendations = payload;
+  }
+
+  static Map<String, dynamic>? recommendationsForKey(String key) {
+    if (cachedRecommendationsKey != key) return null;
+    return cachedRecommendations;
+  }
+
+  static void clearCachedRecommendations() {
+    cachedRecommendationsKey = null;
+    cachedRecommendations = null;
+  }
   static UserCalibration? _cachedUserCalibration;
 
   /// Snapshot of the latest *completed* scan (captures, analysis, recs, previews).
@@ -304,6 +334,7 @@ class UserSession {
   /// When [preserveCompatibility] is true, keeps a lightweight [lastScan]
   /// summary only (no captures) for Library badges.
   static void resetScanState({bool preserveCompatibility = false}) {
+    clearCachedRecommendations();
     Map<String, dynamic>? summary;
     if (preserveCompatibility) {
       summary = scanForCompatibility;
