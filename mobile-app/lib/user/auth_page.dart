@@ -977,13 +977,14 @@ class _AuthPageState extends State<AuthPage> {
           return authOauthOnlySignInMessage(providers);
         }
       } catch (_) {}
-      if (email.endsWith('@tatis.local')) {
-        return '@tatis.local staff accounts log in via the API (auth.php). '
-            'Customer and barber demo emails must exist in Supabase Auth. '
-            'Web staff demo: receptionist@tatis.local / Reception123!, '
-            'admin@tatis.local / Admin123!.';
-      }
-      return 'Invalid email or password. If you registered with Google or Facebook, use those buttons. If you registered with email, confirm your email first or reset your password.';
+      // Deliberately generic. The genuinely OAuth-only case is already caught
+      // by the _lookupEmail(oauthOnly) branch above, so the old "use those
+      // buttons" advice was wrong for the common case: a Google user who has
+      // since set a password can sign in here, and telling them otherwise sent
+      // them down the wrong path. Staff (@tatis.local) get the same message —
+      // the old branch printed working admin/receptionist demo credentials into
+      // a toast that any customer could trigger by typing a @tatis.local email.
+      return 'Invalid email or password.';
     }
     if (lower.contains('failed to fetch') || lower.contains('network')) {
       return 'Cannot reach the auth server. Check your internet connection and API URL.';

@@ -471,7 +471,9 @@ try {
         if (!$isMobileClient && $barber) {
             json_response([
                 'error' => empty($barber['password_hash'])
-                    ? 'This barber account has no app password yet. Set password_hash in the barbers table, or sign in with barber@tatis.local / Barber123! (demo).'
+                    // Was leaking working demo credentials in an unauthenticated
+                    // 401 body. Matches the staff branch above instead.
+                    ? 'This barber account has no password set. Contact your administrator.'
                     : 'Invalid email or password.',
                 'code' => empty($barber['password_hash']) ? 'NO_LOCAL_PASSWORD' : 'WRONG_PASSWORD',
                 'accountType' => 'barber',
