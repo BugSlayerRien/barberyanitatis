@@ -439,15 +439,15 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _signInWithSupabaseGoogle() async {
     setState(() => _isLoading = true);
     try {
-      // Stock SDK sign-in. signInWithOAuth forces LaunchMode.externalApplication
-      // for Google on Android internally ("Google login has to be performed on
-      // external browser window on Android"), and the SDK's own deep-link
-      // observer completes the code exchange. Driving that exchange ourselves
-      // is what broke repeat sign-ins with flow_state_not_found.
+      // Stock SDK initiation, as in 3e1976e where repeated Google sign-in
+      // worked. signInWithOAuth generates the PKCE verifier, stores it, builds
+      // the authorize URL and launches the browser in one step. The custom
+      // getOAuthSignInUrl + manual launch path that replaced it is what this
+      // restructure rolls back.
       //
       // markExpectingOAuth() must stay: it is what makes AuthBootstrap treat
       // the resulting signedIn event as AuthArrival.oauthCallback and route to
-      // the dashboard. Without it the session is created but nothing navigates.
+      // the dashboard.
       AuthBootstrap.markExpectingOAuth();
       AuthRedirect.prepareWebOAuthReturn();
       await Supabase.instance.client.auth.signInWithOAuth(

@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -108,6 +109,17 @@ class AuthBootstrap {
 
   static void markExpectingOAuth() {
     flow.markExpectingOAuth();
+    // Attempt-scoped state must not leak from a previous sign-in. The live
+    // sign-in path calls this (not startProviderOAuth), so without these resets
+    // a second attempt in the same run was still gated by attempt 1's leftovers:
+    // _lastProcessedAuthCallbackUri could short-circuit the new callback, a
+    // stale _pendingNavigation could fire the wrong destination, and codes
+    // retired by a failed exchange stayed retired.
+    flow.state = flow.state.copyWith(didNavigate: false, onRecoveryRoute: false);
+    _lastProcessedAuthCallbackUri = null;
+    _pendingNavigation = null;
+    _handlingAuthCallback = false;
+    OAuthPkceCoordinator.clearOnLogout();
   }
 
   /// Recovery established by an emailed OTP code instead of a recovery link.
@@ -251,26 +263,31 @@ class AuthBootstrap {
     flow.markPasswordLogin();
   }
 
-  /// Waits briefly for supabase_flutter's own deep-link observer to finish the
-  /// PKCE exchange and publish a session.
-  ///
-  /// Returns the session, or null if the SDK did not produce one in time (in
-  /// which case the caller should do the exchange itself). The window is short
-  /// because it only covers one local HTTP round trip; a real failure falls
-  /// through quickly rather than hanging the callback.
-  static Future<Session?> _awaitSdkOAuthSession({
-    Duration timeout = const Duration(seconds: 4),
-    Duration pollInterval = const Duration(milliseconds: 100),
-  }) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      final session = Supabase.instance.client.auth.currentSession;
-      if (session != null) {
-        return session;
+  /// Debug-only: fingerprint the stored PKCE verifier without revealing it.
+  static Future<void> _logPkceVerifierFingerprint() async {
+    if (!kDebugMode) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      String? raw;
+      for (final key in prefs.getKeys()) {
+        if (key.contains('code-verifier')) {
+          raw = prefs.getString(key);
+          break;
+        }
       }
-      await Future<void>.delayed(pollInterval);
+      if (raw == null || raw.isEmpty) {
+        _authLog('pkce verifier=(absent) -- nothing to exchange with');
+        return;
+      }
+      final verifier = raw.split('/').first;
+      final tag = raw.contains('/') ? raw.split('/').last : '(oauth)';
+      _authLog(
+        'pkce verifier=${verifier.substring(0, verifier.length.clamp(0, 8))}... '
+        'len=${verifier.length} tag=$tag',
+      );
+    } catch (e) {
+      _authLog('pkce verifier probe failed: $e');
     }
-    return Supabase.instance.client.auth.currentSession;
   }
 
   static Future<void> onSignedOut() async {
@@ -333,11 +350,21 @@ class AuthBootstrap {
       await _onAuthStateChange(data);
     });
 
+    // NO uriLinkStream subscription here. EventChannel.receiveBroadcastStream()
+    // calls binaryMessenger.setMessageHandler(name, ...), and that allows only
+    // ONE handler per channel: the last widget to call .listen() wins and every
+    // earlier subscriber is silently orphaned -- it keeps a live StreamController
+    // that never receives another event.
+    //
+    // This app had three subscribers to the same app_links channel (the Supabase
+    // SDK observer, this class, and main.dart), so which one actually received a
+    // callback depended on registration order. That is what left the SDK's
+    // observer permanently deaf.
+    //
+    // There is now exactly one subscription, in main.dart, which dispatches
+    // explicitly: auth links to handleAuthCallbackUri, payment links to the
+    // payment route. Ownership is deterministic instead of order-dependent.
     final appLinks = AppLinks();
-    _oauthDeepLinkSubscription = appLinks.uriLinkStream.listen(
-      (uri) => unawaited(handleAuthCallbackUri(uri)),
-      onError: (_) {},
-    );
 
     Uri? initial = startupLink;
     if (kIsWeb) {
@@ -391,6 +418,26 @@ class AuthBootstrap {
 
     AuthArrival arrival = AuthArrival.none;
     if (flow.state.expectingOAuth) {
+      arrival = AuthArrival.oauthCallback;
+    } else if (data.event == AuthChangeEvent.signedIn &&
+        !isRecoverySession &&
+        !flow.state.recoveryPending) {
+      // Safety net for the reported failure: sign in with Google, sign out,
+      // sign in again -> the browser round trip succeeds and Supabase publishes
+      // a session, but the app stays on the Sign In page.
+      //
+      // Navigation was gated entirely on expectingOAuth still being true when
+      // the signedIn event landed. That flag is static and can be cleared in
+      // between by anything that resets the flow (a late signedOut event from
+      // the previous session being the usual culprit), and when it is, arrival
+      // stays `none` and decide() returns stay -- no error, just no navigation,
+      // which is exactly what the user sees.
+      //
+      // A fresh signedIn event with a real session and no recovery in progress
+      // is unambiguous: the user just authenticated and belongs on the
+      // dashboard. Recovery is excluded above so a reset link still routes to
+      // Change Password.
+      _authLog('signedIn without expectingOAuth; treating as oauth arrival');
       arrival = AuthArrival.oauthCallback;
     }
 
@@ -603,30 +650,23 @@ class AuthBootstrap {
       // expectingOAuth is only true between tapping a provider button and its
       // callback, and logout nulls currentSession, so this cannot pick up a
       // previously signed-in account.
-      if (!recoveryIntent && flow.state.expectingOAuth) {
-        // Checking currentSession only once is a race, and it is the race that
-        // made the SECOND sign-in of a run fail. On the first attempt the SDK
-        // has usually finished by the time this runs, so a session is already
-        // there. After a logout currentSession is null, so on the next attempt
-        // this check finds nothing, we fall through and exchange the code
-        // ourselves -- at the same moment the SDK is exchanging it. The loser
-        // of that race gets flow_state_not_found, because an authorization code
-        // is single-use and the winner already consumed the PKCE flow state.
-        //
-        // Waiting briefly makes the ordering deterministic: let the SDK finish,
-        // and only exchange ourselves if it produced nothing at all.
-        session = await _awaitSdkOAuthSession();
-        if (session != null) {
-          _authLog(
-            'oauth adopting session established by the SDK observer '
-            'email=${session.user.email}',
-          );
-        } else {
-          _authLog('sdk observer produced no session in time; exchanging here');
-        }
-      }
+      // No wait-for-the-SDK step here any more. Device logs with Level.ALL
+      // logging showed supabase_flutter's deep-link observer never receives a
+      // callback at all (it logs "Starting deeplink observer" at init and never
+      // "handle deeplink uri"), so there is no second exchanger to defer to and
+      // nothing to adopt. detectSessionInUri is now false to match. Waiting
+      // here only added a 6 second stall in front of every sign-in.
 
       if (session == null && (hasCode || hasAccessToken || uriRecovery)) {
+        // The remaining unknown is whether the verifier in storage is the one
+        // this attempt's authorize call used. gotrue keeps it under a single
+        // fixed key and deletes it on a successful exchange, so a stale or
+        // missing value produces exactly the flow_state_not_found we see on the
+        // second sign-in. Log a fingerprint (never the value) to tell those
+        // apart: a different prefix each attempt means a fresh verifier and the
+        // fault is server-side; the same prefix, or "(absent)", means the
+        // client sent the wrong one.
+        await _logPkceVerifierFingerprint();
         _exchangingAuthCode = true;
         try {
           final response = await _exchangeAuthCallbackUrl(
@@ -643,6 +683,11 @@ class AuthBootstrap {
           );
         } catch (e) {
           _authLog('getSessionFromUrl failed: $e');
+          // Previously this treated flow_state_not_found as "another exchanger
+          // beat us to it" and waited to adopt its session. Logs disproved
+          // that: there is no other exchanger, and no session ever appeared.
+          // The error means GoTrue genuinely has no flow state matching this
+          // code and the verifier we sent.
           OAuthPkceCoordinator.markAuthCodeFinished(authCode);
         } finally {
           _exchangingAuthCode = false;

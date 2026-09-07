@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:logging/logging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_navigator.dart';
 
@@ -44,14 +45,59 @@ Future<void> main() async {
     setUrlStrategy(PathUrlStrategy());
   }
 
+  // OAuth callback ownership diagnostic (debug builds only).
+  //
+  // Supabase.initialize's own listener prints Level.INFO and above, which is
+  // why "supabase.auth: INFO: Signing out user" shows up in the console. The
+  // deep-link observer's own breadcrumbs are quieter than that:
+  //   'Starting deeplink observer'  -> Level.FINE
+  //   'handle deeplink uri: <uri>'  -> Level.FINEST
+  //   'handle deeplink uri'         -> Level.INFO
+  // Neither of the first two can appear under the default listener, so the
+  // console could not distinguish "the SDK observer never received the
+  // callback" from "it received it and failed quietly". This listener drops the
+  // floor to ALL so that distinction is visible.
+  //
+  // Diagnostic only -- remove once OAuth callback ownership is settled.
+  if (kDebugMode) {
+    Logger.root.level = Level.ALL;
+    Logger.root.onRecord.listen((record) {
+      if (record.loggerName.startsWith('supabase')) {
+        debugPrint(
+          '[sdk] ${record.loggerName}: ${record.level.name}: ${record.message}'
+          '${record.error != null ? " error=${record.error}" : ""}',
+        );
+      }
+    });
+  }
+
   await Supabase.initialize(
     url: 'https://sergfnujsutcschocuuz.supabase.co',
     anonKey:
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNlcmdmbnVqc3V0Y3NjaG9jdXV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQxODM3NzQsImV4cCI6MjA4OTc1OTc3NH0.tr2aFcXaKYt5LwvWp48VRAi-IS2nI1bur_CnRd7OHCg',
     authOptions: const FlutterAuthClientOptions(
       authFlowType: AuthFlowType.pkce,
-      // detectSessionInUri is intentionally left at its default (true): the
-      // SDK's own deep-link observer performs the OAuth code exchange.
+      detectSessionInUri: false,
+      // detectSessionInUri: false -- AuthBootstrap owns the code exchange.
+      //
+      // This is now settled by device logs rather than assumption. With
+      // Level.ALL logging the SDK prints "Starting deeplink observer" (FINE) at
+      // init, but NEVER prints "handle deeplink uri" (INFO) for any callback --
+      // not on the first sign-in, not on the second. Its observer is installed
+      // and then never fed.
+      //
+      // The reason is app_links 3.5.1: `uriLinkStream` is a getter that calls
+      // EventChannel.receiveBroadcastStream() afresh on every access, and each
+      // call re-registers the platform message handler for that channel. The
+      // last subscriber to register wins and the earlier ones are silently
+      // disconnected. supabase_flutter subscribes inside Supabase.initialize;
+      // AuthBootstrap subscribes afterwards, so AuthBootstrap wins and the SDK
+      // observer goes deaf.
+      //
+      // So ownership was never actually shared -- AuthBootstrap has been the
+      // only exchanger all along. Setting this to false makes that explicit
+      // instead of accidental, and stops the SDK adding a competing subscriber
+      // that can only ever steal the stream from whoever registers before it.
       //
       // History worth keeping: on 2026-09-01 this was set to false so that
       // AuthBootstrap could own the exchange, as an attempted fix for OAuth
@@ -74,10 +120,21 @@ Future<void> main() async {
   // Preload haircut overlay PNGs in background (reduces scanner/results lag).
   unawaited(OverlayAssetCache.preload());
 
-  // Payment return deep links only. OAuth/recovery is handled in AuthBootstrap.
-  final AppLinks _appLinks = AppLinks();
-  _appLinks.uriLinkStream.listen((uri) {
+  // THE single app_links subscription for the whole app.
+  //
+  // EventChannel allows one message handler per channel, so the last .listen()
+  // call wins and earlier subscribers are silently orphaned. When the Supabase
+  // SDK observer, AuthBootstrap and this block each subscribed separately, which
+  // one actually received a deep link came down to registration order -- and the
+  // auth callback was reaching a listener that then dropped it.
+  //
+  // This listener is registered last on purpose, so it deterministically owns
+  // the channel, and it dispatches explicitly rather than filtering. Restores
+  // the working shape from 3e1976e, which forwarded auth links the same way.
+  final AppLinks appLinks = AppLinks();
+  appLinks.uriLinkStream.listen((uri) {
     if (uri.scheme == 'io.supabase.flutter' && uri.host == 'login-callback') {
+      unawaited(AuthBootstrap.handleAuthCallbackUri(uri));
       return;
     }
     if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
