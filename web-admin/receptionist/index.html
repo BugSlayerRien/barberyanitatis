@@ -187,31 +187,6 @@
               </div>
             </div>
 
-            <div class="card">
-              <div class="card-head">
-                <div class="card-head-text">
-                  <h3 class="card-title">Team leave calendar</h3>
-                  <p class="card-sub">Approved barber absences and shop closures. Select a day for details.</p>
-                </div>
-                <div class="card-tools">
-                  <strong id="leave-cal-month-label">—</strong>
-                  <select class="select" id="leave-cal-barber-filter" aria-label="Filter calendar by barber" style="max-width: 190px;">
-                    <option value="">All barbers</option>
-                  </select>
-                  <button class="icon-btn" id="leave-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
-                  <button class="icon-btn" id="leave-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
-                </div>
-              </div>
-              <div class="schedule-calendar leave-calendar" id="leave-calendar-grid"></div>
-              <div class="schedule-cal-legend row-wrap" style="margin-top: 12px;">
-                <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
-                <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
-                <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
-                <span class="meta"><span class="cal-legend-swatch cal-has-leave"></span> Barber leave</span>
-                <span class="meta"><span class="cal-legend-swatch cal-busy"></span> Busy day</span>
-                <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
-              </div>
-              <div class="cal-detail" id="leave-cal-day-detail"></div>
             </div>
           </section>
 
@@ -283,6 +258,32 @@
                 <p class="page-sub">Team availability by channel, plus time-off requests waiting on the front desk.</p>
               </div>
             </div>
+
+            <div class="card">
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Team leave calendar</h3>
+                  <p class="card-sub">Approved barber absences and shop closures. Select a day for details.</p>
+                </div>
+                <div class="card-tools">
+                  <strong id="leave-cal-month-label">—</strong>
+                  <select class="select" id="leave-cal-barber-filter" aria-label="Filter calendar by barber" style="max-width: 190px;">
+                    <option value="">All barbers</option>
+                  </select>
+                  <button class="icon-btn" id="leave-cal-prev" type="button" aria-label="Previous month">&lsaquo;</button>
+                  <button class="icon-btn" id="leave-cal-next" type="button" aria-label="Next month">&rsaquo;</button>
+                </div>
+              </div>
+              <div class="schedule-calendar leave-calendar" id="leave-calendar-grid"></div>
+              <div class="schedule-cal-legend row-wrap" style="margin-top: 12px;">
+                <span class="meta"><span class="cal-legend-swatch cal-open"></span> Open</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-weekly"></span> Closed (weekly)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-closed-holiday"></span> Closed (holiday)</span>
+                <span class="meta"><span class="cal-legend-swatch cal-has-leave"></span> Barber leave</span>
+                <span class="meta"><span class="cal-legend-swatch cal-busy"></span> Busy day</span>
+                <span class="meta"><span class="cal-legend-swatch cal-past"></span> Past</span>
+              </div>
+              <div class="cal-detail" id="leave-cal-day-detail"></div>
 
             <div class="card time-off-section">
               <div class="card-head">
