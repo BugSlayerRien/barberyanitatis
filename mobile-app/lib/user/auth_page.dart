@@ -11,6 +11,7 @@ import 'api_config.dart';
 import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_redirect.dart';
+import 'signup_otp_page.dart';
 import 'auth_user_messages.dart';
 import 'supabase_password_identity.dart';
 import 'user_session.dart';
@@ -336,12 +337,16 @@ class _AuthPageState extends State<AuthPage> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-            content:
-                Text('Registration successful. You can now sign in.')),
+      // No session means Supabase requires email confirmation. Send the user to
+      // the OTP screen instead of dumping them back on Sign In, where the
+      // account would silently refuse to log in until they found the emailed
+      // link. The same email carries a 6-digit code, which is faster and keeps
+      // them inside the app.
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => SignupOtpPage(email: email, fullName: fullName),
+        ),
       );
-      setState(() => _isLogin = true);
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

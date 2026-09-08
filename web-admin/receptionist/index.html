@@ -30,6 +30,11 @@
             <span class="nav-label">Live tracking</span>
           </button>
 
+          <button data-view="refunds" type="button">
+            <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"></path><polyline points="3 3 3 9 9 9"></polyline></svg></span>
+            <span class="nav-label">Refunds</span>
+          </button>
+
           <p class="nav-category">Team</p>
           <button data-view="barbers" type="button">
             <span class="nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg></span>
@@ -246,6 +251,27 @@
                   </div>
                 </div>
                 <div class="list" id="tracking-exclusive-list"></div>
+              </div>
+            </div>
+          </section>
+
+          <section id="refunds-view" hidden>
+            <div class="page-head">
+              <div class="page-head-text">
+                <h2 class="page-title">Refunds</h2>
+                <p class="page-sub">Paid bookings the customer cancelled. Send the money by hand, then mark it sent so the customer is notified.</p>
+              </div>
+              <div class="page-actions">
+                <select class="input" id="refunds-filter">
+                  <option value="pending">Pending</option>
+                  <option value="completed">Completed</option>
+                  <option value="all">All</option>
+                </select>
+              </div>
+            </div>
+            <div class="card">
+              <div class="table-wrap">
+                <table class="table" id="refunds-table"></table>
               </div>
             </div>
           </section>

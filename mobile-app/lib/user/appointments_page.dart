@@ -15,6 +15,7 @@ import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
+import 'ph_phone.dart';
 import 'user_session.dart';
 import 'suggested_appointment_page.dart';
 import 'barber_selection_page.dart';
@@ -1680,9 +1681,11 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
                   onPressed: () {
                     final note = _controller.text.trim();
                     final phone = _phoneController.text.trim();
-                    if (widget.needsPhone && phone.length < 7) {
-                      setState(() => _phoneError =
-                          'Enter a contact number so we can send your refund.');
+                    // Same PH rule as registration. "Any 7+ characters" let a
+                    // number through that the receptionist could not send money
+                    // to, which defeats the point of collecting it.
+                    if (widget.needsPhone && !PhPhone.isValid(phone)) {
+                      setState(() => _phoneError = PhPhone.error);
                       return;
                     }
                     _close({

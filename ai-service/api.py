@@ -1280,6 +1280,20 @@ HAIR_COVERAGE_BALD_MAX = float(os.environ.get("HAIR_COVERAGE_BALD_MAX", "0.010")
 HAIR_COVERAGE_OBSTRUCTED_MAX = float(
     os.environ.get("HAIR_COVERAGE_OBSTRUCTED_MAX", "0.030")
 )
+
+# Coverage alone cannot detect a covered head. MediaPipe's hair segmenter is
+# trained to find hair-shaped regions, so a cloth draped where hair goes is
+# segmented AS hair: a bandana measured 17.6% coverage on a real capture, HIGHER
+# than the same person's actual hair at 12.2%. The give-away is appearance, not
+# area. Measured on real captures:
+#
+#   real hair   median V 40-46,  median S 54-67
+#   bandana     median V 172-234, median S 18-147
+#
+# Human hair -- black, brown, blonde, grey -- is dark in a normal photo. A bright
+# or vividly coloured region where hair should be is a hat, hood or scarf.
+HAIR_MAX_VALUE = float(os.environ.get("HAIR_MAX_VALUE", "150"))
+HAIR_MAX_SATURATION = float(os.environ.get("HAIR_MAX_SATURATION", "130"))
 TEXTURE_CURLY_MAX = 280.0
 # Fraction of image pixels with hair mask above threshold (very low = bald/buzzed).
 BALD_MASK_COVERAGE_MAX = 0.012
@@ -1826,6 +1840,35 @@ def _detector_yaw(image_path: Path) -> float | None:
         return None
 
 
+def hair_region_looks_like_hair(image_path: Path) -> bool | None:
+    """False when the 'hair' region is too bright or too vivid to be hair.
+
+    Returns None when it cannot be judged (no mask, unreadable image).
+    """
+    img = cv2.imread(str(image_path))
+    mask = segment_hair_mask(image_path)
+    if img is None or mask is None:
+        return None
+    hair = mask > 0.5
+    if int(np.count_nonzero(hair)) < 200:
+        return None
+
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    value = float(np.median(hsv[:, :, 2][hair].astype(np.float32)))
+    saturation = float(np.median(hsv[:, :, 1][hair].astype(np.float32)))
+    ok = value <= HAIR_MAX_VALUE and saturation <= HAIR_MAX_SATURATION
+    if not ok:
+        logger.info(
+            "hair region rejected as non-hair: medianV=%.0f (max %.0f) "
+            "medianS=%.0f (max %.0f)",
+            value,
+            HAIR_MAX_VALUE,
+            saturation,
+            HAIR_MAX_SATURATION,
+        )
+    return ok
+
+
 def face_yaw_direction(image_path: Path) -> dict[str, object]:
     """Which way the head is turned, from landmark geometry.
 
@@ -1975,6 +2018,13 @@ async def analyze_face(
                 hair_visibility = "none"
             elif mask_coverage < HAIR_COVERAGE_OBSTRUCTED_MAX:
                 hair_visibility = "obstructed"
+            else:
+                # Enough area, but does it actually look like hair? Majority vote
+                # across the three captures so one odd angle cannot decide it.
+                verdicts = [hair_region_looks_like_hair(p) for p in paths]
+                judged = [v for v in verdicts if v is not None]
+                if judged and sum(judged) * 2 <= len(judged):
+                    hair_visibility = "obstructed"
 
         if hair_visibility != "ok":
             logger.info(

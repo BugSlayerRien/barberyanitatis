@@ -2,6 +2,7 @@ const views = {
   dashboard: document.getElementById("dashboard-view"),
   tracking: document.getElementById("tracking-view"),
   barbers: document.getElementById("barbers-view"),
+  refunds: document.getElementById("refunds-view"),
 };
 
 const state = {
@@ -86,6 +87,9 @@ navButtons.forEach((button) => {
     applyGlobalSearch();
     if (view === "barbers") {
       loadBarberUnavailabilityRequests();
+    }
+    if (view === "refunds") {
+      loadRefunds();
     }
   });
 });
@@ -1766,5 +1770,99 @@ init();
 window.addEventListener("pageshow", (event) => {
   if (event.persisted) {
     requireReceptionist();
+  }
+});
+
+// --- Refunds -----------------------------------------------------------------
+// Cancelling a PAID booking raises a Pending row (booking.php 'cancel'). There
+// is no gateway refund in this system: the desk sends the money by hand and
+// marks it sent here, which is what notifies the customer.
+function escapeRefundText(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+}
+
+function renderRefunds(rows) {
+  const table = document.getElementById("refunds-table");
+  if (!table) return;
+
+  if (!rows.length) {
+    table.innerHTML =
+      '<tbody><tr><td class="meta">No refunds to show for this filter.</td></tr></tbody>';
+    return;
+  }
+
+  const body = rows
+    .map((row) => {
+      const pending = row.status !== "Completed";
+      // A missing number is the one thing that blocks the desk, so call it out
+      // rather than rendering an empty cell.
+      const phone = row.contactPhone
+        ? escapeRefundText(row.contactPhone)
+        : '<span class="status status--warning">No number on file</span>';
+      const action = pending
+        ? `<button class="btn primary btn-refund-complete" data-id="${row.refundId}" type="button">Mark sent</button>`
+        : `<span class="meta">Sent${row.completedBy ? ` by ${escapeRefundText(row.completedBy)}` : ""}</span>`;
+      return `<tr>
+        <td>#${Number(row.appointmentId)}</td>
+        <td>${escapeRefundText(row.customerName)}<div class="meta">${escapeRefundText(row.customerEmail)}</div></td>
+        <td>${phone}</td>
+        <td>₱${Number(row.amount || 0).toFixed(2)}</td>
+        <td>${escapeRefundText(row.reason)}</td>
+        <td>${escapeRefundText(row.appointmentDate)} ${escapeRefundText(row.startTime)}</td>
+        <td>${action}</td>
+      </tr>`;
+    })
+    .join("");
+
+  table.innerHTML = `
+    <thead><tr>
+      <th>Booking</th><th>Customer</th><th>Contact</th><th>Amount</th>
+      <th>Reason</th><th>Was scheduled</th><th>Action</th>
+    </tr></thead>
+    <tbody>${body}</tbody>`;
+}
+
+async function loadRefunds() {
+  const status = document.getElementById("refunds-filter")?.value || "pending";
+  try {
+    const data = await postJson(apiUrl("receptionist.php"), {
+      action: "listRefunds",
+      status,
+    });
+    renderRefunds(data.refunds || []);
+  } catch (error) {
+    const table = document.getElementById("refunds-table");
+    if (table) {
+      table.innerHTML = `<tbody><tr><td class="meta">Could not load refunds: ${escapeRefundText(error.message)}</td></tr></tbody>`;
+    }
+  }
+}
+
+document.getElementById("refunds-filter")?.addEventListener("change", loadRefunds);
+
+document.getElementById("refunds-table")?.addEventListener("click", async (event) => {
+  const target = event.target;
+  if (!target.classList.contains("btn-refund-complete")) return;
+  const refundId = Number(target.dataset.id);
+  if (!refundId) return;
+
+  // Irreversible from the desk's point of view: it notifies the customer that
+  // their money has been sent, so confirm before firing.
+  if (!window.confirm("Mark this refund as sent? The customer will be notified.")) {
+    return;
+  }
+
+  target.disabled = true;
+  try {
+    await postJson(apiUrl("receptionist.php"), {
+      action: "completeRefund",
+      refundId,
+      completedBy: sessionStorage.getItem("staffName") || "Receptionist",
+    });
+    await loadRefunds();
+  } catch (error) {
+    target.disabled = false;
+    window.alert(`Could not mark refund as sent: ${error.message}`);
   }
 });

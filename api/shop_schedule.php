@@ -678,7 +678,15 @@ function shop_max_reschedules_per_appointment(): int
 
 function shop_reschedule_notice_hours(): int
 {
-    return 24;
+    // 0 = no minimum notice. The shop does not actually enforce a lead time for
+    // reschedules, but this returned 24, so a customer rescheduling a booking
+    // less than a day out was refused with
+    // "Reschedule at least 24 hours before your appointment."
+    //
+    // The check below is skipped entirely at 0; raise this if the shop later
+    // wants a real cutoff. The separate "at least 1 hour from now" rule in
+    // booking.php still prevents rescheduling into the past.
+    return 0;
 }
 
 function shop_window_end_date(?int $windowDays = null): string
@@ -745,11 +753,12 @@ function can_customer_reschedule_appointment(array $appt, string $paymentState):
         ];
     }
 
-    $noticeDeadline = shop_now()->modify('+' . shop_reschedule_notice_hours() . ' hours');
-    if ($currentStart < $noticeDeadline) {
+    $noticeHours = shop_reschedule_notice_hours();
+    $noticeDeadline = shop_now()->modify('+' . $noticeHours . ' hours');
+    if ($noticeHours > 0 && $currentStart < $noticeDeadline) {
         return [
             'allowed' => false,
-            'reason' => 'Reschedule at least ' . shop_reschedule_notice_hours() . ' hours before your appointment.',
+            'reason' => 'Reschedule at least ' . $noticeHours . ' hours before your appointment.',
             'remaining' => $remaining,
         ];
     }
