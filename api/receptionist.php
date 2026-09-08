@@ -77,7 +77,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? 'dashboard';
 
-$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin'];
+$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin', 'listRefunds', 'completeRefund'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }

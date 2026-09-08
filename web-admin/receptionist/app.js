@@ -87,6 +87,9 @@ navButtons.forEach((button) => {
     applyGlobalSearch();
     if (view === "barbers") {
       loadBarberUnavailabilityRequests();
+      // The leave calendar lives on this page now, so load it here rather than
+      // with Live tracking where its markup used to sit.
+      loadBarberLeaveCalendar();
     }
     if (view === "refunds") {
       loadRefunds();
