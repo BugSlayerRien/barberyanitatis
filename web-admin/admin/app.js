@@ -1347,6 +1347,7 @@ function renderHaircuts() {
       { key: "style_code", label: "Code" },
       { key: "gender", label: "Gender" },
       { key: "texture_list", label: "Texture" },
+      { key: "category", label: "Category" },
       { key: "variant_count", label: "Variants" },
       { key: "overlay_status", label: "Overlays" },
       { key: "is_active", label: "Active" },
@@ -1536,6 +1537,19 @@ function openHaircutEditor(hairstyle, variants = []) {
          so saving preserves whatever value the row already has instead of
          silently rewriting it to "Unisex". -->
     <input type="hidden" id="hc-gender" value="${hairstyle?.gender ?? "Unisex"}" />
+    <label>Category
+      <select class="select" id="hc-category">
+        ${[
+          ["formal", "Formal — clean, professional cuts"],
+          ["alternative", "Alternative — bold, textured cuts"],
+        ]
+          .map(
+            ([value, text]) =>
+              `<option value="${value}" ${(hairstyle?.category ?? "alternative") === value ? "selected" : ""}>${text}</option>`,
+          )
+          .join("")}
+      </select>
+    </label>
     <label>Difficulty
       <select class="select" id="hc-difficulty">
         ${["Easy", "Medium", "Hard"]
@@ -1580,6 +1594,7 @@ async function saveHaircutEditor() {
     styleCode: document.getElementById("hc-code")?.value?.trim() || "",
     description: document.getElementById("hc-description")?.value?.trim() || "",
     gender: document.getElementById("hc-gender")?.value || "Unisex",
+    category: document.getElementById("hc-category")?.value || "alternative",
     difficulty: document.getElementById("hc-difficulty")?.value || "Medium",
     maintenance: document.getElementById("hc-maintenance")?.value || "Medium",
     isActive: Number(document.getElementById("hc-active")?.value ?? 1) !== 0,

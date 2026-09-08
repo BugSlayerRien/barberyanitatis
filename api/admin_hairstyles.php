@@ -14,10 +14,18 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 try {
     $pdo = get_db_connection();
 
+    // Category decides which Library section a cut appears in. It is stored per
+    // style (see hairstyle_categories_and_catalog.sql) so a haircut cannot drift
+    // between sections between requests.
+    $normalizeCategory = static function ($raw): string {
+        $value = strtolower(trim((string)$raw));
+        return in_array($value, ['formal', 'alternative'], true) ? $value : 'alternative';
+    };
+
     if ($method === 'GET') {
         $stmt = $pdo->query(<<<'SQL'
             SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
-                   hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.created_at,
+                   hs.gender, hs.difficulty, hs.maintenance, hs.category, hs.is_active, hs.created_at,
                    COUNT(hv.variant_id) AS variant_count,
                    -- Textures live on the variants, not the style. Aggregate them
                    -- so the admin list can filter by texture without a second query.
@@ -28,7 +36,7 @@ try {
               FROM hairstyles hs
               LEFT JOIN hairstyle_variants hv ON hv.hairstyle_id = hs.hairstyle_id
              GROUP BY hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
-                      hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.created_at
+                      hs.gender, hs.difficulty, hs.maintenance, hs.category, hs.is_active, hs.created_at
              ORDER BY hs.style_name
             SQL
         );
@@ -62,7 +70,7 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active, created_at
+            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, category, is_active, created_at
              FROM hairstyles WHERE hairstyle_id = :id LIMIT 1'
         );
         $stmt->execute([':id' => $hairstyleID]);
@@ -104,8 +112,8 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, is_active)
-             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :is_active)
+            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active)
+             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active)
              RETURNING hairstyle_id'
         );
         $stmt->execute([
@@ -115,6 +123,7 @@ try {
             ':gender' => normalize_hairstyle_gender($input['gender'] ?? 'Unisex'),
             ':difficulty' => normalize_hairstyle_tier($input['difficulty'] ?? 'Medium', ['Easy', 'Medium', 'Hard']),
             ':maintenance' => normalize_hairstyle_tier($input['maintenance'] ?? 'Medium', ['Low', 'Medium', 'High']),
+            ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
             ':is_active' => !empty($input['isActive']) && (string)$input['isActive'] !== '0',
         ]);
 
@@ -138,6 +147,7 @@ try {
                     gender = :gender,
                     difficulty = :difficulty,
                     maintenance = :maintenance,
+                    category = :category,
                     is_active = :is_active';
         $params = [
             ':style_name' => $styleName,
@@ -145,6 +155,7 @@ try {
             ':gender' => normalize_hairstyle_gender($input['gender'] ?? 'Unisex'),
             ':difficulty' => normalize_hairstyle_tier($input['difficulty'] ?? 'Medium', ['Easy', 'Medium', 'Hard']),
             ':maintenance' => normalize_hairstyle_tier($input['maintenance'] ?? 'Medium', ['Low', 'Medium', 'High']),
+            ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
             ':is_active' => !empty($input['isActive']) && (string)$input['isActive'] !== '0',
             ':id' => $hairstyleID,
         ];

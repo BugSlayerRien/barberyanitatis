@@ -301,17 +301,11 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
               variantId: UserSession.selectedVariantId!,
             );
           } catch (e) {
+            // Silent. This only matters when the customer actually
+            // generated an AI try-on for this style; booking a Library
+            // haircut with no generated preview has nothing to link, so
+            // the warning was firing on a normal, successful booking.
             debugPrint('Preview attach failed: $e');
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text(
-                    'Booking saved, but preview photos could not be linked. '
-                    'Your barber may see the default style images.',
-                  ),
-                ),
-              );
-            }
           }
         }
       }

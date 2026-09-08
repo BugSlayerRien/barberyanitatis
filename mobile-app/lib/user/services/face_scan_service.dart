@@ -260,13 +260,15 @@ class FaceScanService {
     String category = '',
   }) {
     final style = row['style_name']?.toString() ?? 'This style';
-    final pct = row['match_percent'] ?? row['matchPercent'];
     final rank = row['match_rank_label']?.toString() ?? row['matchRankLabel']?.toString() ?? '';
     final desc = row['description']?.toString().trim() ?? '';
-    final pctText = pct != null ? ' (${pct}% match)' : '';
     final rankText = rank.isNotEmpty ? ' $rank.' : '';
-    var text =
-        '$style fits your $faceShape face and $hairTexture hair$pctText.$rankText';
+    // No "(88% match)". The percentage is derived from the variant's stored
+    // confidence_score, which is 0.88 for nearly every seeded row, so almost
+    // every style displayed the same number and read as hardcoded. The rank
+    // label ("Top match", "Strong match") is relative to the other results and
+    // is the honest signal to show.
+    var text = '$style fits your $faceShape face and $hairTexture hair.$rankText';
     if (category == 'formal') {
       text += ' Clean, professional finish.';
     } else if (category == 'alternative') {

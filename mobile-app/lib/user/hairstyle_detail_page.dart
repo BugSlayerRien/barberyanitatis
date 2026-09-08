@@ -502,8 +502,19 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       if (!mounted) {
         return;
       }
+      // Booking is NOT failing here -- the barber picker that follows is a full
+      // booking path. The old wording said "Could not continue booking", which
+      // read as an error immediately before the flow carried on working.
+      //
+      // BookingSlotsService.fetchBestSuggestion already handles its own network
+      // and parse errors and reports them through result.errorMessage, so
+      // reaching this catch means something unexpected threw. Log it rather than
+      // swallowing it, and tell the user only what actually changed for them.
+      debugPrint('Suggested-slot path threw, falling back to barber picker: $e');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not continue booking. Please pick a barber manually.')),
+        const SnackBar(
+          content: Text("Couldn't load a suggested time. Choose a barber instead."),
+        ),
       );
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => const BarberSelectionPage()),

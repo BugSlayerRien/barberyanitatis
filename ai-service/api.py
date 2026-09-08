@@ -389,14 +389,14 @@ def _segment_hair_mask_uncached(image_path: Path) -> np.ndarray | None:
             hair = cv2.resize(
                 hair, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_LINEAR
             )
-        # A trace of hair pixels means the model found nothing usable (bald, or a
-        # failed segmentation); let the caller fall back rather than measure noise.
-        if float(np.mean(hair > 0.5)) < 0.002:
-            return None
-        # Light smoothing removes single-pixel speckle at the hairline without
-        # pulling the boundary out into the background the way dilation did.
-        hair = cv2.GaussianBlur(hair, (5, 5), 0)
-        return np.clip(hair, 0.0, 1.0)
+        # A near-empty mask is a RESULT, not a failure: the model ran fine and
+        # found almost no hair. Returning None here made the caller fall back to
+        # the landmark hull, which draws a head-shaped region regardless and then
+        # measured scalp and background -- so a bald customer, or one wearing a
+        # cap, got confident-looking texture and colour invented from whatever
+        # was behind them. Hand back the (almost empty) mask instead and let
+        # coverage speak for itself; None now means only "segmentation failed".
+        return np.clip(cv2.GaussianBlur(hair, (5, 5), 0), 0.0, 1.0)
     except Exception:
         logger.exception("Hair segmentation failed; using geometric fallback.")
         return None
@@ -1269,6 +1269,17 @@ FACE_YAW_PROFILE_MIN = float(os.environ.get("FACE_YAW_PROFILE_MIN", "0.12"))
 # on segmented masks were 40-46, so the previous cutoff of 45 sat exactly inside
 # the real range and labelled black hair "dark brown".
 HAIR_COLOR_BLACK_MAX_V = float(os.environ.get("HAIR_COLOR_BLACK_MAX_V", "68"))
+
+# Hair coverage (fraction of frame) below which we stop claiming a texture.
+# Separates two cases we previously could not tell apart:
+#   * genuinely little/no hair  -> bald or very closely shaved
+#   * hair present but hidden   -> cap, hood, headscarf, hand, hair tied back
+# Below BALD, there is nothing to measure. Between BALD and OBSTRUCTED the face
+# was found but far too little hair is visible for the numbers to mean anything.
+HAIR_COVERAGE_BALD_MAX = float(os.environ.get("HAIR_COVERAGE_BALD_MAX", "0.010"))
+HAIR_COVERAGE_OBSTRUCTED_MAX = float(
+    os.environ.get("HAIR_COVERAGE_OBSTRUCTED_MAX", "0.030")
+)
 TEXTURE_CURLY_MAX = 280.0
 # Fraction of image pixels with hair mask above threshold (very low = bald/buzzed).
 BALD_MASK_COVERAGE_MAX = 0.012
@@ -1952,6 +1963,28 @@ async def analyze_face(
         )
         hair_texture, hair_texture_score = detect_hair_texture(paths)
         hair_color = detect_hair_color(paths)
+
+        # Do not report a texture we cannot actually see. With a real hair mask
+        # the coverage number is trustworthy, so use it to say "no hair" or
+        # "hair is covered" instead of inventing Straight/Wavy/Curly from a
+        # handful of pixels.
+        segmented = hair_mask_is_segmented(front_path)
+        hair_visibility = "ok"
+        if segmented:
+            if mask_coverage < HAIR_COVERAGE_BALD_MAX:
+                hair_visibility = "none"
+            elif mask_coverage < HAIR_COVERAGE_OBSTRUCTED_MAX:
+                hair_visibility = "obstructed"
+
+        if hair_visibility != "ok":
+            logger.info(
+                "hair visibility=%s coverage=%.4f; suppressing texture claim",
+                hair_visibility,
+                mask_coverage,
+            )
+            hair_texture = ""
+            hair_texture_score = 0.0
+            hair_color = {"label": "", "rgb": None}
         achievable = styles_for_length(length_level)
         top_styles = recommend_styles(shape, length_level)
 
@@ -1965,7 +1998,11 @@ async def analyze_face(
             "hair_mask_coverage": round(mask_coverage, 4),
             # "model" = per-pixel segmentation; "geometric" = landmark-hull
             # fallback, whose colour/texture numbers are much less reliable.
-            "hair_mask_source": "model" if hair_mask_is_segmented(front_path) else "geometric",
+            "hair_mask_source": "model" if segmented else "geometric",
+            # "ok" | "none" (bald/shaved) | "obstructed" (cap, hood, tied back).
+            # Anything other than "ok" means hair_texture/hair_color are empty
+            # on purpose and the app should ask rather than guess.
+            "hair_visibility": hair_visibility,
             "no_hair_detected": no_hair_detected,
             "hair_color": hair_color.get("label", ""),
             "hair_color_rgb": hair_color.get("rgb"),

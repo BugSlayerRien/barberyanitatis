@@ -27,7 +27,7 @@ class AppBottomNavBar extends StatelessWidget {
       onTap: onTap,
       items: [
         const BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-        const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Appointments'),
+        const BottomNavigationBarItem(icon: Icon(Icons.calendar_today), label: 'Bookings'),
         BottomNavigationBarItem(
           icon: Container(
             width: 48,

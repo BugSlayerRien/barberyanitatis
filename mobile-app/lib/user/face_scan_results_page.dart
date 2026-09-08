@@ -1124,7 +1124,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       body: _error != null ? _errorView() : _content(),
       floatingActionButton: widget.kioskMode
           ? null
-          : const AiChatbotFab(heroTag: 'results_ai_chat_fab'),
+          : const AiChatbotFab(heroTag: 'results_ai_chat_fab', bottomPadding: 8),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: widget.kioskMode
           ? null

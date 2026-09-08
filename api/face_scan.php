@@ -497,6 +497,10 @@ try {
             'hairTextureScore' => $data['hair_texture_score'] ?? null,
             'hairMaskCoverage' => $data['hair_mask_coverage'] ?? null,
             'noHairDetected' => (bool)($data['no_hair_detected'] ?? false),
+            // 'ok' | 'none' (bald/shaved) | 'obstructed' (cap, hood, tied back).
+            // Anything other than 'ok' means the sidecar deliberately returned
+            // no texture/colour rather than guessing from a few pixels.
+            'hairVisibility' => (string)($data['hair_visibility'] ?? 'ok'),
             'hairColor' => (string)($data['hair_color'] ?? ''),
             'hairColorRgb' => $data['hair_color_rgb'] ?? null,
             'topStyles' => $data['top_styles'] ?? [],

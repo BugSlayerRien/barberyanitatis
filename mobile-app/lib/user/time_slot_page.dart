@@ -935,16 +935,10 @@ Keep the total response under 24 words.
                               variantId: UserSession.selectedVariantId!,
                             );
                           } catch (e) {
+                            // Silent: booking a Library haircut with no
+                            // generated preview has nothing to link, so this
+                            // warned on a perfectly successful booking.
                             debugPrint('Preview attach failed: $e');
-                            if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Booking saved, but preview photos could not be linked.',
-                                  ),
-                                ),
-                              );
-                            }
                           }
                         }
                       }
