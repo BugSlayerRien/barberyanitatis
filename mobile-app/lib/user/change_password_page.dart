@@ -332,16 +332,6 @@ class _ChangePasswordPageState extends State<ChangePasswordPage> {
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                   ),
           ),
-          if (!_hasPasswordIdentity) ...[
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: _submitting ? null : _sendPasswordSetupEmail,
-              child: const Text(
-                'Email me a password setup link instead',
-                style: TextStyle(color: Colors.white70),
-              ),
-            ),
-          ],
         ],
       ),
     );

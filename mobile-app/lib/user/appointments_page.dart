@@ -45,8 +45,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
   int _selectedTab = 0;
   int _upcomingPage = 1;
   int _completedPage = 1;
+  int _cancelledPage = 1;
   List<Map<String, dynamic>> _upcomingAppointments = [];
   List<Map<String, dynamic>> _completedAppointments = [];
+  // Cancelled and no-show were filed under "Completed", which read as if the
+  // customer had actually received the service. They get their own tab.
+  List<Map<String, dynamic>> _cancelledAppointments = [];
   bool _loading = true;
   String? _error;
   final Set<int> _processingAppointmentIds = <int>{};
@@ -122,6 +126,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
 
       final upcoming = <Map<String, dynamic>>[];
       final completed = <Map<String, dynamic>>[];
+      final cancelled = <Map<String, dynamic>>[];
 
       for (final appt in items) {
         final services = (appt['services'] as List<dynamic>? ?? []);
@@ -226,7 +231,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         if (status == 'Completed') {
           completed.add(mapped);
         } else if (status == 'Cancelled' || status == 'NoShow') {
-          completed.add(mapped);
+          cancelled.add(mapped);
         } else {
           upcoming.add(mapped);
         }
@@ -236,8 +241,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       setState(() {
         _upcomingAppointments = upcoming;
         _completedAppointments = completed;
+        _cancelledAppointments = cancelled;
         _upcomingPage = 1;
         _completedPage = 1;
+        _cancelledPage = 1;
         _loading = false;
       });
     } on CustomerApiException catch (e) {
@@ -283,8 +290,16 @@ class _AppointmentsPageState extends State<AppointmentsPage>
   @override
   Widget build(BuildContext context) {
     final allAppointments =
-        _selectedTab == 0 ? _upcomingAppointments : _completedAppointments;
-    final currentPage = _selectedTab == 0 ? _upcomingPage : _completedPage;
+        _selectedTab == 0
+            ? _upcomingAppointments
+            : _selectedTab == 1
+                ? _completedAppointments
+                : _cancelledAppointments;
+    final currentPage = _selectedTab == 0
+        ? _upcomingPage
+        : _selectedTab == 1
+            ? _completedPage
+            : _cancelledPage;
     final totalPages = _totalPages(allAppointments.length);
     final safePage = currentPage.clamp(1, totalPages);
     final appointments = _paginateAppointments(allAppointments, safePage);
@@ -377,6 +392,36 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => setState(() {
+                          _selectedTab = 2;
+                        }),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 220),
+                          curve: Curves.easeInOut,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _selectedTab == 2
+                                ? Colors.white
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(
+                            'Cancelled',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _selectedTab == 2
+                                  ? Colors.black
+                                  : Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -392,7 +437,9 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                   child: Text(
                     _selectedTab == 0
                         ? 'No upcoming appointments.'
-                        : 'No completed appointments.',
+                        : _selectedTab == 1
+                            ? 'No completed appointments.'
+                            : 'No cancelled appointments.',
                     style: const TextStyle(color: Colors.white70),
                   ),
                 )
@@ -880,8 +927,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                     setState(() {
                       if (_selectedTab == 0) {
                         _upcomingPage = page;
-                      } else {
+                      } else if (_selectedTab == 1) {
                         _completedPage = page;
+                      } else {
+                        _cancelledPage = page;
                       }
                     });
                   },

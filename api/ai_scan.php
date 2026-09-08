@@ -361,9 +361,11 @@ function build_rule_based_fit_reason(array $row, string $faceShape, string $hair
 
     $lead = $style;
     if ($faceShape !== '' && $hairTexture !== '') {
-        $lead .= " is a {$pct}% match for your {$faceShape} face and {$hairTexture} hair";
+        // Percentage removed: it derives from confidence_score, which is 0.88
+        // on nearly every seeded variant, so it read as a hardcoded number.
+        $lead .= " suits your {$faceShape} face and {$hairTexture} hair";
     } else {
-        $lead .= " scores {$pct}% for your features";
+        $lead .= " works with your features";
     }
     if ($rankLabel !== '') {
         $lead .= " ({$rankLabel} in our catalog)";
