@@ -1185,120 +1185,30 @@ class _AppointmentsPageState extends State<AppointmentsPage>
   }
 
   Future<void> _showCancelModal(Map<String, dynamic> appointment) async {
-    final reasons = [
-      'Scheduling conflict',
-      'Found another barber',
-      'Too far/transport issues',
-      'Not feeling well',
-      'Other',
-    ];
-    String selected = reasons.first;
-    final controller = TextEditingController();
-
-    final confirmed = await showModalBottomSheet<bool>(
+    // The sheet owns its own controller and selection state.
+    //
+    // Previously the controller was created here and disposed immediately after
+    // the sheet's future completed. showModalBottomSheet returns as soon as
+    // pop() is called, while the route is still animating out and its TextField
+    // is still mounted and listening to that controller -- disposing it then
+    // tore down a widget that still had dependents, which is the
+    // '_dependents.isEmpty' assertion seen on cancel. Letting the sheet's own
+    // State dispose it ties the lifetime to the widget that actually uses it.
+    //
+    // It also fixes the reason dropdown, which never repainted the selected
+    // value because the old builder had no setState.
+    final reason = await showModalBottomSheet<String>(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF111111),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('Cancel Appointment',
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16)),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: selected,
-              dropdownColor: const Color(0xFF1A1A1A),
-              iconEnabledColor: Colors.white,
-              decoration: const InputDecoration(
-                labelText: 'Reason',
-                labelStyle: TextStyle(color: Colors.white70),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white)),
-              ),
-              items: reasons
-                  .map((reason) => DropdownMenuItem(
-                      value: reason,
-                      child: Text(reason,
-                          style: const TextStyle(color: Colors.white))))
-                  .toList(),
-              onChanged: (value) {
-                if (value != null) {
-                  selected = value;
-                }
-              },
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: controller,
-              maxLines: 2,
-              style: const TextStyle(color: Colors.white),
-              decoration: const InputDecoration(
-                hintText: 'Optional note',
-                hintStyle: TextStyle(color: Colors.white54),
-                enabledBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white24)),
-                focusedBorder: OutlineInputBorder(
-                    borderSide: BorderSide(color: Colors.white)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton(
-                    onPressed: () {
-                      FocusScope.of(ctx).unfocus();
-                      Navigator.of(ctx).pop(false);
-                    },
-                    style:
-                        OutlinedButton.styleFrom(foregroundColor: Colors.white),
-                    child: const Text('Keep'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton(
-                    // Drop focus before popping. Popping this sheet while the
-                    // note TextField still holds focus (keyboard open) tears the
-                    // focus/InheritedWidget tree down in the same frame as the
-                    // route, which trips a '_dependents.isEmpty' assertion in
-                    // the framework.
-                    onPressed: () {
-                      FocusScope.of(ctx).unfocus();
-                      Navigator.of(ctx).pop(true);
-                    },
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black),
-                    child: const Text('Cancel Appointment'),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+      builder: (ctx) => const _CancelAppointmentSheet(),
     );
 
-    if (confirmed != true) {
-      controller.dispose();
-      return;
-    }
-
-    final reason = selected == 'Other' && controller.text.trim().isNotEmpty
-        ? controller.text.trim()
-        : selected;
-    controller.dispose();
+    if (reason == null || reason.isEmpty) return;
+    if (!mounted) return;
     await _cancelAppointment(appointment, reason);
   }
 
@@ -1567,6 +1477,129 @@ class _AppointmentsPageState extends State<AppointmentsPage>
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Bottom sheet for cancelling an appointment. Owns the note controller so it
+/// is disposed with the widget tree that uses it, not by the caller.
+class _CancelAppointmentSheet extends StatefulWidget {
+  const _CancelAppointmentSheet();
+
+  @override
+  State<_CancelAppointmentSheet> createState() =>
+      _CancelAppointmentSheetState();
+}
+
+class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
+  static const _reasons = [
+    'Scheduling conflict',
+    'Found another barber',
+    'Too far/transport issues',
+    'Not feeling well',
+    'Other',
+  ];
+
+  final _controller = TextEditingController();
+  String _selected = _reasons.first;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _close(String? result) {
+    // Drop focus before popping: tearing the focus tree down in the same frame
+    // as the route is what trips the framework assertion.
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        20,
+        16,
+        20,
+        24 + MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Cancel Appointment',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16)),
+          const SizedBox(height: 12),
+          DropdownButtonFormField<String>(
+            value: _selected,
+            dropdownColor: const Color(0xFF1A1A1A),
+            iconEnabledColor: Colors.white,
+            decoration: const InputDecoration(
+              labelText: 'Reason',
+              labelStyle: TextStyle(color: Colors.white70),
+              enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24)),
+              focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white)),
+            ),
+            items: _reasons
+                .map((reason) => DropdownMenuItem(
+                    value: reason,
+                    child: Text(reason,
+                        style: const TextStyle(color: Colors.white))))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) setState(() => _selected = value);
+            },
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _controller,
+            maxLines: 2,
+            style: const TextStyle(color: Colors.white),
+            decoration: const InputDecoration(
+              hintText: 'Optional note',
+              hintStyle: TextStyle(color: Colors.white54),
+              enabledBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white24)),
+              focusedBorder: OutlineInputBorder(
+                  borderSide: BorderSide(color: Colors.white)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => _close(null),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                  child: const Text('Keep'),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    final note = _controller.text.trim();
+                    _close(
+                      _selected == 'Other' && note.isNotEmpty ? note : _selected,
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black),
+                  child: const Text('Cancel Appointment'),
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

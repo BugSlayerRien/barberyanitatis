@@ -16,13 +16,13 @@ class HairTextureOnboarding extends StatefulWidget {
 }
 
 class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
-  String _selected = 'Straight';
+  String? _selected;
   bool _saving = false;
 
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
-      await UserSession.savePreferredHairTexture(_selected);
+      await UserSession.savePreferredHairTexture(_selected!);
 
       final userId = UserSession.userId;
       if (userId != null && userId > 0) {
@@ -30,7 +30,7 @@ class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
           'action': 'update',
           'userID': userId,
           'fullName': UserSession.fullName ?? 'Customer',
-          'hairTexture': _selected,
+          'hairTexture': _selected!,
         });
       }
 
@@ -118,7 +118,12 @@ class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
                   }),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _saving ? null : _save,
+                    // Disabled until a choice is made. There is no pre-selected
+                    // option any more: defaulting to "Straight" meant a
+                    // distracted tap on Continue silently saved a texture the
+                    // user never picked, and that value then drove every
+                    // recommendation and fit badge.
+                    onPressed: (_saving || _selected == null) ? null : _save,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,
                       foregroundColor: Colors.black,
@@ -132,6 +137,18 @@ class _HairTextureOnboardingState extends State<HairTextureOnboarding> {
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
                           )
                         : const Text('Continue', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(height: 4),
+                  // Skip is a real answer: "I don't know" is common, and
+                  // blocking the app behind this question is worse than having
+                  // no texture. The Library then shows a "set your hair type"
+                  // prompt instead of silently showing no fit guidance.
+                  TextButton(
+                    onPressed: _saving ? null : widget.onCompleted,
+                    child: const Text(
+                      "Skip — I'm not sure",
+                      style: TextStyle(color: Colors.white54, fontSize: 13),
+                    ),
                   ),
                 ],
               ),

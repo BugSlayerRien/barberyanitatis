@@ -178,6 +178,77 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     }
   }
 
+  /// Says what the fit badges are based on, and how to improve it.
+  ///
+  /// The Library is deliberately NOT gated behind a scan -- forcing the scanner
+  /// on every visit would make browsing unusable. The onboarding hair type
+  /// drives the badges instead, and this strip states which source is in use,
+  /// so a self-reported guess is never mistaken for a measurement and "no
+  /// badge" is never mistaken for "every style suits you".
+  Widget _buildTextureBasisBanner() {
+    final source = HairCompatibility.textureSource();
+    final texture = HairCompatibility.userTexture();
+
+    final IconData icon;
+    final String text;
+    final String action;
+    switch (source) {
+      case TextureSource.scan:
+        icon = Icons.verified_outlined;
+        text = 'Fit guidance is based on your scan ($texture hair).';
+        action = 'Rescan';
+        break;
+      case TextureSource.selfReported:
+        icon = Icons.info_outline;
+        text = 'Fit guidance uses the hair type you chose ($texture). '
+            'Scan to confirm it.';
+        action = 'Scan';
+        break;
+      case TextureSource.none:
+        icon = Icons.help_outline;
+        text = 'Set your hair type to see which cuts suit you.';
+        action = 'Set';
+        break;
+    }
+
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AiFaceScanPage()),
+      ),
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1A1A),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: Colors.white54),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: const TextStyle(
+                    color: Colors.white70, fontSize: 12, height: 1.3),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              action,
+              style: const TextStyle(
+                  color: Color(0xFFA99941),
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final inSearch = _searchQuery.isNotEmpty;
@@ -210,6 +281,8 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
               'Browse every haircut in the library if the recommended styles aren\'t for you.',
               style: TextStyle(color: Colors.white54, fontSize: 12, height: 1.4),
             ),
+            const SizedBox(height: 12),
+            _buildTextureBasisBanner(),
             const SizedBox(height: 16),
 
             TextField(
