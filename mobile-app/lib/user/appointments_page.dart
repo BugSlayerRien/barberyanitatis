@@ -1246,23 +1246,37 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     //
     // It also fixes the reason dropdown, which never repainted the selected
     // value because the old builder had no setState.
-    final reason = await showModalBottomSheet<String>(
+    // Only ask for a number when there is money to send back and the profile
+    // has none. Unpaid cancellations should not be interrogated.
+    final isPaid = (appointment['paymentState']?.toString() ?? '')
+            .toLowerCase()
+            .contains('paid') ||
+        (appointment['isPaid'] == true);
+    final hasPhone = (UserSession.phone ?? '').trim().length >= 7;
+
+    final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
       backgroundColor: const Color(0xFF111111),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => const _CancelAppointmentSheet(),
+      builder: (ctx) => _CancelAppointmentSheet(needsPhone: isPaid && !hasPhone),
     );
 
-    if (reason == null || reason.isEmpty) return;
+    final reason = result?['reason'] ?? '';
+    if (reason.isEmpty) return;
     if (!mounted) return;
-    await _cancelAppointment(appointment, reason);
+    await _cancelAppointment(
+      appointment,
+      reason,
+      contactPhone: result?['contactPhone'],
+    );
   }
 
   Future<void> _cancelAppointment(
-      Map<String, dynamic> appointment, String reason) async {
+      Map<String, dynamic> appointment, String reason,
+      {String? contactPhone}) async {
     final appointmentId = appointment['appointmentId'];
     if (appointmentId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1282,6 +1296,8 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         'appointmentID': appointmentId,
         'userID': UserSession.userId,
         'reason': reason,
+        if (contactPhone != null && contactPhone.trim().isNotEmpty)
+          'contactPhone': contactPhone.trim(),
       });
       if (!mounted) {
         return;
@@ -1534,7 +1550,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
 /// Bottom sheet for cancelling an appointment. Owns the note controller so it
 /// is disposed with the widget tree that uses it, not by the caller.
 class _CancelAppointmentSheet extends StatefulWidget {
-  const _CancelAppointmentSheet();
+  /// True when the appointment was paid AND the account has no phone number.
+  /// A manual refund cannot be sent without one, so it is collected here rather
+  /// than chased afterwards.
+  final bool needsPhone;
+
+  const _CancelAppointmentSheet({this.needsPhone = false});
 
   @override
   State<_CancelAppointmentSheet> createState() =>
@@ -1551,15 +1572,18 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
   ];
 
   final _controller = TextEditingController();
+  final _phoneController = TextEditingController();
   String _selected = _reasons.first;
+  String? _phoneError;
 
   @override
   void dispose() {
     _controller.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
-  void _close(String? result) {
+  void _close(Map<String, String>? result) {
     // Drop focus before popping: tearing the focus tree down in the same frame
     // as the route is what trips the framework assertion.
     FocusScope.of(context).unfocus();
@@ -1621,6 +1645,25 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
                   borderSide: BorderSide(color: Colors.white)),
             ),
           ),
+          if (widget.needsPhone) ...[
+            const SizedBox(height: 10),
+            TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                labelText: 'Contact number for your refund',
+                labelStyle: const TextStyle(color: Colors.white70),
+                helperText: 'This booking was paid. We need a number to send it to.',
+                helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                errorText: _phoneError,
+                enabledBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white24)),
+                focusedBorder: const OutlineInputBorder(
+                    borderSide: BorderSide(color: Colors.white)),
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
           Row(
             children: [
@@ -1636,9 +1679,17 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
                 child: ElevatedButton(
                   onPressed: () {
                     final note = _controller.text.trim();
-                    _close(
-                      _selected == 'Other' && note.isNotEmpty ? note : _selected,
-                    );
+                    final phone = _phoneController.text.trim();
+                    if (widget.needsPhone && phone.length < 7) {
+                      setState(() => _phoneError =
+                          'Enter a contact number so we can send your refund.');
+                      return;
+                    }
+                    _close({
+                      'reason':
+                          _selected == 'Other' && note.isNotEmpty ? note : _selected,
+                      if (phone.isNotEmpty) 'contactPhone': phone,
+                    });
                   },
                   style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.white,

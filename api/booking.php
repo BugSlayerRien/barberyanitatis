@@ -45,6 +45,15 @@ function ensure_financial_tables(PDO $pdo): void
         )"
     );
 
+    // Refunds are settled by hand (GCash/cash), so the row has to carry who to
+    // pay and who marked it done. The table existed but was never written to --
+    // cancelling a paid booking simply lost the money silently.
+    $pdo->exec("ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS contact_phone VARCHAR(40)");
+    $pdo->exec("ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS user_id BIGINT");
+    $pdo->exec("ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ");
+    $pdo->exec("ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS completed_by VARCHAR(120)");
+    $pdo->exec("ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS note TEXT");
+
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS appointment_payment_intents (
             intent_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1108,6 +1117,72 @@ try {
             $expireIntent->execute([':appointment_id' => $appointmentID]);
         }
 
+        // Money already taken must not vanish when the booking is cancelled.
+        // Raise a Pending refund the receptionist settles by hand (GCash/cash);
+        // there is no gateway auto-refund in this system.
+        $refundRow = null;
+        $paidStmt = $pdo->prepare(
+            "SELECT payment_id, total_amount
+             FROM payments
+             WHERE appointment_id = :appointment_id
+               AND payment_status = 'Paid'
+             ORDER BY payment_id DESC
+             LIMIT 1"
+        );
+        $paidStmt->execute([':appointment_id' => $appointmentID]);
+        $paidRow = $paidStmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($paidRow && (float)$paidRow['total_amount'] > 0) {
+            $existing = $pdo->prepare(
+                'SELECT refund_id FROM appointment_refunds WHERE appointment_id = :appointment_id LIMIT 1'
+            );
+            $existing->execute([':appointment_id' => $appointmentID]);
+
+            if (!$existing->fetchColumn()) {
+                // Phone comes from the profile; the app prompts for one at cancel
+                // time when the account has none, because a refund cannot be sent
+                // without a contact number.
+                $phone = trim((string)($input['contactPhone'] ?? ''));
+                if ($phone === '') {
+                    $phoneStmt = $pdo->prepare('SELECT phone FROM users WHERE user_id = :id LIMIT 1');
+                    $phoneStmt->execute([':id' => $userID]);
+                    $phone = trim((string)($phoneStmt->fetchColumn() ?: ''));
+                }
+
+                $insertRefund = $pdo->prepare(
+                    "INSERT INTO appointment_refunds
+                        (appointment_id, payment_id, user_id, amount, reason, status, contact_phone)
+                     VALUES (:appointment_id, :payment_id, :user_id, :amount, :reason, 'Pending', :contact_phone)
+                     RETURNING refund_id"
+                );
+                $insertRefund->execute([
+                    ':appointment_id' => $appointmentID,
+                    ':payment_id' => null,
+                    ':user_id' => $userID,
+                    ':amount' => (float)$paidRow['total_amount'],
+                    ':reason' => $cancelReason !== '' ? substr($cancelReason, 0, 80) : 'Customer cancelled',
+                    ':contact_phone' => $phone !== '' ? $phone : null,
+                ]);
+
+                $refundRow = [
+                    'refundId' => (int)$insertRefund->fetchColumn(),
+                    'amount' => (float)$paidRow['total_amount'],
+                    'status' => 'Pending',
+                    'contactPhone' => $phone,
+                ];
+
+                // Receptionists need to see this without polling the DB.
+                $pdo->prepare(
+                    "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
+                     VALUES ('Staff', 0, 'Refund', 'Refund requested', :message, TRUE)"
+                )->execute([
+                    ':message' => 'Cancelled appointment #' . $appointmentID . ' needs a refund of P'
+                        . number_format((float)$paidRow['total_amount'], 2)
+                        . ($phone !== '' ? ' to ' . $phone : ' (no contact number on file)') . '.',
+                ]);
+            }
+        }
+
         $notifyCancelStmt = $pdo->prepare(
             "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
              VALUES ('User', :recipient_id, 'Appointment', 'Appointment cancelled', :message, TRUE)"
@@ -1138,7 +1213,13 @@ try {
 
         $pdo->commit();
 
-        json_response(['message' => 'Appointment cancelled']);
+        json_response([
+            'message' => 'Appointment cancelled',
+            // Present only when money was actually taken. The app uses this to
+            // tell the customer a refund is on the way, and to ask for a phone
+            // number when the account has none on file.
+            'refund' => $refundRow,
+        ]);
     }
 
     if ($action === 'reschedule') {

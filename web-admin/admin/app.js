@@ -2076,17 +2076,51 @@ function renderBarberTable(metrics) {
   }
   if (empty) empty.hidden = true;
 
-  tbody.innerHTML = rows.map((row) => {
-    const rating = row.avgRating == null ? "-" : Number(row.avgRating).toFixed(2);
-    const cancelNoShow = `${Number(row.cancelled || 0)} / ${Number(row.noShow || 0)}`;
-    return `<tr>
+  // Split by channel. Ratings and cancel/no-show come from the appointment
+  // pipeline, so for walk-in barbers those columns were always "5.00" and
+  // "0 / 0" -- padding that looked like data. Each group gets only the columns
+  // that mean something for it, under its own subheading.
+  const exclusive = rows.filter((row) => row.channel !== "walk_in");
+  const regular = rows.filter((row) => row.channel === "walk_in");
+
+  const groupHeader = (label, cols) =>
+    `<tr class="table-group-row"><td colspan="${cols}"><strong>${label}</strong></td></tr>`;
+
+  const html = [];
+
+  if (exclusive.length) {
+    html.push(groupHeader("Exclusive (by appointment)", 5));
+    html.push(
+      ...exclusive.map((row) => {
+        const rating = row.avgRating == null ? "-" : Number(row.avgRating).toFixed(2);
+        const cancelNoShow = `${Number(row.cancelled || 0)} / ${Number(row.noShow || 0)}`;
+        return `<tr>
       <td>${escapeAnalyticsText(row.barberName)}</td>
       <td>${Number(row.completed || 0)}</td>
       <td>${formatPeso(row.revenue)}</td>
       <td>${rating}</td>
       <td>${cancelNoShow}</td>
     </tr>`;
-  }).join("");
+      }),
+    );
+  }
+
+  if (regular.length) {
+    html.push(groupHeader("Regular (walk-in)", 5));
+    html.push(
+      ...regular.map(
+        (row) => `<tr>
+      <td>${escapeAnalyticsText(row.barberName)}</td>
+      <td>${Number(row.completed || 0)}</td>
+      <td>${formatPeso(row.revenue)}</td>
+      <td class="meta">n/a</td>
+      <td class="meta">n/a</td>
+    </tr>`,
+      ),
+    );
+  }
+
+  tbody.innerHTML = html.join("");
 }
 
 function starGlyphs(rating) {

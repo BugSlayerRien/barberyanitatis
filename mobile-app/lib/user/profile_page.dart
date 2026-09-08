@@ -304,6 +304,9 @@ class _ProfilePageState extends State<ProfilePage> {
               : (UserSession.fullName ?? '').trim();
       final resolvedEmail = (user?.email ?? UserSession.email ?? '').trim();
       final resolvedPhone = _readProfileValue(metadata, 'phone');
+      // Cached so the cancel flow can tell whether it needs to ask for a refund
+      // contact number without another profile fetch.
+      UserSession.phone = resolvedPhone;
       final resolvedAccountAge = _readProfileValue(metadata, 'account_age');
       final resolvedGender = _readProfileValue(metadata, 'gender');
       final resolvedHairTexture = _readProfileValue(metadata, 'hair_texture');

@@ -4416,8 +4416,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     setState(() => _bookingInFlight = true);
 
     try {
+      // 30s: same Render cold-start reason as hairstyle_detail_page.
       final hasActive = await BookingGuard.hasActiveAppointment(userId: userId)
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 30));
       if (!mounted) {
         return;
       }
