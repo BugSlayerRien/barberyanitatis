@@ -14,6 +14,7 @@ import 'booking_guard.dart';
 import 'payment_page.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
+import 'haircuts_list_page.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
 import 'services/booking_slots_service.dart';
@@ -143,10 +144,16 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     }
 
     if (UserSession.selectedVariantId == null) {
+      // Same dead end as time_slot_page: booking started from a barber card
+      // never picked a style, so refusing here left nowhere to go.
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Select a hairstyle before booking.')),
+        const SnackBar(content: Text('Pick a haircut to finish this booking.')),
       );
-      return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const HaircutsListPage()),
+      );
+      if (!mounted) return;
+      if (UserSession.selectedVariantId == null) return;
     }
 
     setState(() => _booking = true);

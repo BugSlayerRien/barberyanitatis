@@ -10,6 +10,7 @@ import 'payment_page.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
+import 'haircuts_list_page.dart';
 import 'user_session.dart';
 import 'services/face_scan_service.dart';
 import 'services/booking_draft_service.dart';
@@ -834,10 +835,24 @@ Keep the total response under 24 words.
                       }
 
                       if (UserSession.selectedVariantId == null) {
+                        // Booking can start from a barber card (Favorite barber,
+                        // Book again), which never passes through hairstyle
+                        // selection. The old toast was a dead end: it refused the
+                        // booking and left the customer on a screen with no way
+                        // to satisfy it. Send them to pick a style, then they can
+                        // come straight back to this time.
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Select a hairstyle before booking.')),
+                          const SnackBar(
+                            content: Text('Pick a haircut to finish this booking.'),
+                          ),
                         );
-                        return;
+                        await Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const HaircutsListPage(),
+                          ),
+                        );
+                        if (!context.mounted) return;
+                        if (UserSession.selectedVariantId == null) return;
                       }
                       final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
                       if (!context.mounted) return;

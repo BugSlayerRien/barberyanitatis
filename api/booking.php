@@ -1120,17 +1120,57 @@ try {
         // Money already taken must not vanish when the booking is cancelled.
         // Raise a Pending refund the receptionist settles by hand (GCash/cash);
         // there is no gateway auto-refund in this system.
+        //
+        // The app records booking payments in appointment_payments with status
+        // 'Captured'. An earlier version of this looked in `payments` for
+        // status 'Paid' -- that is the walk-in/analytics ledger, so no app
+        // booking ever matched and cancelling a paid booking silently raised no
+        // refund at all. Check appointment_payments first, then fall back to
+        // `payments` for anything booked through the desk.
         $refundRow = null;
         $paidStmt = $pdo->prepare(
-            "SELECT payment_id, total_amount
-             FROM payments
+            "SELECT payment_id, amount AS total_amount
+             FROM appointment_payments
              WHERE appointment_id = :appointment_id
-               AND payment_status = 'Paid'
+               AND status IN ('Captured', 'Paid')
              ORDER BY payment_id DESC
              LIMIT 1"
         );
         $paidStmt->execute([':appointment_id' => $appointmentID]);
         $paidRow = $paidStmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$paidRow) {
+            $legacyStmt = $pdo->prepare(
+                "SELECT NULL::bigint AS payment_id, total_amount
+                 FROM payments
+                 WHERE appointment_id = :appointment_id
+                   AND payment_status = 'Paid'
+                 ORDER BY payment_id DESC
+                 LIMIT 1"
+            );
+            $legacyStmt->execute([':appointment_id' => $appointmentID]);
+            $paidRow = $legacyStmt->fetch(PDO::FETCH_ASSOC);
+        }
+
+        // A group booking has one payment against the lead appointment, so
+        // check the whole group rather than only the row being cancelled --
+        // otherwise cancelling from a member raises no refund for the group.
+        if (!$paidRow && $groupId > 0) {
+            $groupPay = $pdo->prepare(
+                "SELECT ap.payment_id, ap.amount AS total_amount, ap.appointment_id
+                 FROM appointment_payments ap
+                 JOIN appointments a ON a.appointment_id = ap.appointment_id
+                 WHERE a.booking_group_id = :group_id
+                   AND ap.status IN ('Captured', 'Paid')
+                 ORDER BY ap.payment_id DESC
+                 LIMIT 1"
+            );
+            $groupPay->execute([':group_id' => $groupId]);
+            $paidRow = $groupPay->fetch(PDO::FETCH_ASSOC);
+            if ($paidRow && !empty($paidRow['appointment_id'])) {
+                $appointmentID = (int)$paidRow['appointment_id'];
+            }
+        }
 
         if ($paidRow && (float)$paidRow['total_amount'] > 0) {
             $existing = $pdo->prepare(
@@ -1170,7 +1210,7 @@ try {
                 );
                 $insertRefund->execute([
                     ':appointment_id' => $appointmentID,
-                    ':payment_id' => null,
+                    ':payment_id' => $paidRow['payment_id'] ?? null,
                     ':user_id' => $userID,
                     ':amount' => (float)$paidRow['total_amount'],
                     ':reason' => $cancelReason !== '' ? substr($cancelReason, 0, 80) : 'Customer cancelled',
@@ -1284,7 +1324,7 @@ try {
 
         $apptStmt = $pdo->prepare(
             'SELECT appointment_id, booking_code, user_id, barber_id, appointment_date, start_time, end_time,
-                    status, COALESCE(reschedule_count, 0) AS reschedule_count
+                    status, booking_group_id, COALESCE(reschedule_count, 0) AS reschedule_count
              FROM appointments
              WHERE appointment_id = :appointment_id
              LIMIT 1'
@@ -1399,12 +1439,90 @@ try {
                  updated_at = CURRENT_TIMESTAMP
              WHERE appointment_id = :appointment_id"
         );
-        $updateApptStmt->execute([
-            ':appointment_date' => $newDate,
-            ':start_time' => $newStartTime,
-            ':end_time' => $newEndTime,
-            ':appointment_id' => $appointmentID,
-        ]);
+
+        // A group booking is N back-to-back appointments sharing one
+        // booking_group_id. Updating only the row the customer tapped left the
+        // other members at the old time, splitting the group across the day --
+        // which is why a 4-person booking rendered as "7:00 PM - 2:00 PM".
+        // Move the whole group, keeping members consecutive from the new start.
+        $rescheduleGroupId = (int)($appt['booking_group_id'] ?? 0);
+        if ($rescheduleGroupId > 0) {
+            $membersStmt = $pdo->prepare(
+                "SELECT appointment_id, start_time, end_time
+                 FROM appointments
+                 WHERE booking_group_id = :group_id
+                   AND status NOT IN ('Cancelled', 'NoShow', 'Completed')
+                 ORDER BY start_time, appointment_id"
+            );
+            $membersStmt->execute([':group_id' => $rescheduleGroupId]);
+            $members = $membersStmt->fetchAll(PDO::FETCH_ASSOC);
+
+            // Validate the FULL block before moving anything: every member's
+            // slot must be a real bookable time and still free, or the group
+            // ends up half-moved and running past closing.
+            $cursor = $newStartTime;
+            $planned = [];
+            foreach ($members as $member) {
+                // Each member keeps its own length; fall back to the requested
+                // duration if the stored range is unusable.
+                $memberStart = strtotime('1970-01-01 ' . (string)$member['start_time'] . ' UTC');
+                $memberFinish = strtotime('1970-01-01 ' . (string)$member['end_time'] . ' UTC');
+                $memberMinutes = ($memberStart !== false && $memberFinish !== false
+                    && $memberFinish > $memberStart)
+                    ? (int)round(($memberFinish - $memberStart) / 60)
+                    : $durationMinutes;
+                $memberEnd = shop_add_minutes_to_time($cursor, $memberMinutes);
+
+                if (!shop_is_allowed_slot_time($cursor, $newDate)
+                    || shop_is_break_slot_time($cursor, $newDate)) {
+                    $pdo->rollBack();
+                    json_response([
+                        'error' => 'The group needs ' . count($members)
+                            . ' back-to-back slots. ' . format_time_12h($newStartTime)
+                            . ' does not leave enough open time that day.',
+                    ], 422);
+                }
+
+                if (paid_slot_conflict_exists(
+                    $pdo,
+                    (int)$appt['barber_id'],
+                    $newDate,
+                    $cursor,
+                    array_column($members, 'appointment_id')
+                )) {
+                    $pdo->rollBack();
+                    json_response([
+                        'error' => format_time_12h($cursor)
+                            . ' is already booked, so the group cannot start at '
+                            . format_time_12h($newStartTime) . '.',
+                    ], 409);
+                }
+
+                $planned[] = [
+                    'appointment_id' => (int)$member['appointment_id'],
+                    'start' => $cursor,
+                    'end' => $memberEnd,
+                ];
+                $cursor = $memberEnd;
+            }
+
+            foreach ($planned as $slot) {
+                release_slots_for_appointment($pdo, $slot['appointment_id']);
+                $updateApptStmt->execute([
+                    ':appointment_date' => $newDate,
+                    ':start_time' => $slot['start'],
+                    ':end_time' => $slot['end'],
+                    ':appointment_id' => $slot['appointment_id'],
+                ]);
+            }
+        } else {
+            $updateApptStmt->execute([
+                ':appointment_date' => $newDate,
+                ':start_time' => $newStartTime,
+                ':end_time' => $newEndTime,
+                ':appointment_id' => $appointmentID,
+            ]);
+        }
 
         $notifyStmt = $pdo->prepare(
             "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
