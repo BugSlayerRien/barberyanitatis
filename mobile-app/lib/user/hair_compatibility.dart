@@ -3,6 +3,18 @@ import 'package:flutter/material.dart';
 import 'user_session.dart';
 
 /// Soft guidance levels for hairstyle vs detected hair texture.
+/// Where the texture used for compatibility guidance came from.
+enum TextureSource {
+  /// Measured by a successful AI face scan.
+  scan,
+
+  /// Chosen by the user in onboarding or their profile.
+  selfReported,
+
+  /// Unknown -- no scan and no selection.
+  none,
+}
+
 enum HairCompatibilityLevel {
   recommended,
   possible,
@@ -74,6 +86,26 @@ class HairCompatibility {
     );
   }
 
+  /// Where the texture used for guidance came from.
+  ///
+  /// Guidance used to require a successful scan, so a user who browsed the
+  /// Library without scanning saw no badges at all -- indistinguishable from
+  /// "every style suits you". The onboarding picker already collects a texture,
+  /// so use that when no scan exists and say which one is being used.
+  static TextureSource textureSource() {
+    if (scanTexture() != null) return TextureSource.scan;
+    if (normalizeTexture(UserSession.preferredHairTexture) != null) {
+      return TextureSource.selfReported;
+    }
+    return TextureSource.none;
+  }
+
+  /// Texture to judge styles against: the scan if there is one, else the
+  /// user's own selection from onboarding/profile.
+  static String? userTexture() {
+    return scanTexture() ?? normalizeTexture(UserSession.preferredHairTexture);
+  }
+
   static String? normalizeTexture(String? raw) {
     final value = (raw ?? '').trim().toLowerCase();
     switch (value) {
@@ -94,8 +126,14 @@ class HairCompatibility {
     required String? styleHairTexture,
     String? styleName,
   }) {
-    final user = scanTexture();
+    final user = userTexture();
     if (user == null) return null;
+    final fromScan = textureSource() == TextureSource.scan;
+    // Self-reported textures get the same guidance, worded as the user's own
+    // answer rather than a measurement.
+    final basis = fromScan
+        ? 'Your latest scan detected $user hair'
+        : 'You told us your hair is $user';
 
     final style = normalizeTexture(styleHairTexture);
     final name = (styleName ?? '').trim().toLowerCase();
@@ -111,7 +149,7 @@ class HairCompatibility {
         shortLabel: 'Not recommended for your hair texture',
         detailMessage:
             'This style usually needs curly or coily hair to look as intended. '
-            'Your latest scan detected $user hair, so results may not match the preview. '
+            '$basis, so results may not match the preview. '
             'You can still book — your barber can advise in person.',
         userTexture: user,
         styleTexture: style ?? '',
