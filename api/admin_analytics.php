@@ -264,30 +264,59 @@ try {
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $barberPerformance = $pdo->query(
-        "SELECT b.barber_id, b.full_name,
+        "SELECT b.barber_id, b.full_name, b.barber_channel,
                 COUNT(*) FILTER (WHERE a.status = 'Completed')::int AS completed,
                 COUNT(*) FILTER (WHERE a.status = 'Cancelled')::int AS cancelled,
                 COUNT(*) FILTER (WHERE a.status = 'NoShow')::int AS no_show,
                 COUNT(a.appointment_id)::int AS total_appointments,
+                -- Walk-in barbers take no appointments, so their 'completed'
+                -- count has to come from the queue or they read as idle.
+                COALESCE(w.walkin_completed, 0)::int AS walkin_completed,
                 COALESCE(b.rating, 0)::float AS barber_rating
          FROM barbers b
          LEFT JOIN appointments a
            ON a.barber_id = b.barber_id
           AND {$apptWhere}
+         LEFT JOIN (
+             SELECT barber_id, COUNT(*) AS walkin_completed
+             FROM walkin_queue
+             WHERE status = 'Completed'
+               AND created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+               AND created_at < (CURRENT_DATE + INTERVAL '1 day')
+             GROUP BY barber_id
+         ) w ON w.barber_id = b.barber_id
          WHERE b.is_active = TRUE
-         GROUP BY b.barber_id, b.full_name, b.rating
+         GROUP BY b.barber_id, b.full_name, b.barber_channel, b.rating, w.walkin_completed
          ORDER BY completed DESC, b.full_name ASC"
     )->fetchAll(PDO::FETCH_ASSOC);
 
+    // Revenue must come from BOTH sides of the payments table.
+    //
+    // payments carries appointment_id OR queue_id. Joining only appointments
+    // dropped every walk-in payment, so regular (walk_in channel) barbers always
+    // reported P0.00 even with completed services -- verified against live data:
+    // three walk-in barbers had P1,300 of paid walk-ins in the period, all of it
+    // invisible here.
     $barberRevenueMap = [];
     $barberRevRows = $pdo->query(
-        "SELECT a.barber_id, COALESCE(SUM(p.total_amount), 0)::float AS revenue
-         FROM payments p
-         JOIN appointments a ON a.appointment_id = p.appointment_id
-         WHERE p.payment_status = 'Paid'
-           AND p.created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
-           AND p.created_at < (CURRENT_DATE + INTERVAL '1 day')
-         GROUP BY a.barber_id"
+        "SELECT barber_id, COALESCE(SUM(total_amount), 0)::float AS revenue
+         FROM (
+             SELECT a.barber_id, p.total_amount
+             FROM payments p
+             JOIN appointments a ON a.appointment_id = p.appointment_id
+             WHERE p.payment_status = 'Paid'
+               AND p.created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+               AND p.created_at < (CURRENT_DATE + INTERVAL '1 day')
+             UNION ALL
+             SELECT w.barber_id, p.total_amount
+             FROM payments p
+             JOIN walkin_queue w ON w.queue_id = p.queue_id
+             WHERE p.payment_status = 'Paid'
+               AND p.created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+               AND p.created_at < (CURRENT_DATE + INTERVAL '1 day')
+         ) AS all_payments
+         WHERE barber_id IS NOT NULL
+         GROUP BY barber_id"
     )->fetchAll(PDO::FETCH_ASSOC);
     foreach ($barberRevRows as $row) {
         $barberRevenueMap[(int)$row['barber_id']] = (float)$row['revenue'];
@@ -322,11 +351,18 @@ try {
         $barberRows[] = [
             'barberId' => $id,
             'barberName' => (string)$row['full_name'],
-            'completed' => (int)$row['completed'],
+            // Walk-in barbers are measured by queue completions, not appointments.
+            'completed' => ((string)($row['barber_channel'] ?? '') === 'walk_in')
+                ? (int)$row['walkin_completed']
+                : (int)$row['completed'],
             'cancelled' => (int)$row['cancelled'],
             'noShow' => (int)$row['no_show'],
             'totalAppointments' => (int)$row['total_appointments'],
             'revenue' => (float)($barberRevenueMap[$id] ?? 0),
+            // 'walk_in' (regular) or 'appointment' (exclusive). Ratings and
+            // cancel/no-show only exist for the appointment channel, so the UI
+            // renders the two as separate tables with different columns.
+            'channel' => (string)($row['barber_channel'] ?? 'appointment'),
             'avgRating' => $fb['avgRating'] ?? ((float)$row['barber_rating'] > 0 ? (float)$row['barber_rating'] : null),
             'ratingCount' => $fb['ratingCount'] ?? 0,
             'ratingSource' => $fb ? 'period_feedback' : 'barber_profile',

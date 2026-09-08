@@ -96,10 +96,15 @@ function operating_schedule_payload(PDO $pdo): array
          ORDER BY day_of_week NULLS FIRST, start_time'
     )->fetchAll(PDO::FETCH_ASSOC);
 
+    // Upcoming only. The Settings list is a management tool -- a closure that
+    // has already passed cannot be acted on, so showing 30 days of history just
+    // accumulated dead rows the admin could not meaningfully remove. The
+    // underlying rows are kept (shop_schedule_config still reads a year either
+    // side) so historical bookings and the calendar stay correct.
     $closedDates = $pdo->query(
         "SELECT closed_date, reason
          FROM shop_closed_dates
-         WHERE closed_date >= CURRENT_DATE - INTERVAL '30 day'
+         WHERE closed_date >= CURRENT_DATE
          ORDER BY closed_date"
     )->fetchAll(PDO::FETCH_ASSOC);
 

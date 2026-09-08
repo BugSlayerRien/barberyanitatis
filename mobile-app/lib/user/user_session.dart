@@ -13,6 +13,9 @@ class UserSession {
   static String? preferredHairTexture;
   static String? fullName;
   static String? email;
+  /// Profile phone number. Used to decide whether a cancellation needs to ask
+  /// for a refund contact number.
+  static String? phone;
   static List<String> roles = [];
 
   static String? selectedStyleName;
@@ -375,6 +378,7 @@ class UserSession {
     userId = null;
     fullName = null;
     email = null;
+    phone = null;
     roles = [];
     selectedStyleName = null;
     selectedVariantId = null;

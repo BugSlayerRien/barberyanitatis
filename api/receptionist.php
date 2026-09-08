@@ -12,6 +12,23 @@ require_once __DIR__ . '/slot_locking.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
+    // Columns added for the manual refund workflow; mirrors booking.php so
+    // whichever endpoint runs first creates them.
+    $addRefundColumns = static function (PDO $db): void {
+        foreach ([
+            'contact_phone VARCHAR(40)',
+            'user_id BIGINT',
+            'completed_at TIMESTAMPTZ',
+            'completed_by VARCHAR(120)',
+            'note TEXT',
+        ] as $column) {
+            try {
+                $db->exec('ALTER TABLE appointment_refunds ADD COLUMN IF NOT EXISTS ' . $column);
+            } catch (Throwable $e) {
+                // Table may not exist yet on first run; created below.
+            }
+        }
+    };
     $pdo->exec(
         "CREATE TABLE IF NOT EXISTS appointment_payments (
             payment_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -41,6 +58,8 @@ function ensure_financial_tables(PDO $pdo): void
                 FOREIGN KEY (payment_id) REFERENCES appointment_payments(payment_id) ON DELETE SET NULL
         )"
     );
+
+    $addRefundColumns($pdo);
 }
 
 // Browsers open the .php URL with GET (shows "Method not allowed"); the desk uses POST JSON.
@@ -223,6 +242,101 @@ try {
             }, $walkins),
             'automation' => $trackingAutomation,
         ]);
+    }
+
+    // --- Refunds -----------------------------------------------------------
+    // Cancelling a paid booking raises a Pending row (see booking.php 'cancel').
+    // There is no payment-gateway refund in this system: a receptionist sends
+    // the money by hand and marks it done here, which is what tells the
+    // customer their refund has been sent.
+    if ($action === 'listRefunds') {
+        ensure_financial_tables($pdo);
+        $status = strtolower(trim((string)($input['status'] ?? 'pending')));
+        $where = $status === 'all'
+            ? '1=1'
+            : ($status === 'completed' ? "r.status = 'Completed'" : "r.status = 'Pending'");
+
+        $rows = $pdo->query(
+            "SELECT r.refund_id, r.appointment_id, r.amount, r.reason, r.status,
+                    r.contact_phone, r.created_at, r.completed_at, r.completed_by, r.note,
+                    u.full_name, u.email, u.phone AS profile_phone,
+                    a.appointment_date, a.start_time
+             FROM appointment_refunds r
+             LEFT JOIN users u ON u.user_id = r.user_id
+             LEFT JOIN appointments a ON a.appointment_id = r.appointment_id
+             WHERE {$where}
+             ORDER BY r.status ASC, r.created_at DESC
+             LIMIT 200"
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        json_response([
+            'refunds' => array_map(static function (array $row): array {
+                $phone = trim((string)($row['contact_phone'] ?? ''));
+                if ($phone === '') {
+                    $phone = trim((string)($row['profile_phone'] ?? ''));
+                }
+                return [
+                    'refundId' => (int)$row['refund_id'],
+                    'appointmentId' => (int)$row['appointment_id'],
+                    'customerName' => (string)($row['full_name'] ?? 'Customer'),
+                    'customerEmail' => (string)($row['email'] ?? ''),
+                    'contactPhone' => $phone,
+                    'amount' => (float)$row['amount'],
+                    'reason' => (string)($row['reason'] ?? ''),
+                    'status' => (string)$row['status'],
+                    'appointmentDate' => (string)($row['appointment_date'] ?? ''),
+                    'startTime' => (string)($row['start_time'] ?? ''),
+                    'createdAt' => (string)$row['created_at'],
+                    'completedAt' => (string)($row['completed_at'] ?? ''),
+                    'completedBy' => (string)($row['completed_by'] ?? ''),
+                    'note' => (string)($row['note'] ?? ''),
+                ];
+            }, $rows),
+        ]);
+    }
+
+    if ($action === 'completeRefund') {
+        ensure_financial_tables($pdo);
+        $refundId = (int)($input['refundId'] ?? 0);
+        if ($refundId <= 0) {
+            json_response(['error' => 'Invalid refundId'], 422);
+        }
+
+        $lookup = $pdo->prepare(
+            'SELECT appointment_id, user_id, amount, status FROM appointment_refunds WHERE refund_id = :id LIMIT 1'
+        );
+        $lookup->execute([':id' => $refundId]);
+        $refund = $lookup->fetch(PDO::FETCH_ASSOC);
+        if (!$refund) {
+            json_response(['error' => 'Refund not found'], 404);
+        }
+        if ((string)$refund['status'] === 'Completed') {
+            json_response(['message' => 'Refund already marked as sent']);
+        }
+
+        $pdo->prepare(
+            "UPDATE appointment_refunds
+             SET status = 'Completed', completed_at = NOW(), completed_by = :by, note = :note
+             WHERE refund_id = :id"
+        )->execute([
+            ':id' => $refundId,
+            ':by' => substr(trim((string)($input['completedBy'] ?? 'Receptionist')), 0, 120),
+            ':note' => trim((string)($input['note'] ?? '')) ?: null,
+        ]);
+
+        // This notification IS the customer-facing confirmation.
+        if ((int)($refund['user_id'] ?? 0) > 0) {
+            $pdo->prepare(
+                "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
+                 VALUES ('User', :recipient_id, 'Refund', 'Refund sent', :message, TRUE)"
+            )->execute([
+                ':recipient_id' => (int)$refund['user_id'],
+                ':message' => 'Your refund of P' . number_format((float)$refund['amount'], 2)
+                    . ' for cancelled appointment #' . (int)$refund['appointment_id'] . ' has been sent.',
+            ]);
+        }
+
+        json_response(['message' => 'Refund marked as sent']);
     }
 
     if ($action === 'updateAppointmentStatus') {

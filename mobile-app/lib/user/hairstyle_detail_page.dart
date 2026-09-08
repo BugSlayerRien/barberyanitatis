@@ -447,9 +447,18 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
 
     try {
+      // 30s, not 8s. The API is on Render's free tier and sleeps when idle, so
+      // the first request after a cold start regularly takes 15-30s. The old 8s
+      // budget threw TimeoutException on a perfectly healthy server, which fell
+      // through to the catch below and dumped the customer into the manual
+      // barber picker with an error toast -- the exact failure reported.
+      //
+      // Confirmed from device logs:
+      //   Suggested-slot path threw, falling back to barber picker:
+      //   TimeoutException after 0:00:08.000000: Future not completed
       final hasActive = await BookingGuard.hasActiveAppointment(
         userId: UserSession.userId,
-      ).timeout(const Duration(seconds: 8));
+      ).timeout(const Duration(seconds: 30));
       if (!mounted) {
         return;
       }
