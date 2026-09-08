@@ -1143,6 +1143,19 @@ try {
                 // time when the account has none, because a refund cannot be sent
                 // without a contact number.
                 $phone = trim((string)($input['contactPhone'] ?? ''));
+                // Mirror the app's PH rule server-side: a refund number that
+                // cannot be dialled is worse than none, because the desk would
+                // treat it as actionable.
+                if ($phone !== '') {
+                    $digits = preg_replace('/\D/', '', $phone) ?? '';
+                    if (str_starts_with($digits, '63') && strlen($digits) >= 12) {
+                        $digits = '0' . substr($digits, 2);
+                    }
+                    $validMobile = str_starts_with($digits, '09') && strlen($digits) === 11;
+                    $validLandline = preg_match('/^0[2-8]/', $digits) === 1
+                        && strlen($digits) >= 8 && strlen($digits) <= 10;
+                    $phone = ($validMobile || $validLandline) ? $digits : '';
+                }
                 if ($phone === '') {
                     $phoneStmt = $pdo->prepare('SELECT phone FROM users WHERE user_id = :id LIMIT 1');
                     $phoneStmt->execute([':id' => $userID]);
