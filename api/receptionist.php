@@ -327,8 +327,15 @@ try {
         // This notification IS the customer-facing confirmation.
         if ((int)($refund['user_id'] ?? 0) > 0) {
             $pdo->prepare(
+                // notification_type is constrained to
+                // ('Appointment','Reminder','Queue','Promotion','System') and
+                // recipient_type to ('User','Barber','Admin'). 'Refund' is not a
+                // member, so this insert violated
+                // notifications_notification_type_check. A refund notice is
+                // about the customer's appointment, so 'Appointment' fits and
+                // needs no schema change.
                 "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-                 VALUES ('User', :recipient_id, 'Refund', 'Refund sent', :message, TRUE)"
+                 VALUES ('User', :recipient_id, 'Appointment', 'Refund sent', :message, TRUE)"
             )->execute([
                 ':recipient_id' => (int)$refund['user_id'],
                 ':message' => 'Your refund of P' . number_format((float)$refund['amount'], 2)
