@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -142,9 +143,16 @@ class CustomerApi {
 
     final map = Map<String, dynamic>.from(decoded);
     if (!okStatusCodes.contains(response.statusCode)) {
+      // The API returns a generic `error` plus a `details` field carrying the
+      // real cause (e.g. the SQLSTATE and constraint name). Dropping `details`
+      // meant a server fault surfaced to the user as a bare "Database error"
+      // with nothing to diagnose from. Append it in debug builds only, so
+      // customers never see internals but developers can act on the toast.
+      final apiError = map['error']?.toString() ??
+          'Request failed (HTTP ${response.statusCode}).';
+      final apiDetails = map['details']?.toString().trim() ?? '';
       throw CustomerApiException(
-        map['error']?.toString() ??
-            'Request failed (HTTP ${response.statusCode}).',
+        kDebugMode && apiDetails.isNotEmpty ? '$apiError — $apiDetails' : apiError,
         statusCode: response.statusCode,
       );
     }
