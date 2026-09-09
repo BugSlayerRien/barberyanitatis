@@ -1225,14 +1225,14 @@ try {
                 ];
 
                 // Receptionists need to see this without polling the DB.
+                //
+                // 'Admin'/'System', not 'Staff'/'Refund': the notifications table
+                // constrains recipient_type to (User|Barber|Admin) and
+                // notification_type to (Appointment|Reminder|Queue|Promotion|
+                // System). This insert runs inside the cancel transaction, so
+                // invalid values fail the whole cancellation, not just the notice.
                 $pdo->prepare(
                     "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
-                     // 'Staff'/'Refund' both violate the notifications CHECK
-                     // constraints (recipient_type is User|Barber|Admin,
-                     // notification_type is Appointment|Reminder|Queue|
-                     // Promotion|System). This runs inside the cancel
-                     // transaction, so the bad values would have failed the
-                     // whole cancellation, not just the notice.
                      VALUES ('Admin', 0, 'System', 'Refund requested', :message, TRUE)"
                 )->execute([
                     ':message' => 'Cancelled appointment #' . $appointmentID . ' needs a refund of P'
