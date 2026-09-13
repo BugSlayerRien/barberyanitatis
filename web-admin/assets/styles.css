@@ -3096,3 +3096,42 @@ canvas {
     flex: 1;
   }
 }
+
+/* --- Dashboard shop rating -------------------------------------------------
+   Headline score on the left, 1-5 distribution on the right. Stacks on narrow
+   screens so the chart never gets squeezed into an unreadable strip. */
+.shop-rating-body {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.shop-rating-score {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.shop-rating-value {
+  font-size: 40px;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+}
+
+.shop-rating-stars {
+  font-size: 18px;
+  letter-spacing: 2px;
+  color: #a99941;
+}
+
+.shop-rating-chart {
+  min-width: 0;
+}
+
+@media (max-width: 720px) {
+  .shop-rating-body {
+    grid-template-columns: 1fr;
+  }
+}
