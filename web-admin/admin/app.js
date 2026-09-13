@@ -569,6 +569,8 @@ async function loadDashboard() {
     state.activities = data.activities ?? [];
     renderStats(data.stats ?? []);
     renderActivities(state.activities);
+    renderShopRating(data.shopRating, data.barberRatings ?? []);
+    renderWeekTrend(data.weekTrend ?? []);
   } catch (error) {
     state.activities = [];
     renderStats([]);
@@ -3426,3 +3428,126 @@ window.addEventListener("pageshow", (event) => {
 });
 
 init();
+
+// --- Dashboard visuals -------------------------------------------------------
+// The dashboard was almost entirely text: stat tiles, an activity list and a
+// status panel. These two cards turn the two most-asked questions ("how are we
+// rated?", "how busy were we?") into something readable at a glance.
+
+state.dashboardCharts = state.dashboardCharts || {};
+
+function destroyDashboardChart(key) {
+  const chart = state.dashboardCharts[key];
+  if (chart && typeof chart.destroy === "function") chart.destroy();
+  delete state.dashboardCharts[key];
+}
+
+/// Shop-wide rating: one headline number, a star row, and the 1-5 spread.
+///
+/// The spread matters — an average of 4.7 from all 5s reads very differently
+/// from 4.7 with a 1-star in it, and a single number hides that entirely.
+function renderShopRating(rating, barberRatings) {
+  const valueEl = document.getElementById("shop-rating-value");
+  const starsEl = document.getElementById("shop-rating-stars");
+  const countEl = document.getElementById("shop-rating-count");
+  const canvas = document.getElementById("shop-rating-chart");
+  if (!valueEl || !starsEl || !countEl) return;
+
+  const average = rating && rating.average != null ? Number(rating.average) : null;
+  const count = Number(rating?.count ?? 0);
+
+  valueEl.textContent = average == null ? "—" : average.toFixed(2);
+  starsEl.textContent = average == null ? "☆☆☆☆☆" : starGlyphs(average);
+  countEl.textContent = count === 0
+    ? "No customer ratings yet"
+    : `From ${count} customer rating${count === 1 ? "" : "s"}`;
+
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  destroyDashboardChart("rating");
+
+  const dist = rating?.distribution ?? {};
+  const counts = [5, 4, 3, 2, 1].map((star) => Number(dist[star] ?? 0));
+  const hasAny = counts.some((n) => n > 0);
+
+  state.dashboardCharts.rating = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: ["5★", "4★", "3★", "2★", "1★"],
+      datasets: [{
+        label: "Ratings",
+        data: hasAny ? counts : [0, 0, 0, 0, 0],
+        backgroundColor: [
+          "#48c07a", "#8fd49a", "#e9a83e", "#ec8f56", "#ec5f56",
+        ],
+        borderRadius: 4,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      ...chartDefaults(),
+      indexAxis: "y",
+      plugins: { legend: { display: false } },
+      scales: {
+        x: {
+          beginAtZero: true,
+          // Whole ratings only; a "2.5 ratings" gridline is meaningless.
+          ticks: { precision: 0, color: CHART_COLORS.tick },
+          grid: { color: CHART_COLORS.grid },
+        },
+        y: {
+          ticks: { color: CHART_COLORS.tick },
+          grid: { display: false },
+        },
+      },
+    },
+  });
+
+  const sub = document.getElementById("shop-rating-sub");
+  if (sub) {
+    const rated = (barberRatings || []).length;
+    sub.textContent = rated
+      ? `Averaged from customer feedback across ${rated} rated barber${rated === 1 ? "" : "s"}.`
+      : "Averaged from customer feedback across all barbers.";
+  }
+}
+
+/// Bookings per day for the last 7 days.
+function renderWeekTrend(rows) {
+  const canvas = document.getElementById("dashboard-week-chart");
+  if (!(canvas instanceof HTMLCanvasElement)) return;
+  destroyDashboardChart("week");
+
+  // Short weekday labels read better than ISO dates on a 7-point axis.
+  const labels = rows.map((row) => {
+    const parsed = new Date(`${row.day}T00:00:00`);
+    return Number.isNaN(parsed.getTime())
+      ? row.day
+      : parsed.toLocaleDateString(undefined, { weekday: "short" });
+  });
+
+  state.dashboardCharts.week = new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels: labels.length ? labels : ["No data"],
+      datasets: [{
+        label: "Appointments",
+        data: rows.length ? rows.map((row) => Number(row.total) || 0) : [0],
+        backgroundColor: CHART_COLORS.goldBar,
+        borderRadius: 4,
+        borderWidth: 0,
+      }],
+    },
+    options: {
+      ...chartDefaults(),
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: CHART_COLORS.tick }, grid: { display: false } },
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0, color: CHART_COLORS.tick },
+          grid: { color: CHART_COLORS.grid },
+        },
+      },
+    },
+  });
+}

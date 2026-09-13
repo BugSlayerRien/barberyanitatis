@@ -120,6 +120,41 @@
 
             <div class="split">
               <div class="column">
+                <div class="card shop-rating-card">
+                  <div class="card-head">
+                    <div class="card-head-text">
+                      <h3 class="card-title">Shop rating</h3>
+                      <p class="card-sub" id="shop-rating-sub">Averaged from customer feedback across all barbers.</p>
+                    </div>
+                  </div>
+                  <div class="shop-rating-body">
+                    <div class="shop-rating-score">
+                      <span class="shop-rating-value" id="shop-rating-value">—</span>
+                      <span class="shop-rating-stars" id="shop-rating-stars" aria-hidden="true"></span>
+                      <span class="meta" id="shop-rating-count">No ratings yet</span>
+                    </div>
+                    <div class="shop-rating-chart">
+                      <canvas id="shop-rating-chart" height="120"></canvas>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="column">
+                <div class="card">
+                  <div class="card-head">
+                    <div class="card-head-text">
+                      <h3 class="card-title">Appointments this week</h3>
+                      <p class="card-sub">Bookings per day over the last 7 days.</p>
+                    </div>
+                  </div>
+                  <canvas id="dashboard-week-chart" height="120"></canvas>
+                </div>
+              </div>
+            </div>
+
+            <div class="split">
+              <div class="column">
                 <div class="section-head">
                   <div>
                     <h3 class="section-title">Recent activity</h3>
