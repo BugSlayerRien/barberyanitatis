@@ -21,6 +21,9 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   camera: ^0.10.6
+  # Used directly by scanner/device_orientation_tracker.dart for the platform
+  # orientation stream; pinned explicitly rather than relied on transitively.
+  camera_platform_interface: ^2.12.0
   camera_web: ^0.3.3
   image_picker: ^0.8.7+4
   google_sign_in: ^6.2.1

@@ -17,6 +17,7 @@ import 'kiosk/kiosk_home_page.dart';
 import 'package:app_links/app_links.dart';
 import 'user/payment_result_page.dart';
 import 'user/scanner/overlay_asset_cache.dart';
+import 'user/scanner/device_orientation_tracker.dart';
 import 'app_orientation.dart';
 
 // --- 1. Define Custom Colors ---
@@ -34,6 +35,10 @@ Future<void> main() async {
     await AppOrientation.lockForCustomer();
   }
   await ApiConfig.ensureInitialized();
+  // Subscribe before any camera opens: the plugin only broadcasts the device
+  // orientation when it changes, so the session's first camera open is the one
+  // event guaranteed to be delivered.
+  DeviceOrientationTracker.start();
   Uri? startupLink;
   if (!kIsWeb) {
     try {

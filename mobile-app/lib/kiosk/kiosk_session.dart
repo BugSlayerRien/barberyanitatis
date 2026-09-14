@@ -13,16 +13,34 @@ enum KioskEntryPath {
 class KioskSession {
   KioskSession._();
 
+  /// Upper bound on a walk-in guest name.
+  ///
+  /// Mirrored server-side in `api/kiosk_guest_name.php`. `walkin_queue.
+  /// guest_name` is VARCHAR(120), so this stays well inside the column and a
+  /// long entry is rejected at the screen instead of failing on insert.
+  static const int guestNameMaxLength = 70;
+
   static const String guestNameHint = 'Your name (letters and spaces)';
   static const String guestNameError =
       'Enter at least 2 letters. Letters and spaces only.';
+  static const String guestNameTooLongError =
+      'Name must be $guestNameMaxLength characters or fewer.';
 
   static bool isValidGuestName(String raw) {
     final name = raw.trim();
     if (name.isEmpty) return false;
+    if (name.length > guestNameMaxLength) return false;
     final allowed = RegExp(r'^[\p{L} ]+$', unicode: true);
     if (!allowed.hasMatch(name)) return false;
     return RegExp(r'\p{L}', unicode: true).allMatches(name).length >= 2;
+  }
+
+  /// Which rule the entry breaks, so the kiosk can say the useful thing rather
+  /// than one generic message.
+  static String? guestNameErrorFor(String raw) {
+    final name = raw.trim();
+    if (name.length > guestNameMaxLength) return guestNameTooLongError;
+    return isValidGuestName(name) ? null : guestNameError;
   }
 
   static String? guestName;

@@ -30,6 +30,7 @@ import 'scanner/overlay_asset_cache.dart';
 import 'scanner/scanner_layout.dart';
 import 'scanner/camera_preview_cover.dart';
 import 'scanner/camera_frame_orientation.dart';
+import 'scanner/device_orientation_tracker.dart';
 import 'scanner/face_preview_mapping.dart';
 import 'scanner/staging_face_validation.dart';
 import 'scanner/attachment_engine.dart';
@@ -272,11 +273,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     // Reinforce mode orientation when entering the scanner.
-    if (widget.kioskMode) {
-      unawaited(AppOrientation.lockForKiosk());
-    } else {
-      unawaited(AppOrientation.lockForCustomer());
-    }
+    // Awaited inside _setup() before the camera is built: creating the
+    // controller while the UI is still rotating is what left its cached
+    // deviceOrientation stale in the first place.
+    DeviceOrientationTracker.start();
     _attachmentEngine = createAttachmentEngine(AttachmentEngineMode.auto);
     if (widget.livePreviewOnly && !kEnableLiveScanner) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -562,6 +562,14 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
     try {
       unawaited(OverlayAssetCache.preload());
+      // Awaited, not fire-and-forget: the camera controller caches the device
+      // orientation it sees at construction, so it must be built after the UI
+      // has settled into its final rotation, not during the rotation.
+      if (widget.kioskMode) {
+        await AppOrientation.lockForKiosk();
+      } else {
+        await AppOrientation.lockForCustomer();
+      }
       debugPrint('[AiFaceScan] Initializing face detector...');
       await _detector.initialize();
       debugPrint('[AiFaceScan] Face detector initialized successfully');
@@ -618,7 +626,14 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         debugPrint('[AiFaceScan] Locked capture orientation to $lockTo');
       }
       
-      debugPrint('[AiFaceScan] Starting image stream...');
+      debugPrint(
+        '[AiFaceScan] Starting image stream... '
+        'sensor=${controller.description.sensorOrientation} '
+        'lens=${controller.description.lensDirection.name} '
+        'trackedOrientation=${DeviceOrientationTracker.latest} '
+        'controllerOrientation=${controller.value.deviceOrientation} '
+        'mlKitRotation=${CameraFrameOrientation.mlKitRotationDegreesFor(controller)}',
+      );
       await controller.startImageStream((image) async {
         if (_busy || !mounted) return;
         _busy = true;
@@ -627,7 +642,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             image,
             sensorOrientation: controller.description.sensorOrientation,
             deviceOrientation:
-                CameraFrameOrientation.previewOrientation(controller),
+                CameraFrameOrientation.frameOrientation(controller),
             lensDirection: controller.description.lensDirection,
           );
           if (!mounted) {
@@ -1872,7 +1887,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           image,
           sensorOrientation: _camera!.description.sensorOrientation,
           deviceOrientation:
-              CameraFrameOrientation.previewOrientation(_camera!),
+              CameraFrameOrientation.frameOrientation(_camera!),
           lensDirection: _camera!.description.lensDirection,
         );
         if (!mounted) {

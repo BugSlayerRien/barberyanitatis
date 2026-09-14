@@ -11,6 +11,7 @@ import '../user/api_config.dart';
 import '../user/auth_bootstrap.dart';
 import '../user/payment_result_page.dart';
 import '../user/scanner/overlay_asset_cache.dart';
+import '../user/scanner/device_orientation_tracker.dart';
 import 'kiosk_home_page.dart';
 import 'kiosk_theme.dart';
 
@@ -19,6 +20,10 @@ Future<void> runKioskApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppOrientation.lockForKiosk();
   await ApiConfig.ensureInitialized();
+  // Subscribe before any camera opens: the plugin only broadcasts the device
+  // orientation when it changes, so the session's first camera open is the one
+  // event guaranteed to be delivered.
+  DeviceOrientationTracker.start();
   if (kIsWeb) {
     setUrlStrategy(PathUrlStrategy());
   }
