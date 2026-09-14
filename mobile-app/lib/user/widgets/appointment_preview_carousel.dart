@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_brand.dart';
 
 import '../api_config.dart';
 
@@ -131,7 +132,7 @@ class _AppointmentPreviewCarouselState extends State<AppointmentPreviewCarousel>
                   width: active ? 18 : 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: active ? const Color(0xFFA99941) : Colors.white24,
+                    color: active ? AppBrand.accent : Colors.white24,
                     borderRadius: BorderRadius.circular(8),
                   ),
                 );

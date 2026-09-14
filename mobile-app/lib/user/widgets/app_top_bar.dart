@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_brand.dart';
 import '../customer_api.dart';
 import '../user_session.dart';
 
@@ -210,7 +211,7 @@ class _AppTopBarState extends State<AppTopBar> {
                               child: const Text(
                                 'Mark all as read',
                                 style: TextStyle(
-                                  color: Color(0xFFA99941),
+                                  color: AppBrand.accent,
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -354,7 +355,7 @@ class _AppTopBarState extends State<AppTopBar> {
             )
           : null,
       titleSpacing: 0,
-      leadingWidth: widget.showBack ? 120 : 72,
+      leadingWidth: widget.showBack ? 196 : 152,
       leading: Row(
         children: [
           if (widget.showBack)
@@ -363,9 +364,22 @@ class _AppTopBarState extends State<AppTopBar> {
               onPressed: widget.onBack ?? () => Navigator.of(context).pop(),
             ),
           const SizedBox(width: 8),
-          Image.asset(
-            'assets/images/TATIS.png',
-            height: 46,
+          // The badge artwork is unreadable at app-bar size, so the bar gets
+          // the pole glyph plus the name set as type.
+          const BrilliantePole(height: 30),
+          const SizedBox(width: 9),
+          Flexible(
+            child: Text(
+              AppBrand.shortName.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.clip,
+              style: const TextStyle(
+                color: AppBrand.chalk,
+                fontSize: 14,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.6,
+              ),
+            ),
           ),
         ],
       ),
@@ -420,7 +434,7 @@ class _AppTopBarState extends State<AppTopBar> {
       onTap: onTap,
       leading: Icon(
         isRead ? Icons.notifications_none : Icons.notifications,
-        color: isRead ? Colors.white54 : const Color(0xFFA99941),
+        color: isRead ? Colors.white54 : AppBrand.accent,
       ),
       title: Text(
         title,

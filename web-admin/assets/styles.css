@@ -30,15 +30,39 @@
   --muted: #a2a2ad;
   --text-subtle: #7c7c88;
 
-  /* Gold ramp */
-  --gold-100: #f4ead0;
-  --gold-200: #e6d59b;
-  --gold-300: #d5bf72;
-  --gold: #a99941;
-  --gold-600: #8c7f34;
-  --gold-tint: rgba(169, 153, 65, 0.13);
-  --gold-tint-2: rgba(169, 153, 65, 0.22);
-  --gold-line: rgba(169, 153, 65, 0.4);
+  /* Brilliante — the shop mark's own colours.
+     White linework dominates, so chalk is the primary action fill. The pole's
+     blue carries accent/active state; the pole's red is kept for destructive
+     actions and brand ornament so red never means "confirm" and "cancel" on
+     the same screen. */
+  --chalk: #f2f0ec;
+  --pole-red: #d93b30;
+  --pole-red-text: #e8554a;
+  --pole-blue: #3c7dd9;
+  --pole-blue-text: #6aa3f0;
+
+  /* Accent ramp (the role the gold ramp used to fill) */
+  --accent-100: #e2edfc;
+  --accent-200: #bcd6f8;
+  --accent-300: #8fbaf4;
+  --accent: #6aa3f0;
+  --accent-600: #3c7dd9;
+  --accent-700: #2b62b0;
+  --accent-tint: rgba(60, 125, 217, 0.13);
+  --accent-tint-2: rgba(60, 125, 217, 0.22);
+  --accent-line: rgba(60, 125, 217, 0.42);
+
+  /* Deprecated: Barberya ni Tatis gold. Kept as aliases so the admin and
+     receptionist views follow the new accent instead of stranding on a colour
+     the brand no longer uses. Remove once those views are migrated. */
+  --gold-100: var(--accent-100);
+  --gold-200: var(--accent-200);
+  --gold-300: var(--accent-300);
+  --gold: var(--accent);
+  --gold-600: var(--accent-600);
+  --gold-tint: var(--accent-tint);
+  --gold-tint-2: var(--accent-tint-2);
+  --gold-line: var(--accent-line);
 
   /* Status */
   --success: #48c07a;
@@ -90,7 +114,7 @@
   /* Shell metrics */
   --sidebar-w: 252px;
   --topbar-h: 62px;
-  --focus: rgba(213, 191, 114, 0.85);
+  --focus: rgba(143, 186, 244, 0.9);
   --speed: 0.16s;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -900,18 +924,26 @@ a {
   transform: translateY(1px);
 }
 
+/* Primary is white on black, the way the shop mark is set. */
 .btn.primary,
 .btn.gold {
-  background: linear-gradient(180deg, #bfad55, var(--gold));
-  border-color: var(--gold-600);
-  color: #14120a;
-  box-shadow: 0 6px 16px -10px rgba(169, 153, 65, 0.9);
+  background: linear-gradient(180deg, #ffffff, var(--chalk));
+  border-color: #ffffff;
+  color: #0b0b0e;
+  box-shadow: 0 6px 18px -12px rgba(255, 255, 255, 0.75);
 }
 
 .btn.primary:hover,
 .btn.gold:hover {
-  background: linear-gradient(180deg, #cdba60, #b1a047);
-  border-color: var(--gold-300);
+  background: linear-gradient(180deg, #ffffff, #ffffff);
+  border-color: #ffffff;
+  box-shadow: 0 8px 22px -12px rgba(255, 255, 255, 0.9);
+}
+
+.btn.primary:active,
+.btn.gold:active {
+  transform: translateY(1px);
+  box-shadow: 0 2px 8px -6px rgba(255, 255, 255, 0.7);
 }
 
 .btn.secondary {
@@ -2851,6 +2883,7 @@ canvas {
 
 /* 23. Login ---------------------------------------------------------------- */
 
+/* Red and blue thrown from opposite corners — the pole, at room scale. */
 .login-page {
   min-height: 100dvh;
   display: grid;
@@ -2858,8 +2891,8 @@ canvas {
   padding: var(--s-6);
   overflow-y: auto;
   background:
-    radial-gradient(circle at 15% 8%, rgba(169, 153, 65, 0.14), transparent 34%),
-    radial-gradient(circle at 88% 92%, rgba(255, 255, 255, 0.05), transparent 38%),
+    radial-gradient(circle at 14% 6%, rgba(217, 59, 48, 0.16), transparent 36%),
+    radial-gradient(circle at 88% 94%, rgba(60, 125, 217, 0.18), transparent 40%),
     var(--bg);
 }
 
@@ -2894,25 +2927,51 @@ canvas {
   transform: scale(1.04);
 }
 
+/* Drawn pole, used until the badge artwork lands — and permanently at sizes
+   where the badge's arched lettering would be unreadable. */
+.login-pole {
+  display: block;
+  width: 30px;
+  height: 76px;
+  margin: 0 auto;
+}
+
 .login-brand {
   text-align: center;
   margin-bottom: var(--s-6);
 }
 
-.login-eyebrow {
+.login-wordmark {
   display: block;
   margin-top: var(--s-4);
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 5px;
+  text-indent: 5px;
+  text-transform: uppercase;
+  color: var(--chalk);
+  line-height: 1;
+}
+
+.login-eyebrow {
+  display: block;
+  margin-top: 8px;
   font-size: var(--fs-label);
   font-weight: 700;
-  letter-spacing: 1.6px;
+  letter-spacing: 4.4px;
+  text-indent: 4.4px;
   text-transform: uppercase;
-  color: var(--text);
+  color: var(--muted);
 }
 
 .login-title {
-  margin: 6px 0 6px;
-  font-size: 22px;
-  letter-spacing: 0.2px;
+  margin: var(--s-5) 0 0;
+  padding-top: var(--s-4);
+  border-top: 1px solid var(--line);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  color: var(--text-2);
 }
 
 .login-subtitle {

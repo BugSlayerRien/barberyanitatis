@@ -1,11 +1,11 @@
 {
-    "name": "tatis_barbershop",
-    "short_name": "tatis_barbershop",
+    "name": "Brilliante Barbershop",
+    "short_name": "Brilliante",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#08080A",
+    "theme_color": "#08080A",
+    "description": "Book a cut at Brilliante Barbershop Baliwag: AI hairstyle recommendations, live barber availability and instant booking.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

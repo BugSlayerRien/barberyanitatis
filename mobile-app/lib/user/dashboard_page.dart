@@ -37,6 +37,15 @@ class _DashboardPageState extends State<DashboardPage>
     with WidgetsBindingObserver, RouteAware {
   static const _fontFamily = 'CenturyGothic';
 
+  /// Shop hours run morning to evening, so the greeting is worth getting right
+  /// — it is the first line a returning customer reads.
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'GOOD MORNING';
+    if (hour < 18) return 'GOOD AFTERNOON';
+    return 'GOOD EVENING';
+  }
+
   int _selectedIndex = 0; // Home tab
 
   bool _showWelcome = true;
@@ -653,16 +662,16 @@ class _DashboardPageState extends State<DashboardPage>
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF2A2418), Color(0xFF1A1A1A)],
+            colors: [Color(0xFF141A24), Color(0xFF11131A)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: AppBrand.goldLine, width: 1),
+          border: Border.all(color: AppBrand.accentLine, width: 1),
         ),
         child: Row(
           children: [
-            const Icon(Icons.event_available, color: AppBrand.gold, size: 28),
+            const Icon(Icons.event_available, color: AppBrand.accent, size: 28),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -671,7 +680,7 @@ class _DashboardPageState extends State<DashboardPage>
                   const Text(
                     'Upcoming appointment',
                     style: TextStyle(
-                      color: AppBrand.gold,
+                      color: AppBrand.accent,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.3,
@@ -732,7 +741,7 @@ class _DashboardPageState extends State<DashboardPage>
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF151515),
+        color: AppBrand.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppBrand.borderStrong),
       ),
@@ -764,7 +773,7 @@ class _DashboardPageState extends State<DashboardPage>
             onPressed: _continueBooking,
             child: const Text(
               'Continue',
-              style: TextStyle(color: AppBrand.gold, fontWeight: FontWeight.w700),
+              style: TextStyle(color: AppBrand.accent, fontWeight: FontWeight.w700),
             ),
           ),
         ],
@@ -786,12 +795,12 @@ class _DashboardPageState extends State<DashboardPage>
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF1E1A10), Color(0xFF2A2412)],
+          colors: [Color(0xFF11131A), Color(0xFF161E2B)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppBrand.goldLine),
+        border: Border.all(color: AppBrand.accentLine),
       ),
       child: Material(
         color: Colors.transparent,
@@ -802,7 +811,7 @@ class _DashboardPageState extends State<DashboardPage>
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                const Icon(Icons.flash_on, color: AppBrand.gold, size: 28),
+                const Icon(Icons.flash_on, color: AppBrand.accent, size: 28),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -926,7 +935,7 @@ class _DashboardPageState extends State<DashboardPage>
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF151515),
+          color: AppBrand.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppBrand.borderStrong),
         ),
@@ -997,7 +1006,7 @@ class _DashboardPageState extends State<DashboardPage>
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF151515),
+        color: AppBrand.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppBrand.borderStrong),
       ),
@@ -1043,9 +1052,9 @@ class _DashboardPageState extends State<DashboardPage>
               Expanded(
                 child: ElevatedButton(
                   onPressed: () => _openFaceScan(startFresh: true),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppBrand.gold,
-                    foregroundColor: Colors.black,
+                  style: AppBrand.primaryButton.copyWith(
+                    minimumSize:
+                        const WidgetStatePropertyAll(Size.fromHeight(44)),
                   ),
                   child: const Text(
                     'New scan',
@@ -1219,7 +1228,7 @@ class _DashboardPageState extends State<DashboardPage>
           title: barber['fullName']?.toString() ?? 'Barber',
           subtitle: '$source · $ratingText★',
           icon: Icons.star_rounded,
-          accent: AppBrand.gold,
+          accent: AppBrand.accent,
           onAction: _bookWithFavoriteBarber,
         ),
       );
@@ -1252,7 +1261,7 @@ class _DashboardPageState extends State<DashboardPage>
               ? 'Booked $count times in the last 90 days'
               : 'Popular with customers right now',
           icon: Icons.local_fire_department_outlined,
-          accent: const Color(0xFFE07A3D),
+          accent: AppBrand.warning,
           onAction: _bookTrendingHaircut,
         ),
       );
@@ -1263,7 +1272,7 @@ class _DashboardPageState extends State<DashboardPage>
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF151515),
+          color: AppBrand.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppBrand.border),
         ),
@@ -1327,32 +1336,50 @@ class _DashboardPageState extends State<DashboardPage>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 12),
-            
-            // Welcome Card
+            const SizedBox(height: AppBrand.s2),
+
+            // Greeting masthead — the dashboard's one brand moment.
             if (_showWelcome) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppBrand.goldTint,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppBrand.goldLine),
-                ),
-                child: Text(
-                  UserSession.fullName != null
-                      ? 'Welcome, ${UserSession.fullName}'
-                      : 'Welcome',
-                  textAlign: TextAlign.left,
-                  style: const TextStyle(
-                    color: AppBrand.text,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.3,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const BrilliantePole(height: 40),
+                  const SizedBox(width: AppBrand.s4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _greeting(),
+                          style: const TextStyle(
+                            fontFamily: _fontFamily,
+                            color: AppBrand.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          UserSession.fullName ?? 'Welcome',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: _fontFamily,
+                            color: AppBrand.chalk,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 0.2,
+                            height: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(height: 32),
+              const SizedBox(height: AppBrand.s6),
             ],
 
             _buildUpcomingStrip(),
@@ -1423,7 +1450,7 @@ class _QuickActionTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: const Color(0xFF151515),
+      color: AppBrand.surface,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -1481,7 +1508,7 @@ class _InsightCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF151515),
+        color: AppBrand.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppBrand.border),
       ),
@@ -1597,7 +1624,7 @@ class _InsightCardSkeleton extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF151515),
+        color: AppBrand.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppBrand.border),
       ),

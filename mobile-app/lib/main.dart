@@ -156,7 +156,7 @@ class TatisBarbershopApp extends StatelessWidget {
   Widget build(BuildContext context) {
     final baseTextTheme = ThemeData.dark().textTheme.apply(fontFamily: 'CenturyGothic');
     return MaterialApp(
-      title: 'Tatis Barbershop',
+      title: 'Brilliante Barbershop',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       navigatorObservers: [routeObserver],
