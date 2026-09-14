@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../user/app_brand.dart';
 
-/// Shared kiosk colors — same tokens as the customer app.
+/// Shared kiosk colors — same Brilliante tokens as the customer app.
 class KioskColors {
   KioskColors._();
 
@@ -14,9 +14,19 @@ class KioskColors {
   static const textPrimary = AppBrand.text;
   static const textMuted = AppBrand.textMuted;
   static const textDim = AppBrand.textMuted;
-  static const gold = AppBrand.gold;
-  static const goldTint = AppBrand.goldTint;
-  static const goldLine = AppBrand.goldLine;
+  static const accent = AppBrand.accent;
+  static const chalk = AppBrand.chalk;
+
+  @Deprecated('Brilliante rebrand — use KioskColors.accent')
+  static const gold = AppBrand.accent;
+  static const accentTint = AppBrand.accentTint;
+
+  @Deprecated('Brilliante rebrand — use KioskColors.accentTint')
+  static const goldTint = AppBrand.accentTint;
+  static const accentLine = AppBrand.accentLine;
+
+  @Deprecated('Brilliante rebrand — use KioskColors.accentLine')
+  static const goldLine = AppBrand.accentLine;
 }
 
 InputDecoration kioskInputDecoration({
@@ -41,17 +51,17 @@ InputDecoration kioskInputDecoration({
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(10),
-      borderSide: const BorderSide(color: KioskColors.gold),
+      borderSide: const BorderSide(color: KioskColors.accent),
     ),
   );
 }
 
 BoxDecoration kioskCardDecoration({bool selected = false}) {
   return BoxDecoration(
-    color: selected ? KioskColors.goldTint : KioskColors.panel,
+    color: selected ? KioskColors.accentTint : KioskColors.panel,
     borderRadius: BorderRadius.circular(12),
     border: Border.all(
-      color: selected ? KioskColors.gold : KioskColors.border,
+      color: selected ? KioskColors.accent : KioskColors.border,
       width: selected ? 1.5 : 1,
     ),
   );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 import 'services/chatbot_faq_entry.dart';
 import 'services/chatbot_faq_repository.dart';
@@ -12,7 +13,7 @@ class FaqLibraryPage extends StatefulWidget {
 }
 
 class _FaqLibraryPageState extends State<FaqLibraryPage> {
-  static const Color _accent = Color(0xFFA99941);
+  static const Color _accent = AppBrand.accent;
 
   final TextEditingController _searchController = TextEditingController();
   final Set<String> _expandedIds = {};

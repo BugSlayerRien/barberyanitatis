@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class ContactPage extends StatelessWidget {
   const ContactPage({super.key});
 
-  static const Color _accent = Color(0xFFA99941);
-  static const String _facebookUrl = 'https://www.facebook.com/BarberyaNiTatis';
-  static const String _messengerUrl = 'https://m.me/BarberyaNiTatis';
+  static const Color _accent = AppBrand.accent;
+  static const String _facebookUrl = 'https://www.facebook.com/BrillianteBaliwag';
+  static const String _messengerUrl = 'https://m.me/BrillianteBaliwag';
 
   Future<void> _openUrl(BuildContext context, Uri uri) async {
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -37,7 +38,7 @@ class ContactPage extends StatelessWidget {
         padding: const EdgeInsets.all(20),
         children: [
           const Text(
-            'Get in touch with Barberya ni Tatis',
+            'Get in touch with Brilliante Barbershop',
             style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
@@ -68,7 +69,7 @@ class ContactPage extends StatelessWidget {
             onTap: () => _openUrl(context, Uri.parse(_facebookUrl)),
             leading: const _FacebookLogo(size: 36),
             title: 'Facebook Page',
-            subtitle: 'Barberya ni Tatis',
+            subtitle: 'Brilliante Barbershop',
             trailing: Icons.open_in_new,
           ),
           const SizedBox(height: 10),
@@ -84,7 +85,7 @@ class ContactPage extends StatelessWidget {
               child: const Icon(Icons.chat_bubble, color: Colors.white, size: 20),
             ),
             title: 'Messenger',
-            subtitle: 'Barberya ni Tatis',
+            subtitle: 'Brilliante Barbershop',
             trailing: Icons.open_in_new,
           ),
           const SizedBox(height: 20),

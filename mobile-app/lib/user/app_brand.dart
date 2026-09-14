@@ -277,6 +277,34 @@ class _PolePainter extends CustomPainter {
   bool shouldRepaint(covariant _PolePainter oldDelegate) => false;
 }
 
+/// The shop badge, at any size.
+///
+/// Single place the logo artwork is loaded, so the asset path lives in exactly
+/// one constant. Falls back to the drawn pole if the artwork is missing or
+/// fails to decode, which keeps every screen rendering either way.
+class BrandMark extends StatelessWidget {
+  final double size;
+  final BoxFit fit;
+
+  const BrandMark({super.key, required this.size, this.fit = BoxFit.contain});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '${AppBrand.name} logo',
+      image: true,
+      child: Image.asset(
+        AppBrand.logoAsset,
+        height: size,
+        width: size,
+        fit: fit,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => BrilliantePole(height: size),
+      ),
+    );
+  }
+}
+
 /// Full brand lockup: the badge, and optionally a caption beneath it.
 ///
 /// The badge artwork already contains the wordmark, so this no longer prints

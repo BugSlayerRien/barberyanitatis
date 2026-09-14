@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
-const Color kGoldColor = Color(0xFFA99941);
+const Color kGoldColor = AppBrand.accent;
 const Color kDarkBackground = Color(0xFF0A0A0A);
 
 class AIUpdatesPage extends StatefulWidget {

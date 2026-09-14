@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
@@ -362,7 +363,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                           const SizedBox(height: 12),
                           Text(
                             'Estimated total: ₱${_totalAmount.toStringAsFixed(2)} (${_effectivePeopleCount} × ₱${_pricePerPerson.toStringAsFixed(2)})',
-                            style: const TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: AppBrand.accent, fontWeight: FontWeight.bold),
                           ),
                         ],
                         const SizedBox(height: 20),

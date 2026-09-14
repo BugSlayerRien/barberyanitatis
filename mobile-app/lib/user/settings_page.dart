@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'change_password_page.dart';
@@ -228,7 +229,7 @@ class _SettingsPageState extends State<SettingsPage> {
     bool destructive = false,
     Widget? trailing,
   }) {
-    final accent = destructive ? const Color(0xFFE74C3C) : const Color(0xFFA99941);
+    final accent = destructive ? const Color(0xFFE74C3C) : AppBrand.accent;
     final titleColor = destructive ? const Color(0xFFE74C3C) : Colors.white;
 
     return Padding(
@@ -292,7 +293,7 @@ class _SettingsPageState extends State<SettingsPage> {
         child: SwitchListTile(
           value: value,
           onChanged: onChanged,
-          activeThumbColor: const Color(0xFFA99941),
+          activeThumbColor: AppBrand.accent,
           title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
           subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
         ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 import 'faq_library_page.dart';
 
@@ -83,7 +84,7 @@ class PrivacyDataPage extends StatelessWidget {
                 ),
                 child: const Row(
                   children: [
-                    Icon(Icons.chat_bubble_outline, color: Color(0xFFA99941)),
+                    Icon(Icons.chat_bubble_outline, color: AppBrand.accent),
                     SizedBox(width: 12),
                     Expanded(
                       child: Column(

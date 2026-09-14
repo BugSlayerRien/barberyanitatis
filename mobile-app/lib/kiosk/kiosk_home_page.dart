@@ -138,7 +138,7 @@ class _WalkInQueuePanel extends StatelessWidget {
           const SizedBox(height: 16),
           Expanded(
             child: loading
-                ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
+                ? const Center(child: CircularProgressIndicator(color: KioskColors.accent))
                 : error != null
                     ? Center(
                         child: Column(
@@ -182,7 +182,7 @@ class _WalkInQueuePanel extends StatelessWidget {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       decoration: BoxDecoration(
-                                        color: KioskColors.gold,
+                                        color: KioskColors.accent,
                                         borderRadius: BorderRadius.circular(8),
                                       ),
                                       child: Text(
@@ -216,7 +216,7 @@ class _WalkInQueuePanel extends StatelessWidget {
                                             Text(
                                               'Est. wait: $waitMinutes min',
                                               style: const TextStyle(
-                                                color: KioskColors.gold,
+                                                color: KioskColors.accent,
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.w600,
                                               ),
@@ -234,7 +234,7 @@ class _WalkInQueuePanel extends StatelessWidget {
                                         if (status == 'InProgress')
                                           const Text(
                                             'In service',
-                                            style: TextStyle(color: KioskColors.gold, fontSize: 10),
+                                            style: TextStyle(color: KioskColors.accent, fontSize: 10),
                                           ),
                                       ],
                                     ),

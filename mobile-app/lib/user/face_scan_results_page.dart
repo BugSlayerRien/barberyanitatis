@@ -1244,11 +1244,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF2A2208),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFC9B46A)),
+                  border: Border.all(color: AppBrand.accent),
                 ),
                 child: Text(
                   _lengthNote!,
-                  style: const TextStyle(color: Color(0xFFC9B46A), fontSize: 12),
+                  style: const TextStyle(color: AppBrand.accent, fontSize: 12),
                 ),
               ),
               const SizedBox(height: 10),
@@ -1325,11 +1325,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 decoration: BoxDecoration(
                   color: const Color(0xFF2A2208),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFFC9B46A)),
+                  border: Border.all(color: AppBrand.accent),
                 ),
                 child: Text(
                   _previewDiagnosticWarning(angleKey)!,
-                  style: const TextStyle(color: Color(0xFFC9B46A), fontSize: 12, height: 1.35),
+                  style: const TextStyle(color: AppBrand.accent, fontSize: 12, height: 1.35),
                 ),
               ),
             ],

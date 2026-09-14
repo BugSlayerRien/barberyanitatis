@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'user/app_brand.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'package:logging/logging.dart';
@@ -19,7 +20,7 @@ import 'user/scanner/overlay_asset_cache.dart';
 import 'app_orientation.dart';
 
 // --- 1. Define Custom Colors ---
-const Color kGoldColor = Color(0xFFA99941);
+const Color kGoldColor = AppBrand.accent;
 const Color kDarkBlackColor = Color(0xFF111111);
 const Color kOrangeColor = Color(0xFFF37022);
 
@@ -222,15 +223,15 @@ class BarbershopDashboardContent extends StatelessWidget {
           // Logo and Barbershop Name
           Row(
             children: <Widget>[
-              // Tatis Logo (FIXED PATH: using TATIS.png)
+              // Shop badge.
               Image.asset(
-                'assets/images/TATIS.png', 
+                'assets/images/brilliante.png', 
                 height: 30, 
                 color: Colors.white, 
               ),
               const SizedBox(width: 8),
               const Text(
-                'BARBERYA NI TATIS',
+                'BRILLIANTE BARBERSHOP',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 14,
@@ -320,9 +321,8 @@ class BarbershopDashboardContent extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
                         Image.asset(
-                          'assets/images/TATIS.png',
-                          height: 40,
-                          color: Colors.white,
+                          'assets/images/brilliante.png',
+                          height: 44,
                         ),
                         const SizedBox(width: 12),
                         const Expanded(

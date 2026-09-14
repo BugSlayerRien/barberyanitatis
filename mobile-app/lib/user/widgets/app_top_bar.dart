@@ -355,7 +355,7 @@ class _AppTopBarState extends State<AppTopBar> {
             )
           : null,
       titleSpacing: 0,
-      leadingWidth: widget.showBack ? 196 : 152,
+      leadingWidth: widget.showBack ? 112 : 64,
       leading: Row(
         children: [
           if (widget.showBack)
@@ -364,23 +364,8 @@ class _AppTopBarState extends State<AppTopBar> {
               onPressed: widget.onBack ?? () => Navigator.of(context).pop(),
             ),
           const SizedBox(width: 8),
-          // The badge artwork is unreadable at app-bar size, so the bar gets
-          // the pole glyph plus the name set as type.
-          const BrilliantePole(height: 30),
-          const SizedBox(width: 9),
-          Flexible(
-            child: Text(
-              AppBrand.shortName.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.clip,
-              style: const TextStyle(
-                color: AppBrand.chalk,
-                fontSize: 14,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.6,
-              ),
-            ),
-          ),
+          // Badge only — it already carries the wordmark.
+          const BrandMark(size: 42),
         ],
       ),
       actions: widget.showCustomerActions

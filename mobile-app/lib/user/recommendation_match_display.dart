@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 /// UI helpers for PHP `match_percent` + `match_breakdown` from ai_scan.php.
 class RecommendationMatchDisplay {
@@ -47,12 +48,12 @@ class RecommendationMatchDisplay {
       decoration: BoxDecoration(
         color: const Color(0xFF2A2410),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFC9B46A).withValues(alpha: 0.55)),
+        border: Border.all(color: AppBrand.accent.withValues(alpha: 0.55)),
       ),
       child: Text(
         '$percent% match',
         style: TextStyle(
-          color: const Color(0xFFC9B46A),
+          color: AppBrand.accent,
           fontSize: compact ? 11 : 12,
           fontWeight: FontWeight.w700,
         ),

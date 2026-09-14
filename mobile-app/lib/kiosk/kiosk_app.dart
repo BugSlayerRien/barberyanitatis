@@ -49,7 +49,7 @@ class KioskApp extends StatelessWidget {
     final centuryPrimaryTextTheme =
         base.primaryTextTheme.apply(fontFamily: 'CenturyGothic');
     return MaterialApp(
-      title: 'Barberya ni Tatis',
+      title: 'Brilliante Barbershop',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
       navigatorObservers: [routeObserver],
@@ -57,7 +57,7 @@ class KioskApp extends StatelessWidget {
         brightness: Brightness.dark,
         scaffoldBackgroundColor: KioskColors.background,
         colorScheme: const ColorScheme.dark(
-          primary: KioskColors.gold,
+          primary: KioskColors.accent,
           onPrimary: Colors.black,
           surface: KioskColors.panel,
           onSurface: KioskColors.textPrimary,
@@ -71,12 +71,12 @@ class KioskApp extends StatelessWidget {
           toolbarTextStyle: centuryTextTheme.bodyMedium,
         ),
         progressIndicatorTheme: const ProgressIndicatorThemeData(
-          color: KioskColors.gold,
+          color: KioskColors.accent,
         ),
         dividerTheme: const DividerThemeData(color: KioskColors.border),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(
-            foregroundColor: KioskColors.gold,
+            foregroundColor: KioskColors.accent,
             textStyle: const TextStyle(fontFamily: 'CenturyGothic'),
           ),
         ),

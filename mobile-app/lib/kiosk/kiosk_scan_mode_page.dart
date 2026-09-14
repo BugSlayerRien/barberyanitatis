@@ -125,7 +125,7 @@ class _ModeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? KioskColors.goldTint : KioskColors.panel,
+      color: selected ? KioskColors.accentTint : KioskColors.panel,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         onTap: onTap,
@@ -137,7 +137,7 @@ class _ModeCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(icon, color: selected ? KioskColors.gold : KioskColors.textDim, size: 32),
+              Icon(icon, color: selected ? KioskColors.accent : KioskColors.textDim, size: 32),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -158,7 +158,7 @@ class _ModeCard extends StatelessWidget {
               ),
               Icon(
                 selected ? Icons.radio_button_checked : Icons.radio_button_off,
-                color: selected ? KioskColors.gold : KioskColors.textMuted,
+                color: selected ? KioskColors.accent : KioskColors.textMuted,
               ),
             ],
           ),

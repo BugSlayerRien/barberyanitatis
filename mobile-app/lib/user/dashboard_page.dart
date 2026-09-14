@@ -1343,7 +1343,7 @@ class _DashboardPageState extends State<DashboardPage>
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  const BrilliantePole(height: 40),
+                  const BrandMark(size: 52),
                   const SizedBox(width: AppBrand.s4),
                   Expanded(
                     child: Column(

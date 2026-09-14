@@ -1,13 +1,14 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../user/app_brand.dart';
 import 'package:http/http.dart' as http;
 
 import '../user/api_config.dart';
 import '../user/time_format_utils.dart';
 import '../user/user_session.dart';
 
-const Color _kGold = Color(0xFFA99941);
+const Color _kGold = AppBrand.accent;
 
 class BarberCalendarPage extends StatefulWidget {
   const BarberCalendarPage({super.key});

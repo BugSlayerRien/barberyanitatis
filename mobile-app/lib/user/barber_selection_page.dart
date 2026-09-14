@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:http/http.dart' as http;
 import 'group_size_page.dart';
 import 'appointments_page.dart';
@@ -410,7 +411,7 @@ class BarberDetailDialog extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: const Color(0xFFA99941),
+            backgroundColor: AppBrand.accent,
             child: Text(
               barberName.isNotEmpty
                   ? barberName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join()

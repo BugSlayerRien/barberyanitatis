@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:http/http.dart' as http;
 import 'completed_appointment_detail.dart';
 import 'profile_page.dart';
@@ -488,7 +489,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                     padding: EdgeInsets.only(right: 8),
                                     child: Icon(
                                       Icons.groups_rounded,
-                                      color: Color(0xFFA99941),
+                                      color: AppBrand.accent,
                                       size: 28,
                                     ),
                                   ),
@@ -657,7 +658,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           Text(
                                             appointment['price'] as String,
                                             style: const TextStyle(
-                                              color: Color(0xFFA99941),
+                                              color: AppBrand.accent,
                                               fontWeight: FontWeight.bold,
                                               fontSize: 12,
                                             ),
@@ -681,7 +682,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                     child: Text(
                                       appointment['rating'] as String,
                                       style: const TextStyle(
-                                        color: Color(0xFFA99941),
+                                        color: AppBrand.accent,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 12,
                                       ),
@@ -708,7 +709,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                           );
                                         },
                                         style: TextButton.styleFrom(
-                                          foregroundColor: const Color(0xFFA99941),
+                                          foregroundColor: AppBrand.accent,
                                           padding: const EdgeInsets.symmetric(
                                             horizontal: 12,
                                             vertical: 8,
@@ -758,12 +759,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                             style: OutlinedButton.styleFrom(
                                               foregroundColor:
                                                   appointment['canReschedule'] == true
-                                                      ? const Color(0xFFA99941)
+                                                      ? AppBrand.accent
                                                       : Colors.white38,
                                               visualDensity: VisualDensity.compact,
                                               side: BorderSide(
                                                   color: appointment['canReschedule'] == true
-                                                      ? const Color(0xFFA99941)
+                                                      ? AppBrand.accent
                                                       : Colors.white24,
                                                   width: 1),
                                               padding:
@@ -869,7 +870,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                                             },
                                             style: TextButton.styleFrom(
                                               foregroundColor:
-                                                  const Color(0xFFA99941),
+                                                  AppBrand.accent,
                                               visualDensity: VisualDensity.compact,
                                               padding:
                                                   const EdgeInsets.symmetric(
@@ -1368,7 +1369,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
                       onPressed: () => setState(() => rating = index + 1),
                       icon: Icon(
                         isActive ? Icons.star : Icons.star_border,
-                        color: const Color(0xFFA99941),
+                        color: AppBrand.accent,
                       ),
                     );
                   }),

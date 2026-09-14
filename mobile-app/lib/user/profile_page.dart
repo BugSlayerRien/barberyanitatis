@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'customer_navigation.dart';
@@ -773,7 +774,7 @@ class _ProfilePageState extends State<ProfilePage> {
       case 'Platinum':
         return const Color(0xFFE5E4E2);
       case 'Gold':
-        return const Color(0xFFA99941);
+        return AppBrand.accent;
       case 'Silver':
         return const Color(0xFFC0C0C0);
       case 'Bronze':

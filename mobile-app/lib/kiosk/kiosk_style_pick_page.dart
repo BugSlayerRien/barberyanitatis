@@ -231,11 +231,11 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
           if (_searchLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: LinearProgressIndicator(color: KioskColors.gold, minHeight: 2),
+              child: LinearProgressIndicator(color: KioskColors.accent, minHeight: 2),
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
+                ? const Center(child: CircularProgressIndicator(color: KioskColors.accent))
                 : _error != null && styles.isEmpty
                     ? Center(child: Text(_error!, style: const TextStyle(color: KioskColors.textMuted)))
                     : styles.isEmpty
