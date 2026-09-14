@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 class AboutPage extends StatelessWidget {
   const AboutPage({super.key});
@@ -53,14 +54,14 @@ class AboutPage extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF1A1A1A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFA99941).withValues(alpha: 0.4)),
+        border: Border.all(color: AppBrand.accent.withValues(alpha: 0.4)),
       ),
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             'Owner — Francis Carlo Vasallo',
-            style: TextStyle(color: Color(0xFFA99941), fontWeight: FontWeight.bold, fontSize: 15),
+            style: TextStyle(color: AppBrand.accent, fontWeight: FontWeight.bold, fontSize: 15),
           ),
           SizedBox(height: 8),
           Text(

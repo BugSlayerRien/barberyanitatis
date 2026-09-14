@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 import 'face_scan_results_page.dart';
 import 'services/face_scan_service.dart';
@@ -564,7 +565,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
                 value: progress.clamp(0.0, 1.0),
                 minHeight: 8,
                 backgroundColor: Colors.white12,
-                color: const Color(0xFFA99941),
+                color: AppBrand.accent,
               ),
               const SizedBox(height: 18),
               Expanded(
@@ -608,7 +609,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
                     child: ElevatedButton(
                       onPressed: _faceSessionReady ? _proceedToBooking : null,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFA99941),
+                        backgroundColor: AppBrand.accent,
                         foregroundColor: Colors.black,
                         disabledBackgroundColor: Colors.grey[700],
                         minimumSize: const Size.fromHeight(54),
@@ -765,7 +766,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: captured
-                    ? const Color(0xFFA99941).withOpacity(0.6)
+                    ? AppBrand.accent.withOpacity(0.6)
                     : active
                         ? Colors.white24
                         : Colors.white12,
@@ -773,7 +774,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
             ),
             child: Column(
               children: [
-                Icon(stage.icon, size: 18, color: captured ? const Color(0xFFA99941) : Colors.white54),
+                Icon(stage.icon, size: 18, color: captured ? AppBrand.accent : Colors.white54),
                 const SizedBox(height: 6),
                 Text(
                   stage.label,
@@ -784,7 +785,7 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
                 Text(
                   captured ? '✓' : active ? '...' : 'Pending',
                   style: TextStyle(
-                    color: captured ? const Color(0xFFA99941) : Colors.white54,
+                    color: captured ? AppBrand.accent : Colors.white54,
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
                   ),

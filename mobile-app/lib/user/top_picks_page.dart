@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'hairstyle_detail_page.dart';
 
 class TopPicksPage extends StatelessWidget {
@@ -62,10 +63,10 @@ class TopPicksPage extends StatelessWidget {
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFA99941), width: 2),
+                  border: Border.all(color: AppBrand.accent, width: 2),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFFA99941).withOpacity(0.2),
+                      color: AppBrand.accent.withOpacity(0.2),
                       blurRadius: 20,
                       offset: const Offset(0, 10),
                     ),
@@ -106,7 +107,7 @@ class TopPicksPage extends StatelessWidget {
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFA99941),
+                                color: AppBrand.accent,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: const Icon(Icons.favorite, color: Colors.white, size: 20),
@@ -147,7 +148,7 @@ class TopPicksPage extends StatelessWidget {
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
-                                    colors: [const Color(0xFFA99941), const Color(0xFF8B7E3A)],
+                                    colors: [AppBrand.accent, const Color(0xFF8B7E3A)],
                                   ),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
@@ -172,10 +173,10 @@ class TopPicksPage extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFA99941).withOpacity(0.2),
+                                  color: AppBrand.accent.withOpacity(0.2),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: const Icon(Icons.info_outline, color: Color(0xFFA99941), size: 18),
+                                child: const Icon(Icons.info_outline, color: AppBrand.accent, size: 18),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -202,7 +203,7 @@ class TopPicksPage extends StatelessWidget {
                                                   width: 5,
                                                   height: 5,
                                                   decoration: const BoxDecoration(
-                                                    color: Color(0xFFA99941),
+                                                    color: AppBrand.accent,
                                                     shape: BoxShape.circle,
                                                   ),
                                                 ),
@@ -245,11 +246,11 @@ class TopPicksPage extends StatelessWidget {
                 );
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA99941),
+                backgroundColor: AppBrand.accent,
                 minimumSize: const Size.fromHeight(56),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 8,
-                shadowColor: const Color(0xFFA99941).withOpacity(0.4),
+                shadowColor: AppBrand.accent.withOpacity(0.4),
               ),
               child: const Text(
                 'View & Book',

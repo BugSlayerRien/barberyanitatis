@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../user/app_brand.dart';
 
 import '../user/time_format_utils.dart';
 import '../user/widgets/appointment_preview_carousel.dart';
@@ -77,7 +78,7 @@ class BarberAppointmentDetailPage extends StatelessWidget {
         color: highlight ? const Color(0xFF2A2410) : const Color(0xFF121212),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: highlight ? const Color(0xFFA99941) : Colors.white12,
+          color: highlight ? AppBrand.accent : Colors.white12,
         ),
       ),
       child: Column(

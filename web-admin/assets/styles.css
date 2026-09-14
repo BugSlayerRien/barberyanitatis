@@ -1,6 +1,6 @@
 /* ==========================================================================
-   Barberya ni Tatis — Operations Portal design system
-   Black + White + Gold. Shared by Admin, Receptionist and Sign-in.
+   Brilliante Barbershop — Operations Portal design system
+   Black + White + barber-pole red/blue. Shared by Admin, Receptionist and Sign-in.
    ========================================================================== */
 
 /* 1. Tokens ---------------------------------------------------------------- */
@@ -275,7 +275,9 @@ a {
 
 .brand-badge-logo {
   background-color: #0f0f13;
-  background-image: url("./images/TATIS.png");
+  /* 128px variant, not the full badge: this renders at ~31px and the large
+     file is only needed by the login card. */
+  background-image: url("./images/brilliante-badge.png");
   background-size: 82%;
   background-repeat: no-repeat;
   background-position: center;
@@ -2911,8 +2913,8 @@ canvas {
 }
 
 .login-logo {
-  width: 108px;
-  height: 108px;
+  width: 168px;
+  height: 168px;
   object-fit: contain;
   display: block;
   margin: 0 auto;

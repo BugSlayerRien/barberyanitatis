@@ -4,6 +4,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:http/http.dart' as http;
 import 'ai_funnel_service.dart';
 import 'barber_selection_page.dart';
@@ -239,7 +240,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             Text(
               action,
               style: const TextStyle(
-                  color: Color(0xFFA99941),
+                  color: AppBrand.accent,
                   fontSize: 12,
                   fontWeight: FontWeight.bold),
             ),

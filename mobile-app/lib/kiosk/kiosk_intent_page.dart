@@ -126,7 +126,7 @@ class _IntentCard extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Icon(icon, color: KioskColors.gold, size: 32),
+              Icon(icon, color: KioskColors.accent, size: 32),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(

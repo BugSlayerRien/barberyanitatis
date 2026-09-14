@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 
 import 'appointments_page.dart';
 import 'customer_navigation.dart';
@@ -67,7 +68,7 @@ class _CompletedAppointmentDetailPageState extends State<CompletedAppointmentDet
           Row(
             children: [
               if (isGroup) ...[
-                const Icon(Icons.groups_rounded, color: Color(0xFFA99941), size: 28),
+                const Icon(Icons.groups_rounded, color: AppBrand.accent, size: 28),
                 const SizedBox(width: 10),
               ],
               Expanded(
@@ -98,7 +99,7 @@ class _CompletedAppointmentDetailPageState extends State<CompletedAppointmentDet
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
                   children: [
-                    const Icon(Icons.person_outline, color: Color(0xFFA99941), size: 18),
+                    const Icon(Icons.person_outline, color: AppBrand.accent, size: 18),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -144,11 +145,11 @@ class _CompletedAppointmentDetailPageState extends State<CompletedAppointmentDet
           const SizedBox(height: 16),
           Row(
             children: [
-              const Icon(Icons.calendar_today, color: Color(0xFFA99941), size: 18),
+              const Icon(Icons.calendar_today, color: AppBrand.accent, size: 18),
               const SizedBox(width: 8),
               Text(date, style: const TextStyle(color: Colors.white70)),
               const SizedBox(width: 20),
-              const Icon(Icons.access_time, color: Color(0xFFA99941), size: 18),
+              const Icon(Icons.access_time, color: AppBrand.accent, size: 18),
               const SizedBox(width: 8),
               Text(time, style: const TextStyle(color: Colors.white70)),
             ],
@@ -159,7 +160,7 @@ class _CompletedAppointmentDetailPageState extends State<CompletedAppointmentDet
           Text(
             'Price: $price',
             style: const TextStyle(
-              color: Color(0xFFA99941),
+              color: AppBrand.accent,
               fontWeight: FontWeight.bold,
               fontSize: 16,
             ),

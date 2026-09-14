@@ -144,7 +144,7 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Image.asset(
-                      'assets/images/TATIS.png',
+                      'assets/images/brilliante.png',
                       height: 20,
                       color: Colors.white,
                     ),
@@ -156,7 +156,7 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
-                          'TATIS',
+                          'BRILLIANTE',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 16,
@@ -432,7 +432,7 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
       child: Column(
         children: [
           const Text(
-            'WHY CHOOSE TATIS',
+            'WHY CHOOSE BRILLIANTE',
             style: TextStyle(
               color: Colors.black,
               fontSize: 12,
@@ -827,14 +827,14 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Image.asset(
-                      'assets/images/TATIS.png',
+                      'assets/images/brilliante.png',
                       height: 20,
                       color: Colors.white,
                     ),
                   ),
                   const SizedBox(width: 10),
                   const Text(
-                    'TATIS BARBERSHOP',
+                    'BRILLIANTE BARBERSHOP',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -846,7 +846,7 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
               ),
               const SizedBox(height: 12),
               Text(
-                'Premium grooming since 2020',
+                'Premium grooming in Baliwag',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: Colors.white.withOpacity(0.6),
@@ -859,7 +859,7 @@ class _HeroPageState extends State<HeroPage> with SingleTickerProviderStateMixin
           const SizedBox(height: 30),
           
           Text(
-            '© 2026 Tatis Barbershop. All rights reserved.',
+            '© 2026 Brilliante Barbershop. All rights reserved.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: Colors.white.withOpacity(0.5),

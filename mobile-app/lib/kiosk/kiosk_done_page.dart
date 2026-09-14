@@ -26,7 +26,7 @@ class KioskDonePage extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.check_circle_outline, color: KioskColors.gold, size: 72),
+                const Icon(Icons.check_circle_outline, color: KioskColors.accent, size: 72),
                 const SizedBox(height: 20),
                 Text(
                   'You\'re in the queue, $guestName!',
@@ -42,9 +42,9 @@ class KioskDonePage extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 20),
                   decoration: BoxDecoration(
-                    color: KioskColors.goldTint,
+                    color: KioskColors.accentTint,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: KioskColors.gold),
+                    border: Border.all(color: KioskColors.accent),
                   ),
                   child: Column(
                     children: [
@@ -53,7 +53,7 @@ class KioskDonePage extends StatelessWidget {
                       Text(
                         queueNumber,
                         style: const TextStyle(
-                          color: KioskColors.gold,
+                          color: KioskColors.accent,
                           fontSize: 40,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 2,

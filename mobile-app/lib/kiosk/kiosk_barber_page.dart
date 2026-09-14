@@ -147,7 +147,7 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
     return KioskScaffold(
       title: 'Choose your barber',
       body: _loading
-          ? const Center(child: CircularProgressIndicator(color: KioskColors.gold))
+          ? const Center(child: CircularProgressIndicator(color: KioskColors.accent))
           : _error != null
               ? Center(
                   child: Column(
@@ -178,7 +178,7 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.content_cut, color: KioskColors.gold, size: 20),
+                            const Icon(Icons.content_cut, color: KioskColors.accent, size: 20),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -249,7 +249,7 @@ class _BarberTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: selected ? KioskColors.goldTint : KioskColors.panel,
+      color: selected ? KioskColors.accentTint : KioskColors.panel,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         onTap: onTap,
@@ -260,7 +260,7 @@ class _BarberTile extends StatelessWidget {
           child: Row(
             children: [
               CircleAvatar(
-                backgroundColor: selected ? KioskColors.gold : KioskColors.panelAlt,
+                backgroundColor: selected ? KioskColors.accent : KioskColors.panelAlt,
                 child: Text(
                   name.isNotEmpty ? name[0].toUpperCase() : 'B',
                   style: TextStyle(
@@ -281,7 +281,7 @@ class _BarberTile extends StatelessWidget {
                     Text(
                       subtitle,
                       style: const TextStyle(
-                        color: KioskColors.gold,
+                        color: KioskColors.accent,
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),
@@ -296,7 +296,7 @@ class _BarberTile extends StatelessWidget {
               ),
               Icon(
                 selected ? Icons.check_circle : Icons.circle_outlined,
-                color: selected ? KioskColors.gold : KioskColors.textMuted,
+                color: selected ? KioskColors.accent : KioskColors.textMuted,
               ),
             ],
           ),

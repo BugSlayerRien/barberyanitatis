@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'app_brand.dart';
 import 'package:http/http.dart' as http;
 import 'time_slot_page.dart';
 import 'api_config.dart';
@@ -445,7 +446,7 @@ class _CalendarPageState extends State<CalendarPage> {
                                 Color textColor;
                                 Border? border;
                                 if (isSelected) {
-                                  fill = isClosed ? _closedHolidayFill : const Color(0xFFA99941);
+                                  fill = isClosed ? _closedHolidayFill : AppBrand.accent;
                                   textColor = Colors.white;
                                   border = isClosed
                                       ? Border.all(color: const Color(0xFFFF8A80), width: 1.5)
