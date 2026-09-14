@@ -2,6 +2,8 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'device_orientation_tracker.dart';
+
 /// Shared camera / ML Kit orientation math for portrait (customer) and
 /// landscape (kiosk) UIs.
 ///
@@ -34,8 +36,27 @@ class CameraFrameOrientation {
         value.deviceOrientation;
   }
 
+  /// Orientation to feed the ML Kit rotation maths.
+  ///
+  /// Deliberately NOT [previewOrientation]. Two reasons:
+  ///
+  /// 1. `lockedCaptureOrientation` describes the rotation stamped on still
+  ///    captures. Image-stream frames keep arriving in sensor orientation
+  ///    regardless, so folding the lock into the rotation maths pins the
+  ///    compensation to a value that has nothing to do with the frames.
+  /// 2. `controller.value.deviceOrientation` defaults to portraitUp and is only
+  ///    corrected by a change event the Android plugin suppresses when the
+  ///    orientation has not changed since the previous controller — see
+  ///    [DeviceOrientationTracker].
+  ///
+  /// So prefer what the platform last actually reported, and fall back to the
+  /// controller only when the tracker has never heard anything.
+  static DeviceOrientation frameOrientation(CameraController controller) {
+    return DeviceOrientationTracker.latest ?? controller.value.deviceOrientation;
+  }
+
   static DeviceOrientation landscapeLockTarget(CameraController controller) {
-    final current = controller.value.deviceOrientation;
+    final current = frameOrientation(controller);
     return isLandscape(current) ? current : DeviceOrientation.landscapeLeft;
   }
 
@@ -59,7 +80,7 @@ class CameraFrameOrientation {
   static int mlKitRotationDegreesFor(CameraController controller) {
     return mlKitRotationDegrees(
       sensorOrientation: controller.description.sensorOrientation,
-      deviceOrientation: previewOrientation(controller),
+      deviceOrientation: frameOrientation(controller),
       lensDirection: controller.description.lensDirection,
     );
   }

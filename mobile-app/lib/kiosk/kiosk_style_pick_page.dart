@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../user/ai_face_scan_page.dart';
@@ -205,6 +206,12 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
               controller: _searchController,
+              // Same 70-character ceiling as the guest name; no counter, since
+              // nobody types a 70-character hairstyle on purpose.
+              inputFormatters: [
+                LengthLimitingTextInputFormatter(
+                    KioskSession.guestNameMaxLength),
+              ],
               style: const TextStyle(color: KioskColors.textPrimary),
               decoration: kioskInputDecoration(
                 hintText: 'Search hairstyles',

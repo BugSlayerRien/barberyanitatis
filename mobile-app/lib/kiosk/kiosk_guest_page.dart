@@ -24,9 +24,10 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
 
   void _continue() {
     final name = _nameController.text.trim();
-    if (!KioskSession.isValidGuestName(name)) {
+    final error = KioskSession.guestNameErrorFor(name);
+    if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(KioskSession.guestNameError)),
+        SnackBar(content: Text(error)),
       );
       return;
     }
@@ -53,6 +54,28 @@ class _KioskGuestPageState extends State<KioskGuestPage> {
             TextField(
               controller: _nameController,
               textCapitalization: TextCapitalization.words,
+              maxLength: KioskSession.guestNameMaxLength,
+              // Counter only appears as the guest nears the cap — a "0/70"
+              // sitting under an empty field reads as a demand, not a hint.
+              buildCounter: (
+                context, {
+                required currentLength,
+                required isFocused,
+                maxLength,
+              }) {
+                if (maxLength == null || currentLength < maxLength - 10) {
+                  return null;
+                }
+                return Text(
+                  '$currentLength/$maxLength',
+                  style: TextStyle(
+                    color: currentLength >= maxLength
+                        ? KioskColors.accent
+                        : KioskColors.textMuted,
+                    fontSize: 12,
+                  ),
+                );
+              },
               inputFormatters: [
                 FilteringTextInputFormatter.allow(RegExp(r'[\p{L} ]', unicode: true)),
               ],

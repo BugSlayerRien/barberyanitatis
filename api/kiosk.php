@@ -134,8 +134,9 @@ try {
             json_response(['error' => 'Missing serviceIDs'], 422);
         }
 
-        if (!kiosk_guest_name_is_valid($guestName)) {
-            json_response(['error' => kiosk_guest_name_error()], 422);
+        $guestNameError = kiosk_guest_name_validation_error($guestName);
+        if ($guestNameError !== null) {
+            json_response(['error' => $guestNameError], 422);
         }
 
         if ($variantID <= 0) {
