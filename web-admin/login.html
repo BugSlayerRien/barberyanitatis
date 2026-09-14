@@ -3,24 +3,48 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Barberya ni Tatis | Operations Portal Sign In</title>
-    <link rel="icon" type="image/png" href="./assets/images/TATIS.png" />
-    <link rel="apple-touch-icon" href="./assets/images/TATIS.png" />
+    <title>Brilliante Barbershop | Operations Portal Sign In</title>
+    <link rel="icon" type="image/svg+xml" href="./assets/images/brilliante-pole.svg" />
+    <link rel="apple-touch-icon" href="./assets/images/brilliante-pole.svg" />
     <link rel="stylesheet" href="./assets/styles.css" />
   </head>
   <body class="login-page">
     <main class="login-container">
       <section class="login-card" aria-label="Portal sign in">
         <div class="login-brand">
-          <img class="login-logo" src="./assets/images/TATIS.png" alt="Barberya ni Tatis logo" />
-          <span class="login-eyebrow">Barberya ni Tatis</span>
+          <!-- Drawn rather than loaded: the badge artwork's arched lettering
+               is unreadable at this size, and this needs no asset request. -->
+          <svg class="login-pole" viewBox="0 0 32 80" aria-hidden="true" focusable="false">
+            <rect x="1" y="0" width="30" height="9" rx="4" fill="#F2F0EC" />
+            <rect x="1" y="71" width="30" height="9" rx="4" fill="#F2F0EC" />
+            <clipPath id="pole-barrel">
+              <rect x="4" y="9" width="24" height="62" rx="6" />
+            </clipPath>
+            <g clip-path="url(#pole-barrel)">
+              <rect x="4" y="9" width="24" height="62" fill="#F2F0EC" />
+              <g fill="#D93B30">
+                <path d="M4 0 L28 -13 L28 -3 L4 10 Z" />
+                <path d="M4 24 L28 11 L28 21 L4 34 Z" />
+                <path d="M4 48 L28 35 L28 45 L4 58 Z" />
+                <path d="M4 72 L28 59 L28 69 L4 82 Z" />
+              </g>
+              <g fill="#3C7DD9">
+                <path d="M4 12 L28 -1 L28 9 L4 22 Z" />
+                <path d="M4 36 L28 23 L28 33 L4 46 Z" />
+                <path d="M4 60 L28 47 L28 57 L4 70 Z" />
+              </g>
+            </g>
+            <rect x="4" y="9" width="24" height="62" rx="6" fill="none" stroke="#08080A" stroke-width="2.5" />
+          </svg>
+          <span class="login-wordmark">Brilliante</span>
+          <span class="login-eyebrow">Barbershop</span>
           <h1 class="login-title">Operations Portal</h1>
         </div>
 
         <form id="login-form" class="login-form">
           <label class="login-label">
             <span class="login-meta">Work email</span>
-            <input id="email" class="input login-input" type="email" placeholder="name@barberyatatis.com" autocomplete="username" required />
+            <input id="email" class="input login-input" type="email" placeholder="name@brilliantebarbershop.com" autocomplete="username" required />
           </label>
 
           <label class="login-label">

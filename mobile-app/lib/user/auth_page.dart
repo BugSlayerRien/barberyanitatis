@@ -16,7 +16,8 @@ import 'auth_user_messages.dart';
 import 'supabase_password_identity.dart';
 import 'user_session.dart';
 
-const Color kGoldColor = AppBrand.gold;
+// Field styling, button styling and the accent all come from AppBrand now —
+// see lib/user/app_brand.dart for the Brilliante token set.
 const String kGoogleLogoAsset = 'assets/images/google_logo.png';
 
 class AuthPage extends StatefulWidget {
@@ -518,59 +519,20 @@ class _AuthPageState extends State<AuthPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const BrandWordmark(logoHeight: 104),
-                const SizedBox(height: 18),
+                const SizedBox(height: AppBrand.s5),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-                  decoration: AppBrand.card,
+                  padding: const EdgeInsets.fromLTRB(
+                      AppBrand.s5, AppBrand.s4, AppBrand.s5, AppBrand.s5),
+                  decoration: AppBrand.cardRaised,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Toggle buttons
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          GestureDetector(
-                            onTap: () => setState(() => _isLogin = true),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color:
-                                    _isLogin ? kGoldColor : Colors.transparent,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text('SIGN IN',
-                                  style: TextStyle(
-                                      color: _isLogin
-                                          ? Colors.black
-                                          : Colors.white)),
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          GestureDetector(
-                            onTap: () => setState(() => _isLogin = false),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 220),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 14, vertical: 8),
-                              decoration: BoxDecoration(
-                                color:
-                                    !_isLogin ? kGoldColor : Colors.transparent,
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: Text('SIGN UP',
-                                  style: TextStyle(
-                                      color: !_isLogin
-                                          ? Colors.black
-                                          : Colors.white)),
-                            ),
-                          ),
-                        ],
+                      _AuthModeSwitch(
+                        isLogin: _isLogin,
+                        onChanged: (value) => setState(() => _isLogin = value),
                       ),
 
-                      const SizedBox(height: 14),
+                      const SizedBox(height: AppBrand.s5),
 
                       // Animated switch between login and register
                       AnimatedCrossFade(
@@ -597,33 +559,31 @@ class _AuthPageState extends State<AuthPage> {
   Widget _buildLogin(BuildContext context) {
     return Column(
       children: [
-        const SizedBox(height: 8),
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text('Sign in to your account',
-              style: TextStyle(color: Colors.white70, fontSize: 12)),
-        ),
-        const SizedBox(height: 10),
+        const _FieldLabel('Email'),
         TextField(
           controller: _loginUser,
           keyboardType: TextInputType.emailAddress,
-          style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your email'),
+          autofillHints: const [AutofillHints.email],
+          textInputAction: TextInputAction.next,
+          style: const TextStyle(color: AppBrand.text),
+          decoration: AppBrand.field('you@example.com'),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppBrand.s4),
+        const _FieldLabel('Password'),
         TextField(
           controller: _loginPass,
           obscureText: _obscureLogin,
-          style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your password',
-              suffix: IconButton(
-                  icon: Icon(
-                      _obscureLogin ? Icons.visibility_off : Icons.visibility,
-                      color: Colors.white70),
-                  onPressed: () =>
-                      setState(() => _obscureLogin = !_obscureLogin))),
+          autofillHints: const [AutofillHints.password],
+          onSubmitted: (_) => _isLoading ? null : _login(),
+          style: const TextStyle(color: AppBrand.text),
+          decoration: AppBrand.field('Enter your password',
+              suffix: _RevealButton(
+                obscured: _obscureLogin,
+                onPressed: () =>
+                    setState(() => _obscureLogin = !_obscureLogin),
+              )),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppBrand.s1),
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
@@ -633,24 +593,28 @@ class _AuthPageState extends State<AuthPage> {
               );
             },
             style: TextButton.styleFrom(
-              padding: EdgeInsets.zero,
-              minimumSize: Size.zero,
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: AppBrand.s2, vertical: AppBrand.s2),
+              minimumSize: const Size(0, 40),
+              foregroundColor: AppBrand.accent,
             ),
             child: const Text(
               'Forgot password?',
-              style: TextStyle(color: AppBrand.gold, fontSize: 12),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
             ),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppBrand.s3),
         ElevatedButton(
           onPressed: _isLoading ? null : _login,
           style: AppBrand.primaryButton,
-          child: Text(_isLoading ? 'PLEASE WAIT...' : 'SIGN IN',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: _isLoading
+              ? const _ButtonSpinner()
+              : const Text('SIGN IN'),
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: AppBrand.s4),
+        const _OrDivider(),
+        const SizedBox(height: AppBrand.s3),
         OutlinedButton.icon(
           onPressed: _isLoading ? null : _signInWithSupabaseGoogle,
           icon: Image.asset(
@@ -662,31 +626,35 @@ class _AuthPageState extends State<AuthPage> {
           ),
           label: const Text(
             'Continue with Google',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w600),
           ),
           style: AppBrand.outlineButton,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppBrand.s2),
         OutlinedButton.icon(
           onPressed: _isLoading ? null : _signInWithSupabaseFacebook,
-          icon: const Icon(Icons.facebook, color: Colors.white, size: 20),
+          icon: const Icon(Icons.facebook, color: AppBrand.text, size: 20),
           label: const Text(
             'Continue with Facebook',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w600),
           ),
           style: AppBrand.outlineButton,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppBrand.s3),
         Wrap(
           alignment: WrapAlignment.center,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             const Text('Don’t have an account? ',
-                style: TextStyle(color: Colors.white54, fontSize: 12)),
+                style: TextStyle(color: AppBrand.textMuted, fontSize: 12.5)),
             TextButton(
               onPressed: () => setState(() => _isLogin = false),
+              style: TextButton.styleFrom(
+                foregroundColor: AppBrand.accent,
+                minimumSize: const Size(0, 40),
+              ),
               child: const Text('Sign up',
-                  style: TextStyle(color: AppBrand.gold, fontSize: 12)),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
@@ -697,122 +665,122 @@ class _AuthPageState extends State<AuthPage> {
   Widget _buildRegister(BuildContext context) {
     return Column(
       children: [
-        const SizedBox(height: 8),
-        const Align(
-          alignment: Alignment.centerLeft,
-          child: Text('Create your account',
-              style: TextStyle(color: Colors.white70, fontSize: 12)),
-        ),
-        const SizedBox(height: 10),
         Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
-                child: TextField(
-                    controller: _firstName,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _fieldDecoration('Enter first name'))),
-            const SizedBox(width: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _FieldLabel('First name'),
+                  TextField(
+                      controller: _firstName,
+                      textCapitalization: TextCapitalization.words,
+                      autofillHints: const [AutofillHints.givenName],
+                      style: const TextStyle(color: AppBrand.text),
+                      decoration: AppBrand.field('Juan')),
+                ],
+              ),
+            ),
+            const SizedBox(width: AppBrand.s3),
             Expanded(
-                child: TextField(
-                    controller: _lastName,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: _fieldDecoration('Enter last name'))),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _FieldLabel('Last name'),
+                  TextField(
+                      controller: _lastName,
+                      textCapitalization: TextCapitalization.words,
+                      autofillHints: const [AutofillHints.familyName],
+                      style: const TextStyle(color: AppBrand.text),
+                      decoration: AppBrand.field('Dela Cruz')),
+                ],
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppBrand.s4),
+        const _FieldLabel('Email'),
         TextField(
           controller: _regEmail,
           keyboardType: TextInputType.emailAddress,
-          style: const TextStyle(color: Colors.white),
-          decoration: _fieldDecoration('Enter your email', helperText: 'Format: yourname@example.com'),
+          autofillHints: const [AutofillHints.email],
+          style: const TextStyle(color: AppBrand.text),
+          decoration: AppBrand.field('you@example.com',
+              helperText: 'We send your booking confirmations here.'),
         ),
         // Phone is intentionally not collected at registration — it keeps
         // sign-up short and is not needed to create an account. Customers can
         // add or edit it any time under Profile → Mobile Number.
-        const SizedBox(height: 12),
+        const SizedBox(height: AppBrand.s4),
+        const _FieldLabel('Password'),
         TextField(
             controller: _regPass,
             focusNode: _regPassFocus,
             obscureText: _obscureReg1,
-            style: const TextStyle(color: Colors.white),
-            decoration: _fieldDecoration('Enter your password',
-                suffix: IconButton(
-                    icon: Icon(
-                        _obscureReg1 ? Icons.visibility_off : Icons.visibility,
-                        color: Colors.white70),
-                    onPressed: () =>
-                        setState(() => _obscureReg1 = !_obscureReg1)))),
-        if (_shouldShowPasswordRequirements) ...[
-          const SizedBox(height: 8),
-          _buildPasswordRequirementsChecklist(_regPass.text),
-        ],
-        const SizedBox(height: 12),
+            autofillHints: const [AutofillHints.newPassword],
+            style: const TextStyle(color: AppBrand.text),
+            decoration: AppBrand.field('Create a password',
+                suffix: _RevealButton(
+                  obscured: _obscureReg1,
+                  onPressed: () =>
+                      setState(() => _obscureReg1 = !_obscureReg1),
+                ))),
+        AnimatedSize(
+          duration: AppBrand.medium,
+          curve: AppBrand.ease,
+          alignment: Alignment.topCenter,
+          child: _shouldShowPasswordRequirements
+              ? Padding(
+                  padding: const EdgeInsets.only(top: AppBrand.s2),
+                  child: _buildPasswordRequirementsChecklist(_regPass.text),
+                )
+              : const SizedBox(width: double.infinity),
+        ),
+        const SizedBox(height: AppBrand.s4),
+        const _FieldLabel('Confirm password'),
         TextField(
             controller: _confirm,
             obscureText: _obscureReg2,
-            style: const TextStyle(color: Colors.white),
-            decoration: _fieldDecoration('Confirm your password',
-                suffix: IconButton(
-                    icon: Icon(
-                        _obscureReg2 ? Icons.visibility_off : Icons.visibility,
-                        color: Colors.white70),
-                    onPressed: () =>
-                        setState(() => _obscureReg2 = !_obscureReg2)))),
-        if (_showConfirmMismatchMessage) ...[
-          const SizedBox(height: 6),
-          const Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Passwords do not match.',
-              style: TextStyle(color: Color(0xFFFF8A80), fontSize: 12),
-            ),
-          ),
-        ],
-        const SizedBox(height: 18),
+            autofillHints: const [AutofillHints.newPassword],
+            style: const TextStyle(color: AppBrand.text),
+            decoration: AppBrand.field('Re-enter your password',
+                errorText: _showConfirmMismatchMessage
+                    ? 'Passwords do not match.'
+                    : null,
+                suffix: _RevealButton(
+                  obscured: _obscureReg2,
+                  onPressed: () =>
+                      setState(() => _obscureReg2 = !_obscureReg2),
+                ))),
+        const SizedBox(height: AppBrand.s5),
         ElevatedButton(
           onPressed: (_isLoading || !_canSubmitRegisterPassword)
               ? null
               : _register,
           style: AppBrand.primaryButton,
-          child: Text(_isLoading ? 'PLEASE WAIT...' : 'CREATE ACCOUNT',
-              style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: _isLoading
+              ? const _ButtonSpinner()
+              : const Text('CREATE ACCOUNT'),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppBrand.s3),
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Text('Already have an account? ',
-                style: TextStyle(color: Colors.white54, fontSize: 12)),
+                style: TextStyle(color: AppBrand.textMuted, fontSize: 12.5)),
             TextButton(
               onPressed: () => setState(() => _isLogin = true),
+              style: TextButton.styleFrom(
+                foregroundColor: AppBrand.accent,
+                minimumSize: const Size(0, 40),
+              ),
               child: const Text('Sign in',
-                  style: TextStyle(color: AppBrand.gold, fontSize: 12)),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
             ),
           ],
         ),
       ],
-    );
-  }
-
-  InputDecoration _fieldDecoration(String hint, {Widget? suffix, String? helperText}) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: Colors.white54),
-      helperText: helperText,
-      helperStyle: const TextStyle(color: Colors.white38, fontSize: 11),
-      filled: true,
-      fillColor: AppBrand.surfaceAlt,
-      enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppBrand.border)),
-      focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppBrand.goldLine)),
-      border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppBrand.border)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-      suffixIcon: suffix,
     );
   }
 
@@ -878,10 +846,11 @@ class _AuthPageState extends State<AuthPage> {
     final states = _passwordRequirementStates(password);
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppBrand.s3, vertical: AppBrand.s3),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(8),
+        color: AppBrand.panel,
+        borderRadius: AppBrand.radiusSm,
         border: Border.all(color: AppBrand.border),
       ),
       child: Column(
@@ -889,24 +858,34 @@ class _AuthPageState extends State<AuthPage> {
         children: [
           for (final entry in states.entries)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 1.5),
+              padding: const EdgeInsets.symmetric(vertical: 2.5),
               child: Row(
                 children: [
-                  Icon(
-                    entry.value ? Icons.check_circle : Icons.radio_button_unchecked,
-                    size: 14,
-                    color: entry.value
-                        ? const Color(0xFF81C784)
-                        : Colors.white38,
+                  // Shape changes with state as well as colour, so the
+                  // checklist still reads without colour vision.
+                  AnimatedSwitcher(
+                    duration: AppBrand.fast,
+                    child: Icon(
+                      entry.value
+                          ? Icons.check_circle_rounded
+                          : Icons.circle_outlined,
+                      key: ValueKey(entry.value),
+                      size: 15,
+                      color: entry.value
+                          ? AppBrand.success
+                          : AppBrand.textSubtle,
+                    ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: AppBrand.s2),
                   Expanded(
                     child: Text(
                       entry.key,
                       style: TextStyle(
-                        color: entry.value ? Colors.white70 : Colors.white38,
-                        fontSize: 11,
-                        height: 1.2,
+                        color: entry.value
+                            ? AppBrand.textMuted
+                            : AppBrand.textSubtle,
+                        fontSize: 11.5,
+                        height: 1.3,
                       ),
                     ),
                   ),
@@ -1010,5 +989,200 @@ class _AuthPageState extends State<AuthPage> {
       return raw;
     }
     return 'Google sign-in failed. $raw';
+  }
+}
+
+/// Sign in / Sign up segmented control.
+///
+/// Replaces the two loose pills. Both halves are full-height tap targets and
+/// the selected state slides between them, so the change of mode reads as one
+/// object moving rather than two colours swapping.
+class _AuthModeSwitch extends StatelessWidget {
+  final bool isLogin;
+  final ValueChanged<bool> onChanged;
+
+  const _AuthModeSwitch({required this.isLogin, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: AppBrand.tapTarget,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppBrand.background,
+        borderRadius: AppBrand.radiusMd,
+        border: Border.all(color: AppBrand.border),
+      ),
+      child: Stack(
+        children: [
+          AnimatedAlign(
+            duration: AppBrand.medium,
+            curve: AppBrand.ease,
+            alignment: isLogin ? Alignment.centerLeft : Alignment.centerRight,
+            child: FractionallySizedBox(
+              widthFactor: 0.5,
+              heightFactor: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: AppBrand.surfaceLift,
+                  borderRadius: BorderRadius.circular(9),
+                  border: Border.all(color: AppBrand.accentLine),
+                ),
+              ),
+            ),
+          ),
+          Row(
+            children: [
+              _AuthModeTab(
+                label: 'SIGN IN',
+                selected: isLogin,
+                onTap: () => onChanged(true),
+              ),
+              _AuthModeTab(
+                label: 'SIGN UP',
+                selected: !isLogin,
+                onTap: () => onChanged(false),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AuthModeTab extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _AuthModeTab({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Semantics(
+        button: true,
+        selected: selected,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(9),
+            child: Center(
+              child: AnimatedDefaultTextStyle(
+                duration: AppBrand.medium,
+                curve: AppBrand.ease,
+                style: TextStyle(
+                  fontFamily: 'CenturyGothic',
+                  color: selected ? AppBrand.chalk : AppBrand.textMuted,
+                  fontSize: 13,
+                  fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                  letterSpacing: 1.2,
+                ),
+                child: Text(label),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Every input gets a visible label. A placeholder alone disappears the moment
+/// someone starts typing, which is exactly when they need to check what the
+/// field was asking for.
+class _FieldLabel extends StatelessWidget {
+  final String text;
+
+  const _FieldLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppBrand.s2, left: 2),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          style: const TextStyle(
+            color: AppBrand.textMuted,
+            fontSize: 11.5,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.7,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RevealButton extends StatelessWidget {
+  final bool obscured;
+  final VoidCallback onPressed;
+
+  const _RevealButton({required this.obscured, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      onPressed: onPressed,
+      tooltip: obscured ? 'Show password' : 'Hide password',
+      splashRadius: 22,
+      icon: Icon(
+        obscured ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+        color: AppBrand.textMuted,
+        size: 20,
+      ),
+    );
+  }
+}
+
+/// Keeps the button's own label out of the loading state — the width no longer
+/// jumps between "SIGN IN" and "PLEASE WAIT...".
+class _ButtonSpinner extends StatelessWidget {
+  const _ButtonSpinner();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 20,
+      height: 20,
+      child: CircularProgressIndicator(
+        strokeWidth: 2.2,
+        color: Color(0xFF0B0B0E),
+      ),
+    );
+  }
+}
+
+class _OrDivider extends StatelessWidget {
+  const _OrDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Expanded(child: Divider(color: AppBrand.border, height: 1)),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppBrand.s3),
+          child: Text(
+            'OR',
+            style: TextStyle(
+              color: AppBrand.textSubtle,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.4,
+            ),
+          ),
+        ),
+        const Expanded(child: Divider(color: AppBrand.border, height: 1)),
+      ],
+    );
   }
 }
