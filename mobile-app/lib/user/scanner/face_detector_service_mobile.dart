@@ -29,6 +29,8 @@ class DetectedFaceFrame {
 class FaceDetectorService {
   late final FaceDetector _faceDetector;
   bool _initialized = false;
+  /// One line per session, not one per frame — this runs at camera frame rate.
+  bool _loggedFrameShape = false;
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -140,18 +142,36 @@ class FaceDetectorService {
         return null;
       }
 
+      // No copy needed: camera_android's ImageStreamReader already reads each
+      // plane into a fresh byte[] before closing the image, so this buffer is
+      // ours. On Android the nv21 format group yields a single plane.
       final bool isSinglePlane = image.planes.length == 1;
       final Uint8List bytes = isSinglePlane
           ? image.planes.first.bytes
           : _concatenatePlanes(image.planes);
       final int bytesPerRow = image.planes.first.bytesPerRow;
-      
+
+      if (bytes.isEmpty) {
+        debugPrint('[FaceDetectorService] Empty frame buffer, skipping');
+        return null;
+      }
+
       final metadata = InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
         format: format,
         bytesPerRow: bytesPerRow,
       );
+
+      if (!_loggedFrameShape) {
+        _loggedFrameShape = true;
+        debugPrint(
+          '[FaceDetectorService] frame shape: ${image.width}x${image.height} '
+          'planes=${image.planes.length} bytes=${bytes.length} '
+          'bytesPerRow=$bytesPerRow rawFormat=${image.format.raw} '
+          'format=$format rotation=$rotation',
+        );
+      }
 
       return InputImage.fromBytes(bytes: bytes, metadata: metadata);
     } catch (e, st) {
@@ -160,8 +180,9 @@ class FaceDetectorService {
     }
   }
 
+  /// Copies by design: the result outlives the camera frame it came from.
   Uint8List _concatenatePlanes(List<Plane> planes) {
-    final buffer = BytesBuilder(copy: false);
+    final buffer = BytesBuilder();
     for (final plane in planes) {
       buffer.add(plane.bytes);
     }
