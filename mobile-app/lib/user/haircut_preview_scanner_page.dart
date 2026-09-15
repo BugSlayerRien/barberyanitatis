@@ -475,7 +475,9 @@ class _HaircutPreviewScannerPageState extends State<HaircutPreviewScannerPage>
 
     UserSession.capturedFaceImages = Map.from(_capturedImages);
     final faceShape = UserSession.lastScan?['faceShape']?.toString() ?? 'Oval';
-    final hairTexture = UserSession.lastScan?['hairTexture']?.toString() ?? 'Straight';
+    final hairTexture = UserSession.normalizeHairTextureLabel(
+      UserSession.lastScan?['hairTexture']?.toString(),
+    );
 
     try {
       await FaceScanService.uploadCaptures(

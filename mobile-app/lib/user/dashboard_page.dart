@@ -489,9 +489,10 @@ class _DashboardPageState extends State<DashboardPage>
             builder: (_) => FaceScanResultsPage(
               captures: Map<String, String>.from(captures),
               faceShape: scan['faceShape']?.toString() ?? 'oval',
-              hairTexture: scan['hairTexture']?.toString() ??
-                  UserSession.preferredHairTexture ??
-                  'Straight',
+              hairTexture: UserSession.normalizeHairTextureLabel(
+                scan['hairTexture']?.toString() ??
+                    UserSession.preferredHairTexture,
+              ),
               hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
               hairLengthLabel: scan['hairLength']?.toString() ?? 'short',
               analysisProvider: scan['analysisProvider']?.toString(),
