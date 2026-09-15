@@ -237,8 +237,21 @@ class UserSession {
     }
   }
 
+  /// What to show when we do not actually know the texture.
+  ///
+  /// Never 'Straight'. Straight is the strongest claim the classifier can make
+  /// — it asserts the absence of wave and curl — so defaulting to it turns
+  /// "no answer" into a confident wrong answer, and the customer sees a texture
+  /// nothing measured. Wavy sits between the other two, so a wrong guess is off
+  /// by one step rather than two, and it matches what the server
+  /// (`api/face_scan.php`) already substitutes for an empty texture.
+  static const String neutralHairTexture = 'Wavy';
+
   /// Normalizes API/profile texture labels to Straight, Wavy, or Curly.
-  static String normalizeHairTextureLabel(String? raw, {String fallback = 'Wavy'}) {
+  static String normalizeHairTextureLabel(
+    String? raw, {
+    String fallback = neutralHairTexture,
+  }) {
     return _normalizeHairTexture(raw ?? '') ?? fallback;
   }
 

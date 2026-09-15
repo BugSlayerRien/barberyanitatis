@@ -163,7 +163,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     double? _minSmoothHeadRoll;
     static const double _minSmoothRectAlpha = 0.82;
     static const double _minSmoothAngleAlpha = 0.75;
-  String _hairTexture = 'Straight';
+  // Seeded neutral, not 'Straight'. This value is the last-resort fallback for
+  // _hairTextureFromAnalysis(), so whatever sits here is what the customer is
+  // told when the server returns no texture at all.
+  String _hairTexture = UserSession.neutralHairTexture;
   String _status = 'Center your face in the guide.';
 
   final List<Map<String, dynamic>> _recommendations = [];
@@ -301,7 +304,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           builder: (_) => FaceScanResultsPage(
             captures: Map.from(captures),
             faceShape: scan?['faceShape']?.toString() ?? 'oval',
-            hairTexture: scan?['hairTexture']?.toString() ?? 'Wavy',
+            hairTexture: UserSession.normalizeHairTextureLabel(
+                scan?['hairTexture']?.toString()),
             hairLengthLevel: int.tryParse('${scan?['hairLengthLevel']}') ?? 1,
             hairLengthLabel: scan?['hairLength']?.toString() ?? 'short',
             analysisProvider: scan?['analysisProvider']?.toString(),
@@ -430,7 +434,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   Future<void> _primeHairTextureHint() async {
     final preferred = await UserSession.loadPreferredHairTexture();
     if (!mounted) return;
-    final hint = UserSession.normalizeHairTextureLabel(preferred, fallback: 'Wavy');
+    final hint = UserSession.normalizeHairTextureLabel(preferred);
     setState(() => _hairTexture = hint);
   }
 
