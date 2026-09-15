@@ -37,18 +37,19 @@ class AppOrientation {
     ]);
   }
 
+  /// Kiosk rotates freely.
+  ///
+  /// Previously this pinned Pi-sized panels to landscape. That branch bought
+  /// nothing — a fixed panel never rotates regardless of what is permitted —
+  /// while making a portrait-mounted panel unusable. Allowing all four lets the
+  /// scanner follow however the hardware is actually installed; the ML Kit
+  /// rotation is recomputed per frame from [DeviceOrientationTracker], so the
+  /// detector keeps up with the change.
   static Future<void> lockForKiosk() async {
     if (kIsWeb) return;
-    if (kioskAllowsPortraitRotation()) {
-      await SystemChrome.setPreferredOrientations(const [
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
-      return;
-    }
     await SystemChrome.setPreferredOrientations(const [
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
     ]);

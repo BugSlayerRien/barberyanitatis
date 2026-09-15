@@ -30,6 +30,17 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+
+            // Stated explicitly rather than left to Flutter's defaults. R8 runs
+            // on release either way; what was missing was proguard-rules.pro,
+            // without which R8 stripped ML Kit's InputImageConverter and broke
+            // face detection in every installed APK.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
