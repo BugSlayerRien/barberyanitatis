@@ -743,6 +743,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     final maskMax = (diag['maskMax'] as num?)?.toDouble();
     final faceDrift = (diag['faceDrift'] as num?)?.toDouble();
     final usedRaw = diag['usedRawOutput'] == true;
+    // Checked first: if left and right show the same pose, nothing else the
+    // other checks report about this angle is worth acting on yet.
+    if (diag['duplicateView'] == true) {
+      return 'The left and right previews came back showing the same angle. '
+          'Tap Regenerate preview to try again.';
+    }
     if (faceDrift != null && faceDrift > 28) {
       return 'Face region shifted in this view. Tap Regenerate preview for a cleaner hair-only result.';
     }
