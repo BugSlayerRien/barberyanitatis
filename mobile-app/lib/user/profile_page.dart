@@ -104,6 +104,10 @@ class _ProfilePageState extends State<ProfilePage> {
     Map<String, String?>? bookingPreferences,
     Uint8List? profileImageBytes,
   }) {
+    // Keeps the cancel-appointment flow (appointments_page.dart) in sync: it
+    // checks UserSession.phone directly rather than re-fetching the profile,
+    // so every place that learns the phone number must update it here too.
+    UserSession.phone = phone;
     setState(() {
       _fullName = fullName;
       _email = email;
@@ -305,9 +309,8 @@ class _ProfilePageState extends State<ProfilePage> {
               : (UserSession.fullName ?? '').trim();
       final resolvedEmail = (user?.email ?? UserSession.email ?? '').trim();
       final resolvedPhone = _readProfileValue(metadata, 'phone');
-      // Cached so the cancel flow can tell whether it needs to ask for a refund
-      // contact number without another profile fetch.
-      UserSession.phone = resolvedPhone;
+      // UserSession.phone is now set inside _applyProfileData below, so every
+      // load path (this one and the API path above) keeps it current.
       final resolvedAccountAge = _readProfileValue(metadata, 'account_age');
       final resolvedGender = _readProfileValue(metadata, 'gender');
       final resolvedHairTexture = _readProfileValue(metadata, 'hair_texture');
