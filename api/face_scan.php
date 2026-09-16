@@ -733,6 +733,20 @@ try {
             $images = $generated['images'];
             $feasibleToday = $generated['feasibleToday'];
             $lengthNote = $generated['lengthNote'];
+
+            // The cloud helpers produce an orientation report but nothing ever
+            // read it, so the per-angle warning banner the app already renders
+            // was dead on this branch. Forward the entries the client knows how
+            // to display; 'ok:' and 'skipped:' verdicts are noise.
+            foreach (($generated['orientation'] ?? []) as $angle => $verdict) {
+                $verdict = (string)$verdict;
+                if (str_starts_with($verdict, 'duplicate:')) {
+                    $previewDiagnostics[$angle]['duplicateView'] = true;
+                    $previewDiagnostics[$angle]['orientation'] = $verdict;
+                } elseif (str_starts_with($verdict, 'mismatch:')) {
+                    $previewDiagnostics[$angle]['orientation'] = $verdict;
+                }
+            }
         }
 
         ensure_scan_session_row(

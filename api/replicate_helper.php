@@ -233,9 +233,38 @@ function tryon_mirror_image_bytes(string $bytes): ?string
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
  * @return array<string, string> per-view diagnostics
  */
+/**
+ * Do the two generated profiles show the same pose?
+ *
+ * Pure function of two signed yaws so it can be tested without a sidecar — see
+ * scripts/test_view_duplication.php. The existing SHA-256 guards never fire
+ * because a duplicated pose still differs by a few hundred bytes; yaw sign
+ * survives re-encoding, rescaling and lighting changes.
+ *
+ * A correct pair turns opposite ways, so their yaws have opposite signs. Same
+ * sign means both views face the same direction. The near-zero band catches the
+ * other duplication shape: two almost-frontal outputs where neither turned far
+ * enough for a sign to mean anything.
+ */
+function tryon_views_are_duplicated(?float $yawLeft, ?float $yawRight, float $minSeparation = 0.10): bool
+{
+    if ($yawLeft === null || $yawRight === null) {
+        return false; // Unknown is not evidence of duplication.
+    }
+
+    if (abs($yawLeft - $yawRight) < $minSeparation) {
+        return true;
+    }
+
+    return ($yawLeft <= 0 && $yawRight <= 0) || ($yawLeft >= 0 && $yawRight >= 0);
+}
+
 function tryon_enforce_view_orientation(array &$resultImages, array $capturePaths): array
 {
     $report = [];
+    // Yaw of each generated profile as finally returned, for the cross-view
+    // duplicate check below. Null means we never got a reading for that angle.
+    $finalYaw = ['left' => null, 'right' => null];
 
     foreach (['left', 'right'] as $angle) {
         if (!isset($resultImages[$angle]) || empty($capturePaths[$angle])) {
@@ -265,24 +294,49 @@ function tryon_enforce_view_orientation(array &$resultImages, array $capturePath
             @unlink($tmp);
             $resultImages[$angle] = $corrected;
             $report[$angle] = "corrected:mirrored-to-{$expected}";
+            // The sidecar mirrored it to match $expected, so the pose is now
+            // known-good for this angle even though we have no fresh reading.
+            $finalYaw[$angle] = ($expected === 'left') ? -1.0 : 1.0;
             error_log("tryon: {$angle} view was facing the wrong way; mirrored to {$expected}.");
             continue;
         }
 
         // Local GD fallback for deployments where the sidecar is unreachable.
-        $actual = ai_service_face_orientation($tmp);
+        $probe = ai_service_face_yaw($tmp);
+        $actual = $probe['direction'] ?? null;
         @unlink($tmp);
         if ($actual === null || $actual === $expected) {
+            $finalYaw[$angle] = $probe['yaw'] ?? null;
             $report[$angle] = 'ok:' . ($actual ?? 'unverified');
             continue;
         }
         $mirrored = tryon_mirror_image_bytes($resultImages[$angle]);
         if ($mirrored === null) {
+            $finalYaw[$angle] = $probe['yaw'] ?? null;
             $report[$angle] = "mismatch:{$actual}!={$expected}:mirror-unavailable";
             continue;
         }
         $resultImages[$angle] = $mirrored;
+        // Mirroring flips the head turn, so the yaw sign inverts with it.
+        $finalYaw[$angle] = isset($probe['yaw']) ? -$probe['yaw'] : null;
         $report[$angle] = "corrected:{$actual}->{$expected}";
+    }
+
+    // Cross-view check. Everything above compares a view against its OWN input,
+    // so two outputs showing the same pose pass individually. Comparing them to
+    // each other is what catches angle duplication.
+    if (tryon_views_are_duplicated($finalYaw['left'], $finalYaw['right'])) {
+        foreach (['left', 'right'] as $angle) {
+            $report[$angle] = sprintf(
+                'duplicate:yaw=%.2f',
+                $finalYaw[$angle]
+            );
+        }
+        error_log(sprintf(
+            'tryon: left and right previews show the same pose (yaw %.2f vs %.2f); flagged for regeneration.',
+            $finalYaw['left'],
+            $finalYaw['right']
+        ));
     }
 
     return $report;

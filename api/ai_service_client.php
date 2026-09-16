@@ -131,6 +131,27 @@ function ai_service_enforce_view_orientation(string $absolutePath, string $expec
  */
 function ai_service_face_orientation(string $absolutePath): ?string
 {
+    $probe = ai_service_face_yaw($absolutePath);
+    return $probe === null ? null : $probe['direction'];
+}
+
+/**
+ * Head-turn direction AND the signed yaw behind it.
+ *
+ * Same single request as ai_service_face_orientation() — /face-orientation has
+ * always returned `yaw` alongside `direction`, we simply threw the number away.
+ * The number is what makes left-vs-right duplicate detection possible: two
+ * generated profiles turned the same way share a yaw sign, even when their
+ * bytes differ enough to defeat a hash comparison.
+ *
+ * Returns ['direction' => 'left'|'right'|'front', 'yaw' => float], or null when
+ * it could not be determined (sidecar down, no face found). Callers must treat
+ * null as "unknown" and skip the check rather than assuming a direction.
+ *
+ * @return array{direction: string, yaw: float}|null
+ */
+function ai_service_face_yaw(string $absolutePath): ?array
+{
     $base = ai_service_base_url();
     if ($base === '' || !is_readable($absolutePath)) {
         return null;
@@ -150,7 +171,14 @@ function ai_service_face_orientation(string $absolutePath): ?string
         return null;
     }
     $direction = (string)($data['direction'] ?? '');
-    return in_array($direction, ['left', 'right', 'front'], true) ? $direction : null;
+    if (!in_array($direction, ['left', 'right', 'front'], true)) {
+        return null;
+    }
+
+    return [
+        'direction' => $direction,
+        'yaw' => (float)($data['yaw'] ?? 0.0),
+    ];
 }
 
 /**
