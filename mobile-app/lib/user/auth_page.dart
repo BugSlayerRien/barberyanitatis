@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:http/http.dart' as http;
@@ -243,6 +244,18 @@ class _AuthPageState extends State<AuthPage> {
         password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please complete all required fields.')),
+      );
+      return;
+    }
+
+    // Validation 1b: Names are letters only. The fields already filter input,
+    // but paste and autofill can still land here, so check again.
+    final nameError =
+        PersonName.errorFor(firstName, 'First name') ??
+            PersonName.errorFor(lastName, 'Last name');
+    if (nameError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(nameError)),
       );
       return;
     }
@@ -676,6 +689,7 @@ class _AuthPageState extends State<AuthPage> {
                   TextField(
                       controller: _firstName,
                       textCapitalization: TextCapitalization.words,
+                      inputFormatters: PersonName.inputFormatters,
                       autofillHints: const [AutofillHints.givenName],
                       style: const TextStyle(color: AppBrand.text),
                       decoration: AppBrand.field('Juan')),
@@ -691,6 +705,7 @@ class _AuthPageState extends State<AuthPage> {
                   TextField(
                       controller: _lastName,
                       textCapitalization: TextCapitalization.words,
+                      inputFormatters: PersonName.inputFormatters,
                       autofillHints: const [AutofillHints.familyName],
                       style: const TextStyle(color: AppBrand.text),
                       decoration: AppBrand.field('Dela Cruz')),
@@ -1184,5 +1199,38 @@ class _OrDivider extends StatelessWidget {
         const Expanded(child: Divider(color: AppBrand.border, height: 1)),
       ],
     );
+  }
+}
+
+/// Rules for a customer's first or last name.
+///
+/// Letters from any script, plus the punctuation real names use: spaces
+/// ("Dela Cruz"), hyphens ("Anne-Marie"), apostrophes ("O'Neil") and periods
+/// ("Jr."). No digits or other symbols.
+class PersonName {
+  PersonName._();
+
+  static const int maxLength = 50;
+
+  static final RegExp _allowedChar = RegExp(r"[\p{L}\p{M} .'\-]", unicode: true);
+  static final RegExp _valid =
+      RegExp(r"^[\p{L}\p{M}][\p{L}\p{M} .'\-]*$", unicode: true);
+
+  static final List<TextInputFormatter> inputFormatters = [
+    FilteringTextInputFormatter.allow(_allowedChar),
+    LengthLimitingTextInputFormatter(maxLength),
+  ];
+
+  /// Null when valid, otherwise a message naming the field.
+  static String? errorFor(String raw, String label) {
+    final value = raw.trim();
+    if (value.isEmpty) return '$label is required.';
+    if (value.length > maxLength) {
+      return '$label must be $maxLength characters or fewer.';
+    }
+    if (!_valid.hasMatch(value)) {
+      return '$label can only contain letters, spaces, hyphens, apostrophes and periods.';
+    }
+    return null;
   }
 }
