@@ -16,6 +16,7 @@ import 'ai_funnel_service.dart';
 import '../services/calibration_api.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
+import 'profile_page.dart';
 import 'suggested_appointment_page.dart';
 import 'widgets/ai_chatbot_fab.dart';
 import 'customer_navigation.dart';
@@ -95,7 +96,14 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   /// upload. Auto-capture is paused while this is true, so a retake is always
   /// a deliberate choice rather than something the camera does on its own.
   bool _reviewingCaptures = false;
-  
+
+  /// Counts down on the review screen; hitting 0 auto-continues with the
+  /// captured photos so a customer who is happy with them doesn't have to
+  /// tap anything. Retaking any angle cancels it.
+  static const int _autoContinueSeconds = 6;
+  Timer? _autoContinueTimer;
+  int _autoContinueSecondsLeft = _autoContinueSeconds;
+
   double? _currentHeadYaw;
   Rect? _currentFaceRect;
   Size? _stagingViewSize;
@@ -1883,7 +1891,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         await _restartStagingStream();
       } else {
         // Stream stays stopped; nothing uploads until the customer confirms.
-        setState(() => _reviewingCaptures = true);
+        _enterReviewMode();
       }
     } catch (e) {
       debugPrint('[AiFaceScan] Capture error: $e');
@@ -1899,9 +1907,42 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return null;
   }
 
+  /// Enter the review screen and start the auto-continue countdown. Called
+  /// once every angle is captured, and again after a retake refills the last
+  /// missing one.
+  void _enterReviewMode() {
+    setState(() => _reviewingCaptures = true);
+    _startAutoContinueTimer();
+  }
+
+  void _startAutoContinueTimer() {
+    _autoContinueTimer?.cancel();
+    setState(() => _autoContinueSecondsLeft = _autoContinueSeconds);
+    _autoContinueTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_autoContinueSecondsLeft <= 1) {
+        timer.cancel();
+        _autoContinueTimer = null;
+        setState(() => _autoContinueSecondsLeft = 0);
+        unawaited(_confirmCaptures());
+        return;
+      }
+      setState(() => _autoContinueSecondsLeft -= 1);
+    });
+  }
+
+  void _cancelAutoContinueTimer() {
+    _autoContinueTimer?.cancel();
+    _autoContinueTimer = null;
+  }
+
   /// Discard one captured angle and go back to shoot it again.
   Future<void> _retakeStage(int index) async {
     if (_finishingStaging || index < 0 || index >= _stages.length) return;
+    _cancelAutoContinueTimer();
     final key = _stages[index].keyName;
     setState(() {
       _capturedImages.remove(key);
@@ -1918,9 +1959,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
   }
 
-  /// Customer accepted all three photos: hand them to the existing upload path.
+  /// Customer accepted all three photos (by hand or by the auto-continue
+  /// timer running out): hand them to the existing upload path.
   Future<void> _confirmCaptures() async {
     if (_finishingStaging || _nextUncapturedStageIndex() != null) return;
+    _cancelAutoContinueTimer();
     UserSession.capturedFaceImages = Map.from(_capturedImages);
     UserSession.captureFaceRects = Map.from(_capturedFaceRects);
     // _reviewingCaptures is left true on purpose. If validation or upload fails,
@@ -1992,7 +2035,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       if (next != null) {
         setState(() => _stageIndex = next);
       } else {
-        setState(() => _reviewingCaptures = true);
+        _enterReviewMode();
       }
     } catch (e) {
       debugPrint('[AiFaceScan] Web capture error: $e');
@@ -2186,6 +2229,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
   }
 
+  /// Every AppTopBar on this page left onProfileTap unset, which renders the
+  /// profile icon as a permanently-disabled IconButton (see
+  /// widgets/app_top_bar.dart) rather than actually opening the profile.
+  void _openProfile() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ProfilePage()),
+    );
+  }
+
   Future<bool> _confirmExitScanner() async {
     if (widget.kioskMode) {
       return true;
@@ -2193,20 +2245,26 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final leave = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF141414),
-        title: const Text('Leave scan?', style: TextStyle(color: Colors.white)),
+        backgroundColor: AppBrand.panel,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppBrand.radiusMd,
+          side: const BorderSide(color: AppBrand.border),
+        ),
+        title: const Text('Leave scan?', style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w700)),
         content: const Text(
           'Your current capture session will be discarded. You will need to scan again for fresh recommendations.',
-          style: TextStyle(color: Colors.white70, height: 1.4),
+          style: TextStyle(color: AppBrand.textMuted, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.text),
             child: const Text('Stay'),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Leave', style: TextStyle(color: Colors.redAccent)),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.danger),
+            child: const Text('Leave'),
           ),
         ],
       ),
@@ -2225,24 +2283,60 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     navigateToCustomerHome(context);
   }
 
-  void _onScannerBottomNav(int index) {
-    if (index == 0) {
-      if (widget.kioskMode) {
-        unawaited(_exitScannerFlow());
+  /// Confirms discarding the in-progress capture (unless already past staging,
+  /// where there is nothing left to lose), then runs [afterLeave] — or a plain
+  /// pop if none is given. Shared by the back button, the system back gesture,
+  /// and every bottom-nav tab that actually navigates away, so none of them
+  /// can silently drop photos the customer already took.
+  Future<void> _confirmAndExitStaging({VoidCallback? afterLeave}) async {
+    if (!_reviewingCaptures && _capturedImages.isEmpty) {
+      // Nothing captured yet on this visit — leaving costs nothing, so don't
+      // interrupt with a dialog that has nothing real to warn about.
+      await _releaseScannerResources();
+      if (!mounted) return;
+      if (afterLeave != null) {
+        afterLeave();
       } else {
-        unawaited(_popScanner());
+        Navigator.of(context).pop();
       }
-    } else if (index == 1) {
-      openCustomerTab(context, CustomerTab.appointments);
-    } else if (index == 2) {
       return;
-    } else if (index == 3) {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
-      );
-    } else if (index == 4) {
-      showAppMenuSheet(context);
     }
+    final leave = await _confirmExitScanner();
+    if (!leave || !mounted) return;
+    _cancelAutoContinueTimer();
+    UserSession.discardInProgressAndRestoreCompleted();
+    await _releaseScannerResources();
+    if (!mounted) return;
+    if (afterLeave != null) {
+      afterLeave();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  void _onScannerBottomNav(int index) {
+    if (index == 2) {
+      return; // Already on AI Scan.
+    }
+    if (index == 4) {
+      // Opens an overlay on top of this same screen — nothing is left, so it
+      // does not need the leave-scan confirmation.
+      showAppMenuSheet(context);
+      return;
+    }
+    unawaited(_confirmAndExitStaging(
+      afterLeave: () {
+        if (index == 0) {
+          Navigator.of(context).pop();
+        } else if (index == 1) {
+          openCustomerTab(context, CustomerTab.appointments);
+        } else if (index == 3) {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SavedHaircutsPage()),
+          );
+        }
+      },
+    ));
   }
 
   Widget _buildStagingUI() {
@@ -2264,7 +2358,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       canPop: widget.kioskMode,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) {
-          unawaited(_popScanner());
+          unawaited(_confirmAndExitStaging());
         }
       },
       child: Scaffold(
@@ -2272,7 +2366,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         appBar: AppTopBar(
           showBack: true,
           showCustomerActions: !widget.kioskMode,
-          onBack: () => unawaited(_popScanner()),
+          onBack: () => unawaited(_confirmAndExitStaging()),
+          onProfileTap: _openProfile,
         ),
         body: SafeArea(
           child: Padding(
@@ -2577,7 +2672,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             SizedBox(
               height: 50,
               child: ElevatedButton(
-                onPressed: _finishingStaging ? null : () => unawaited(_confirmCaptures()),
+                onPressed: _finishingStaging
+                    ? null
+                    : () {
+                        _cancelAutoContinueTimer();
+                        unawaited(_confirmCaptures());
+                      },
                 style: AppBrand.primaryButton,
                 child: _finishingStaging
                     ? const SizedBox(
@@ -2588,7 +2688,32 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                           color: Color(0xFF0B0B0E),
                         ),
                       )
-                    : const Text('USE THESE PHOTOS'),
+                    : Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text('USE THESE PHOTOS'),
+                          const SizedBox(width: 10),
+                          // The visible countdown: hitting 0 auto-continues
+                          // (see _startAutoContinueTimer), so a customer happy
+                          // with their photos doesn't have to tap anything.
+                          Container(
+                            width: 22,
+                            height: 22,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: Colors.black12,
+                            ),
+                            child: Text(
+                              '$_autoContinueSecondsLeft',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
               ),
             ),
           ],
@@ -2654,50 +2779,25 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     // Portrait: always reserve three equal columns so capturing Front cannot
-    // shrink the status cards or leave a gap on the right.
+    // shrink the cards or leave a gap on the right. One row per stage — the
+    // thumbnail and its angle/status used to be two separate rows; merged
+    // into one card so the thumbnail and its own label sit together.
     return LayoutBuilder(
       builder: (context, constraints) {
         const gap = 8.0;
         final count = _stages.length;
         final slotWidth = (constraints.maxWidth - gap * (count - 1)) / count;
 
-        Widget slot({required Widget child, required double height}) {
-          return SizedBox(
-            width: slotWidth,
-            height: height,
-            child: child,
-          );
-        }
-
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        return Row(
           children: [
-            Row(
-              children: [
-                for (var i = 0; i < count; i++) ...[
-                  if (i > 0) const SizedBox(width: gap),
-                  slot(
-                    height: 72,
-                    child: _stageThumbnailSlot(_stages[i]),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                for (var i = 0; i < count; i++) ...[
-                  if (i > 0) const SizedBox(width: gap),
-                  slot(
-                    height: 78,
-                    child: _stageStatusCard(
-                      stage: _stages[i],
-                      index: i,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            for (var i = 0; i < count; i++) ...[
+              if (i > 0) const SizedBox(width: gap),
+              SizedBox(
+                width: slotWidth,
+                height: 96,
+                child: _stageCombinedCard(stage: _stages[i], index: i),
+              ),
+            ],
           ],
         );
       },
@@ -2822,11 +2922,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             fit: StackFit.expand,
             children: [
               thumb,
+              // Icon only, no "Retake" text -- the label took up space this
+              // merged card doesn't have to spare, and a captured thumbnail
+              // with a refresh glyph on it reads as "tap to retry" on its own.
               const Positioned(
-                left: 0,
-                right: 0,
-                bottom: 6,
-                child: Center(child: _RetakePill(compact: true)),
+                right: 4,
+                bottom: 4,
+                child: _RetakePill(iconOnly: true),
               ),
             ],
           ),
@@ -2865,7 +2967,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
-  Widget _stageStatusCard({
+  /// One card per angle: thumbnail (with its tap-to-retake affordance once
+  /// captured) plus a compact label/status strip, replacing what used to be
+  /// two separate rows (a thumbnail row, then a status-card row below it).
+  Widget _stageCombinedCard({
     required _CaptureStage stage,
     required int index,
   }) {
@@ -2886,46 +2991,50 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               : active
                   ? Colors.white24
                   : Colors.white12,
+          width: active ? 1.5 : 1,
         ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+        padding: const EdgeInsets.all(5),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(
-              stage.icon,
-              size: 18,
-              color: captured ? Colors.white : Colors.white54,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              stage.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: false,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              captured
-                  ? '✓'
-                  : active
-                      ? '...'
-                      : 'Pending',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              softWrap: false,
-              style: TextStyle(
-                color: captured ? Colors.white : Colors.white54,
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-              ),
+            Expanded(child: _stageThumbnailSlot(stage)),
+            const SizedBox(height: 5),
+            Row(
+              children: [
+                Icon(
+                  stage.icon,
+                  size: 13,
+                  color: captured ? Colors.white : Colors.white54,
+                ),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    stage.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: false,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Text(
+                  captured
+                      ? '✓'
+                      : active
+                          ? '...'
+                          : '',
+                  style: TextStyle(
+                    color: captured ? Colors.white : Colors.white54,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -2944,6 +3053,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _webCamera.tracking.removeListener(_onWebTrackingChanged);
       _webTrackingAttached = false;
     }
+    _autoContinueTimer?.cancel();
     _pageScrollController.dispose();
     _releaseScannerResources();
     _detector.dispose();
@@ -2967,6 +3077,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           showBack: true,
           showCustomerActions: !widget.kioskMode,
           onBack: () => unawaited(_popScanner()),
+          onProfileTap: _openProfile,
         ),
         body: SafeArea(
           child: Padding(
@@ -3125,6 +3236,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             unawaited(_popScanner());
           }
         },
+        onProfileTap: _openProfile,
       ),
       bottomNavigationBar: widget.kioskMode
           ? _kioskLivePreviewBottomBar()
@@ -5079,33 +5191,45 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 }
 
+/// Tap-to-retake affordance shown on a captured thumbnail. Icon only, no
+/// "Retake" text: the merged stage card (thumbnail + label in one row) has no
+/// spare room for it, and a refresh glyph sitting on the photo itself already
+/// reads as "tap to retry".
 class _RetakePill extends StatelessWidget {
-  final bool compact;
+  final bool iconOnly;
 
-  const _RetakePill({this.compact = false});
+  const _RetakePill({this.iconOnly = false});
 
   @override
   Widget build(BuildContext context) {
+    final decoration = BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.68),
+      borderRadius: BorderRadius.circular(999),
+      border: Border.all(color: Colors.white38),
+    );
+
+    if (iconOnly) {
+      return DecoratedBox(
+        decoration: decoration,
+        child: const Padding(
+          padding: EdgeInsets.all(4),
+          child: Icon(Icons.refresh, size: 13, color: Colors.white),
+        ),
+      );
+    }
+
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.68),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white38),
-      ),
-      child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: compact ? 7 : 10, vertical: 3),
+      decoration: decoration,
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 3),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.refresh, size: compact ? 12 : 14, color: Colors.white),
-            const SizedBox(width: 3),
+            Icon(Icons.refresh, size: 14, color: Colors.white),
+            SizedBox(width: 3),
             Text(
               'Retake',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: compact ? 10.5 : 12,
-                fontWeight: FontWeight.w600,
-              ),
+              style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ],
         ),
