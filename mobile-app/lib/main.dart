@@ -16,6 +16,7 @@ import 'user/splash_page.dart';
 import 'kiosk/kiosk_home_page.dart';
 import 'package:app_links/app_links.dart';
 import 'user/payment_result_page.dart';
+import 'user/payment_return_guard.dart';
 import 'user/scanner/overlay_asset_cache.dart';
 import 'user/scanner/device_orientation_tracker.dart';
 import 'app_orientation.dart';
@@ -144,6 +145,14 @@ Future<void> main() async {
       return;
     }
     if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
+      if (PaymentReturnGuard.isPollerActive) {
+        // The page that started this payment (PaymentPage or
+        // AiCreditPurchasePage) is already polling for this exact return and
+        // will navigate onward itself. Pushing PaymentResultPage on top of it
+        // here doubled up the verification, and PaymentResultPage's own
+        // poll had no query params to work with -- see PaymentReturnGuard.
+        return;
+      }
       final params = uri.queryParameters;
       try {
         navigatorKey.currentState?.pushNamed('/payment-result', arguments: params);

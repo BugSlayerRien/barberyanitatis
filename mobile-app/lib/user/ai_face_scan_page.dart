@@ -2258,7 +2258,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            style: TextButton.styleFrom(foregroundColor: AppBrand.text),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.accent),
             child: const Text('Stay'),
           ),
           TextButton(
