@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'api_config.dart';
 import 'customer_api.dart';
+import 'payment_return_guard.dart';
 import 'services/face_scan_service.dart';
 import 'user_session.dart';
 
@@ -42,9 +43,13 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
 
   String _returnUrl(bool success) {
     final base = _paymongoBase();
+    // purpose=ai_credits rides through payment-success.php/failed.php's query
+    // forwarding into the deep link, so PaymentResultPage can tell a credit
+    // purchase apart from a booking payment in the rare case it does end up
+    // handling this return (see PaymentReturnGuard for the normal case).
     return success
-        ? '$base/paymongo/payment-success.php'
-        : '$base/paymongo/payment-failed.php';
+        ? '$base/paymongo/payment-success.php?purpose=ai_credits'
+        : '$base/paymongo/payment-failed.php?purpose=ai_credits';
   }
 
   String? _extractCheckoutUrl(Map<String, dynamic> body) {
@@ -102,16 +107,27 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
 
       setState(() => _statusLabel = 'Waiting for GCash confirmation...');
 
-      if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
-        final uri = Uri.tryParse(checkoutUrl);
-        if (uri != null) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+      // Active for the whole trip out to GCash and back: this page's own poll
+      // below is what actually credits the account (via payment-status.php),
+      // so the app-wide deep-link listener in main.dart should not also push
+      // a second, independent verifier for the same return. See
+      // PaymentReturnGuard.
+      PaymentReturnGuard.enter();
+      bool paid;
+      try {
+        if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+          final uri = Uri.tryParse(checkoutUrl);
+          if (uri != null) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+          if (!mounted) return;
+          setState(() => _statusLabel = 'Complete payment in the opened app, then return here.');
         }
-        if (!mounted) return;
-        setState(() => _statusLabel = 'Complete payment in the opened app, then return here.');
-      }
 
-      final paid = await _pollUntilFinal(resourceId, resourceType: resourceType);
+        paid = await _pollUntilFinal(resourceId, resourceType: resourceType);
+      } finally {
+        PaymentReturnGuard.exit();
+      }
       if (!mounted) return;
 
       if (!paid) {

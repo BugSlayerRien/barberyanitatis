@@ -176,20 +176,26 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     final leave = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF141414),
-        title: const Text('Leave scan?', style: TextStyle(color: Colors.white)),
+        backgroundColor: AppBrand.panel,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppBrand.radiusMd,
+          side: const BorderSide(color: AppBrand.border),
+        ),
+        title: const Text('Leave scan?', style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w700)),
         content: const Text(
           'You can leave and return later via View results on Home. Your completed scan stays available.',
-          style: TextStyle(color: Colors.white70, height: 1.4),
+          style: TextStyle(color: AppBrand.textMuted, height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.accent),
             child: const Text('Stay'),
           ),
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Leave', style: TextStyle(color: Colors.redAccent)),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.danger),
+            child: const Text('Leave'),
           ),
         ],
       ),

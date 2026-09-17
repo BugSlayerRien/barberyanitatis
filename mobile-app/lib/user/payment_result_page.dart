@@ -3,6 +3,9 @@ import 'appointments_page.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'api_config.dart';
+import 'dashboard_page.dart';
+import 'services/face_scan_service.dart';
+import 'user_session.dart';
 
 class PaymentResultPage extends StatefulWidget {
   const PaymentResultPage({super.key});
@@ -77,30 +80,47 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
               }
               // Wait longer to ensure backend has processed payment and updated database
               await Future.delayed(const Duration(milliseconds: 1500));
-              if (mounted) {
-                final appointmentId = int.tryParse(
-                      _params['appointment_id'] ??
-                          _params['appointmentId'] ??
-                          '',
-                    ) ??
-                    0;
-                final receiptRef = _params['source'] ??
-                    _params['id'] ??
-                    _params['resource_id'] ??
-                    '';
+              if (!mounted) return;
+
+              // An AI-credit top-up is not a booking -- api/paymongo/payment-status.php
+              // has already credited the account by the time `status` reads
+              // paid/succeeded here (see ai_tryon_provider.php's
+              // ai_tryon_purchased_credits()), so there is no appointment to
+              // show. This branch is reached only if this page ends up
+              // handling the return itself -- normally AiCreditPurchasePage's
+              // own poll resolves it first; see PaymentReturnGuard.
+              if (_params['purpose'] == 'ai_credits') {
+                await FaceScanService.fetchQuotaStatus(userId: UserSession.userId);
+                if (!mounted) return;
                 Navigator.of(context).pushAndRemoveUntil(
-                  MaterialPageRoute(
-                    builder: (_) => AppointmentsPage(
-                      highlightAppointmentId:
-                          appointmentId > 0 ? appointmentId : null,
-                      forcedPaymentState: 'Paid',
-                      forcedReceiptRef:
-                          receiptRef.isNotEmpty ? receiptRef : null,
-                    ),
-                  ),
+                  MaterialPageRoute(builder: (_) => const DashboardPage()),
                   (route) => false,
                 );
+                return;
               }
+
+              final appointmentId = int.tryParse(
+                    _params['appointment_id'] ??
+                        _params['appointmentId'] ??
+                        '',
+                  ) ??
+                  0;
+              final receiptRef = _params['source'] ??
+                  _params['id'] ??
+                  _params['resource_id'] ??
+                  '';
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(
+                  builder: (_) => AppointmentsPage(
+                    highlightAppointmentId:
+                        appointmentId > 0 ? appointmentId : null,
+                    forcedPaymentState: 'Paid',
+                    forcedReceiptRef:
+                        receiptRef.isNotEmpty ? receiptRef : null,
+                  ),
+                ),
+                (route) => false,
+              );
               return;
             } else if (status == 'failed' || status == 'canceled' || status == 'expired') {
               // Payment failed

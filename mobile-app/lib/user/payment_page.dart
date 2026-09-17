@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'appointments_page.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
+import 'payment_return_guard.dart';
 import 'time_format_utils.dart';
 import 'user_session.dart';
 
@@ -111,13 +112,23 @@ class _PaymentPageState extends State<PaymentPage> {
 
       setState(() => _intentStatusLabel = 'Waiting for gateway confirmation...');
 
-      if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
-        await _openCheckoutUrlIfPresent(checkoutUrl);
-        if (!mounted) return;
-        setState(() => _intentStatusLabel = 'Complete payment in the opened browser/app...');
-      }
+      // Active for the whole trip out to the gateway and back: this page's own
+      // poll below is what reliably resolves the payment, so the app-wide
+      // deep-link listener in main.dart should not also push a second,
+      // independent verifier for the same return. See PaymentReturnGuard.
+      PaymentReturnGuard.enter();
+      Map<String, dynamic>? statusData;
+      try {
+        if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
+          await _openCheckoutUrlIfPresent(checkoutUrl);
+          if (!mounted) return;
+          setState(() => _intentStatusLabel = 'Complete payment in the opened browser/app...');
+        }
 
-      final statusData = await _pollPaymentUntilFinal(resourceId, resourceType: resourceType);
+        statusData = await _pollPaymentUntilFinal(resourceId, resourceType: resourceType);
+      } finally {
+        PaymentReturnGuard.exit();
+      }
       if (!mounted) return;
       if (statusData == null) {
         ScaffoldMessenger.of(context).showSnackBar(
