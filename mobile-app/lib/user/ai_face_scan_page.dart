@@ -91,6 +91,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _consentFormAgreed = false;
   bool _consentLoading = true;
   bool _finishingStaging = false;
+  /// All angles are captured and the customer is looking them over before
+  /// upload. Auto-capture is paused while this is true, so a retake is always
+  /// a deliberate choice rather than something the camera does on its own.
+  bool _reviewingCaptures = false;
   
   double? _currentHeadYaw;
   Rect? _currentFaceRect;
@@ -331,6 +335,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _consentLoading = false;
         _needsStaging = true;
         _stagingComplete = false;
+        _reviewingCaptures = false;
         _stageIndex = 0;
         _capturedImages = {};
         _capturedFaceRects.clear();
@@ -380,6 +385,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           _consentLoading = false;
           _needsStaging = true;
           _stagingComplete = false;
+          _reviewingCaptures = false;
           _stageIndex = stage;
           _capturedImages = Map<String, String>.from(existing);
         });
@@ -396,6 +402,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       _consentLoading = false;
       _needsStaging = true;
       _stagingComplete = false;
+      _reviewingCaptures = false;
       _stageIndex = 0;
       _capturedImages = {};
       _capturedFaceRects.clear();
@@ -452,6 +459,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       setState(() {
         _needsStaging = true;
         _stagingComplete = false;
+        _reviewingCaptures = false;
         _stageIndex = 0;
         _capturedImages = {};
         UserSession.capturedFaceImages = null;
@@ -1707,6 +1715,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _processStagingFrame(DetectedFaceFrame? frame, CameraImage image) async {
+    if (_reviewingCaptures) return;
     if (frame == null) {
       _logStaging('no_face');
       setState(() {
@@ -1773,6 +1782,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _processStagingFrameWeb() async {
+    if (_reviewingCaptures) return;
     // Web staging uses the web camera controller to capture frames
     final tracked = _webCamera.tracking.value;
     if (tracked.faceRect == null) {
@@ -1836,7 +1846,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   }
 
   Future<void> _captureCurrent(CameraImage image) async {
-    if (_camera == null || !_camera!.value.isInitialized || _finishingStaging) {
+    if (_camera == null ||
+        !_camera!.value.isInitialized ||
+        _finishingStaging ||
+        _reviewingCaptures) {
       return;
     }
     try {
@@ -1862,18 +1875,59 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _goodPositionFrames = 0;
       });
 
-      if (_stageIndex < _stages.length - 1) {
-        setState(() => _stageIndex++);
+      // Next angle still missing, not simply index + 1: after a retake of an
+      // earlier angle the later ones are already captured and must be kept.
+      final next = _nextUncapturedStageIndex();
+      if (next != null) {
+        setState(() => _stageIndex = next);
         await _restartStagingStream();
       } else {
-        UserSession.capturedFaceImages = Map.from(_capturedImages);
-        UserSession.captureFaceRects = Map.from(_capturedFaceRects);
-        await _finishStagingCapture();
+        // Stream stays stopped; nothing uploads until the customer confirms.
+        setState(() => _reviewingCaptures = true);
       }
     } catch (e) {
       debugPrint('[AiFaceScan] Capture error: $e');
       await _restartStagingStream();
     }
+  }
+
+  /// First angle that has no photo yet, or null when all are captured.
+  int? _nextUncapturedStageIndex() {
+    for (var i = 0; i < _stages.length; i++) {
+      if (!_capturedImages.containsKey(_stages[i].keyName)) return i;
+    }
+    return null;
+  }
+
+  /// Discard one captured angle and go back to shoot it again.
+  Future<void> _retakeStage(int index) async {
+    if (_finishingStaging || index < 0 || index >= _stages.length) return;
+    final key = _stages[index].keyName;
+    setState(() {
+      _capturedImages.remove(key);
+      _capturedFaceRects.remove(key);
+      _stageIndex = index;
+      _goodPositionFrames = 0;
+      _isGoodPosition = false;
+      _reviewingCaptures = false;
+      _status = _stages[index].hint;
+    });
+    UserSession.capturedFaceImages = null;
+    if (!kIsWeb) {
+      await _restartStagingStream();
+    }
+  }
+
+  /// Customer accepted all three photos: hand them to the existing upload path.
+  Future<void> _confirmCaptures() async {
+    if (_finishingStaging || _nextUncapturedStageIndex() != null) return;
+    UserSession.capturedFaceImages = Map.from(_capturedImages);
+    UserSession.captureFaceRects = Map.from(_capturedFaceRects);
+    // _reviewingCaptures is left true on purpose. If validation or upload fails,
+    // _finishStagingCapture drops back to staging, and the customer lands on
+    // this review again -- able to retake -- instead of the camera silently
+    // re-shooting the last angle.
+    await _finishStagingCapture();
   }
 
   Future<void> _restartStagingStream() async {
@@ -1934,12 +1988,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _goodPositionFrames = 0;
       });
 
-      if (_stageIndex < _stages.length - 1) {
-        setState(() => _stageIndex++);
+      final next = _nextUncapturedStageIndex();
+      if (next != null) {
+        setState(() => _stageIndex = next);
       } else {
-        UserSession.capturedFaceImages = Map.from(_capturedImages);
-        UserSession.captureFaceRects = Map.from(_capturedFaceRects);
-        await _finishStagingCapture();
+        setState(() => _reviewingCaptures = true);
       }
     } catch (e) {
       debugPrint('[AiFaceScan] Web capture error: $e');
@@ -2194,10 +2247,18 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   Widget _buildStagingUI() {
     final currentStage = _stages[_stageIndex.clamp(0, _stages.length - 1)];
-    final progress = (_stageIndex + (_goodPositionFrames / StagingFaceValidation.holdFrames)) / _stages.length;
-    final camera = kIsWeb
-        ? _buildStagingWebCamera(currentStage)
-        : _buildStagingCameraView(currentStage);
+    // Captured count, not stage index: after a retake the index can move
+    // backwards while later angles are already done.
+    final progress = _reviewingCaptures
+        ? 1.0
+        : (_capturedImages.length +
+                (_goodPositionFrames / StagingFaceValidation.holdFrames)) /
+            _stages.length;
+    final camera = _reviewingCaptures
+        ? _buildCaptureReview()
+        : kIsWeb
+            ? _buildStagingWebCamera(currentStage)
+            : _buildStagingCameraView(currentStage);
 
     return PopScope(
       canPop: widget.kioskMode,
@@ -2257,8 +2318,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         ),
         const SizedBox(height: 18),
         Expanded(child: camera),
-        const SizedBox(height: 14),
-        _stageStatusRow(vertical: false),
+        if (!_reviewingCaptures) ...[
+          const SizedBox(height: 14),
+          _stageStatusRow(vertical: false),
+        ],
       ],
     );
   }
@@ -2472,6 +2535,106 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     );
   }
 
+  /// Shown once every angle is captured, in place of the live camera.
+  Widget _buildCaptureReview() {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white24),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Review your photos',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Blurry, dark, or hair cut off? Tap Retake on that angle. Clear photos give better hairstyle previews.',
+              style: TextStyle(color: Colors.white70, fontSize: 12.5, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (var i = 0; i < _stages.length; i++) ...[
+                    if (i > 0) const SizedBox(width: 10),
+                    Expanded(child: _reviewTile(i)),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 50,
+              child: ElevatedButton(
+                onPressed: _finishingStaging ? null : () => unawaited(_confirmCaptures()),
+                style: AppBrand.primaryButton,
+                child: _finishingStaging
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Color(0xFF0B0B0E),
+                        ),
+                      )
+                    : const Text('USE THESE PHOTOS'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _reviewTile(int index) {
+    final stage = _stages[index];
+    final b64 = _capturedImages[stage.keyName];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: _stageThumbnailImage(stage, b64)),
+        const SizedBox(height: 8),
+        Text(
+          stage.label,
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 40,
+          child: OutlinedButton.icon(
+            onPressed: _finishingStaging ? null : () => unawaited(_retakeStage(index)),
+            icon: const Icon(Icons.refresh, size: 16),
+            label: const Text('Retake', style: TextStyle(fontSize: 12.5)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.white,
+              side: const BorderSide(color: Colors.white24),
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _stageStatusRow({bool vertical = false}) {
     if (vertical) {
       return Column(
@@ -2546,7 +2709,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required int index,
   }) {
     final captured = _capturedImages.containsKey(stage.keyName);
-    final active = index == _stageIndex;
+    final active = !_reviewingCaptures && index == _stageIndex;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -2644,6 +2807,35 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   Widget _stageThumbnailSlot(_CaptureStage stage) {
     final b64 = _capturedImages[stage.keyName];
+    final thumb = _stageThumbnailImage(stage, b64);
+    if (b64 == null || _finishingStaging) return thumb;
+    final index = _stages.indexOf(stage);
+    return Semantics(
+      button: true,
+      label: 'Retake ${stage.label}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => unawaited(_retakeStage(index)),
+          borderRadius: BorderRadius.circular(8),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              thumb,
+              const Positioned(
+                left: 0,
+                right: 0,
+                bottom: 6,
+                child: Center(child: _RetakePill(compact: true)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _stageThumbnailImage(_CaptureStage stage, String? b64) {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: const Color(0xFF141414),
@@ -2678,7 +2870,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required int index,
   }) {
     final captured = _capturedImages.containsKey(stage.keyName);
-    final active = index == _stageIndex;
+    final active = !_reviewingCaptures && index == _stageIndex;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -4883,6 +5075,41 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hairClipFactor: clipFactor,
       visualScale: visualScale,
       yawShiftFactor: base.yawShiftFactor,
+    );
+  }
+}
+
+class _RetakePill extends StatelessWidget {
+  final bool compact;
+
+  const _RetakePill({this.compact = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.68),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: Colors.white38),
+      ),
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: compact ? 7 : 10, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.refresh, size: compact ? 12 : 14, color: Colors.white),
+            const SizedBox(width: 3),
+            Text(
+              'Retake',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: compact ? 10.5 : 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

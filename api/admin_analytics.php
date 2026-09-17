@@ -134,6 +134,16 @@ try {
     $daysBack = (int)$cfg['daysBack'];
 
     $apptWhere = $cfg['appointmentSql'];
+    // Qualified copies for queries that join tables sharing these column names.
+    // hairstyles and hairstyle_variants both have created_at, so an unqualified
+    // filter there is ambiguous and Postgres rejects the whole query.
+    $apptWhereA = str_replace('appointment_date', 'a.appointment_date', $cfg['appointmentSql']);
+    $eventWhereE = str_replace('created_at', 'e.created_at', $cfg['eventSql']);
+    // A booking counts toward "most booked" only if it was not cancelled or a
+    // no-show. Same rule as mostBookedBarber below and as the customer app's
+    // trending haircut (api/booking.php getCustomerHomeInsights), so the admin
+    // dashboard and the app agree on which haircut is most booked.
+    $activeBookingStatuses = "('Completed', 'Scheduled', 'CheckedIn', 'InProgress')";
     $payWhere = $cfg['paymentSql'];
     $eventWhere = $cfg['eventSql'];
     $walkinWhere = $cfg['walkinSql'];
@@ -257,7 +267,8 @@ try {
          FROM appointment_details ad
          JOIN services s ON s.service_id = ad.service_id
          JOIN appointments a ON a.appointment_id = ad.appointment_id
-         WHERE {$apptWhere}
+         WHERE {$apptWhereA}
+           AND a.status IN {$activeBookingStatuses}
          GROUP BY s.service_id, s.service_name
          ORDER BY booking_count DESC
          LIMIT 8"
@@ -406,6 +417,8 @@ try {
                  JOIN hairstyle_variants hv ON hv.variant_id = uf.variant_id
                  JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
                  WHERE uf.variant_id IS NOT NULL
+                   AND uf.created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+                   AND uf.created_at < (CURRENT_DATE + INTERVAL '1 day')
                  GROUP BY hs.style_name, hv.variant_id
                  ORDER BY favorite_count DESC
                  LIMIT 8"
@@ -491,7 +504,7 @@ try {
                  LEFT JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
                  WHERE e.event_type = 'style_selected'
                    AND e.variant_id IS NOT NULL
-                   AND {$eventWhere}
+                   AND {$eventWhereE}
                  GROUP BY hs.style_name, e.variant_id
                  ORDER BY count DESC
                  LIMIT 8"
@@ -559,6 +572,8 @@ try {
                 "SELECT COALESCE(NULLIF(TRIM(face_shape), ''), 'Unknown') AS label, COUNT(*)::int AS count
                  FROM face_scan_sessions
                  WHERE face_shape IS NOT NULL
+                   AND created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+                   AND created_at < (CURRENT_DATE + INTERVAL '1 day')
                  GROUP BY 1
                  ORDER BY count DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
@@ -573,6 +588,8 @@ try {
                 "SELECT COALESCE(NULLIF(TRIM(hair_texture), ''), 'Unknown') AS label, COUNT(*)::int AS count
                  FROM face_scan_sessions
                  WHERE hair_texture IS NOT NULL
+                   AND created_at >= (CURRENT_DATE - INTERVAL '{$daysBack} days')
+                   AND created_at < (CURRENT_DATE + INTERVAL '1 day')
                  GROUP BY 1
                  ORDER BY count DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
@@ -582,16 +599,27 @@ try {
     }
 
     try {
+        // Ranked per haircut, not per variant: "Blowout Taper" has several
+        // variants, and counting them separately let a style lose the top spot
+        // to itself. variant_id is the haircut's most-booked variant.
         $mostBookedStyles = $pdo->query(
-            "SELECT hs.style_name, ad.variant_id, COUNT(*)::int AS booking_count
-             FROM appointment_details ad
-             JOIN appointments a ON a.appointment_id = ad.appointment_id
-             JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
-             JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
-             WHERE {$apptWhere}
-               AND ad.variant_id IS NOT NULL AND ad.variant_id > 0
-             GROUP BY hs.style_name, ad.variant_id
-             ORDER BY booking_count DESC
+            "WITH booked AS (
+                 SELECT hs.hairstyle_id, hs.style_name, ad.variant_id, COUNT(*)::int AS n
+                 FROM appointment_details ad
+                 JOIN appointments a ON a.appointment_id = ad.appointment_id
+                 JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
+                 JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
+                 WHERE {$apptWhereA}
+                   AND a.status IN {$activeBookingStatuses}
+                   AND ad.variant_id IS NOT NULL AND ad.variant_id > 0
+                 GROUP BY hs.hairstyle_id, hs.style_name, ad.variant_id
+             )
+             SELECT style_name,
+                    (ARRAY_AGG(variant_id ORDER BY n DESC, variant_id))[1] AS variant_id,
+                    SUM(n)::int AS booking_count
+             FROM booked
+             GROUP BY hairstyle_id, style_name
+             ORDER BY booking_count DESC, style_name ASC
              LIMIT 8"
         )->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {

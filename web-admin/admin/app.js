@@ -2178,6 +2178,7 @@ function renderCustomers(metrics) {
   const c = metrics?.customers || {};
   const favBarber = c.mostBookedBarber;
   const styles = c.mostFavoritedHairstyles || [];
+  const bookedStyles = metrics?.ai?.mostBooked || [];
   el.innerHTML = `
     <div class="analytics-stack-item"><strong>New customers</strong>${Number(c.newCustomers || 0)}</div>
     <div class="analytics-stack-item"><strong>Returning customers</strong>${Number(c.returningCustomers || 0)}</div>
@@ -2190,10 +2191,17 @@ function renderCustomers(metrics) {
       <div class="meta" style="margin-top:4px;">${escapeAnalyticsText(favBarber?.note || "Barber favorites are not stored.")}</div>
     </div>
     <div class="analytics-stack-item">
+      <strong>Most booked haircuts</strong>
+      ${bookedStyles.length
+        ? bookedStyles.slice(0, 5).map((s) => `${escapeAnalyticsText(s.style_name)} (${Number(s.booking_count)})`).join(", ")
+        : "No haircut bookings in this period."}
+      <div class="meta" style="margin-top:4px;">Excludes cancelled and no-show bookings.</div>
+    </div>
+    <div class="analytics-stack-item">
       <strong>Most favorited hairstyles</strong>
       ${styles.length
         ? styles.slice(0, 5).map((s) => `${escapeAnalyticsText(s.style_name)} (${s.favorite_count})`).join(", ")
-        : "No favorites recorded yet."}
+        : "No favorites in this period."}
     </div>
   `;
 }
