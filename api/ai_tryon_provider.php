@@ -213,12 +213,77 @@ function ai_tryon_user_has_generated_variant(PDO $pdo, int $userId, int $variant
 }
 
 /**
+ * Idempotent columns that let an appointment_payment_intents /
+ * appointment_payments row represent a non-booking purchase (an AI-generation
+ * credit top-up) instead of a booking payment.
+ *
+ * appointment_id is made nullable rather than adding a parallel table: both
+ * tables already carry everything a credit purchase needs (amount, method,
+ * status, provider_ref/transaction_ref for reconciling against PayMongo), and
+ * reusing them means the proven PayMongo source-to-payment conversion logic in
+ * paymongo/payment-status.php (paymongo_create_payment_from_source) keeps
+ * working unmodified for both purposes — no second implementation of that to
+ * get subtly wrong. `purpose = 'booking'` is the default, so every existing
+ * row and every booking-payment code path is unaffected.
+ */
+function ensure_ai_credit_columns(PDO $pdo): void
+{
+    foreach (['appointment_payment_intents', 'appointment_payments'] as $table) {
+        // A no-op if appointment_id is already nullable — safe to run every time.
+        $pdo->exec("ALTER TABLE {$table} ALTER COLUMN appointment_id DROP NOT NULL");
+        $pdo->exec(
+            "ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS purpose VARCHAR(20) NOT NULL DEFAULT 'booking'"
+        );
+        $pdo->exec(
+            "ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS user_id BIGINT
+             REFERENCES users(user_id) ON DELETE CASCADE"
+        );
+        $pdo->exec("ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS credits INT");
+    }
+}
+
+/**
+ * Sum of credits from completed AI-generation top-up purchases. Additive to
+ * the free style limit — see ai_tryon_effective_style_limit(). Guests/kiosk
+ * (no user_id) can't purchase credits, so this is only ever called for a
+ * signed-in mobile-app account.
+ *
+ * 'Captured' matches the exact status string finalize_paid_intent() and
+ * payment-status.php's paymongo_payment_row_status() already write for a
+ * successful appointment_payments row — kept consistent rather than inventing
+ * a second "paid" convention.
+ */
+function ai_tryon_purchased_credits(PDO $pdo, int $userId): int
+{
+    $stmt = $pdo->prepare(
+        "SELECT COALESCE(SUM(credits), 0)
+         FROM appointment_payments
+         WHERE purpose = 'ai_credits'
+           AND user_id = :user_id
+           AND status = 'Captured'"
+    );
+    $stmt->execute([':user_id' => $userId]);
+
+    return (int)$stmt->fetchColumn();
+}
+
+/** Free limit plus any purchased top-up credits. Kiosk/guest gets no top-up. */
+function ai_tryon_effective_style_limit(PDO $pdo, ?int $userId): int
+{
+    $limit = ai_tryon_style_limit();
+    if ($userId !== null) {
+        $limit += ai_tryon_purchased_credits($pdo, $userId);
+    }
+    return $limit;
+}
+
+/**
  * @return array{limit: int, used: int, remaining: int, unlimited: bool}
  */
 function ai_tryon_quota_status(PDO $pdo, ?int $userId): array
 {
     $unlimited = ai_tryon_unlimited();
-    $limit = ai_tryon_style_limit();
+    $limit = ai_tryon_effective_style_limit($pdo, $userId);
     $used = $userId !== null ? ai_tryon_styles_used($pdo, $userId) : 0;
     $remaining = $unlimited ? $limit : max(0, $limit - $used);
 

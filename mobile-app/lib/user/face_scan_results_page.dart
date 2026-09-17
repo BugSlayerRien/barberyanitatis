@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 
+import 'ai_credit_purchase_page.dart';
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
 import 'app_brand.dart';
@@ -78,6 +79,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   bool _bookingInFlight = false;
   bool _previewGenerating = false;
   String? _previewError;
+  /// Last quota the server reported for this account (from a successful
+  /// generation, a cache hit, or a 429). Kept across calls so a persistent
+  /// indicator can show "X of Y used" without waiting for the next attempt.
+  Map<String, dynamic>? _lastQuota;
   String? _lengthNote;
   late String _faceShape;
   late String _hairTexture;
@@ -119,6 +124,19 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     // ranking already computed for this scan; only fetch when there is none.
     if (!_restoreCachedRecommendations()) {
       _loadRecommendations();
+    }
+    // So the "X of Y" chip is visible immediately, not only after the first
+    // generate attempt on this visit.
+    unawaited(_refreshQuotaStatus());
+  }
+
+  Future<void> _refreshQuotaStatus() async {
+    final quota = await FaceScanService.fetchQuotaStatus(
+      userId: UserSession.userId,
+      scanSessionId: UserSession.userId == null ? UserSession.ensureScanSessionId() : null,
+    );
+    if (quota != null && mounted) {
+      setState(() => _lastQuota = quota);
     }
   }
 
@@ -887,6 +905,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       UserSession.customerPreviewImages = urls;
       UserSession.commitCompletedScan();
       final quota = FaceScanService.quotaFromResponse(data);
+      if (quota != null) {
+        setState(() => _lastQuota = quota);
+      }
       if (fromCache) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -903,6 +924,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       setState(() {
         _previewGenerating = false;
         _previewError = null;
+        _lastQuota = {
+          'limit': e.limit,
+          'used': e.used,
+          'remaining': e.remaining,
+          'unlimited': e.unlimited,
+        };
       });
       await _showQuotaExceededDialog(e);
     } catch (e) {
@@ -926,8 +953,30 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     return 'AI preview ready — swipe angles to compare. ($used of $limit free styles used)';
   }
 
+  /// Kiosk walk-ins have no login, so there is no account to attach a
+  /// purchase to (see ai_tryon_effective_style_limit — top-ups only apply to a
+  /// signed-in userId). The purchase entry point is hidden there rather than
+  /// shown and failing.
+  bool get _canPurchaseCredits => !widget.kioskMode && UserSession.userId != null;
+
+  Future<void> _openCreditPurchase() async {
+    final quota = await Navigator.of(context).push<Map<String, dynamic>?>(
+      MaterialPageRoute(builder: (_) => const AiCreditPurchasePage()),
+    );
+    if (quota != null && mounted) {
+      setState(() => _lastQuota = quota);
+    }
+  }
+
   Future<void> _showQuotaExceededDialog(FaceScanQuotaExceededException e) async {
     if (!mounted) return;
+    // e.hint is the server's own guidance for this response (e.g. "you can still
+    // view or regenerate a style you already tried"). Previously this dialog
+    // always showed a hardcoded sentence instead, which drifts if the server-side
+    // wording ever changes.
+    final hint = (e.hint?.trim().isNotEmpty ?? false)
+        ? e.hint!.trim()
+        : 'You can still view and book any style you already generated.';
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -936,16 +985,99 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           'Free style limit reached',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
-        content: Text(
-          '${e.message}\n\nYou can still view and book any style you already generated.',
-          style: const TextStyle(color: Colors.white70, height: 1.4),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "You've used ${e.used} of ${e.limit} free previews.",
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 15,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              hint,
+              style: const TextStyle(color: Colors.white70, height: 1.4),
+            ),
+          ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
             child: const Text('Got it'),
           ),
+          if (_canPurchaseCredits)
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(_openCreditPurchase());
+              },
+              child: Text(
+                'Get ${AiCreditPurchasePage.bundleCredits} more — '
+                '₱${AiCreditPurchasePage.bundleAmountPhp.toStringAsFixed(0)}',
+              ),
+            ),
         ],
+      ),
+    );
+  }
+
+  /// Small persistent "X of Y previews used" chip. The only place a count used
+  /// to appear was a one-off SnackBar after a *successful* generation, so a
+  /// customer had no visibility into where they stood before hitting the limit.
+  Widget? _quotaIndicatorChip() {
+    final quota = _lastQuota;
+    if (quota == null || quota['unlimited'] == true) return null;
+    final limit = (quota['limit'] as num?)?.toInt();
+    final used = (quota['used'] as num?)?.toInt();
+    if (limit == null || used == null || limit <= 0) return null;
+    final atLimit = used >= limit;
+    final offerBuyMore = atLimit && _canPurchaseCredits;
+    final chip = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: atLimit ? const Color(0xFF3A1A10) : const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: atLimit ? Colors.orange.shade300 : Colors.white24,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '$used of $limit free previews used',
+            style: TextStyle(
+              color: atLimit ? Colors.orange.shade200 : Colors.white70,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (offerBuyMore) ...[
+            const SizedBox(width: 6),
+            Text(
+              '·  Buy more',
+              style: TextStyle(
+                color: Colors.orange.shade200,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+    if (!offerBuyMore) return chip;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () => unawaited(_openCreditPurchase()),
+        child: chip,
       ),
     );
   }
@@ -1358,6 +1490,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 );
               }),
             ),
+            if (_quotaIndicatorChip() != null) ...[
+              const SizedBox(height: 8),
+              Center(child: _quotaIndicatorChip()!),
+            ],
             const SizedBox(height: 8),
             if (_selected == null)
               const Text(

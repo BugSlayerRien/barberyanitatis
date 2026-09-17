@@ -73,7 +73,11 @@ function paymongo_update_table_status(PDO $pdo, string $tableName, string $exter
 }
 
 function paymongo_find_intent_context(PDO $pdo, string $externalId, ?string $metadataRef = null): ?array {
-    $sql = "SELECT appointment_id, amount, method
+    // purpose/user_id/credits are absent for pre-existing rows created before
+    // ensure_ai_credit_columns() ran; PDO returns null for them there, which
+    // paymongo_sync_payment_row() below already treats as "not an ai_credits
+    // row" via the purpose default.
+    $sql = "SELECT appointment_id, amount, method, purpose, user_id, credits
             FROM appointment_payment_intents
             WHERE CAST(intent_token AS TEXT) = :external
                OR CAST(provider_ref AS TEXT) = :external
@@ -86,9 +90,13 @@ function paymongo_find_intent_context(PDO $pdo, string $externalId, ?string $met
         return $row;
     }
 
+    // Metadata-ref fallback is booking-only: an ai_credits intent is always
+    // found by intent_token/provider_ref above (the PayMongo resource id is
+    // stored there at creation time regardless of purpose), so there is no
+    // equivalent single-id fallback needed for a credit purchase.
     if ($metadataRef !== null && $metadataRef !== '') {
         $metaStmt = $pdo->prepare(
-            "SELECT appointment_id, amount, method
+            "SELECT appointment_id, amount, method, purpose, user_id, credits
              FROM appointment_payment_intents
              WHERE CAST(appointment_id AS TEXT) = :meta
              ORDER BY created_at DESC
@@ -132,9 +140,17 @@ function paymongo_get_pdo(): ?PDO
 {
     try {
         require_once dirname(__DIR__) . '/db.php';
+        require_once dirname(__DIR__) . '/ai_tryon_provider.php';
         load_repository_env();
 
-        return get_db_connection();
+        $pdo = get_db_connection();
+        // Must run before paymongo_find_intent_context()'s SELECT below, which
+        // names purpose/user_id/credits unconditionally.
+        schema_ensure_once('ai_credit_columns', static function () use ($pdo): void {
+            ensure_ai_credit_columns($pdo);
+        });
+
+        return $pdo;
     } catch (Throwable $e) {
         @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . ' DB connect error: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
 
@@ -144,18 +160,24 @@ function paymongo_get_pdo(): ?PDO
 
 function paymongo_sync_payment_row(PDO $pdo, string $externalId, string $status, ?string $metadataRef = null): void {
     $intentContext = paymongo_find_intent_context($pdo, $externalId, $metadataRef);
+
+    $isAiCreditPurchase = $intentContext
+        && ($intentContext['purpose'] ?? 'booking') === 'ai_credits'
+        && (int)($intentContext['user_id'] ?? 0) > 0;
+
     $appointmentId = null;
+    if (!$isAiCreditPurchase) {
+        if ($intentContext && isset($intentContext['appointment_id'])) {
+            $appointmentId = intval($intentContext['appointment_id']);
+        }
 
-    if ($intentContext && isset($intentContext['appointment_id'])) {
-        $appointmentId = intval($intentContext['appointment_id']);
-    }
+        if (($appointmentId === null || $appointmentId <= 0) && $metadataRef !== null && ctype_digit((string) $metadataRef)) {
+            $appointmentId = intval($metadataRef);
+        }
 
-    if (($appointmentId === null || $appointmentId <= 0) && $metadataRef !== null && ctype_digit((string) $metadataRef)) {
-        $appointmentId = intval($metadataRef);
-    }
-
-    if ($appointmentId === null || $appointmentId <= 0) {
-        return;
+        if ($appointmentId === null || $appointmentId <= 0) {
+            return;
+        }
     }
 
     $paymentStatus = paymongo_payment_row_status($status);
@@ -175,6 +197,25 @@ function paymongo_sync_payment_row(PDO $pdo, string $externalId, string $status,
         $updateStmt->execute([
             'status' => $paymentStatus,
             'payment_id' => $existing['payment_id'],
+        ]);
+        return;
+    }
+
+    if ($isAiCreditPurchase) {
+        // No appointment side effects (no promote_paid_booking_unit-equivalent
+        // needed): ai_tryon_purchased_credits() sums this row directly, so
+        // landing it here as Captured is the whole job.
+        $insertStmt = $pdo->prepare(
+            'INSERT INTO appointment_payments (appointment_id, purpose, user_id, credits, amount, method, status, transaction_ref)
+             VALUES (NULL, \'ai_credits\', :user_id, :credits, :amount, :method, :status, :transaction_ref)'
+        );
+        $insertStmt->execute([
+            'user_id' => (int)$intentContext['user_id'],
+            'credits' => (int)($intentContext['credits'] ?? 0),
+            'amount' => $amount,
+            'method' => $method,
+            'status' => $paymentStatus,
+            'transaction_ref' => $externalId,
         ]);
         return;
     }
