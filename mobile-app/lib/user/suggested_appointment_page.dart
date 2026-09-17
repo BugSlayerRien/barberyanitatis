@@ -10,7 +10,6 @@ import 'app_brand.dart';
 import 'services/face_scan_service.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
-import 'booking_guard.dart';
 import 'payment_page.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
@@ -97,21 +96,44 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     return isPastOrInvalidSuggestion(date: date, time: time);
   }
 
+  // The service catalogue is the same for every booking, so it is fetched once
+  // and reused rather than costing a round-trip on every Continue tap.
+  static List<Map<String, dynamic>>? _cachedServices;
+  static DateTime? _cachedServicesAt;
+  static const Duration _servicesCacheTtl = Duration(minutes: 10);
+
+  Future<List<Map<String, dynamic>>?> _fetchServices() async {
+    final cachedAt = _cachedServicesAt;
+    if (_cachedServices != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _servicesCacheTtl) {
+      return _cachedServices;
+    }
+    final response = await http
+        .post(
+          Uri.parse('${ApiConfig.baseUrl}/services.php'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'action': 'list'}),
+        )
+        .timeout(const Duration(seconds: 30));
+    if (response.statusCode != 200 || response.body.isEmpty) {
+      return null;
+    }
+    final data = jsonDecode(response.body) as Map<String, dynamic>;
+    final services = (data['services'] as List<dynamic>? ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+    _cachedServices = services;
+    _cachedServicesAt = DateTime.now();
+    return services;
+  }
+
   Future<Map<String, dynamic>?> _loadDefaultService() async {
     try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/services.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'list'}),
-      );
-      if (response.statusCode != 200 || response.body.isEmpty) {
+      final services = await _fetchServices();
+      if (services == null) {
         return null;
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final services = (data['services'] as List<dynamic>? ?? [])
-          .map((item) => Map<String, dynamic>.from(item as Map))
-          .toList();
 
       final selectedServiceId = UserSession.selectedServiceId;
       if (selectedServiceId != null) {
@@ -158,20 +180,10 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
 
     setState(() => _booking = true);
     try {
-      final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
-      if (!mounted) {
-        return;
-      }
-      if (hasActive) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('You already have an active appointment.')),
-        );
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-        );
-        return;
-      }
-
+      // No separate active-appointment pre-check here: the create call below is
+      // rejected with 409 "active appointment" by the server, which is handled
+      // with the same message and redirect. Checking first cost an extra
+      // round-trip that downloaded the full appointment list on every tap.
       final service = await _loadDefaultService();
       if (!mounted) {
         return;
@@ -288,33 +300,45 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
 
       await BookingDraftService.clear();
 
-      if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null && !widget.skipPreviews) {
-        await AiFunnelService.trackBookingCreated(
-          scanSessionId: UserSession.ensureScanSessionId(),
-          userId: UserSession.userId!,
-          variantId: UserSession.selectedVariantId!,
-          appointmentId: appointmentId,
-          serviceId: serviceId,
-          estimatedMinutes: duration,
-          frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-          sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-          backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
-        );
-        if (bookingData['previewsAttached'] != true) {
+      final userId = UserSession.userId;
+      final variantId = UserSession.selectedVariantId;
+      if (appointmentId > 0 && userId != null && variantId != null && !widget.skipPreviews) {
+        // Fire-and-forget: the booking already exists and neither of these
+        // changes what the payment screen needs. Awaiting them held the
+        // customer here for two more network round-trips.
+        final scanSessionId = UserSession.ensureScanSessionId();
+        final previews = UserSession.selectedPreviewImages;
+        final attachPreviews = bookingData['previewsAttached'] != true;
+        unawaited(() async {
           try {
-            await FaceScanService.attachPreviewsToAppointment(
+            await AiFunnelService.trackBookingCreated(
+              scanSessionId: scanSessionId,
+              userId: userId,
+              variantId: variantId,
               appointmentId: appointmentId,
-              scanSessionId: UserSession.ensureScanSessionId(),
-              variantId: UserSession.selectedVariantId!,
+              serviceId: serviceId,
+              estimatedMinutes: duration,
+              frontViewUrl: previews?['frontViewUrl'],
+              sideViewUrl: previews?['sideViewUrl'],
+              backViewUrl: previews?['backViewUrl'],
             );
           } catch (e) {
-            // Silent. This only matters when the customer actually
-            // generated an AI try-on for this style; booking a Library
-            // haircut with no generated preview has nothing to link, so
-            // the warning was firing on a normal, successful booking.
-            debugPrint('Preview attach failed: $e');
+            debugPrint('Booking funnel tracking failed: $e');
           }
-        }
+          if (attachPreviews) {
+            try {
+              await FaceScanService.attachPreviewsToAppointment(
+                appointmentId: appointmentId,
+                scanSessionId: scanSessionId,
+                variantId: variantId,
+              );
+            } catch (e) {
+              // Silent. Only matters when the customer generated an AI try-on
+              // for this style; a Library haircut has nothing to link.
+              debugPrint('Preview attach failed: $e');
+            }
+          }
+        }());
       }
 
       if (!mounted) {

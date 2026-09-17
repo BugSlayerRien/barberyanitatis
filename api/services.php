@@ -16,7 +16,9 @@ if ($action !== 'list') {
 
 try {
     $pdo = get_db_connection();
-    ensure_service_channel_column($pdo);
+    schema_ensure_once('services.channel', static function () use ($pdo): void {
+        ensure_service_channel_column($pdo);
+    });
 
     $channel = normalize_service_channel($input['channel'] ?? $input['serviceChannel'] ?? null);
     $channelFilter = $channel !== null ? service_channel_filter_sql($channel) : '';

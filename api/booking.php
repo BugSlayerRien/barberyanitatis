@@ -236,21 +236,27 @@ try {
     } else {
         $customer = ['user_id' => 0, 'email' => '', 'supabase_sub' => ''];
     }
-    ensure_service_channel_column($pdo);
-    ensure_financial_tables($pdo);
-    ensure_appointments_status_constraint($pdo);
-    ensure_barber_channel_column($pdo);
-    ensure_group_booking_schema($pdo);
-    // Unconditional (not skipped for read-only actions like reschedule_count is
-    // below): listByCustomer's SELECT references cancel_reason directly, and on
-    // a fresh deploy no 'cancel' action may have run yet to create the column —
-    // that would otherwise break the whole appointments list with a SQL error
-    // until someone happened to cancel something first.
-    ensure_cancel_reason_column($pdo);
+    // Schema setup runs once per container, not on every request -- see
+    // schema_ensure_once() in db.php. This block used to cost several seconds
+    // on every booking call, including the read-only list the app fetches
+    // before letting a customer book.
+    schema_ensure_once('booking.core', static function () use ($pdo): void {
+        ensure_service_channel_column($pdo);
+        ensure_financial_tables($pdo);
+        ensure_appointments_status_constraint($pdo);
+        ensure_barber_channel_column($pdo);
+        ensure_group_booking_schema($pdo);
+        // Must stay in the always-run group: listByCustomer's SELECT references
+        // cancel_reason directly, and on a fresh deploy no 'cancel' action may
+        // have run yet to create the column.
+        ensure_cancel_reason_column($pdo);
+    });
     $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile', 'getCustomerHomeInsights'];
     if (!in_array($action, $readOnlyActions, true)) {
-        ensure_appointment_detail_image_columns($pdo);
-        ensure_reschedule_count_column($pdo);
+        schema_ensure_once('booking.write', static function () use ($pdo): void {
+            ensure_appointment_detail_image_columns($pdo);
+            ensure_reschedule_count_column($pdo);
+        });
     }
     if (!in_array($action, $readOnlyActions, true)) {
         auto_complete_due_appointments($pdo);
@@ -728,18 +734,33 @@ try {
         }
 
         $trendingHaircut = null;
+        // Must match the admin dashboard's "Most booked haircuts" for its
+        // "Last 3 months" period (api/admin_analytics.php $mostBookedStyles):
+        // same 90 days ending today, same active statuses, ranked per haircut.
+        // Previously this had no upper bound (future bookings counted) and
+        // ranked per variant+service, so the two screens disagreed.
         $trendStmt = $pdo->query(
-            "SELECT hv.variant_id, hs.style_name, ad.service_id, COUNT(*)::int AS booking_count
-             FROM appointment_details ad
-             JOIN appointments a ON a.appointment_id = ad.appointment_id
-             JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
-             JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
-             WHERE ad.variant_id IS NOT NULL
-               AND ad.variant_id > 0
-               AND a.status IN ('Completed', 'Scheduled', 'CheckedIn', 'InProgress')
-               AND a.appointment_date >= (CURRENT_DATE - INTERVAL '90 days')
-             GROUP BY hv.variant_id, hs.style_name, ad.service_id
-             ORDER BY COUNT(*) DESC, hs.style_name ASC
+            "WITH booked AS (
+                 SELECT hs.hairstyle_id, hs.style_name, ad.variant_id, ad.service_id,
+                        COUNT(*)::int AS n
+                 FROM appointment_details ad
+                 JOIN appointments a ON a.appointment_id = ad.appointment_id
+                 JOIN hairstyle_variants hv ON hv.variant_id = ad.variant_id
+                 JOIN hairstyles hs ON hs.hairstyle_id = hv.hairstyle_id
+                 WHERE ad.variant_id IS NOT NULL
+                   AND ad.variant_id > 0
+                   AND a.status IN ('Completed', 'Scheduled', 'CheckedIn', 'InProgress')
+                   AND a.appointment_date >= (CURRENT_DATE - INTERVAL '89 days')::date
+                   AND a.appointment_date < (CURRENT_DATE + INTERVAL '1 day')::date
+                 GROUP BY hs.hairstyle_id, hs.style_name, ad.variant_id, ad.service_id
+             )
+             SELECT style_name,
+                    (ARRAY_AGG(variant_id ORDER BY n DESC, variant_id))[1] AS variant_id,
+                    (ARRAY_AGG(service_id ORDER BY n DESC, variant_id))[1] AS service_id,
+                    SUM(n)::int AS booking_count
+             FROM booked
+             GROUP BY hairstyle_id, style_name
+             ORDER BY booking_count DESC, style_name ASC
              LIMIT 1"
         );
         $trendRow = $trendStmt ? $trendStmt->fetch(PDO::FETCH_ASSOC) : false;

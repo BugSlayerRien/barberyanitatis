@@ -67,6 +67,60 @@ function open_pdo_once(): PDO
 }
 
 /**
+ * Run idempotent schema setup once per server container instead of per request.
+ *
+ * Endpoints call ensure_*() helpers (ALTER TABLE ... ADD COLUMN IF NOT EXISTS,
+ * CREATE TABLE IF NOT EXISTS, constraint checks) before doing any work. Their
+ * `static $initialized` guards only last one PHP request, and under Apache every
+ * request is a fresh one -- so booking.php alone was sending ~15 DDL statements
+ * to Supabase on every call, including read-only ones. ALTER TABLE takes an
+ * exclusive lock even when the column already exists, so this was the bulk of
+ * the multi-second latency on booking screens.
+ *
+ * A marker file in the system temp dir records that the setup succeeded. The
+ * key includes the newest modification time of every loaded API file and the
+ * target database, so a deploy, a code change, or pointing DB_URL at a different
+ * database all re-run the setup once. On Render each deploy starts a new
+ * container with an empty temp dir, so migrations still run on first request.
+ *
+ * The marker is written only after $ensure returns, so a failed setup retries
+ * on the next request instead of being skipped.
+ */
+function schema_ensure_once(string $key, callable $ensure): void
+{
+    static $done = [];
+
+    $codeStamp = 0;
+    foreach (get_included_files() as $file) {
+        $mtime = @filemtime($file);
+        if ($mtime !== false && $mtime > $codeStamp) {
+            $codeStamp = $mtime;
+        }
+    }
+    $dbStamp = substr(md5((string)(getenv('DB_URL') ?: getenv('DB_DSN') ?: getenv('DB_HOST') ?: '')), 0, 10);
+    $stamp = preg_replace('/[^A-Za-z0-9_.-]/', '_', "{$key}-{$codeStamp}-{$dbStamp}");
+
+    if (isset($done[$stamp])) {
+        return;
+    }
+
+    $dir = rtrim(sys_get_temp_dir(), '/\\') . DIRECTORY_SEPARATOR . 'tatis_schema';
+    $marker = $dir . DIRECTORY_SEPARATOR . $stamp;
+    if (is_file($marker)) {
+        $done[$stamp] = true;
+        return;
+    }
+
+    $ensure();
+
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    @touch($marker);
+    $done[$stamp] = true;
+}
+
+/**
  * Same as open_pdo_once(); kept as the name the rest of the API uses.
  */
 function get_db_connection(): PDO
