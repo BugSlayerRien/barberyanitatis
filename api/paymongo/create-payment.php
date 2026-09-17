@@ -14,7 +14,7 @@ function store_payment_intent_record(int $appointmentId, string $resourceId, str
         with_pdo_retry(function (PDO $pdo) use ($appointmentId, $resourceId, $method, $amount): void {
         $expiresAt = new DateTimeImmutable('+ 24 hours');
         $stmt = $pdo->prepare(
-            "INSERT INTO appointment_payment_intents 
+            "INSERT INTO appointment_payment_intents
              (appointment_id, amount, method, provider, status, intent_token, provider_ref, expires_at)
              VALUES (:appointment_id, :amount, :method, 'paymongo', 'PendingGateway', :token, :ref, :expires_at)
              ON CONFLICT DO NOTHING"
@@ -37,6 +37,52 @@ function store_payment_intent_record(int $appointmentId, string $resourceId, str
     }
 }
 
+/**
+ * Same intent row as store_payment_intent_record(), but for an AI-generation
+ * credit top-up rather than a booking: appointment_id is NULL, purpose is
+ * 'ai_credits', and user_id/credits identify what to grant once PayMongo
+ * confirms payment (see ai_tryon_provider.php's ensure_ai_credit_columns()
+ * and ai_tryon_purchased_credits()).
+ *
+ * A separate function rather than widening store_payment_intent_record()'s
+ * signature, so the booking path above is untouched.
+ */
+function store_ai_credit_intent_record(int $userId, int $credits, string $resourceId, string $method, int $amount): ?string {
+    try {
+        require_once dirname(__DIR__) . '/db.php';
+        require_once dirname(__DIR__) . '/ai_tryon_provider.php';
+        load_repository_env();
+
+        with_pdo_retry(function (PDO $pdo) use ($userId, $credits, $resourceId, $method, $amount): void {
+            schema_ensure_once('ai_credit_columns', static function () use ($pdo): void {
+                ensure_ai_credit_columns($pdo);
+            });
+            $expiresAt = new DateTimeImmutable('+ 24 hours');
+            $stmt = $pdo->prepare(
+                "INSERT INTO appointment_payment_intents
+                 (appointment_id, purpose, user_id, credits, amount, method, provider, status, intent_token, provider_ref, expires_at)
+                 VALUES (NULL, 'ai_credits', :user_id, :credits, :amount, :method, 'paymongo', 'PendingGateway', :token, :ref, :expires_at)
+                 ON CONFLICT DO NOTHING"
+            );
+            $stmt->execute([
+                ':user_id' => $userId,
+                ':credits' => $credits,
+                ':amount' => $amount / 100,
+                ':method' => $method,
+                ':token' => $resourceId,
+                ':ref' => $resourceId,
+                ':expires_at' => $expiresAt->format('c'),
+            ]);
+        });
+
+        return null; // success
+    } catch (Exception $e) {
+        $msg = "DB error: {$e->getMessage()}";
+        @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Failed to store ai_credits intent: {$msg}\n", FILE_APPEND);
+        return $msg;
+    }
+}
+
 $rawInput = file_get_contents('php://input');
 $input = json_decode($rawInput, true) ?: [];
 
@@ -47,6 +93,21 @@ $description = isset($input['description']) ? $input['description'] : null;
 $appointmentId = isset($input['appointment_id']) ? intval($input['appointment_id']) : 0;
 $successUrl = isset($input['success_url']) ? strval($input['success_url']) : (getenv('PAYMONGO_SUCCESS_URL') ?: null);
 $failedUrl = isset($input['failed_url']) ? strval($input['failed_url']) : (getenv('PAYMONGO_FAILED_URL') ?: null);
+
+// AI-generation credit top-up: an alternative to appointment_id. Everything
+// else about the PayMongo call (source/payment-intent creation, redirect,
+// status polling) is identical to a booking payment — only what gets stored
+// afterwards differs.
+$purpose = isset($input['purpose']) ? strtolower(trim((string)$input['purpose'])) : 'booking';
+$creditUserId = isset($input['user_id']) ? intval($input['user_id']) : 0;
+$credits = isset($input['credits']) ? intval($input['credits']) : 0;
+$isAiCreditPurchase = $purpose === 'ai_credits';
+
+if ($isAiCreditPurchase && ($creditUserId <= 0 || $credits <= 0)) {
+    http_response_code(400);
+    echo json_encode(['error' => 'ai_credits purchases require a positive user_id and credits']);
+    exit;
+}
 
 if ($amount <= 0) {
     http_response_code(400);
@@ -67,7 +128,11 @@ if ($method === 'grabpay') {
 }
 
 $metadata = [];
-if ($appointmentId > 0) {
+if ($isAiCreditPurchase) {
+    $metadata['purpose'] = 'ai_credits';
+    $metadata['user_id'] = (string)$creditUserId;
+    $metadata['credits'] = (string)$credits;
+} elseif ($appointmentId > 0) {
     $metadata['appointment_id'] = $appointmentId;
 }
 
@@ -96,11 +161,9 @@ if ($method === 'gcash' || $method === 'grab_pay') {
         ],
     ];
 
-    // Add flat metadata if appointment_id exists (PayMongo doesn't accept nested metadata objects)
-    if ($appointmentId > 0) {
-        $sourcePayload['data']['attributes']['metadata'] = [
-            'appointment_id' => (string)$appointmentId,
-        ];
+    // Flat metadata only (PayMongo doesn't accept nested metadata objects).
+    if (!empty($metadata)) {
+        $sourcePayload['data']['attributes']['metadata'] = $metadata;
     }
     if ($description !== null) {
         $sourcePayload['data']['attributes']['description'] = $description;
@@ -112,8 +175,10 @@ if ($method === 'gcash' || $method === 'grab_pay') {
     $sourceId = $body['data']['id'] ?? null;
 
     // Store initial payment intent record for tracking
-    if ($sourceId && $appointmentId > 0 && ($resp['http_code'] ?? 0) >= 200 && ($resp['http_code'] ?? 0) < 300) {
-        $dbError = store_payment_intent_record($appointmentId, $sourceId, $method, $amount, 'source');
+    if ($sourceId && ($resp['http_code'] ?? 0) >= 200 && ($resp['http_code'] ?? 0) < 300) {
+        $dbError = $isAiCreditPurchase
+            ? store_ai_credit_intent_record($creditUserId, $credits, $sourceId, $method, $amount)
+            : ($appointmentId > 0 ? store_payment_intent_record($appointmentId, $sourceId, $method, $amount, 'source') : null);
         if ($dbError) {
             // Log but don't fail the entire payment - user can still proceed
             @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Warning: {$dbError} for source {$sourceId}\n", FILE_APPEND);
@@ -153,11 +218,9 @@ if ($description !== null) {
     $payload['data']['attributes']['description'] = $description;
 }
 
-// Add flat metadata if appointment_id exists
-if ($appointmentId > 0) {
-    $payload['data']['attributes']['metadata'] = [
-        'appointment_id' => (string)$appointmentId,
-    ];
+// Flat metadata only
+if (!empty($metadata)) {
+    $payload['data']['attributes']['metadata'] = $metadata;
 }
 
 $resp = paymongo_request('POST', '/payment_intents', $payload);
@@ -165,8 +228,10 @@ $body = $resp['body'];
 $intentId = $body['data']['id'] ?? null;
 
 // Store initial payment intent record for tracking
-if ($intentId && $appointmentId > 0 && ($resp['http_code'] ?? 0) >= 200 && ($resp['http_code'] ?? 0) < 300) {
-    $dbError = store_payment_intent_record($appointmentId, $intentId, $method, $amount, 'payment_intent');
+if ($intentId && ($resp['http_code'] ?? 0) >= 200 && ($resp['http_code'] ?? 0) < 300) {
+    $dbError = $isAiCreditPurchase
+        ? store_ai_credit_intent_record($creditUserId, $credits, $intentId, $method, $amount)
+        : ($appointmentId > 0 ? store_payment_intent_record($appointmentId, $intentId, $method, $amount, 'payment_intent') : null);
     if ($dbError) {
         // Log but don't fail the entire payment - user can still proceed
         @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " Warning: {$dbError} for intent {$intentId}\n", FILE_APPEND);

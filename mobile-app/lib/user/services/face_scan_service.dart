@@ -14,11 +14,22 @@ class FaceScanQuotaExceededException implements Exception {
   final String message;
   final int limit;
   final int used;
+  final int remaining;
+  final bool unlimited;
+
+  /// What the customer can still do despite the limit (server-authored, e.g.
+  /// "You can still view or regenerate a style you already tried."). Previously
+  /// sent by the server on every 429 and discarded here — the dialog fell back to
+  /// its own hardcoded sentence instead of the server's actual guidance.
+  final String? hint;
 
   FaceScanQuotaExceededException({
     required this.message,
     required this.limit,
     required this.used,
+    this.remaining = 0,
+    this.unlimited = false,
+    this.hint,
   });
 
   @override
@@ -524,6 +535,9 @@ class FaceScanService {
             "You've reached your free AI hairstyle generation limit.",
         limit: (quota['limit'] as num?)?.toInt() ?? 2,
         used: (quota['used'] as num?)?.toInt() ?? 0,
+        remaining: (quota['remaining'] as num?)?.toInt() ?? 0,
+        unlimited: quota['unlimited'] == true,
+        hint: data['hint']?.toString(),
       );
     }
 
@@ -544,6 +558,33 @@ class FaceScanService {
   static Map<String, dynamic>? quotaFromResponse(Map<String, dynamic> data) {
     final quota = data['quota'];
     return quota is Map ? Map<String, dynamic>.from(quota) : null;
+  }
+
+  /// Current quota without needing a prior generate call — used to show the
+  /// "X of Y" indicator on page load, and to refresh it right after a credit
+  /// purchase completes.
+  static Future<Map<String, dynamic>?> fetchQuotaStatus({
+    int? userId,
+    String? scanSessionId,
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/face_scan.php'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'action': 'getQuotaStatus',
+              if (userId != null) 'userID': userId,
+              if (scanSessionId != null) 'scanSessionId': scanSessionId,
+            }),
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) return null;
+      final data = _decodeJsonMap(response.body);
+      return quotaFromResponse(data);
+    } catch (_) {
+      return null;
+    }
   }
 
   static Map<String, String> previewUrlsFromResponse(Map<String, dynamic> data) {

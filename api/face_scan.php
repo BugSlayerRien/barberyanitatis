@@ -237,6 +237,17 @@ try {
     $customer = require_customer_or_guest($pdo, $input);
     $userID = $customer !== null ? (int)$customer['user_id'] : null;
 
+    if ($action === 'getQuotaStatus') {
+        // Read-only. Lets the client show "X of Y previews used" on page load
+        // and immediately after a credit purchase, without needing a prior
+        // generateStylePreviews call to have populated it first.
+        json_response([
+            'quota' => $userID !== null
+                ? ai_tryon_quota_status($pdo, $userID)
+                : ai_tryon_kiosk_quota_status($pdo, trim((string)($input['scanSessionId'] ?? ''))),
+        ]);
+    }
+
     if ($action === 'uploadCaptures') {
         $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
         if ($scanSessionId === '') {
@@ -579,7 +590,7 @@ try {
         // did not exist at all, so kiosk generations were unmetered.
         if (!ai_tryon_unlimited()) {
             if ($userID !== null) {
-                $styleLimit = ai_tryon_style_limit();
+                $styleLimit = ai_tryon_effective_style_limit($pdo, $userID);
                 $stylesUsed = ai_tryon_styles_used($pdo, $userID);
                 $alreadyGenerated = ai_tryon_user_has_generated_variant($pdo, $userID, $variantID);
             } else {
