@@ -17,6 +17,11 @@ class FaceScanQuotaExceededException implements Exception {
   final int remaining;
   final bool unlimited;
 
+  /// How much of [limit] came from a paid top-up (AiCreditPurchasePage) rather
+  /// than the server's base free allotment — lets the UI say "X of Y used"
+  /// without implying every slot in Y was free.
+  final int purchased;
+
   /// What the customer can still do despite the limit (server-authored, e.g.
   /// "You can still view or regenerate a style you already tried."). Previously
   /// sent by the server on every 429 and discarded here — the dialog fell back to
@@ -29,6 +34,7 @@ class FaceScanQuotaExceededException implements Exception {
     required this.used,
     this.remaining = 0,
     this.unlimited = false,
+    this.purchased = 0,
     this.hint,
   });
 
@@ -532,11 +538,12 @@ class FaceScanService {
       final quota = data['quota'] is Map ? Map<String, dynamic>.from(data['quota'] as Map) : const {};
       throw FaceScanQuotaExceededException(
         message: data['error']?.toString() ??
-            "You've reached your free AI hairstyle generation limit.",
+            "You've reached your AI hairstyle generation limit.",
         limit: (quota['limit'] as num?)?.toInt() ?? 2,
         used: (quota['used'] as num?)?.toInt() ?? 0,
         remaining: (quota['remaining'] as num?)?.toInt() ?? 0,
         unlimited: quota['unlimited'] == true,
+        purchased: (quota['purchased'] as num?)?.toInt() ?? 0,
         hint: data['hint']?.toString(),
       );
     }

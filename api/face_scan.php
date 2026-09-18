@@ -590,10 +590,12 @@ try {
         // did not exist at all, so kiosk generations were unmetered.
         if (!ai_tryon_unlimited()) {
             if ($userID !== null) {
-                $styleLimit = ai_tryon_effective_style_limit($pdo, $userID);
+                $purchasedCredits = ai_tryon_purchased_credits($pdo, $userID);
+                $styleLimit = ai_tryon_style_limit() + $purchasedCredits;
                 $stylesUsed = ai_tryon_styles_used($pdo, $userID);
                 $alreadyGenerated = ai_tryon_user_has_generated_variant($pdo, $userID, $variantID);
             } else {
+                $purchasedCredits = 0;
                 $styleLimit = ai_tryon_kiosk_limit();
                 $stylesUsed = ai_tryon_kiosk_styles_used($pdo, $scanSessionId);
                 $alreadyGenerated = ai_tryon_kiosk_has_generated_variant($pdo, $scanSessionId, $variantID);
@@ -601,13 +603,14 @@ try {
 
             if ($stylesUsed >= $styleLimit && !$alreadyGenerated) {
                 json_response([
-                    'error' => "You've reached your free AI hairstyle generation limit ({$styleLimit} styles).",
+                    'error' => "You've reached your AI hairstyle generation limit ({$styleLimit} previews).",
                     'quotaExceeded' => true,
                     'quota' => [
                         'limit' => $styleLimit,
                         'used' => $stylesUsed,
                         'remaining' => 0,
                         'unlimited' => false,
+                        'purchased' => $purchasedCredits,
                     ],
                     'hint' => 'You can still view or regenerate a style you already tried.',
                 ], 429);
