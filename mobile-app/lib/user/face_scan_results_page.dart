@@ -935,6 +935,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           'used': e.used,
           'remaining': e.remaining,
           'unlimited': e.unlimited,
+          'purchased': e.purchased,
         };
       });
       await _showQuotaExceededDialog(e);
@@ -947,6 +948,19 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
   }
 
+  /// "$used of $limit ..." wording that tells a free allotment apart from
+  /// purchased top-up credits, instead of calling the whole `limit` "free"
+  /// once AiCreditPurchasePage credits are mixed into it.
+  String _previewsUsedLabel({
+    required int used,
+    required int limit,
+    required int purchased,
+    required String noun,
+  }) {
+    if (purchased <= 0) return '$used of $limit free $noun used';
+    return '$used of $limit $noun used ($purchased purchased)';
+  }
+
   String _generationSuccessMessage(Map<String, dynamic>? quota) {
     if (quota == null || quota['unlimited'] == true) {
       return 'AI preview ready — swipe angles to compare.';
@@ -956,7 +970,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     if (limit == null || used == null) {
       return 'AI preview ready — swipe angles to compare.';
     }
-    return 'AI preview ready — swipe angles to compare. ($used of $limit free styles used)';
+    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
+    final label = _previewsUsedLabel(
+      used: used,
+      limit: limit,
+      purchased: purchased,
+      noun: 'styles',
+    );
+    return 'AI preview ready — swipe angles to compare. ($label)';
   }
 
   /// Kiosk walk-ins have no login, so there is no account to attach a
@@ -988,7 +1009,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         title: const Text(
-          'Free style limit reached',
+          'Preview limit reached',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
         content: Column(
@@ -996,7 +1017,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "You've used ${e.used} of ${e.limit} free previews.",
+              e.purchased > 0
+                  ? "You've used ${e.used} of ${e.limit} previews (${e.purchased} purchased)."
+                  : "You've used ${e.used} of ${e.limit} free previews.",
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
@@ -1040,6 +1063,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     final limit = (quota['limit'] as num?)?.toInt();
     final used = (quota['used'] as num?)?.toInt();
     if (limit == null || used == null || limit <= 0) return null;
+    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
     final atLimit = used >= limit;
     final offerBuyMore = atLimit && _canPurchaseCredits;
     final chip = Container(
@@ -1055,7 +1079,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
-            '$used of $limit free previews used',
+            _previewsUsedLabel(
+              used: used,
+              limit: limit,
+              purchased: purchased,
+              noun: 'previews',
+            ),
             style: TextStyle(
               color: atLimit ? Colors.orange.shade200 : Colors.white70,
               fontSize: 11.5,

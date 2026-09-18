@@ -278,12 +278,13 @@ function ai_tryon_effective_style_limit(PDO $pdo, ?int $userId): int
 }
 
 /**
- * @return array{limit: int, used: int, remaining: int, unlimited: bool}
+ * @return array{limit: int, used: int, remaining: int, unlimited: bool, purchased: int}
  */
 function ai_tryon_quota_status(PDO $pdo, ?int $userId): array
 {
     $unlimited = ai_tryon_unlimited();
-    $limit = ai_tryon_effective_style_limit($pdo, $userId);
+    $purchased = $userId !== null ? ai_tryon_purchased_credits($pdo, $userId) : 0;
+    $limit = ai_tryon_style_limit() + $purchased;
     $used = $userId !== null ? ai_tryon_styles_used($pdo, $userId) : 0;
     $remaining = $unlimited ? $limit : max(0, $limit - $used);
 
@@ -292,6 +293,9 @@ function ai_tryon_quota_status(PDO $pdo, ?int $userId): array
         'used' => $used,
         'remaining' => $remaining,
         'unlimited' => $unlimited,
+        // Client needs this to tell a customer how much of `limit` is the
+        // base free allotment vs. what they paid for (see AiCreditPurchasePage).
+        'purchased' => $purchased,
     ];
 }
 
@@ -336,7 +340,7 @@ function ai_tryon_kiosk_has_generated_variant(PDO $pdo, string $scanSessionId, i
 }
 
 /**
- * @return array{limit: int, used: int, remaining: int, unlimited: bool}
+ * @return array{limit: int, used: int, remaining: int, unlimited: bool, purchased: int}
  */
 function ai_tryon_kiosk_quota_status(PDO $pdo, string $scanSessionId): array
 {
@@ -350,5 +354,7 @@ function ai_tryon_kiosk_quota_status(PDO $pdo, string $scanSessionId): array
         'used' => $used,
         'remaining' => $remaining,
         'unlimited' => $unlimited,
+        // Kiosk walk-ins have no login, so no identity to attach a purchase to.
+        'purchased' => 0,
     ];
 }
