@@ -1175,65 +1175,162 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     }
   }
 
-  /// Small persistent "X of Y previews used" chip. The only place a count used
-  /// to appear was a one-off SnackBar after a *successful* generation, so a
-  /// customer had no visibility into where they stood before hitting the limit.
-  Widget? _quotaIndicatorChip() {
+  /// Compact "previews left" pill for the Top picks row: an icon, the number
+  /// still available, a + to buy more, and a ? explaining what the number is.
+  ///
+  /// Shows what is *left* rather than what has been used, because remaining is
+  /// the number a customer acts on. Free and purchased are deliberately summed
+  /// into one figure -- the breakdown lives in the help sheet, since which
+  /// bucket a preview comes from does not change what they can do next.
+  Widget? _quotaPill() {
     final quota = _lastQuota;
     if (quota == null || quota['unlimited'] == true) return null;
     final limit = (quota['limit'] as num?)?.toInt();
     final used = (quota['used'] as num?)?.toInt();
     if (limit == null || used == null || limit <= 0) return null;
-    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
-    final atLimit = used >= limit;
-    final offerBuyMore = atLimit && _canPurchaseCredits;
-    final chip = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: atLimit ? const Color(0xFF3A1A10) : const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: atLimit ? Colors.orange.shade300 : Colors.white24,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            _previewsUsedLabel(
-              used: used,
-              limit: limit,
-              purchased: purchased,
-              noun: 'previews',
-            ),
-            style: TextStyle(
-              color: atLimit ? Colors.orange.shade200 : Colors.white70,
-              fontSize: 11.5,
-              fontWeight: FontWeight.w600,
-            ),
+
+    // Clamped: `used` can legitimately exceed `limit` (previews generated while
+    // AI_TRYON_UNLIMITED was on, or before a limit was lowered), and a negative
+    // "left" count would be nonsense.
+    final remaining = (limit - used).clamp(0, limit);
+    final isEmpty = remaining <= 0;
+    final canBuy = _canPurchaseCredits;
+
+    final accentColor = isEmpty ? Colors.orange.shade200 : Colors.white70;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Material(
+          color: isEmpty ? const Color(0xFF3A1A10) : const Color(0xFF1A1A1A),
+          shape: StadiumBorder(
+            side: BorderSide(color: isEmpty ? Colors.orange.shade300 : Colors.white24),
           ),
-          if (offerBuyMore) ...[
-            const SizedBox(width: 6),
-            Text(
-              '·  Buy more',
-              style: TextStyle(
-                color: Colors.orange.shade200,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w800,
-                decoration: TextDecoration.underline,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: canBuy ? () => unawaited(_openCreditPurchase()) : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(9, 5, 7, 5),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.auto_awesome, size: 14, color: accentColor),
+                  const SizedBox(width: 5),
+                  Text(
+                    '$remaining',
+                    style: TextStyle(
+                      color: isEmpty ? Colors.orange.shade200 : Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (canBuy) ...[
+                    const SizedBox(width: 4),
+                    Icon(Icons.add_circle, size: 15, color: accentColor),
+                  ],
+                ],
               ),
             ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        IconButton(
+          onPressed: _showQuotaHelp,
+          icon: const Icon(Icons.help_outline, size: 16, color: Colors.white38),
+          tooltip: 'What is this number?',
+          visualDensity: VisualDensity.compact,
+          padding: EdgeInsets.zero,
+          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showQuotaHelp() async {
+    final quota = _lastQuota;
+    final limit = (quota?['limit'] as num?)?.toInt() ?? 0;
+    final used = (quota?['used'] as num?)?.toInt() ?? 0;
+    final purchased = (quota?['purchased'] as num?)?.toInt() ?? 0;
+    final free = (limit - purchased).clamp(0, limit);
+    final remaining = (limit - used).clamp(0, limit);
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppBrand.panel,
+        shape: RoundedRectangleBorder(
+          borderRadius: AppBrand.radiusMd,
+          side: const BorderSide(color: AppBrand.border),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.auto_awesome, size: 18, color: AppBrand.accent),
+            SizedBox(width: 8),
+            Text(
+              'AI previews',
+              style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w700),
+            ),
           ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This number is how many AI hairstyle previews you have left. '
+              'Generating a new style uses one.',
+              style: const TextStyle(color: AppBrand.textMuted, height: 1.45).copyWith(fontSize: 13.5),
+            ),
+            const SizedBox(height: 12),
+            _quotaHelpRow('Previews left', '$remaining'),
+            _quotaHelpRow('Free allowance', '$free'),
+            if (purchased > 0) _quotaHelpRow('Purchased', '$purchased'),
+            _quotaHelpRow('Used so far', '$used'),
+            const SizedBox(height: 12),
+            const Text(
+              'Reopening a style you already generated is free — it does not use another preview.',
+              style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            style: TextButton.styleFrom(foregroundColor: AppBrand.accent),
+            child: const Text('Got it'),
+          ),
+          if (_canPurchaseCredits)
+            FilledButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                unawaited(_openCreditPurchase());
+              },
+              child: Text(
+                'Get ${AiCreditPurchasePage.bundleCredits} more — '
+                '₱${AiCreditPurchasePage.bundleAmountPhp.toStringAsFixed(0)}',
+              ),
+            ),
         ],
       ),
     );
-    if (!offerBuyMore) return chip;
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: () => unawaited(_openCreditPurchase()),
-        child: chip,
+  }
+
+  Widget _quotaHelpRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12.5)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1648,10 +1745,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 );
               }),
             ),
-            if (_quotaIndicatorChip() != null) ...[
-              const SizedBox(height: 8),
-              Center(child: _quotaIndicatorChip()!),
-            ],
             const SizedBox(height: 8),
             if (_selected == null)
               const Text(
@@ -1677,7 +1770,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ] else ...[
               if (_topPicks.isNotEmpty) ...[
               const SizedBox(height: 18),
-              _sectionTitle('Top picks'),
+              _sectionTitle('Top picks', trailing: _quotaPill()),
               ..._topPicks.map(_styleTile),
               ],
               if (_categoriesLoading) ...[
@@ -1799,10 +1892,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
-  Widget _sectionTitle(String title) {
+  Widget _sectionTitle(String title, {Widget? trailing}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
-      child: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+      child: Row(
+        children: [
+          Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
+          if (trailing != null) ...[
+            const Spacer(),
+            trailing,
+          ],
+        ],
+      ),
     );
   }
 
