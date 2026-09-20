@@ -83,6 +83,34 @@ function store_ai_credit_intent_record(int $userId, int $credits, string $resour
     }
 }
 
+/**
+ * PayMongo's error detail for a non-2xx response, or null when the call
+ * succeeded. Without this the endpoint passed the gateway's status straight
+ * through with no `error` key in the body, so the app fell back to a bare
+ * "Request failed (HTTP 400)" with nothing to act on.
+ */
+function paymongo_error_detail(array $resp): ?string {
+    $code = (int)($resp['http_code'] ?? 0);
+    if ($code >= 200 && $code < 300) {
+        return null;
+    }
+    $errors = $resp['body']['errors'] ?? null;
+    if (is_array($errors) && $errors !== []) {
+        $details = [];
+        foreach ($errors as $error) {
+            $detail = trim((string)($error['detail'] ?? ''));
+            if ($detail !== '') {
+                $details[] = $detail;
+            }
+        }
+        if ($details !== []) {
+            return implode(' ', $details);
+        }
+    }
+
+    return "Payment gateway rejected the request (HTTP {$code}).";
+}
+
 $rawInput = file_get_contents('php://input');
 $input = json_decode($rawInput, true) ?: [];
 
@@ -130,11 +158,16 @@ if ($method === 'grabpay') {
 $metadata = [];
 if ($isAiCreditPurchase) {
     $metadata['purpose'] = 'ai_credits';
-    $metadata['user_id'] = (string)$creditUserId;
-    $metadata['credits'] = (string)$credits;
+    $metadata['user_id'] = $creditUserId;
+    $metadata['credits'] = $credits;
 } elseif ($appointmentId > 0) {
     $metadata['appointment_id'] = $appointmentId;
 }
+
+// PayMongo rejects the whole request with a 400 if any metadata value is not a
+// string, so coerce here -- once, for every branch -- rather than relying on
+// each field remembering its own cast at assignment.
+$metadata = array_map(static fn($value): string => (string)$value, $metadata);
 
 // Wallet methods use hosted redirect source flow.
 if ($method === 'gcash' || $method === 'grab_pay') {
@@ -185,6 +218,8 @@ if ($method === 'gcash' || $method === 'grab_pay') {
         }
     }
 
+    $gatewayError = paymongo_error_detail($resp);
+
     http_response_code($resp['http_code'] ?: 500);
     echo json_encode([
         'provider' => 'paymongo',
@@ -194,6 +229,7 @@ if ($method === 'gcash' || $method === 'grab_pay') {
         'checkout_url' => $checkoutUrl,
         'data' => $body['data'] ?? null,
         'raw' => $body,
+        ...($gatewayError !== null ? ['error' => $gatewayError] : []),
     ]);
     exit;
 }
@@ -238,6 +274,8 @@ if ($intentId && ($resp['http_code'] ?? 0) >= 200 && ($resp['http_code'] ?? 0) <
     }
 }
 
+$gatewayError = paymongo_error_detail($resp);
+
 http_response_code($resp['http_code'] ?: 500);
 echo json_encode([
     'provider' => 'paymongo',
@@ -246,4 +284,5 @@ echo json_encode([
     'resource_id' => $intentId,
     'data' => $body['data'] ?? null,
     'raw' => $body,
+    ...($gatewayError !== null ? ['error' => $gatewayError] : []),
 ]);
