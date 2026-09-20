@@ -26,6 +26,7 @@ import 'recommendation_match_display.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/scan_progress_panel.dart';
 import '../kiosk/kiosk_barber_page.dart';
 import '../kiosk/kiosk_session.dart';
 
@@ -803,26 +804,36 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   }
 
   Widget _previewStatusBadge({required bool hasAiPreview}) {
+    final saveButton = _buildSaveLookButton();
     return Positioned(
       top: 10,
       left: 10,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.65),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white38,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.65),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white38,
+              ),
+            ),
+            child: Text(
+              hasAiPreview ? 'AI try-on' : 'Scanned photos',
+              style: TextStyle(
+                color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white70,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
           ),
-        ),
-        child: Text(
-          hasAiPreview ? 'AI try-on' : 'Scanned photos',
-          style: TextStyle(
-            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white70,
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
+          if (saveButton != null) ...[
+            const SizedBox(width: 6),
+            saveButton,
+          ],
+        ],
       ),
     );
   }
@@ -1077,19 +1088,37 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     if (front.isEmpty) return null;
 
     final saved = _savedVariantIds.contains(variantId);
-    return TextButton.icon(
-      onPressed: _savingLook ? null : () => unawaited(_toggleSaveLook(variantId)),
-      icon: Icon(
-        saved ? Icons.bookmark : Icons.bookmark_border,
-        size: 18,
-        color: saved ? AppBrand.accent : Colors.white70,
-      ),
-      label: Text(
-        saved ? 'Saved to your looks' : 'Save this look',
-        style: TextStyle(
-          color: saved ? AppBrand.accent : Colors.white70,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+    return Tooltip(
+      message: saved ? 'Saved to your looks' : 'Save this look',
+      child: Material(
+        color: Colors.black.withValues(alpha: 0.65),
+        shape: StadiumBorder(
+          side: BorderSide(color: saved ? AppBrand.accent : Colors.white38),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _savingLook ? null : () => unawaited(_toggleSaveLook(variantId)),
+          child: SizedBox(
+            // Matches the badge's height while keeping a finger-sized target.
+            width: 44,
+            height: 28,
+            child: Center(
+              child: _savingLook
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Icon(
+                      saved ? Icons.bookmark : Icons.bookmark_border,
+                      size: 17,
+                      color: saved ? AppBrand.accent : Colors.white70,
+                    ),
+            ),
+          ),
         ),
       ),
     );
@@ -1524,18 +1553,20 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 fit: StackFit.expand,
                 children: [
                   _previewGenerating
+                      // Indeterminate on purpose: the server generates all three
+                      // angles in one blocking call and reports no partial
+                      // progress, so a percentage here would be invented. The
+                      // stage list plus an elapsed timer is what is actually
+                      // true. See ScanProgressPanel.
                       ? const Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              CircularProgressIndicator(color: Colors.white),
-                              SizedBox(height: 12),
-                              Text(
-                                'Generating AI preview…\nThis can take a few minutes.',
-                                textAlign: TextAlign.center,
-                                style: TextStyle(color: Colors.white54, fontSize: 12),
-                              ),
+                          child: ScanProgressPanel.indeterminate(
+                            title: 'Generating your AI preview',
+                            stages: [
+                              'Preparing your photos',
+                              'Rendering front, left and right views',
+                              'Finishing up',
                             ],
+                            currentStep: 1,
                           ),
                         )
                       : previewUrl != null && previewUrl.isNotEmpty
@@ -1617,10 +1648,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 );
               }),
             ),
-            if (_buildSaveLookButton() != null) ...[
-              const SizedBox(height: 8),
-              Center(child: _buildSaveLookButton()!),
-            ],
             if (_quotaIndicatorChip() != null) ...[
               const SizedBox(height: 8),
               Center(child: _quotaIndicatorChip()!),

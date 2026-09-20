@@ -119,8 +119,27 @@ function filter_overlay_library_rows(array $rows): array
  *   downrankVariantIds?: list<int>
  * } $options
  */
+/**
+ * Admin switch for excluding a style from the general Top 3 while keeping it in
+ * its category list. Defined here rather than only in admin_hairstyles.php
+ * because the ranking query below selects the column, so it has to exist on any
+ * deploy that serves recommendations -- not just one where an admin has opened
+ * the hairstyles screen.
+ */
+function ensure_top_pick_eligible_column(PDO $pdo): void
+{
+    $pdo->exec(
+        'ALTER TABLE hairstyles
+         ADD COLUMN IF NOT EXISTS top_pick_eligible BOOLEAN NOT NULL DEFAULT TRUE'
+    );
+}
+
 function fetch_ranked_variants(PDO $pdo, string $faceShape, string $hairTexture, array $options = []): array
 {
+    schema_ensure_once('hairstyles.top_pick_eligible', static function () use ($pdo): void {
+        ensure_top_pick_eligible_column($pdo);
+    });
+
     $catalogSize = overlay_library_catalog_size();
     $limit = max(1, min(48, (int)($options['limit'] ?? $catalogSize)));
     $libraryOnly = (bool)($options['libraryOnly'] ?? true);
@@ -182,6 +201,9 @@ SELECT
     -- Replaces the old regex-over-style_name classification, which forced every
     -- 'Curly *' / 'Wavy *' cut into 'alternative' regardless of the actual cut.
     hs.category AS style_category,
+    -- Admin switch: excluded styles stay in their category list but are kept
+    -- out of the general Top 3 (see filter_top_picks_with_quality_gate).
+    COALESCE(hs.top_pick_eligible, TRUE) AS top_pick_eligible,
     hs.style_code,
     hs.description,
     (

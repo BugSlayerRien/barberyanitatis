@@ -7,6 +7,7 @@ class UserSession {
   static const String _userCalibrationKey = 'user_hair_calibration';
   static const String _preferredHairTextureKey = 'preferred_hair_texture';
   static const String _lastRecommendedVariantsKey = 'last_recommended_variant_ids';
+  static const String _profilePhoneKey = 'profile_phone';
 
   static int? userId;
   /// Straight, Wavy, or Curly — set during onboarding and editable in profile.
@@ -15,6 +16,11 @@ class UserSession {
   static String? email;
   /// Profile phone number. Used to decide whether a cancellation needs to ask
   /// for a refund contact number.
+  ///
+  /// Persisted (see [setPhone] / [loadPhone]) because this used to be written
+  /// only by the profile page: a customer who never opened Profile in that app
+  /// run was asked for a number on cancellation even though their profile had
+  /// one. Always set it through [setPhone] so memory and storage agree.
   static String? phone;
   static List<String> roles = [];
 
@@ -210,6 +216,43 @@ class UserSession {
       preferredHairTexture = _normalizeHairTexture(stored);
     }
     return preferredHairTexture;
+  }
+
+  /// True when the account has a usable contact number, so a cancellation does
+  /// not need to ask for one.
+  static bool get hasUsablePhone => (phone ?? '').trim().length >= 7;
+
+  /// Sets the phone in memory and persists it, so it survives an app restart
+  /// without requiring a visit to the profile page.
+  static Future<void> setPhone(String? raw) async {
+    final value = raw?.trim() ?? '';
+    phone = value.isEmpty ? null : value;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (phone == null) {
+        await prefs.remove(_profilePhoneKey);
+      } else {
+        await prefs.setString(_profilePhoneKey, phone!);
+      }
+    } catch (_) {
+      // Storage is a convenience here; the in-memory value still works for
+      // this run.
+    }
+  }
+
+  /// Restores the persisted phone when memory has none. Returns the phone.
+  static Future<String?> loadPhone() async {
+    if (hasUsablePhone) return phone;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getString(_profilePhoneKey)?.trim();
+      if (stored != null && stored.isNotEmpty) {
+        phone = stored;
+      }
+    } catch (_) {
+      // Keep whatever is in memory.
+    }
+    return phone;
   }
 
   static Future<void> savePreferredHairTexture(String texture) async {
@@ -410,6 +453,7 @@ class UserSession {
     _cachedUserCalibration = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_preferredHairTextureKey);
+    await prefs.remove(_profilePhoneKey);
     await clearUserCalibration();
   }
 }

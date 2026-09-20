@@ -222,10 +222,43 @@ function assign_match_display_fields(array $rows, int $catalogTotal = 0): array
  * @param list<array<string, mixed>> $variants sorted by match_score desc
  * @return list<array<string, mixed>>
  */
+/** False only when an admin has explicitly excluded the style from Top picks. */
+function variant_is_top_pick_eligible(array $row): bool
+{
+    $raw = $row['top_pick_eligible'] ?? null;
+    if ($raw === null) {
+        return true;
+    }
+    if (is_bool($raw)) {
+        return $raw;
+    }
+    // Postgres hands booleans back as 't'/'f' through PDO.
+    return !in_array(strtolower(trim((string)$raw)), ['f', 'false', '0', ''], true);
+}
+
 function filter_top_picks_with_quality_gate(array $variants, int $maxPicks = 3): array
 {
     if ($variants === []) {
         return [];
+    }
+
+    // Excluded styles still appear in their category list -- they are only kept
+    // out of the general Top 3. If exclusions leave too few to fill the section,
+    // fall back to the full list rather than showing a short or empty Top picks.
+    $eligible = array_values(array_filter($variants, 'variant_is_top_pick_eligible'));
+    if (count($eligible) >= $maxPicks) {
+        $variants = $eligible;
+    } elseif ($eligible !== []) {
+        $seen = [];
+        foreach ($eligible as $row) {
+            $seen[(int)($row['variant_id'] ?? 0)] = true;
+        }
+        foreach ($variants as $row) {
+            if (!isset($seen[(int)($row['variant_id'] ?? 0)])) {
+                $eligible[] = $row;
+            }
+        }
+        $variants = $eligible;
     }
 
     $bestRaw = (float)($variants[0]['match_score'] ?? 0);

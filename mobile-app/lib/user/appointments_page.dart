@@ -1299,7 +1299,13 @@ class _AppointmentsPageState extends State<AppointmentsPage>
             .toLowerCase()
             .contains('paid') ||
         (appointment['isPaid'] == true);
-    final hasPhone = (UserSession.phone ?? '').trim().length >= 7;
+    // Only a paid cancellation needs a refund contact, so only that case is
+    // worth a lookup. UserSession.phone is populated by the profile page, which
+    // the customer may never have opened in this run -- fall back to the
+    // persisted value, then to the profile itself, before asking them to type a
+    // number the account already has.
+    final hasPhone = isPaid ? await _resolveHasPhone() : true;
+    if (!mounted) return;
 
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
@@ -1308,7 +1314,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => _CancelAppointmentSheet(needsPhone: isPaid && !hasPhone),
+      builder: (ctx) => _CancelAppointmentSheet(needsPhone: !hasPhone),
     );
 
     final reason = result?['reason'] ?? '';
@@ -1592,6 +1598,36 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       ),
     );
   }
+}
+
+/// True when the account already has a contact number for a refund, checking
+/// memory, then persisted storage, then the profile API.
+///
+/// A network failure returns false, which asks for the number: better to
+/// collect one that may be redundant than to cancel a paid booking with no way
+/// to send the money back.
+Future<bool> _resolveHasPhone() async {
+  if (UserSession.hasUsablePhone) return true;
+
+  await UserSession.loadPhone();
+  if (UserSession.hasUsablePhone) return true;
+
+  final userId = UserSession.userId;
+  if (userId == null) return false;
+
+  try {
+    final body = await CustomerApi.postDecoded('profile.php', {
+      'action': 'get',
+      'userID': userId,
+    });
+    final profile = body['profile'];
+    if (profile is Map) {
+      await UserSession.setPhone(profile['phone']?.toString());
+    }
+  } catch (_) {
+    return false;
+  }
+  return UserSession.hasUsablePhone;
 }
 
 /// Bottom sheet for cancelling an appointment. Owns the note controller so it

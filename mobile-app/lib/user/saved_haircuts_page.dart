@@ -10,6 +10,7 @@ import 'customer_navigation.dart';
 import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
 import 'scanner/overlay_preview_image.dart';
+import 'saved_look_detail_page.dart';
 import 'scanner/overlay_registry.dart';
 import 'services/saved_previews_service.dart';
 import 'user_session.dart';
@@ -332,9 +333,14 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
     final styleName = look['style_name']?.toString().trim();
     final frontUrl = look['front_url']?.toString().trim() ?? '';
 
-    return Container(
+    return Material(
+      color: const Color(0xFF111111),
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openSavedLook(look),
+        child: Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.white12),
       ),
@@ -386,7 +392,20 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
           ),
         ],
       ),
+        ),
+      ),
     );
+  }
+
+  Future<void> _openSavedLook(Map<String, dynamic> look) async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => SavedLookDetailPage(look: look)),
+    );
+    // The detail page can delete the look, so refresh rather than leaving a
+    // removed card on screen.
+    if (changed == true && mounted) {
+      setState(() => _savedLooksFuture = _loadSavedLooks());
+    }
   }
 
   Future<void> _confirmDeleteSavedLook(int savedId, String? styleName) async {

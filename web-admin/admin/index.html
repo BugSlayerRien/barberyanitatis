@@ -501,6 +501,10 @@
                 </div>
               </div>
 
+              <!-- Break windows is much shorter than Weekly hours beside it, so
+                   Slot settings is stacked underneath to fill the column rather
+                   than leaving dead space. -->
+              <div class="stack">
               <div class="card">
                 <div class="card-head">
                   <div class="card-head-text">
@@ -541,32 +545,6 @@
                   <button class="btn primary" id="schedule-save-breaks" type="button">Save breaks</button>
                 </div>
               </div>
-            </div>
-
-            <div class="split split-even">
-              <div class="card">
-                <div class="card-head">
-                  <div class="card-head-text">
-                    <h3 class="card-title">Closed dates</h3>
-                    <p class="card-sub">Holidays and one-off closures. No bookings are offered on these dates.</p>
-                  </div>
-                </div>
-                <div class="list" id="schedule-closed-dates"></div>
-                <div class="form-grid" style="margin-top: 12px;">
-                  <label class="field">
-                    <span>Date</span>
-                    <input class="input" type="date" id="schedule-closed-date" />
-                  </label>
-                  <label class="field">
-                    <span>Reason</span>
-                    <input class="input" id="schedule-closed-reason" placeholder="e.g. Public holiday" />
-                  </label>
-                </div>
-                <div class="card-foot">
-                  <span class="meta">Added dates are saved immediately.</span>
-                  <button class="btn primary" id="schedule-closed-add" type="button">Add closed date</button>
-                </div>
-              </div>
 
               <div class="card">
                 <div class="card-head">
@@ -600,6 +578,33 @@
                     <button class="btn secondary" id="schedule-preview-btn" type="button">Preview</button>
                   </div>
                   <div class="cal-detail" id="schedule-preview-result"></div>
+                </div>
+              </div>
+              </div>
+            </div>
+
+            <div class="split split-even">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Closed dates</h3>
+                    <p class="card-sub">Holidays and one-off closures. No bookings are offered on these dates.</p>
+                  </div>
+                </div>
+                <div class="list" id="schedule-closed-dates"></div>
+                <div class="form-grid" style="margin-top: 12px;">
+                  <label class="field">
+                    <span>Date</span>
+                    <input class="input" type="date" id="schedule-closed-date" />
+                  </label>
+                  <label class="field">
+                    <span>Reason</span>
+                    <input class="input" id="schedule-closed-reason" placeholder="e.g. Public holiday" />
+                  </label>
+                </div>
+                <div class="card-foot">
+                  <span class="meta">Added dates are saved immediately.</span>
+                  <button class="btn primary" id="schedule-closed-add" type="button">Add closed date</button>
                 </div>
               </div>
             </div>
