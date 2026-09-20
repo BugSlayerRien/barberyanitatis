@@ -11,6 +11,7 @@ import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
 import 'scanner/overlay_preview_image.dart';
 import 'scanner/overlay_registry.dart';
+import 'services/saved_previews_service.dart';
 import 'user_session.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
@@ -28,18 +29,28 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
   static final Map<String, Future<Uint8List>> _webImageCache = {};
 
   late Future<List<Map<String, dynamic>>> _favoritesFuture;
+  late Future<List<Map<String, dynamic>>> _savedLooksFuture;
 
   @override
   void initState() {
     super.initState();
     _favoritesFuture = _loadFavorites();
+    _savedLooksFuture = _loadSavedLooks();
   }
 
   Future<void> _refresh() async {
     setState(() {
       _favoritesFuture = _loadFavorites();
+      _savedLooksFuture = _loadSavedLooks();
     });
-    await _favoritesFuture;
+    await Future.wait([_favoritesFuture, _savedLooksFuture]);
+  }
+
+  Future<List<Map<String, dynamic>>> _loadSavedLooks() async {
+    if (UserSession.userId == null) {
+      return [];
+    }
+    return SavedPreviewsService.list();
   }
 
   Future<List<Map<String, dynamic>>> _loadFavorites() async {
@@ -209,6 +220,8 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
                   );
                 },
               ),
+              const SizedBox(height: 32),
+              _buildSavedLooksSection(),
               const SizedBox(height: 24),
             ],
           ),
@@ -233,6 +246,213 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
             showAppMenuSheet(context);
           }
         },
+      ),
+    );
+  }
+
+  /// AI try-on previews the customer explicitly saved. Distinct from the
+  /// favourites grid above, which holds catalog styles: these are generated
+  /// images of the customer's own face, and without saving they would be lost
+  /// as soon as the next scan supersedes the session that produced them.
+  Widget _buildSavedLooksSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Your AI looks',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Try-on previews you saved from a scan',
+          style: TextStyle(color: Colors.white54, fontSize: 14, height: 1.4),
+        ),
+        const SizedBox(height: 16),
+        FutureBuilder<List<Map<String, dynamic>>>(
+          future: _savedLooksFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return _buildSavedLooksSkeleton();
+            }
+            if (snapshot.hasError) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Column(
+                  children: [
+                    Text(
+                      snapshot.error.toString(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70, height: 1.4),
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(onPressed: _refresh, child: const Text('Try again')),
+                  ],
+                ),
+              );
+            }
+
+            final looks = snapshot.data ?? [];
+            if (looks.isEmpty) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 28),
+                child: Center(
+                  child: Text(
+                    'No saved looks yet.\nTap "Save this look" after generating a preview.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, height: 1.5),
+                  ),
+                ),
+              );
+            }
+
+            return GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                childAspectRatio: 0.78,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+              ),
+              itemCount: looks.length,
+              itemBuilder: (context, index) => _buildSavedLookCard(looks[index]),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSavedLookCard(Map<String, dynamic> look) {
+    final savedId = (look['saved_preview_id'] as num?)?.toInt() ?? 0;
+    final styleName = look['style_name']?.toString().trim();
+    final frontUrl = look['front_url']?.toString().trim() ?? '';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF111111),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _buildPreviewImage(
+                  frontUrl.isEmpty ? '' : ApiConfig.resolveImageUrl(frontUrl),
+                ),
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: Material(
+                    color: Colors.black54,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: savedId > 0
+                          ? () => _confirmDeleteSavedLook(savedId, styleName)
+                          : null,
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.delete_outline,
+                            size: 18, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+            child: Text(
+              (styleName?.isNotEmpty ?? false) ? styleName! : 'Saved look',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteSavedLook(int savedId, String? styleName) async {
+    final label = (styleName?.isNotEmpty ?? false) ? '"$styleName"' : 'this look';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Remove saved look?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'Remove $label from your saved looks? You can save it again from the '
+          'scan results while that scan is still available.',
+          style: const TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: TextButton.styleFrom(foregroundColor: const Color(0xFFE57373)),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await SavedPreviewsService.delete(savedId);
+      if (!mounted) return;
+      setState(() => _savedLooksFuture = _loadSavedLooks());
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not remove the saved look: $e')),
+      );
+    }
+  }
+
+  Widget _buildSavedLooksSkeleton() {
+    return AppShimmer(
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.78,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: 2,
+        itemBuilder: (_, __) => Container(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
       ),
     );
   }

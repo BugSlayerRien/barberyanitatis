@@ -559,9 +559,13 @@ try {
             ]);
             $cached = $cachedStmt->fetch(PDO::FETCH_ASSOC);
             if ($cached && !empty($cached['front_url'])) {
-                $cacheValid = face_scan_preview_file_exists((string)$cached['front_url'])
-                    && face_scan_preview_file_exists((string)($cached['left_url'] ?? ''))
-                    && face_scan_preview_file_exists((string)($cached['right_url'] ?? ''));
+                // Only the front image is probed. All three angles are written
+                // in one operation by the same generation, so they exist as a
+                // set -- and under STORAGE_DRIVER=supabase each probe is an HTTP
+                // round trip (storage_exists_supabase), so checking all three
+                // put 3-6 network calls on the cache-hit hot path. The client
+                // already falls back to the capture if an angle fails to load.
+                $cacheValid = face_scan_preview_file_exists((string)$cached['front_url']);
                 if ($cacheValid) {
                     json_response([
                         'message' => 'Previews loaded from cache',

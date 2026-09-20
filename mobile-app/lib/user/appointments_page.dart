@@ -26,6 +26,42 @@ import 'calendar_page.dart';
 import '../shared/pagination_controls.dart';
 import '../main.dart';
 
+/// True when an appointment's slot has already ended, so it no longer belongs
+/// in the Upcoming tab regardless of the status the server still reports.
+///
+/// [date] is `YYYY-MM-DD` and [endTime] is `HH:MM[:SS]`, both in shop-local
+/// terms. A missing or unparseable [endTime] falls back to the end of that
+/// day, so a row with a blank end_time is only treated as past once the whole
+/// day has gone by -- never mid-day, which would hide a valid appointment.
+/// Unparseable or empty [date] returns false: keep showing it rather than
+/// silently filing a booking away.
+bool appointmentSlotHasPassed({
+  String? date,
+  String? endTime,
+  DateTime? now,
+}) {
+  final rawDate = date?.trim() ?? '';
+  if (rawDate.isEmpty) return false;
+
+  final day = DateTime.tryParse(rawDate);
+  if (day == null) return false;
+
+  var slotEnd = DateTime(day.year, day.month, day.day, 23, 59, 59);
+  final rawTime = endTime?.trim() ?? '';
+  if (rawTime.isNotEmpty) {
+    final parts = rawTime.split(':');
+    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) : null;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) : 0;
+    // '00:00:00' is the codebase's "unset" end_time (see appointment_expiry.php),
+    // not midnight, so it must not collapse the slot to the start of the day.
+    if (hour != null && !(hour == 0 && (minute ?? 0) == 0)) {
+      slotEnd = DateTime(day.year, day.month, day.day, hour, minute ?? 0);
+    }
+  }
+
+  return slotEnd.isBefore(now ?? DateTime.now());
+}
+
 class AppointmentsPage extends StatefulWidget {
   final int? highlightAppointmentId;
   final String? forcedPaymentState;
@@ -234,6 +270,15 @@ class _AppointmentsPageState extends State<AppointmentsPage>
           completed.add(mapped);
         } else if (status == 'Cancelled' || status == 'NoShow') {
           cancelled.add(mapped);
+        } else if (appointmentSlotHasPassed(
+          date: mapped['date']?.toString(),
+          endTime: mapped['endTime']?.toString(),
+        )) {
+          // The server sweep (expire_unpaid_past_appointments) is what actually
+          // resolves these, but it is throttled and runs on request traffic, so
+          // a stale row can still arrive here. Keep it out of Upcoming rather
+          // than showing a date that has already gone by.
+          completed.add(mapped);
         } else {
           upcoming.add(mapped);
         }
