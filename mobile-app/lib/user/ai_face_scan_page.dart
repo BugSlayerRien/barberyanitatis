@@ -48,6 +48,7 @@ import 'saved_haircuts_page.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/scan_progress_panel.dart';
 import '../kiosk/kiosk_barber_page.dart';
 import '../kiosk/kiosk_session.dart';
 import '../app_orientation.dart';
@@ -92,6 +93,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _consentFormAgreed = false;
   bool _consentLoading = true;
   bool _finishingStaging = false;
+
+  /// Real client-driven steps in _finishStagingCapture, in order. Each maps to
+  /// an actual call, so the progress reported here is fact, not an estimate.
+  static const List<String> _stagingStageLabels = [
+    'Checking your photos',
+    'Uploading photos',
+    'Analyzing face shape and hair',
+  ];
+  int _stagingStep = 0;
   /// All angles are captured and the customer is looking them over before
   /// upload. Auto-capture is paused while this is true, so a retake is always
   /// a deliberate choice rather than something the camera does on its own.
@@ -2045,6 +2055,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   Future<void> _finishStagingCapture() async {
     if (_finishingStaging) return;
     _finishingStaging = true;
+    _stagingStep = 0;
 
     // Stop camera immediately — staging is done; avoid stream running on results route.
     await _releaseScannerResources();
@@ -2066,7 +2077,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     if (mounted) {
-      setState(() => _stagingComplete = true);
+      setState(() {
+        _stagingComplete = true;
+        _stagingStep = 1;
+      });
     }
 
     // Ensure uploads go to a fresh session when leaving a completed one behind.
@@ -2091,6 +2105,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _resumeScannerResources();
       }
       return;
+    }
+
+    if (mounted) {
+      setState(() => _stagingStep = 2);
     }
 
     var analyzedFaceShape = _faceShape;
@@ -3187,16 +3205,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     }
 
     if (_finishingStaging) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF090909),
+      return Scaffold(
+        backgroundColor: const Color(0xFF090909),
         body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(color: Colors.white),
-              SizedBox(height: 14),
-              Text('Saving your captures...', style: TextStyle(color: Colors.white70)),
-            ],
+          child: ScanProgressPanel.steps(
+            title: 'Processing your scan',
+            stages: _stagingStageLabels,
+            currentStep: _stagingStep,
           ),
         ),
       );

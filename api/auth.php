@@ -21,6 +21,8 @@ $allowedActions = [
     'changePassword',
     'checkEmailExists',
     'resolveAccount',
+    'requestPasswordOtp',
+    'resetPasswordWithOtp',
 ];
 
 if (!in_array($action, $allowedActions, true)) {
@@ -545,6 +547,106 @@ try {
             'message' => 'Google sign-in successful',
             'user' => build_user_payload('customer', $created),
         ]);
+    }
+
+    // --- OTP password reset (web portal) ---------------------------------
+    //
+    // The code is generated, emailed and verified by Supabase GoTrue, not by
+    // this API. That is deliberate: outbound mail here is bare PHP mail() with
+    // no MTA configured (see forgotPassword below), so a self-issued code would
+    // never arrive. It also means no reset code is ever stored in this
+    // database, and brute-force protection is GoTrue's rather than something
+    // re-implemented here.
+    //
+    // Passwords still live in this app's own tables -- Supabase only proves the
+    // person controls the mailbox. Verification success is the authorization to
+    // write a new password_hash locally.
+    if ($action === 'requestPasswordOtp') {
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        if ($email === '' || !is_valid_email($email)) {
+            json_response(['error' => 'Please provide a valid email address.'], 422);
+        }
+
+        ensure_auth_tables($pdo);
+
+        if (find_account_by_email($pdo, $email) !== null) {
+            require_once __DIR__ . '/supabase_admin_auth.php';
+            // create_user false: a reset must never bring a brand-new Auth user
+            // into existence for an address that has no account here.
+            $sent = supabase_admin_http('POST', '/otp', [
+                'email' => $email,
+                'create_user' => false,
+            ]);
+            if (!$sent['ok']) {
+                // Logged, not surfaced: the caller gets the same generic reply
+                // either way so this cannot be used to probe which addresses
+                // are registered.
+                error_log('Password OTP send failed for ' . mask_email($email)
+                    . ': status=' . $sent['status'] . ' error=' . (string)($sent['error'] ?? '')
+                    . ' body=' . substr((string)$sent['raw'], 0, 300));
+            }
+        }
+
+        json_response([
+            'message' => 'If an account exists for that email, a verification code has been sent.',
+        ]);
+    }
+
+    if ($action === 'resetPasswordWithOtp') {
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $code = trim((string)($input['code'] ?? ''));
+        $newPassword = (string)($input['newPassword'] ?? '');
+
+        if ($email === '' || !is_valid_email($email) || $code === '') {
+            json_response(['error' => 'Email and verification code are required.'], 422);
+        }
+        $policyError = validate_password_policy($newPassword);
+        if ($policyError !== null) {
+            json_response(['error' => $policyError], 422);
+        }
+
+        ensure_auth_tables($pdo);
+
+        require_once __DIR__ . '/supabase_admin_auth.php';
+        $verified = supabase_admin_http('POST', '/verify', [
+            'type' => 'email',
+            'email' => $email,
+            'token' => $code,
+        ]);
+
+        if (!$verified['ok']) {
+            // One message for a wrong code, an expired code and an unknown
+            // address, so none of them can be told apart from outside.
+            json_response(['error' => 'That code is invalid or has expired. Please request a new one.'], 400);
+        }
+
+        $account = find_account_by_email($pdo, $email);
+        if ($account === null) {
+            json_response(['error' => 'That code is invalid or has expired. Please request a new one.'], 400);
+        }
+
+        $accountType = (string)$account['type'];
+        $row = (array)$account['row'];
+        $accountId = $accountType === 'staff'
+            ? (int)$row['staff_id']
+            : ($accountType === 'barber' ? (int)$row['barber_id'] : (int)$row['user_id']);
+
+        update_account_password(
+            $pdo,
+            $accountType,
+            $accountId,
+            password_hash($newPassword, PASSWORD_DEFAULT)
+        );
+
+        // Any emailed reset links still outstanding for this account are now
+        // stale -- a completed reset must not leave a second way in.
+        $pdo->prepare(
+            'UPDATE password_reset_requests
+             SET used_at = NOW()
+             WHERE account_type = :account_type AND account_id = :account_id AND used_at IS NULL'
+        )->execute([':account_type' => $accountType, ':account_id' => $accountId]);
+
+        json_response(['message' => 'Password updated. You can sign in with your new password.']);
     }
 
     if ($action === 'forgotPassword') {

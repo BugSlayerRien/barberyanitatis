@@ -3009,6 +3009,27 @@ canvas {
   min-height: 42px;
 }
 
+/* Secondary action under the submit button (forgot password / back to sign in):
+   a real <button> for keyboard and screen-reader behaviour, styled as a link. */
+.login-link {
+  margin-top: var(--s-2);
+  width: 100%;
+  min-height: 36px;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.login-link:hover {
+  color: var(--text);
+}
+
 .login-error {
   color: var(--danger);
   min-height: 18px;

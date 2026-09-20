@@ -107,7 +107,9 @@ class _ProfilePageState extends State<ProfilePage> {
     // Keeps the cancel-appointment flow (appointments_page.dart) in sync: it
     // checks UserSession.phone directly rather than re-fetching the profile,
     // so every place that learns the phone number must update it here too.
-    UserSession.phone = phone;
+    // setPhone (not a bare assignment) so it is persisted and survives a
+    // restart without the customer having to revisit this page.
+    unawaited(UserSession.setPhone(phone));
     setState(() {
       _fullName = fullName;
       _email = email;

@@ -1523,6 +1523,10 @@ function openHaircutEditor(hairstyle, variants = []) {
   };
   title.textContent = isEdit ? "Manage haircut" : "Add haircut";
   const active = hairstyle?.is_active === false || hairstyle?.is_active === "f" ? "0" : "1";
+  // Absent means eligible, matching the column default, so an existing style
+  // is never silently dropped out of Top picks.
+  const topPickEligible =
+    hairstyle?.top_pick_eligible === false || hairstyle?.top_pick_eligible === "f" ? "0" : "1";
 
   form.innerHTML = `
     <label>Style name
@@ -1551,6 +1555,13 @@ function openHaircutEditor(hairstyle, variants = []) {
           )
           .join("")}
       </select>
+    </label>
+    <label>Top picks
+      <select class="select" id="hc-top-pick">
+        <option value="1" ${topPickEligible === "1" ? "selected" : ""}>Can appear in Top 3</option>
+        <option value="0" ${topPickEligible === "0" ? "selected" : ""}>Exclude from Top 3</option>
+      </select>
+      <span class="field-hint">Excluded styles still show in their category list.</span>
     </label>
     <label>Difficulty
       <select class="select" id="hc-difficulty">
@@ -1597,6 +1608,7 @@ async function saveHaircutEditor() {
     description: document.getElementById("hc-description")?.value?.trim() || "",
     gender: document.getElementById("hc-gender")?.value || "Unisex",
     category: document.getElementById("hc-category")?.value || "alternative",
+    topPickEligible: Number(document.getElementById("hc-top-pick")?.value ?? 1) !== 0,
     difficulty: document.getElementById("hc-difficulty")?.value || "Medium",
     maintenance: document.getElementById("hc-maintenance")?.value || "Medium",
     isActive: Number(document.getElementById("hc-active")?.value ?? 1) !== 0,
