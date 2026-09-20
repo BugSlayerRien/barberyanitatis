@@ -145,15 +145,20 @@ Future<void> main() async {
       return;
     }
     if (uri.scheme == 'tatisapp' && uri.host == 'payment-return') {
-      if (PaymentReturnGuard.isPollerActive) {
+      final params = uri.queryParameters;
+      if (PaymentReturnGuard.shouldSkipDeepLink(params)) {
         // The page that started this payment (PaymentPage or
-        // AiCreditPurchasePage) is already polling for this exact return and
-        // will navigate onward itself. Pushing PaymentResultPage on top of it
-        // here doubled up the verification, and PaymentResultPage's own
-        // poll had no query params to work with -- see PaymentReturnGuard.
+        // AiCreditPurchasePage) already resolved this return itself. Pushing
+        // PaymentResultPage on top would start a second, independent
+        // verification that strands the customer on "Verifying your
+        // payment..." even though the payment succeeded.
+        //
+        // The check is not just "is a poll running": the in-app poll often
+        // resolves before the OS delivers this link, so the guard also matches
+        // on the gateway resource id and on a short window after the poll
+        // ends. See PaymentReturnGuard.
         return;
       }
-      final params = uri.queryParameters;
       try {
         navigatorKey.currentState?.pushNamed('/payment-result', arguments: params);
       } catch (_) {}

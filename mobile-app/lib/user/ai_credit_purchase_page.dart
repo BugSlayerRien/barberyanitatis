@@ -126,6 +126,10 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
 
         paid = await _pollUntilFinal(resourceId, resourceType: resourceType);
       } finally {
+        // Named before releasing the guard, so a deep link that arrives after
+        // this poll has already resolved is recognised as the same return and
+        // does not launch a second verifier.
+        PaymentReturnGuard.markHandled(resourceId);
         PaymentReturnGuard.exit();
       }
       if (!mounted) return;
