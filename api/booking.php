@@ -10,6 +10,7 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/booking_codes.php';
 require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/appointment_expiry.php';
 require_once __DIR__ . '/face_scan_attach.php';
 require_once __DIR__ . '/customer_auth.php';
 
@@ -267,6 +268,11 @@ try {
             $trackingAutomation = run_tracking_automation($pdo, true);
             sync_paid_groups_from_payments($pdo);
             sync_paid_appointments_from_payments($pdo, true);
+            // Strictly after the two syncs above: they promote bookings that
+            // did pay but were never flipped off PendingPayment, and expiring
+            // first would cancel them.
+            expire_unpaid_past_appointments($pdo);
+            notify_unpaid_appointments_due_soon($pdo);
         } catch (Throwable $automationError) {
             error_log('Booking list automation skipped: ' . $automationError->getMessage());
         }

@@ -10,6 +10,7 @@ import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'widgets/shimmer_skeleton.dart';
 import 'customer_api.dart';
+import 'recommendation_match_display.dart';
 import 'ai_face_scan_page.dart';
 import 'appointments_page.dart';
 import 'customer_navigation.dart';
@@ -1033,6 +1034,7 @@ class _DashboardPageState extends State<DashboardPage>
               if (length != '—') _ScanChip(label: 'Length: $length'),
             ],
           ),
+          ..._buildTopPicksPreview(),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1069,6 +1071,116 @@ class _DashboardPageState extends State<DashboardPage>
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  /// Top 3 ranked styles from the last scan, shown inline so the customer does
+  /// not have to open the results page to remember what was recommended.
+  ///
+  /// Reads [UserSession.lastRecommendations], which the results page already
+  /// persists into the session snapshot, so this needs no network call. Returns
+  /// an empty list (rendering nothing) when a scan exists but its ranking does
+  /// not -- a restored snapshot, or a scan whose rerank never completed.
+  List<Widget> _buildTopPicksPreview() {
+    final picks = UserSession.lastRecommendations.take(3).toList();
+    if (picks.isEmpty) return const [];
+
+    return [
+      const SizedBox(height: 14),
+      const Text(
+        'Top picks for you',
+        style: TextStyle(
+          fontFamily: _fontFamily,
+          color: Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          letterSpacing: 0.3,
+        ),
+      ),
+      const SizedBox(height: 8),
+      for (final pick in picks) _buildTopPickRow(pick),
+    ];
+  }
+
+  Widget _buildTopPickRow(Map<String, dynamic> pick) {
+    // Same accessors the results page uses, so the two stay in agreement if the
+    // recommendation payload shape changes.
+    final name = pick['style_name']?.toString() ??
+        pick['styleName']?.toString() ??
+        'Style';
+    final subtitle = (pick['fit_reason']?.toString().trim().isNotEmpty ?? false)
+        ? pick['fit_reason'].toString().trim()
+        : pick['description']?.toString().trim() ?? '';
+    final rankLabel = RecommendationMatchDisplay.rankLabel(pick);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: _openLastScanResults,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontFamily: _fontFamily,
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          if (rankLabel != null) ...[
+                            const SizedBox(width: 6),
+                            Text(
+                              rankLabel,
+                              style: const TextStyle(
+                                fontFamily: _fontFamily,
+                                color: Colors.white38,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: _fontFamily,
+                            color: Colors.white54,
+                            fontSize: 11,
+                            height: 1.3,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }

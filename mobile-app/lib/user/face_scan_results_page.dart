@@ -18,6 +18,7 @@ import 'scanner/scanner_layout.dart';
 import 'services/booking_slots_service.dart';
 import 'services/booking_draft_service.dart';
 import 'services/face_scan_service.dart';
+import 'services/saved_previews_service.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 import 'widgets/ai_chatbot_fab.dart';
@@ -78,6 +79,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   int _previewAngleIndex = 0;
   bool _bookingInFlight = false;
   bool _previewGenerating = false;
+
+  /// Variants whose generated preview the customer has explicitly saved, and
+  /// the saved-row ids needed to unsave them without re-fetching the list.
+  final Set<int> _savedVariantIds = <int>{};
+  final Map<int, int> _savedLookIds = <int, int>{};
+  bool _savingLook = false;
   String? _previewError;
   /// Last quota the server reported for this account (from a successful
   /// generation, a cache hit, or a 429). Kept across calls so a persistent
@@ -1054,6 +1061,91 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  /// "Save this look" for the generated preview currently on screen.
+  ///
+  /// Saving is opt-in: a generated preview otherwise lives only in this scan
+  /// session's cache and becomes unreachable after the next scan. Hidden in
+  /// kiosk mode, where a walk-in has no account to save against, and hidden
+  /// until a real AI preview exists (a catalog photo is not the customer's
+  /// look).
+  Widget? _buildSaveLookButton() {
+    if (widget.kioskMode || UserSession.userId == null) return null;
+    final variantId = _selectedVariantId;
+    if (variantId == null || variantId <= 0) return null;
+    final urls = _previewUrlsForVariant(variantId);
+    final front = urls?['frontViewUrl']?.trim() ?? '';
+    if (front.isEmpty) return null;
+
+    final saved = _savedVariantIds.contains(variantId);
+    return TextButton.icon(
+      onPressed: _savingLook ? null : () => unawaited(_toggleSaveLook(variantId)),
+      icon: Icon(
+        saved ? Icons.bookmark : Icons.bookmark_border,
+        size: 18,
+        color: saved ? AppBrand.accent : Colors.white70,
+      ),
+      label: Text(
+        saved ? 'Saved to your looks' : 'Save this look',
+        style: TextStyle(
+          color: saved ? AppBrand.accent : Colors.white70,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _toggleSaveLook(int variantId) async {
+    final urls = _previewUrlsForVariant(variantId);
+    final front = urls?['frontViewUrl']?.trim() ?? '';
+    if (front.isEmpty) return;
+
+    setState(() => _savingLook = true);
+    try {
+      if (_savedVariantIds.contains(variantId)) {
+        final savedId = _savedLookIds[variantId];
+        if (savedId != null) {
+          await SavedPreviewsService.delete(savedId);
+        }
+        if (!mounted) return;
+        setState(() {
+          _savedVariantIds.remove(variantId);
+          _savedLookIds.remove(variantId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Removed from your saved looks.')),
+        );
+        return;
+      }
+
+      final savedId = await SavedPreviewsService.save(
+        variantId: variantId,
+        scanSessionId: UserSession.ensureScanSessionId(),
+        frontViewUrl: front,
+        sideViewUrl: urls?['sideViewUrl'],
+        backViewUrl: urls?['backViewUrl'],
+        styleName: _selectedStyleName,
+        faceShape: widget.faceShape,
+        hairTexture: widget.hairTexture,
+      );
+      if (!mounted) return;
+      setState(() {
+        _savedVariantIds.add(variantId);
+        if (savedId != null) _savedLookIds[variantId] = savedId;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved. Find it under Saved → Your AI looks.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update your saved looks: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _savingLook = false);
+    }
+  }
+
   /// Small persistent "X of Y previews used" chip. The only place a count used
   /// to appear was a one-off SnackBar after a *successful* generation, so a
   /// customer had no visibility into where they stood before hitting the limit.
@@ -1525,6 +1617,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 );
               }),
             ),
+            if (_buildSaveLookButton() != null) ...[
+              const SizedBox(height: 8),
+              Center(child: _buildSaveLookButton()!),
+            ],
             if (_quotaIndicatorChip() != null) ...[
               const SizedBox(height: 8),
               Center(child: _quotaIndicatorChip()!),
