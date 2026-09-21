@@ -7,6 +7,7 @@ import 'faq_library_page.dart';
 import 'privacy_data_page.dart';
 import 'profile_page.dart';
 import 'session_logout.dart';
+import 'terms_and_conditions_page.dart';
 import 'user_session.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -156,6 +157,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const PrivacyDataPage()),
+                    );
+                  },
+                ),
+                _settingsTile(
+                  icon: Icons.description_outlined,
+                  title: 'Terms and Conditions',
+                  subtitle: 'The terms you agreed to when you signed up',
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const TermsAndConditionsPage()),
                     );
                   },
                 ),

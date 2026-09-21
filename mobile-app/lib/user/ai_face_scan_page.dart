@@ -89,9 +89,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   bool _isGoodPosition = false;
   Map<String, String> _capturedImages = {};
   final Map<String, Rect> _capturedFaceRects = {};
-  bool _consentAccepted = false;
-  bool _consentFormAgreed = false;
-  bool _consentLoading = true;
+  bool _instructionsAcknowledged = false;
+  bool _instructionsLoading = true;
   bool _finishingStaging = false;
 
   /// Real client-driven steps in _finishStagingCapture, in order. Each maps to
@@ -349,8 +348,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       UserSession.resetScanState();
       if (!mounted) return;
       setState(() {
-        _consentAccepted = true;
-        _consentLoading = false;
+        _instructionsAcknowledged = true;
+        _instructionsLoading = false;
         _needsStaging = true;
         _stagingComplete = false;
         _reviewingCaptures = false;
@@ -362,13 +361,13 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       return;
     }
 
-    final consented = await FaceScanService.hasConsent();
+    final consented = await FaceScanService.hasSeenCaptureInstructions();
     if (!mounted) return;
 
     if (widget.livePreviewOnly) {
       setState(() {
-        _consentAccepted = true;
-        _consentLoading = false;
+        _instructionsAcknowledged = true;
+        _instructionsLoading = false;
         _needsStaging = false;
         _stagingComplete = true;
         _capturedImages = Map.from(UserSession.capturedFaceImages ?? {});
@@ -399,8 +398,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
           stage = angles.length - 1;
         }
         setState(() {
-          _consentAccepted = true;
-          _consentLoading = false;
+          _instructionsAcknowledged = true;
+          _instructionsLoading = false;
           _needsStaging = true;
           _stagingComplete = false;
           _reviewingCaptures = false;
@@ -416,8 +415,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
     if (!mounted) return;
     setState(() {
-      _consentAccepted = consented;
-      _consentLoading = false;
+      _instructionsAcknowledged = consented;
+      _instructionsLoading = false;
       _needsStaging = true;
       _stagingComplete = false;
       _reviewingCaptures = false;
@@ -3081,7 +3080,19 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
   double _scannerHeightForLayout(BuildContext context) =>
       ScannerLayout.previewHeight(context);
 
-  Widget _buildConsentUI() {
+  /// First-time visual guide for the capture flow. Legal consent to face
+  /// capture and AI processing is obtained once, at sign-up (see
+  /// TermsAndConditionsPage / auth_page.dart's checkbox) -- this screen exists
+  /// purely to help a first-timer get a usable photo, not to collect
+  /// agreement, so there is no checkbox gating "Got it".
+  Widget _buildCaptureInstructionsUI() {
+    final tips = <(IconData, String)>[
+      (Icons.straighten, 'Hold your phone at arm\'s length'),
+      (Icons.center_focus_strong, 'Look straight at the camera'),
+      (Icons.wb_sunny_outlined, 'Use good, even lighting'),
+      (Icons.crop_rotate, 'We\'ll capture front, left, and right angles'),
+    ];
+
     return PopScope(
       canPop: widget.kioskMode,
       onPopInvokedWithResult: (didPop, _) {
@@ -3104,77 +3115,61 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Before we capture your face for haircut recommendations, please confirm:',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                  'How to get the best results',
+                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 6),
                 const Text(
-                  '• We capture front, left, and right photos once per session.\n'
-                  '• Images are stored securely for AI styling and your appointment preview.\n'
-                  '• You can delete data by contacting the shop or signing out.\n'
-                  '• Live camera preview is optional after static capture.',
-                  style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.45),
+                  'A quick guide before your face scan.',
+                  style: TextStyle(color: Colors.white54, fontSize: 13),
                 ),
-                const Spacer(),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => setState(() => _consentFormAgreed = !_consentFormAgreed),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Checkbox(
-                            value: _consentFormAgreed,
-                            onChanged: (v) => setState(() => _consentFormAgreed = v ?? false),
-                            activeColor: widget.kioskMode ? AppBrand.gold : Colors.white,
-                            checkColor: Colors.black,
-                            side: BorderSide(
-                              color: widget.kioskMode ? AppBrand.gold : Colors.white54,
-                            ),
-                          ),
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(top: 12, right: 4),
-                              child: Text(
-                                'I consent to face capture and AI-powered haircut recommendations.',
-                                style: TextStyle(
-                                  color: _consentFormAgreed ? Colors.white : Colors.white70,
-                                  fontSize: 13,
-                                  height: 1.35,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                const SizedBox(height: 24),
+                for (final tip in tips) ...[
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        alignment: Alignment.center,
+                        child: Icon(tip.$1, color: Colors.white, size: 20),
                       ),
-                    ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            tip.$2,
+                            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.35),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 12),
+                  const SizedBox(height: 18),
+                ],
+                const Spacer(),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: _consentFormAgreed
-                        ? () async {
-                            await FaceScanService.saveConsent();
-                            if (!mounted) return;
-                            _prepareWorkingSessionForCapture();
-                            setState(() => _consentAccepted = true);
-                          }
-                        : null,
+                    onPressed: () async {
+                      await FaceScanService.markCaptureInstructionsSeen();
+                      if (!mounted) return;
+                      _prepareWorkingSessionForCapture();
+                      setState(() => _instructionsAcknowledged = true);
+                    },
                     style: widget.kioskMode
                         ? AppBrand.primaryButton
                         : ElevatedButton.styleFrom(
                             backgroundColor: Colors.white,
                             foregroundColor: Colors.black,
-                            disabledBackgroundColor: Colors.white24,
-                            disabledForegroundColor: Colors.white38,
                             minimumSize: const Size.fromHeight(48),
                           ),
-                    child: const Text('Continue to capture', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text('Got it', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ),
               ],
@@ -3193,15 +3188,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
 
   @override
   Widget build(BuildContext context) {
-    if (_consentLoading) {
+    if (_instructionsLoading) {
       return const Scaffold(
         backgroundColor: Color(0xFF0A0A0A),
         body: Center(child: CircularProgressIndicator(color: Colors.white)),
       );
     }
 
-    if (!_consentAccepted && !widget.livePreviewOnly) {
-      return _buildConsentUI();
+    if (!_instructionsAcknowledged && !widget.livePreviewOnly) {
+      return _buildCaptureInstructionsUI();
     }
 
     if (_finishingStaging) {

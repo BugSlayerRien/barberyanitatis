@@ -1614,7 +1614,8 @@ try {
                     s.service_name,
                     COALESCE(ad.customer_front_url, hv.front_view_url) AS front_view_url,
                     COALESCE(ad.customer_left_url, hv.side_view_url) AS side_view_url,
-                    COALESCE(ad.customer_right_url, hv.back_view_url) AS back_view_url
+                    COALESCE(ad.customer_right_url, hv.back_view_url) AS back_view_url,
+                    hv.clipper_sizes, hv.barber_instructions, hv.styling_products, hv.estimated_minutes
              FROM appointment_details ad
              JOIN services s ON ad.service_id = s.service_id
              LEFT JOIN hairstyle_variants hv ON ad.variant_id = hv.variant_id
@@ -1639,6 +1640,10 @@ try {
                     'frontViewUrl' => $row['front_view_url'],
                     'sideViewUrl' => $row['side_view_url'],
                     'backViewUrl' => $row['back_view_url'],
+                    'clipperSizes' => $row['clipper_sizes'],
+                    'barberInstructions' => $row['barber_instructions'],
+                    'stylingProducts' => $row['styling_products'],
+                    'estimatedMinutes' => $row['estimated_minutes'] !== null ? (int)$row['estimated_minutes'] : null,
                     'specialInstructions' => [],
                 ];
             }
@@ -1668,6 +1673,10 @@ try {
                 'frontViewUrl' => $details['frontViewUrl'] ?? null,
                 'sideViewUrl' => $details['sideViewUrl'] ?? null,
                 'backViewUrl' => $details['backViewUrl'] ?? null,
+                'clipperSizes' => $details['clipperSizes'] ?? null,
+                'barberInstructions' => $details['barberInstructions'] ?? null,
+                'stylingProducts' => $details['stylingProducts'] ?? null,
+                'estimatedMinutes' => $details['estimatedMinutes'] ?? null,
                 'specialInstructions' => !empty($details['specialInstructions'])
                     ? implode(' / ', $details['specialInstructions'])
                     : null,

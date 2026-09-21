@@ -43,7 +43,11 @@ class FaceScanQuotaExceededException implements Exception {
 }
 
 class FaceScanService {
-  static const String _consentKey = 'face_scan_consent_accepted_v1';
+  // v1 was a legal consent checkbox; that consent now lives in the sign-up
+  // Terms and Conditions instead (see auth_page.dart), so this screen is
+  // purely instructional and gets its own key -- a returning user who
+  // accepted the old consent text has not seen the new capture guide.
+  static const String _instructionsSeenKey = 'face_scan_capture_instructions_seen_v2';
 
   static bool isValidJpeg(List<int> bytes) {
     if (bytes.length < 4) return false;
@@ -72,14 +76,14 @@ class FaceScanService {
     return (ok: true, error: null);
   }
 
-  static Future<bool> hasConsent() async {
+  static Future<bool> hasSeenCaptureInstructions() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_consentKey) ?? false;
+    return prefs.getBool(_instructionsSeenKey) ?? false;
   }
 
-  static Future<void> saveConsent() async {
+  static Future<void> markCaptureInstructionsSeen() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_consentKey, true);
+    await prefs.setBool(_instructionsSeenKey, true);
   }
 
   static Future<Map<String, String>> _headers() => CustomerApi.headers();

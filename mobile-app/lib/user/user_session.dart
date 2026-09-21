@@ -40,6 +40,12 @@ class UserSession {
   static Map<String, dynamic>? lastScan;
   static List<Map<String, dynamic>> lastRecommendations = [];
 
+  /// Last known AI-preview quota ({limit, used, remaining, unlimited,
+  /// purchased}), cached in memory so the results page's quota pill can show
+  /// a value immediately on (re)entry instead of blanking out while it waits
+  /// for a fresh fetch.
+  static Map<String, dynamic>? lastQuota;
+
   /// Completed recommendation payload for the current scan, kept so that
   /// re-entering the results page shows the SAME ranking instead of re-running
   /// the AI rerank (which is non-deterministic and reshuffles Top Picks on
@@ -448,6 +454,7 @@ class UserSession {
     hasRecentRecommendations = false;
     lastScan = null;
     lastRecommendations = [];
+    lastQuota = null;
     _completedScanSnapshot = null;
     preferredHairTexture = null;
     _cachedUserCalibration = null;

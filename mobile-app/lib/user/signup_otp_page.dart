@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'api_config.dart';
 import 'auth_bootstrap.dart';
 import 'auth_user_messages.dart';
 
@@ -62,6 +67,12 @@ class _SignupOtpPageState extends State<SignupOtpPage> {
 
       await AuthBootstrap.applySupabaseSession(session);
       AuthBootstrap.markPasswordLogin();
+      // This is the completion point of a fresh registration (the email-
+      // confirmation branch of _register()), so record acceptance here
+      // explicitly -- the generic post-login sync in AuthBootstrap fires on
+      // every sign-in, including for existing accounts that never saw the
+      // checkbox, so it must not send this flag itself.
+      unawaited(_recordTermsAcceptance());
       if (!mounted) return;
       AuthBootstrap.navigateToSignedInHome(showSnackBar: true);
     } catch (e) {
@@ -71,6 +82,22 @@ class _SignupOtpPageState extends State<SignupOtpPage> {
       );
     } finally {
       if (mounted) setState(() => _verifying = false);
+    }
+  }
+
+  Future<void> _recordTermsAcceptance() async {
+    try {
+      await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/auth_sync.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'email': widget.email,
+          'full_name': widget.fullName,
+          'terms_accepted': true,
+        }),
+      );
+    } catch (_) {
+      // Best-effort: the account is already usable without this succeeding.
     }
   }
 

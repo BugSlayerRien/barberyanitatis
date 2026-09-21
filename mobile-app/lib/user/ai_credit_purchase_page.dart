@@ -140,7 +140,14 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
       }
 
       setState(() => _statusLabel = 'Payment received — crediting your account...');
-      final quota = await FaceScanService.fetchQuotaStatus(userId: userId);
+      // The server has already credited the account by this point (payment is
+      // confirmed Paid) -- a null result here means this one status call had a
+      // hiccup, not that the purchase didn't take. One retry, then fall back
+      // to a synthetic bump on the last known quota, so the caller never gets
+      // null and silently keeps showing a stale pre-purchase count.
+      var quota = await FaceScanService.fetchQuotaStatus(userId: userId);
+      quota ??= await FaceScanService.fetchQuotaStatus(userId: userId);
+      quota ??= _syntheticPostPurchaseQuota();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -163,6 +170,27 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
   /// True once the gateway reports the payment as paid/succeeded. Matches
   /// payment_page.dart's own status field and polling cadence exactly — same
   /// endpoint, same response shape for both 'source' and 'payment_intent'.
+  /// Last resort when both post-purchase status fetches fail: bump the
+  /// last known quota (cached in [UserSession.lastQuota] from whatever page
+  /// sent the customer here) by this bundle's credits, so the pill reflects
+  /// the purchase instead of freezing on the pre-purchase count until the
+  /// next unrelated refresh happens to succeed.
+  Map<String, dynamic>? _syntheticPostPurchaseQuota() {
+    final previous = UserSession.lastQuota;
+    if (previous == null) return null;
+    final limit = (previous['limit'] as num?)?.toInt();
+    final purchased = (previous['purchased'] as num?)?.toInt();
+    if (limit == null || purchased == null) return null;
+    final used = (previous['used'] as num?)?.toInt() ?? 0;
+    final newLimit = limit + AiCreditPurchasePage.bundleCredits;
+    return {
+      ...previous,
+      'limit': newLimit,
+      'purchased': purchased + AiCreditPurchasePage.bundleCredits,
+      'remaining': (newLimit - used).clamp(0, newLimit),
+    };
+  }
+
   Future<bool> _pollUntilFinal(String id, {required String resourceType}) async {
     final normalizedType = resourceType.toLowerCase();
     final base = _paymongoBase();

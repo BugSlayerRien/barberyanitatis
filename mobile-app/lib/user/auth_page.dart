@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -15,6 +16,7 @@ import 'auth_redirect.dart';
 import 'signup_otp_page.dart';
 import 'auth_user_messages.dart';
 import 'supabase_password_identity.dart';
+import 'terms_and_conditions_page.dart';
 import 'user_session.dart';
 
 // Field styling, button styling and the accent all come from AppBrand now —
@@ -52,6 +54,7 @@ class _AuthPageState extends State<AuthPage> {
   bool _obscureReg1 = true;
   bool _obscureReg2 = true;
   bool _passwordFieldFocused = false;
+  bool _termsAccepted = false;
 
   static final RegExp _passwordUpper = RegExp(r'[A-Z]');
   static final RegExp _passwordLower = RegExp(r'[a-z]');
@@ -307,6 +310,16 @@ class _AuthPageState extends State<AuthPage> {
       return;
     }
 
+    // Validation 7: Terms acceptance. The button is already disabled without
+    // this, but the checkbox is state, not a TextField -- worth a defensive
+    // check in case a future change to the button's enabled logic drifts.
+    if (!_termsAccepted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please accept the Terms and Conditions to continue.')),
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -338,6 +351,7 @@ class _AuthPageState extends State<AuthPage> {
             body: jsonEncode({
               'email': email,
               'full_name': fullName,
+              'terms_accepted': true,
             }),
           );
         } catch (_) {
@@ -768,7 +782,62 @@ class _AuthPageState extends State<AuthPage> {
                   onPressed: () =>
                       setState(() => _obscureReg2 = !_obscureReg2),
                 ))),
-        const SizedBox(height: AppBrand.s5),
+        const SizedBox(height: AppBrand.s4),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: Checkbox(
+                value: _termsAccepted,
+                onChanged: (v) => setState(() => _termsAccepted = v ?? false),
+                fillColor: WidgetStateProperty.resolveWith(
+                  (states) => states.contains(WidgetState.selected)
+                      ? AppBrand.accent
+                      : Colors.transparent,
+                ),
+                side: const BorderSide(color: AppBrand.textMuted),
+              ),
+            ),
+            const SizedBox(width: AppBrand.s2),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _termsAccepted = !_termsAccepted),
+                behavior: HitTestBehavior.opaque,
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: RichText(
+                    text: TextSpan(
+                      style: const TextStyle(color: AppBrand.textMuted, fontSize: 12.5, height: 1.4),
+                      children: [
+                        const TextSpan(text: 'I agree to the '),
+                        TextSpan(
+                          text: 'Terms and Conditions',
+                          style: const TextStyle(
+                            color: AppBrand.accent,
+                            fontWeight: FontWeight.w700,
+                            decoration: TextDecoration.underline,
+                          ),
+                          recognizer: TapGestureRecognizer()
+                            ..onTap = () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => const TermsAndConditionsPage(),
+                                ),
+                              );
+                            },
+                        ),
+                        const TextSpan(text: '.'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppBrand.s4),
         ElevatedButton(
           onPressed: (_isLoading || !_canSubmitRegisterPassword)
               ? null
@@ -839,7 +908,8 @@ class _AuthPageState extends State<AuthPage> {
     final password = _regPass.text;
     return _isPasswordValid(password) &&
         _confirm.text.isNotEmpty &&
-        password == _confirm.text;
+        password == _confirm.text &&
+        _termsAccepted;
   }
 
   Map<String, bool> _passwordRequirementStates(String password) {
