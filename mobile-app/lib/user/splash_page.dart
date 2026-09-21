@@ -7,6 +7,7 @@ import 'app_brand.dart';
 import 'auth_bootstrap.dart';
 import 'auth_page.dart';
 import 'auth_redirect.dart';
+import 'onboarding_carousel_page.dart';
 
 class SplashPage extends StatefulWidget {
   const SplashPage({super.key});
@@ -73,8 +74,13 @@ class _SplashPageState extends State<SplashPage> {
       return;
     }
 
+    final seenOnboarding = await OnboardingCarouselPage.hasSeenOnboarding();
+    if (!mounted) return;
+
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const AuthPage()),
+      MaterialPageRoute(
+        builder: (_) => seenOnboarding ? const AuthPage() : const OnboardingCarouselPage(),
+      ),
     );
   }
 
