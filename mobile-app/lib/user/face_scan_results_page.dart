@@ -90,7 +90,15 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// Last quota the server reported for this account (from a successful
   /// generation, a cache hit, or a 429). Kept across calls so a persistent
   /// indicator can show "X of Y used" without waiting for the next attempt.
+  /// Seeded from [UserSession.lastQuota] in initState so the pill has
+  /// something to show immediately instead of blanking out while the fresh
+  /// fetch below is in flight.
   Map<String, dynamic>? _lastQuota;
+  bool _quotaRefreshRetried = false;
+  /// True only until the very first quota fetch of this process settles (with
+  /// its one retry). Distinguishes "still loading, nothing cached yet" (show a
+  /// skeleton) from "loaded and unlimited/errored" (show nothing).
+  bool _quotaLoading = true;
   String? _lengthNote;
   late String _faceShape;
   late String _hairTexture;
@@ -125,6 +133,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     _hairColorLabel =
         widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
+    _lastQuota = UserSession.lastQuota;
+    _quotaLoading = _lastQuota == null;
     _restoreCachedPreviewsFromSession();
     // Re-entering this page must not re-rank. The second stage of
     // _loadRecommendations calls the AI reranker, which is non-deterministic,
@@ -143,8 +153,29 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       userId: UserSession.userId,
       scanSessionId: UserSession.userId == null ? UserSession.ensureScanSessionId() : null,
     );
-    if (quota != null && mounted) {
-      setState(() => _lastQuota = quota);
+    if (quota != null) {
+      UserSession.lastQuota = quota;
+      if (mounted) {
+        setState(() {
+          _lastQuota = quota;
+          _quotaLoading = false;
+        });
+      }
+      return;
+    }
+    // A transient network failure would otherwise leave the pill stuck on
+    // whatever was seeded (or blank, on a first-ever visit) for the rest of
+    // this page's lifetime. One retry covers that without polling forever.
+    if (!_quotaRefreshRetried) {
+      _quotaRefreshRetried = true;
+      await Future<void>.delayed(const Duration(seconds: 3));
+      if (mounted) {
+        unawaited(_refreshQuotaStatus());
+      }
+      return;
+    }
+    if (mounted) {
+      setState(() => _quotaLoading = false);
     }
   }
 
@@ -930,6 +961,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       UserSession.commitCompletedScan();
       final quota = FaceScanService.quotaFromResponse(data);
       if (quota != null) {
+        UserSession.lastQuota = quota;
         setState(() => _lastQuota = quota);
       }
       if (fromCache) {
@@ -945,16 +977,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       }
     } on FaceScanQuotaExceededException catch (e) {
       if (!mounted) return;
+      final quotaFromError = {
+        'limit': e.limit,
+        'used': e.used,
+        'remaining': e.remaining,
+        'unlimited': e.unlimited,
+        'purchased': e.purchased,
+      };
+      UserSession.lastQuota = quotaFromError;
       setState(() {
         _previewGenerating = false;
         _previewError = null;
-        _lastQuota = {
-          'limit': e.limit,
-          'used': e.used,
-          'remaining': e.remaining,
-          'unlimited': e.unlimited,
-          'purchased': e.purchased,
-        };
+        _lastQuota = quotaFromError;
       });
       await _showQuotaExceededDialog(e);
     } catch (e) {
@@ -1008,8 +1042,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     final quota = await Navigator.of(context).push<Map<String, dynamic>?>(
       MaterialPageRoute(builder: (_) => const AiCreditPurchasePage()),
     );
-    if (quota != null && mounted) {
-      setState(() => _lastQuota = quota);
+    if (quota != null) {
+      UserSession.lastQuota = quota;
+      if (mounted) {
+        setState(() => _lastQuota = quota);
+      }
     }
   }
 
@@ -1182,9 +1219,35 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// the number a customer acts on. Free and purchased are deliberately summed
   /// into one figure -- the breakdown lives in the help sheet, since which
   /// bucket a preview comes from does not change what they can do next.
+  /// Placeholder shown only while the very first quota fetch of this process
+  /// is still in flight (no cached value to seed from) -- so the pill's slot
+  /// is occupied instead of the row silently having no trailing widget.
+  Widget _quotaPillSkeleton() {
+    return Container(
+      width: 54,
+      height: 26,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white12),
+      ),
+      alignment: Alignment.center,
+      child: const SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white38),
+      ),
+    );
+  }
+
   Widget? _quotaPill() {
     final quota = _lastQuota;
-    if (quota == null || quota['unlimited'] == true) return null;
+    if (quota == null) {
+      // Nothing cached yet and the first fetch (plus its retry) hasn't
+      // settled -- a bare skeleton beats the pill silently never appearing.
+      return _quotaLoading ? _quotaPillSkeleton() : null;
+    }
+    if (quota['unlimited'] == true) return null;
     final limit = (quota['limit'] as num?)?.toInt();
     final used = (quota['used'] as num?)?.toInt();
     if (limit == null || used == null || limit <= 0) return null;
@@ -1839,14 +1902,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 icon: const Icon(Icons.videocam_outlined, color: Colors.white),
                 label: const Text('Try live preview (optional)', style: TextStyle(color: Colors.white)),
               ),
+            ],
+            if (!widget.kioskMode) ...[
               const SizedBox(height: 8),
               TextButton(
                 onPressed: () {
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const HaircutsListPage()),
+                    MaterialPageRoute(
+                      builder: (_) => HaircutsListPage(initialTextureFilter: _hairTexture),
+                    ),
                   );
                 },
-                child: const Text('Browse all haircuts', style: TextStyle(color: Colors.white54)),
+                child: const Text('See all compatible styles', style: TextStyle(color: Colors.white54)),
               ),
             ],
           ],

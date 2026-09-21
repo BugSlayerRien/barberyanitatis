@@ -134,6 +134,30 @@ function ensure_top_pick_eligible_column(PDO $pdo): void
     );
 }
 
+// Normally applied via hairstyle_categories_and_catalog.sql, but the admin
+// editor and ranking query both read/write this column, so a fresh
+// environment that hasn't run that migration must not 500 on first use.
+function ensure_hairstyle_category_column(PDO $pdo): void
+{
+    $pdo->exec(
+        "ALTER TABLE hairstyles
+         ADD COLUMN IF NOT EXISTS category VARCHAR(20)"
+    );
+    $pdo->exec(
+        "DO \$\$
+         BEGIN
+             IF NOT EXISTS (
+                 SELECT 1 FROM pg_constraint WHERE conname = 'hairstyles_category_check'
+             ) THEN
+                 ALTER TABLE hairstyles
+                 ADD CONSTRAINT hairstyles_category_check
+                 CHECK (category IS NULL OR category IN ('formal', 'alternative'));
+             END IF;
+         END
+         \$\$;"
+    );
+}
+
 function fetch_ranked_variants(PDO $pdo, string $faceShape, string $hairTexture, array $options = []): array
 {
     schema_ensure_once('hairstyles.top_pick_eligible', static function () use ($pdo): void {

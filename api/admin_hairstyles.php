@@ -20,6 +20,9 @@ try {
     schema_ensure_once('hairstyles.top_pick_eligible', static function () use ($pdo): void {
         ensure_top_pick_eligible_column($pdo);
     });
+    schema_ensure_once('hairstyles.category', static function () use ($pdo): void {
+        ensure_hairstyle_category_column($pdo);
+    });
 
     // Category decides which Library section a cut appears in. It is stored per
     // style (see hairstyle_categories_and_catalog.sql) so a haircut cannot drift
@@ -145,8 +148,8 @@ try {
             ':difficulty' => normalize_hairstyle_tier($input['difficulty'] ?? 'Medium', ['Easy', 'Medium', 'Hard']),
             ':maintenance' => normalize_hairstyle_tier($input['maintenance'] ?? 'Medium', ['Low', 'Medium', 'High']),
             ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
-            ':is_active' => !empty($input['isActive']) && (string)$input['isActive'] !== '0',
-            ':top_pick_eligible' => $normalizeTopPickEligible($input['topPickEligible'] ?? null),
+            ':is_active' => (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0'),
+            ':top_pick_eligible' => (int)$normalizeTopPickEligible($input['topPickEligible'] ?? null),
         ]);
 
         json_response([
@@ -179,8 +182,8 @@ try {
             ':difficulty' => normalize_hairstyle_tier($input['difficulty'] ?? 'Medium', ['Easy', 'Medium', 'Hard']),
             ':maintenance' => normalize_hairstyle_tier($input['maintenance'] ?? 'Medium', ['Low', 'Medium', 'High']),
             ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
-            ':is_active' => !empty($input['isActive']) && (string)$input['isActive'] !== '0',
-            ':top_pick_eligible' => $normalizeTopPickEligible($input['topPickEligible'] ?? null),
+            ':is_active' => (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0'),
+            ':top_pick_eligible' => (int)$normalizeTopPickEligible($input['topPickEligible'] ?? null),
             ':id' => $hairstyleID,
         ];
 

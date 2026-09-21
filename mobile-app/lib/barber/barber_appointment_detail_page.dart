@@ -25,6 +25,12 @@ class BarberAppointmentDetailPage extends StatelessWidget {
     final bookingCode = appointment['bookingCode']?.toString() ?? '-';
     final specialInstructions =
         appointment['specialInstructions']?.toString().trim() ?? '';
+    final clipperSizes = appointment['clipperSizes']?.toString().trim() ?? '';
+    final barberInstructions =
+        appointment['barberInstructions']?.toString().trim() ?? '';
+    final stylingProducts =
+        appointment['stylingProducts']?.toString().trim() ?? '';
+    final estimatedMinutes = appointment['estimatedMinutes'];
     final previewImages = previewImagesFromAppointment(appointment);
 
     return Scaffold(
@@ -40,6 +46,22 @@ class BarberAppointmentDetailPage extends StatelessWidget {
           _card(title: 'Customer', value: customerName),
           const SizedBox(height: 12),
           _card(title: 'Haircut', value: serviceName),
+          if (clipperSizes.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _card(title: 'Clipper Sizes', value: clipperSizes),
+          ],
+          if (barberInstructions.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _card(title: 'Barber Instructions', value: barberInstructions),
+          ],
+          if (stylingProducts.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _card(title: 'Styling Products', value: stylingProducts),
+          ],
+          if (estimatedMinutes != null) ...[
+            const SizedBox(height: 12),
+            _card(title: 'Est. Time', value: '$estimatedMinutes min'),
+          ],
           const SizedBox(height: 12),
           _card(title: 'Booking Code', value: bookingCode),
           const SizedBox(height: 12),
