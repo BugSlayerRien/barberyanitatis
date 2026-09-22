@@ -28,14 +28,7 @@ import 'scanner/overlay_preview_image.dart';
 import 'scanner/overlay_registry.dart';
 
 class HaircutsListPage extends StatefulWidget {
-  /// Pre-selects this texture's tab (e.g. from a scan's detected texture)
-  /// instead of falling back to the account's stored preference in
-  /// [UserSession.loadPreferredHairTexture]. Must be one of the category
-  /// labels this page already uses -- 'Straight' / 'Wavy' / 'Curly' -- which
-  /// is exactly what [UserSession.normalizeHairTextureLabel] produces.
-  final String? initialTextureFilter;
-
-  const HaircutsListPage({super.key, this.initialTextureFilter});
+  const HaircutsListPage({super.key});
 
   @override
   State<HaircutsListPage> createState() => _HaircutsListPageState();
@@ -60,12 +53,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   @override
   void initState() {
     super.initState();
-    final passedTexture = widget.initialTextureFilter;
-    if (passedTexture != null && passedTexture.isNotEmpty) {
-      _selectedCategory = passedTexture;
-    } else {
-      _initCategory();
-    }
+    _initCategory();
     _loadStyles();
   }
 
