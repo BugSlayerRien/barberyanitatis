@@ -80,11 +80,15 @@ try {
              ORDER BY hs.style_name'
         );
         $stmt->execute($params);
+        // Optional: the scan results page asks for only styles that suit the
+        // scanned texture, using the same rule as the recommendations.
+        $hairTexture = trim((string)($input['hairTexture'] ?? ''));
         $hairstyles = array_map(
             $normalizeHaircutRow,
             array_values(array_filter(
                 $stmt->fetchAll(),
                 static fn(array $row): bool => is_overlay_library_row($row)
+                    && ($hairTexture === '' || variant_matches_customer_texture($row, $hairTexture))
             ))
         );
         json_response([

@@ -11,7 +11,7 @@ import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
 import 'dashboard_page.dart';
-import 'haircuts_list_page.dart';
+import 'profile_page.dart';
 import 'saved_haircuts_page.dart';
 import 'api_config.dart';
 import 'scanner/scanner_layout.dart';
@@ -22,6 +22,7 @@ import 'services/saved_previews_service.dart';
 import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 import 'widgets/ai_chatbot_fab.dart';
+import 'widgets/library_style_picker_sheet.dart';
 import 'recommendation_match_display.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
@@ -71,6 +72,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   String _aiSummary = '';
   bool _aiPowered = false;
   List<Map<String, dynamic>> _topPicks = [];
+  /// Styles the customer picked from the Library sheet (not recommended),
+  /// newest first. Rendered with the same tile so generate/book work as usual.
+  final List<Map<String, dynamic>> _libraryPicks = [];
   Map<String, List<Map<String, dynamic>>> _categories = {
     'formal': [],
     'alternative': [],
@@ -695,6 +699,40 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     final forceRegenerate =
         choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
     unawaited(_loadReplicatePreviewsForSelected(forceRegenerate: forceRegenerate));
+  }
+
+  /// Lets a customer who doesn't like the recommendations pick any library
+  /// style that suits their scanned texture, then generate it on this scan
+  /// through the same confirm-and-generate path as a recommended style.
+  Future<void> _openLibraryPicker() async {
+    String nameOf(Map<String, dynamic> row) =>
+        (row['style_name'] ?? row['styleName'] ?? '').toString().trim().toLowerCase();
+    final shown = <String>{
+      for (final row in [
+        ..._topPicks,
+        ..._categories['formal']!,
+        ..._categories['alternative']!,
+        ..._libraryPicks,
+      ])
+        nameOf(row),
+    }..remove('');
+
+    final picked = await showLibraryStylePicker(
+      context,
+      hairTexture: _hairTexture,
+      excludeStyleNames: shown,
+    );
+    if (picked == null || !mounted) return;
+
+    final id = _variantKey(picked);
+    setState(() {
+      _libraryPicks.removeWhere((row) => _variantKey(row) == id);
+      _libraryPicks.insert(0, picked);
+      _expandedVariantId = id;
+      _selected = picked;
+      _previewError = null;
+    });
+    await _onGeneratePreviewPressed(picked);
   }
 
   Future<void> _onRegeneratePreviewPressed() async {
@@ -1574,6 +1612,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         showBack: true,
         showCustomerActions: !widget.kioskMode,
         onBack: () => unawaited(_leaveResults()),
+        onProfileTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const ProfilePage()),
+          );
+        },
       ),
       body: _error != null ? _errorView() : _content(),
       floatingActionButton: widget.kioskMode
@@ -1867,6 +1910,26 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ..._categories['alternative']!.map(_styleTile),
                 ],
               ],
+              if (_libraryPicks.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _sectionTitle('From the library'),
+                ..._libraryPicks.map(_styleTile),
+              ],
+              if (!widget.kioskMode) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton.icon(
+                    onPressed: () => unawaited(_openLibraryPicker()),
+                    icon: const Icon(Icons.grid_view_rounded, color: Colors.white, size: 18),
+                    label: const Text('Library', style: TextStyle(color: Colors.white)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white24),
+                      shape: const StadiumBorder(),
+                    ),
+                  ),
+                ),
+              ],
             ],
             const SizedBox(height: 20),
             SizedBox(
@@ -1901,19 +1964,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 onPressed: _openLivePreview,
                 icon: const Icon(Icons.videocam_outlined, color: Colors.white),
                 label: const Text('Try live preview (optional)', style: TextStyle(color: Colors.white)),
-              ),
-            ],
-            if (!widget.kioskMode) ...[
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => HaircutsListPage(initialTextureFilter: _hairTexture),
-                    ),
-                  );
-                },
-                child: const Text('See all compatible styles', style: TextStyle(color: Colors.white54)),
               ),
             ],
           ],
