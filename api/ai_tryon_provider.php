@@ -179,10 +179,11 @@ function ai_tryon_style_limit(): int
 }
 
 /**
- * Count of distinct hairstyles this user has ever successfully generated (across all of
- * their scan sessions). Counts DISTINCT variant_id since a style can have more than one
+ * Count of distinct hairstyles this user has generated while limits were on (across all
+ * of their scan sessions). Counts DISTINCT variant_id since a style can have more than one
  * preview row (regenerate); staleness does not reduce the count — a slot, once spent,
- * stays spent even if the user later retakes their photos.
+ * stays spent even if the user later retakes their photos. Only `metered` rows count, so
+ * AI_TRYON_UNLIMITED testing and saved/attached rows don't eat into the quota.
  */
 function ai_tryon_styles_used(PDO $pdo, int $userId): int
 {
@@ -191,7 +192,8 @@ function ai_tryon_styles_used(PDO $pdo, int $userId): int
          FROM face_scan_previews fsp
          JOIN face_scan_sessions fss ON fss.scan_session_id = fsp.scan_session_id
          WHERE fss.user_id = :user_id
-           AND fsp.variant_id IS NOT NULL'
+           AND fsp.variant_id IS NOT NULL
+           AND fsp.metered = TRUE'
     );
     $stmt->execute([':user_id' => $userId]);
 
@@ -205,7 +207,8 @@ function ai_tryon_user_has_generated_variant(PDO $pdo, int $userId, int $variant
          FROM face_scan_previews fsp
          JOIN face_scan_sessions fss ON fss.scan_session_id = fsp.scan_session_id
          WHERE fss.user_id = :user_id
-           AND fsp.variant_id = :variant_id'
+           AND fsp.variant_id = :variant_id
+           AND fsp.metered = TRUE'
     );
     $stmt->execute([':user_id' => $userId, ':variant_id' => $variantId]);
 
@@ -319,7 +322,8 @@ function ai_tryon_kiosk_styles_used(PDO $pdo, string $scanSessionId): int
         'SELECT COUNT(DISTINCT variant_id)
          FROM face_scan_previews
          WHERE scan_session_id = :scan_session_id
-           AND variant_id IS NOT NULL'
+           AND variant_id IS NOT NULL
+           AND metered = TRUE'
     );
     $stmt->execute([':scan_session_id' => $scanSessionId]);
 
@@ -332,7 +336,8 @@ function ai_tryon_kiosk_has_generated_variant(PDO $pdo, string $scanSessionId, i
         'SELECT COUNT(*)
          FROM face_scan_previews
          WHERE scan_session_id = :scan_session_id
-           AND variant_id = :variant_id'
+           AND variant_id = :variant_id
+           AND metered = TRUE'
     );
     $stmt->execute([':scan_session_id' => $scanSessionId, ':variant_id' => $variantId]);
 

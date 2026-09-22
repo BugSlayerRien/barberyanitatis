@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'ai_credit_purchase_page.dart';
 import 'appointments_page.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -90,8 +91,30 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
               // handling the return itself -- normally AiCreditPurchasePage's
               // own poll resolves it first; see PaymentReturnGuard.
               if (_params['purpose'] == 'ai_credits') {
-                await FaceScanService.fetchQuotaStatus(userId: UserSession.userId);
+                final quota =
+                    await FaceScanService.fetchQuotaStatus(userId: UserSession.userId);
+                if (quota != null) UserSession.lastQuota = quota;
                 if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Previews added to your account.')),
+                );
+                // Warm return: the purchase page (and the scan results page
+                // under it) are still on the stack -- pop past the purchase
+                // page so the customer lands back on their results.
+                if (AiCreditPurchasePage.isOpen) {
+                  var poppedPurchase = false;
+                  Navigator.of(context).popUntil((route) {
+                    if (poppedPurchase) return true;
+                    if (route.settings.name == AiCreditPurchasePage.routeName) {
+                      poppedPurchase = true;
+                      return false;
+                    }
+                    return route.isFirst;
+                  });
+                  return;
+                }
+                // Cold start: the scan lives only in memory, so there is no
+                // results page to go back to.
                 Navigator.of(context).pushAndRemoveUntil(
                   MaterialPageRoute(builder: (_) => const DashboardPage()),
                   (route) => false,

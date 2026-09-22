@@ -88,6 +88,20 @@ void main() {
     });
   });
 
+  group('poll gave up before the gateway answered', () {
+    test('a late deep link is NOT suppressed after a timed-out poll', () {
+      // Customer stayed in GCash longer than the in-app poll lasted. Nothing
+      // was handled, so PaymentResultPage must take the return.
+      PaymentReturnGuard.enter();
+      PaymentReturnGuard.exit(resolved: false);
+      expect(PaymentReturnGuard.shouldSkipDeepLink({}), isFalse);
+      expect(
+        PaymentReturnGuard.shouldSkipDeepLink({'source': 'src_slow'}),
+        isFalse,
+      );
+    });
+  });
+
   group('cold start', () {
     test('a deep-link-only return is NOT suppressed', () {
       // App killed mid-payment and relaunched: no poll ran in this process, so

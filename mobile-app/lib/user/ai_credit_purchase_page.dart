@@ -31,6 +31,13 @@ class AiCreditPurchasePage extends StatefulWidget {
   static const int bundleCredits = 5;
   static const double bundleAmountPhp = 49.00;
 
+  /// Route name the results page pushes this under, so PaymentResultPage can
+  /// pop back past it to the results page after a late deep-link return.
+  static const String routeName = '/ai-credit-purchase';
+
+  static int _openCount = 0;
+  static bool get isOpen => _openCount > 0;
+
   @override
   State<AiCreditPurchasePage> createState() => _AiCreditPurchasePageState();
 }
@@ -38,6 +45,18 @@ class AiCreditPurchasePage extends StatefulWidget {
 class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
   bool _processing = false;
   String? _statusLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    AiCreditPurchasePage._openCount++;
+  }
+
+  @override
+  void dispose() {
+    AiCreditPurchasePage._openCount--;
+    super.dispose();
+  }
 
   String _paymongoBase() => ApiConfig.baseUrl.replaceAll(RegExp(r'/$'), '');
 
@@ -113,7 +132,7 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
       // a second, independent verifier for the same return. See
       // PaymentReturnGuard.
       PaymentReturnGuard.enter();
-      bool paid;
+      bool? outcome;
       try {
         if (checkoutUrl != null && checkoutUrl.isNotEmpty) {
           final uri = Uri.tryParse(checkoutUrl);
@@ -124,17 +143,22 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
           setState(() => _statusLabel = 'Complete payment in the opened app, then return here.');
         }
 
-        paid = await _pollUntilFinal(resourceId, resourceType: resourceType);
+        outcome = await _pollUntilFinal(resourceId, resourceType: resourceType);
       } finally {
-        // Named before releasing the guard, so a deep link that arrives after
-        // this poll has already resolved is recognised as the same return and
-        // does not launch a second verifier.
-        PaymentReturnGuard.markHandled(resourceId);
-        PaymentReturnGuard.exit();
+        // Only a poll that reached a final state has handled this return. A
+        // timed-out poll leaves the late deep link to PaymentResultPage.
+        final resolved = outcome != null;
+        if (resolved) PaymentReturnGuard.markHandled(resourceId);
+        PaymentReturnGuard.exit(resolved: resolved);
       }
       if (!mounted) return;
 
-      if (!paid) {
+      if (outcome == null) {
+        setState(() => _statusLabel =
+            "Still waiting for GCash. If you finish paying, you'll be brought back automatically.");
+        return;
+      }
+      if (!outcome) {
         setState(() => _statusLabel = 'Payment not completed. You can try again.');
         return;
       }
@@ -167,9 +191,6 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
     }
   }
 
-  /// True once the gateway reports the payment as paid/succeeded. Matches
-  /// payment_page.dart's own status field and polling cadence exactly — same
-  /// endpoint, same response shape for both 'source' and 'payment_intent'.
   /// Last resort when both post-purchase status fetches fail: bump the
   /// last known quota (cached in [UserSession.lastQuota] from whatever page
   /// sent the customer here) by this bundle's credits, so the pill reflects
@@ -191,7 +212,9 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
     };
   }
 
-  Future<bool> _pollUntilFinal(String id, {required String resourceType}) async {
+  /// true = paid/succeeded, false = failed/canceled/expired, null = gave up
+  /// waiting. Same endpoint, response shape and cadence as payment_page.dart.
+  Future<bool?> _pollUntilFinal(String id, {required String resourceType}) async {
     final normalizedType = resourceType.toLowerCase();
     final base = _paymongoBase();
     for (var attempt = 0; attempt < 24; attempt++) {
@@ -224,7 +247,7 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
         await Future<void>.delayed(const Duration(seconds: 2));
       }
     }
-    return false;
+    return null;
   }
 
   @override
