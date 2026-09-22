@@ -1078,7 +1078,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
   Future<void> _openCreditPurchase() async {
     final quota = await Navigator.of(context).push<Map<String, dynamic>?>(
-      MaterialPageRoute(builder: (_) => const AiCreditPurchasePage()),
+      MaterialPageRoute(
+        settings: const RouteSettings(name: AiCreditPurchasePage.routeName),
+        builder: (_) => const AiCreditPurchasePage(),
+      ),
     );
     if (quota != null) {
       UserSession.lastQuota = quota;
@@ -1086,6 +1089,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         setState(() => _lastQuota = quota);
       }
     }
+    // A late deep-link return (PaymentResultPage) pops the purchase page with
+    // no result, so re-read the server either way.
+    _quotaRefreshRetried = false;
+    unawaited(_refreshQuotaStatus());
   }
 
   Future<void> _showQuotaExceededDialog(FaceScanQuotaExceededException e) async {
@@ -1915,21 +1922,28 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 _sectionTitle('From the library'),
                 ..._libraryPicks.map(_styleTile),
               ],
-              if (!widget.kioskMode) ...[
-                const SizedBox(height: 8),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton.icon(
-                    onPressed: () => unawaited(_openLibraryPicker()),
-                    icon: const Icon(Icons.grid_view_rounded, color: Colors.white, size: 18),
-                    label: const Text('Library', style: TextStyle(color: Colors.white)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.white24),
-                      shape: const StadiumBorder(),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => unawaited(_openLibraryPicker()),
+                  icon: Icon(
+                    Icons.grid_view_rounded,
+                    color: widget.kioskMode ? AppBrand.gold : Colors.white,
+                    size: 18,
+                  ),
+                  label: Text(
+                    'Library',
+                    style: TextStyle(color: widget.kioskMode ? AppBrand.gold : Colors.white),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: widget.kioskMode ? AppBrand.goldLine : Colors.white24,
                     ),
+                    shape: const StadiumBorder(),
                   ),
                 ),
-              ],
+              ),
             ],
             const SizedBox(height: 20),
             SizedBox(

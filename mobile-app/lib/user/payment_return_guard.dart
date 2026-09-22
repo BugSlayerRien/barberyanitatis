@@ -55,13 +55,20 @@ class PaymentReturnGuard {
     _activePollers++;
   }
 
-  static void exit() {
+  /// [resolved] is false when the poll gave up (timed out) without the gateway
+  /// reporting a final state. Then nothing was handled, so no grace window is
+  /// opened: the late deep link must reach PaymentResultPage, or a customer who
+  /// took longer in GCash than the poll lasted is left on "not completed" even
+  /// though the payment went through.
+  static void exit({bool resolved = true}) {
     if (_activePollers > 0) {
       _activePollers--;
     }
-    // Stamped on the way out, so a deep link that lands moments later is still
-    // recognised as this return rather than a new one.
-    _lastResolvedAt = DateTime.now();
+    if (resolved) {
+      // Stamped on the way out, so a deep link that lands moments later is
+      // still recognised as this return rather than a new one.
+      _lastResolvedAt = DateTime.now();
+    }
   }
 
   /// Records that this specific payment was resolved by an in-app poll, so the

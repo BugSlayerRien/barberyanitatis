@@ -127,11 +127,12 @@ class _PaymentPageState extends State<PaymentPage> {
 
         statusData = await _pollPaymentUntilFinal(resourceId, resourceType: resourceType);
       } finally {
-        // Named before releasing the guard, so a deep link that arrives after
-        // this poll has already resolved is recognised as the same return and
-        // does not launch a second verifier.
-        PaymentReturnGuard.markHandled(resourceId);
-        PaymentReturnGuard.exit();
+        // _pollPaymentUntilFinal returns null only when it gave up waiting.
+        // Then this return is unhandled, and the late deep link must reach
+        // PaymentResultPage instead of being suppressed.
+        final resolved = statusData != null;
+        if (resolved) PaymentReturnGuard.markHandled(resourceId);
+        PaymentReturnGuard.exit(resolved: resolved);
       }
       if (!mounted) return;
       if (statusData == null) {

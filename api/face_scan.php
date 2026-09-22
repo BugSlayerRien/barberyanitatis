@@ -78,6 +78,11 @@ function ensure_face_scan_tables(PDO $pdo): void
     // cache or attached to a booking, but they still count toward the generation quota —
     // otherwise retaking a photo would be a free way to reset the 2-style limit.
     $pdo->exec('ALTER TABLE face_scan_previews ADD COLUMN IF NOT EXISTS is_stale BOOLEAN NOT NULL DEFAULT FALSE');
+    // Only real AI generations made while limits are on count toward quota
+    // (generateStylePreviews sets it explicitly). DEFAULT FALSE on purpose: the
+    // column's creation is a one-time reset of pre-existing usage (mostly from
+    // AI_TRYON_UNLIMITED testing), and saved/attached rows never count.
+    $pdo->exec('ALTER TABLE face_scan_previews ADD COLUMN IF NOT EXISTS metered BOOLEAN NOT NULL DEFAULT FALSE');
 }
 
 /**
@@ -788,8 +793,8 @@ try {
         ));
 
         $stmt = $pdo->prepare(
-            'INSERT INTO face_scan_previews (scan_session_id, variant_id, front_url, left_url, right_url)
-             VALUES (:scan_session_id, :variant_id, :front_url, :left_url, :right_url)'
+            'INSERT INTO face_scan_previews (scan_session_id, variant_id, front_url, left_url, right_url, metered)
+             VALUES (:scan_session_id, :variant_id, :front_url, :left_url, :right_url, :metered)'
         );
         $stmt->execute([
             ':scan_session_id' => $scanSessionId,
@@ -797,6 +802,7 @@ try {
             ':front_url' => $front,
             ':left_url' => $left,
             ':right_url' => $right,
+            ':metered' => ai_tryon_unlimited() ? 0 : 1,
         ]);
 
         json_response([

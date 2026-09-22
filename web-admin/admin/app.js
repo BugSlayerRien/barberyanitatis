@@ -1146,9 +1146,9 @@ async function deleteAccount(type, id) {
 function formatServiceChannel(channel) {
   const value = String(channel || "appointment").toLowerCase();
   if (value === "walk_in" || value === "walkin" || value === "regular") {
-    return "Regular (kiosk) - ₱100";
+    return "Regular (kiosk)";
   }
-  return "Exclusive (appointments) - ₱500";
+  return "Exclusive (appointments)";
 }
 
 function openServiceEditor(existing) {
