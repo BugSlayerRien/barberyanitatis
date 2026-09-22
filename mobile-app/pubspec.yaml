@@ -72,6 +72,7 @@ flutter:
   assets:
     - assets/data/chatbot_faq.json
     - assets/images/
+    - assets/images/showcase/
     - assets/images/overlays/barbers/
     - assets/images/overlays/blowout_taper/
     - assets/images/overlays/buzz_cut/
