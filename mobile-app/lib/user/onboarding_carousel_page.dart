@@ -63,6 +63,14 @@ class _OnboardingCarouselPageState extends State<OnboardingCarouselPage> {
     ),
   ];
 
+  // Photos of the actual shop, one per slide (cycled). The Wi-Fi password
+  // signs visible in two of the originals are blurred out in the assets.
+  static const _backgrounds = [
+    'assets/images/showcase/shop_1.webp',
+    'assets/images/showcase/shop_2.webp',
+    'assets/images/showcase/shop_3.webp',
+  ];
+
   static const _autoAdvanceInterval = Duration(seconds: 4);
 
   final _controller = PageController();
@@ -73,6 +81,15 @@ class _OnboardingCarouselPageState extends State<OnboardingCarouselPage> {
   void initState() {
     super.initState();
     _scheduleAutoAdvance();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Decode all backgrounds up front so the crossfade never flashes black.
+    for (final path in _backgrounds) {
+      unawaited(precacheImage(AssetImage(path), context));
+    }
   }
 
   @override
@@ -117,97 +134,150 @@ class _OnboardingCarouselPageState extends State<OnboardingCarouselPage> {
   @override
   Widget build(BuildContext context) {
     final isLastSlide = _page == _slides.length - 1;
+    final background = _backgrounds[_page % _backgrounds.length];
 
     return Scaffold(
       backgroundColor: AppBrand.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.only(right: AppBrand.s2, top: AppBrand.s1),
-                child: TextButton(
-                  onPressed: () => unawaited(_finish()),
-                  child: const Text('Skip', style: TextStyle(color: Colors.white54)),
-                ),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          AnimatedSwitcher(
+            duration: AppBrand.slow,
+            child: Image.asset(
+              background,
+              key: ValueKey(background),
+              fit: BoxFit.cover,
+              width: double.infinity,
+              height: double.infinity,
+            ),
+          ),
+          // Scrim: light at the top so the shop reads, near-solid at the
+          // bottom where the headline, dots and button sit.
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0.0, 0.35, 0.62, 1.0],
+                colors: [
+                  Color(0x99000000),
+                  Color(0x33000000),
+                  Color(0xCC08080A),
+                  Color(0xF208080A),
+                ],
               ),
             ),
-            Expanded(
-              child: PageView.builder(
-                controller: _controller,
-                itemCount: _slides.length,
-                onPageChanged: _onPageChanged,
-                itemBuilder: (context, index) => _slideView(_slides[index]),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppBrand.s5),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(_slides.length, (index) {
-                  final active = index == _page;
-                  return AnimatedContainer(
-                    duration: AppBrand.fast,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    width: active ? 18 : 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: active ? AppBrand.accent : Colors.white24,
-                      borderRadius: BorderRadius.circular(8),
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                Align(
+                  alignment: Alignment.topRight,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: AppBrand.s2, top: AppBrand.s1),
+                    child: TextButton(
+                      onPressed: () => unawaited(_finish()),
+                      child: const Text(
+                        'Skip',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
                     ),
-                  );
-                }),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppBrand.s6, 0, AppBrand.s6, AppBrand.s6),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _goToNext,
-                  style: AppBrand.primaryButton,
-                  child: Text(
-                    isLastSlide ? 'Get Started' : 'Next',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                 ),
-              ),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _controller,
+                    itemCount: _slides.length,
+                    onPageChanged: _onPageChanged,
+                    itemBuilder: (context, index) => _slideView(_slides[index]),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppBrand.s5),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(_slides.length, (index) {
+                      final active = index == _page;
+                      return AnimatedContainer(
+                        duration: AppBrand.fast,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        width: active ? 18 : 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          color: active ? AppBrand.accent : Colors.white38,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      );
+                    }),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(AppBrand.s6, 0, AppBrand.s6, AppBrand.s6),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _goToNext,
+                      style: AppBrand.primaryButton,
+                      child: Text(
+                        isLastSlide ? 'Get Started' : 'Next',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
+  static const _textShadow = [
+    Shadow(color: Color(0xCC000000), blurRadius: 12, offset: Offset(0, 2)),
+  ];
+
   Widget _slideView(_OnboardingSlide slide) {
+    // Anchored low, over the dark end of the scrim, so the photo stays visible
+    // above and the copy always has contrast behind it.
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: AppBrand.s7),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisAlignment: MainAxisAlignment.end,
         children: [
           Container(
-            width: 96,
-            height: 96,
+            width: 72,
+            height: 72,
             decoration: BoxDecoration(
-              color: AppBrand.accentTint,
+              color: const Color(0x99000000),
               shape: BoxShape.circle,
               border: Border.all(color: AppBrand.accentLine),
             ),
             alignment: Alignment.center,
-            child: Icon(slide.icon, color: AppBrand.accent, size: 44),
+            child: Icon(slide.icon, color: AppBrand.accent, size: 34),
           ),
-          const SizedBox(height: AppBrand.s6),
+          const SizedBox(height: AppBrand.s5),
           Text(
             slide.title,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              height: 1.15,
+              shadows: _textShadow,
+            ),
           ),
           const SizedBox(height: AppBrand.s3),
           Text(
             slide.body,
             textAlign: TextAlign.center,
-            style: const TextStyle(color: Colors.white70, fontSize: 14, height: 1.5),
+            style: const TextStyle(
+              color: Color(0xE6FFFFFF),
+              fontSize: 15,
+              height: 1.5,
+              shadows: _textShadow,
+            ),
           ),
         ],
       ),
