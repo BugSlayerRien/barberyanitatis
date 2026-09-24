@@ -93,8 +93,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
   String? _error;
   final Set<int> _processingAppointmentIds = <int>{};
   bool _isRouteSubscribed = false;
+  DateTime? _lastLoadedAt;
+  bool _loadInFlight = false;
 
   static const int _itemsPerPage = 4;
+  /// How long a loaded list is trusted before a revisit refetches it.
+  static const Duration _staleAfter = Duration(seconds: 60);
 
   @override
   void initState() {
@@ -136,7 +140,9 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     _loadAppointments();
   }
 
-  Future<void> _loadAppointments() async {
+  /// [force] skips the staleness check -- used after an action that changed
+  /// the data (cancel, reschedule, pull-to-refresh).
+  Future<void> _loadAppointments({bool force = false}) async {
     if (UserSession.userId == null) {
       if (!mounted) return;
       setState(() {
@@ -146,9 +152,28 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       return;
     }
 
-    if (!mounted) return;
+    // Returning from any pushed page and every app resume used to refetch the
+    // whole list, so simply opening an appointment and coming back showed a
+    // full-screen spinner on a list that had not changed.
+    final loadedAt = _lastLoadedAt;
+    final isFresh = loadedAt != null &&
+        DateTime.now().difference(loadedAt) < _staleAfter &&
+        _error == null;
+    if (!force && isFresh) return;
+    if (_loadInFlight) return;
+    _loadInFlight = true;
+
+    if (!mounted) {
+      _loadInFlight = false;
+      return;
+    }
+    // Only block the page when there is nothing to show yet; a refresh over
+    // existing rows happens quietly underneath.
+    final hasRows = _upcomingAppointments.isNotEmpty ||
+        _completedAppointments.isNotEmpty ||
+        _cancelledAppointments.isNotEmpty;
     setState(() {
-      _loading = true;
+      _loading = !hasRows;
       _error = null;
     });
 
@@ -284,6 +309,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         }
       }
 
+      _lastLoadedAt = DateTime.now();
       if (!mounted) return;
       setState(() {
         _upcomingAppointments = upcoming;
@@ -306,6 +332,8 @@ class _AppointmentsPageState extends State<AppointmentsPage>
         _error = 'Failed to load appointments: $e';
         _loading = false;
       });
+    } finally {
+      _loadInFlight = false;
     }
   }
 
@@ -1150,7 +1178,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     );
 
     if (mounted) {
-      _loadAppointments();
+      _loadAppointments(force: true);
     }
   }
 
@@ -1203,7 +1231,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Appointment rescheduled.')),
       );
-      _loadAppointments();
+      _loadAppointments(force: true);
     }
   }
 
@@ -1355,7 +1383,7 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       if (!mounted) {
         return;
       }
-      await _loadAppointments();
+      await _loadAppointments(force: true);
       if (!mounted) {
         return;
       }
