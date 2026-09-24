@@ -480,7 +480,18 @@ function sync_paid_groups_from_payments(PDO $pdo, bool $force = false): void
     $done = true;
 }
 
-/** Promote solo appointments that have a Paid row in `payments` but are still PendingPayment. */
+/**
+ * Promote solo appointments that were paid but are still PendingPayment.
+ *
+ * Checks the same three sources as the group version above. `payments` alone is
+ * not enough: that table is only written when a visit is completed
+ * (payment_recording.php), never by the PayMongo flow, which writes
+ * appointment_payments / appointment_payment_intents instead (webhook.php,
+ * paymongo/payment-status.php). Neither of those promotes the appointment, so
+ * before this looked at them, a solo booking whose in-app confirm call never
+ * landed -- a dropped connection while returning from GCash -- stayed unpaid
+ * forever even though the customer had been charged.
+ */
 function sync_paid_appointments_from_payments(PDO $pdo, bool $force = false): void
 {
     static $done = false;
@@ -498,11 +509,29 @@ function sync_paid_appointments_from_payments(PDO $pdo, bool $force = false): vo
     }
 
     $stmt = $pdo->query(
-        "SELECT DISTINCT a.appointment_id
+        "SELECT a.appointment_id
          FROM appointments a
-         INNER JOIN payments p ON p.appointment_id = a.appointment_id
          WHERE a.status = 'PendingPayment'
-           AND p.payment_status = 'Paid'"
+           AND (
+                EXISTS (
+                    SELECT 1
+                    FROM appointment_payments ap
+                    WHERE ap.appointment_id = a.appointment_id
+                      AND LOWER(ap.status) IN ('captured', 'paid', 'succeeded')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM appointment_payment_intents i
+                    WHERE i.appointment_id = a.appointment_id
+                      AND LOWER(i.status) IN ('paid', 'succeeded', 'captured')
+                )
+                OR EXISTS (
+                    SELECT 1
+                    FROM payments p
+                    WHERE p.appointment_id = a.appointment_id
+                      AND p.payment_status = 'Paid'
+                )
+           )"
     );
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
         $appointmentId = (int)($row['appointment_id'] ?? 0);

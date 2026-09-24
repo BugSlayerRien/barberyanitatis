@@ -4,7 +4,13 @@ import 'package:http/http.dart' as http;
 
 import 'api_config.dart';
 import 'app_brand.dart';
+import 'appointments_page.dart';
+import 'barber_selection_page.dart';
+import 'booking_guard.dart';
+import 'services/booking_slots_service.dart';
 import 'services/saved_previews_service.dart';
+import 'suggested_appointment_page.dart';
+import 'user_session.dart';
 import 'widgets/app_top_bar.dart';
 
 /// Full view of one saved AI look: all three generated angles, not just the
@@ -30,6 +36,7 @@ class _SavedLookDetailPageState extends State<SavedLookDetailPage> {
 
   int _angleIndex = 0;
   bool _deleting = false;
+  bool _booking = false;
 
   String get _styleName {
     final name = widget.look['style_name']?.toString().trim() ?? '';
@@ -43,6 +50,89 @@ class _SavedLookDetailPageState extends State<SavedLookDetailPage> {
         widget.look['left_url']?.toString().trim() ?? '',
         widget.look['right_url']?.toString().trim() ?? '',
       ];
+
+  /// Books this exact look. Mirrors face_scan_results_page's _bookSelected,
+  /// minus the capture upload: a saved row has no base64 photos, and the scan's
+  /// images are already on the server from when it was generated.
+  Future<void> _bookThisLook() async {
+    final variantId = (widget.look['variant_id'] as num?)?.toInt() ??
+        int.tryParse('${widget.look['variant_id'] ?? ''}') ??
+        0;
+    if (variantId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This look cannot be booked yet.')),
+      );
+      return;
+    }
+    final userId = UserSession.userId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please log in again.')),
+      );
+      return;
+    }
+
+    setState(() => _booking = true);
+    try {
+      if (await BookingGuard.hasActiveAppointment(userId: userId)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already have an active appointment.')),
+        );
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
+        );
+        return;
+      }
+
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedStyleName = _styleName;
+      // Must be the session that produced these images: the attach endpoint
+      // only accepts preview URLs living under this exact scan session, and
+      // ensureScanSessionId() would otherwise mint a fresh, wrong one.
+      final scanSessionId = widget.look['scan_session_id']?.toString().trim() ?? '';
+      if (scanSessionId.isNotEmpty) {
+        UserSession.activeScanSessionId = scanSessionId;
+      }
+      final urls = _angleUrls;
+      final previews = {
+        'frontViewUrl': urls[0],
+        'sideViewUrl': urls[1],
+        'backViewUrl': urls[2],
+      };
+      UserSession.selectedPreviewImages = previews;
+      UserSession.customerPreviewImages = previews;
+
+      final result = await BookingSlotsService.fetchBestSuggestion(userId: userId);
+      if (!mounted) return;
+
+      if (result.isSuccess && result.suggestion != null) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => SuggestedAppointmentPage(
+              suggestion: result.suggestion!,
+              alternatives: result.alternatives,
+            ),
+          ),
+        );
+        return;
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            result.errorMessage ??
+                'No open times right now. Pick a barber to see their schedule.',
+          ),
+        ),
+      );
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
+      );
+    } finally {
+      if (mounted) setState(() => _booking = false);
+    }
+  }
 
   Future<void> _confirmDelete() async {
     final savedId = (widget.look['saved_preview_id'] as num?)?.toInt() ?? 0;
@@ -163,8 +253,31 @@ class _SavedLookDetailPageState extends State<SavedLookDetailPage> {
             const SizedBox(height: 24),
             SizedBox(
               width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_booking || _deleting) ? null : _bookThisLook,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  disabledBackgroundColor: Colors.white24,
+                  minimumSize: const Size.fromHeight(50),
+                ),
+                child: _booking
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                      )
+                    : const Text(
+                        'Book this look',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
               child: OutlinedButton.icon(
-                onPressed: _deleting ? null : _confirmDelete,
+                onPressed: (_deleting || _booking) ? null : _confirmDelete,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppBrand.danger,
                   side: const BorderSide(color: AppBrand.danger),

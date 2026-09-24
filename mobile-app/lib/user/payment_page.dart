@@ -136,12 +136,26 @@ class _PaymentPageState extends State<PaymentPage> {
       }
       if (!mounted) return;
       if (statusData == null) {
+        // The gateway never answered in time -- usually a dropped connection on
+        // the way back from GCash, not a failed payment. Leaving the customer
+        // on this screen made them think nothing happened; the server
+        // reconciles a real payment on the next Bookings load
+        // (sync_paid_appointments_from_payments), so send them there.
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Payment status could not be confirmed. Check Appointments or retry.',
+              "Still confirming your payment. If it went through, your booking "
+              "updates here shortly -- don't pay again.",
             ),
           ),
+        );
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(
+            builder: (_) => AppointmentsPage(
+              highlightAppointmentId: widget.appointmentID,
+            ),
+          ),
+          (route) => false,
         );
         return;
       }
