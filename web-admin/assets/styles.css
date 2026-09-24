@@ -1208,6 +1208,28 @@ a {
   align-items: start;
 }
 
+/* Overlay PNG previews sit under their file input, so the cells they live in
+   are taller than their neighbours. A fixed box keeps every cell the same
+   height whether or not a view has been uploaded yet. */
+.overlay-thumb {
+  width: 100%;
+  max-width: 120px;
+  height: 72px;
+  margin-top: 6px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-0);
+}
+
+.overlay-thumb.is-empty {
+  display: grid;
+  place-items: center;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--text-subtle);
+}
+
 .form-grid > label,
 .field {
   display: grid;
@@ -1308,8 +1330,30 @@ input[type="checkbox"] {
 }
 
 input[type="file"].input {
+  display: flex;
+  align-items: center;
   padding: 6px 8px;
   font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+/* The native picker button renders in the OS light theme, which reads as a
+   bright patch in the dark admin shell. Match it to the secondary button. */
+input[type="file"].input::file-selector-button {
+  margin-right: 10px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+
+input[type="file"].input::file-selector-button:hover {
+  border-color: var(--gold);
+  color: var(--gold);
 }
 
 /* Search field with icon */
