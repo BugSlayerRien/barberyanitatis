@@ -1295,10 +1295,18 @@ async function loadServices() {
   renderServices();
 }
 
+// Overlay PNGs live with the API (on disk or in Storage), not beside the admin
+// bundle, so previews go through the same image proxy the mobile app uses.
+// The old `../../mobile-app/assets/...` path only resolved when the admin was
+// served out of a full repo checkout and 404'd on every real deployment.
 function overlayPreviewUrl(assetPath) {
   if (!assetPath) return "";
-  const clean = String(assetPath).replace(/^assets\//, "");
-  return `../../mobile-app/assets/${clean}`;
+  const raw = String(assetPath).trim();
+  if (/^(https?:)?\/\//.test(raw) || raw.includes("image_proxy.php")) {
+    return raw;
+  }
+  const clean = raw.replace(/^\/+/, "");
+  return `${resolveApiUrl("image_proxy.php")}?path=${encodeURIComponent(clean)}`;
 }
 
 async function loadHaircuts() {
@@ -1468,8 +1476,10 @@ function renderHaircutOverlayUploads(hairstyle) {
     { key: "right", label: "Right", url: hairstyle.back_view_url },
   ];
 
+  // The folder slug applies to all three views, so it gets its own full-width
+  // row instead of competing for a column with the uploads.
   container.innerHTML = `
-    <label>Overlay folder slug
+    <label style="grid-column: 1 / -1;">Overlay folder slug
       <input class="input" id="hc-overlay-folder" value="${folder}" placeholder="e.g. wavy_mod_cut" />
     </label>
     ${views
@@ -1477,7 +1487,11 @@ function renderHaircutOverlayUploads(hairstyle) {
         (view) => `
           <label>${view.label} PNG
             <input class="input" type="file" accept="image/png" data-overlay-view="${view.key}" />
-            ${view.url ? `<img src="${overlayPreviewUrl(view.url)}" alt="${view.label}" style="max-width: 120px; margin-top: 6px; border-radius: 8px;" />` : ""}
+            ${
+              view.url
+                ? `<img class="overlay-thumb" src="${overlayPreviewUrl(view.url)}" alt="${view.label} overlay" />`
+                : `<span class="overlay-thumb is-empty">No PNG yet</span>`
+            }
           </label>
         `,
       )
