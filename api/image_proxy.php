@@ -30,10 +30,17 @@ $root = api_project_root();
 $relative = ltrim($path, '/');
 $fullPath = $root . '/' . $relative;
 
+// assets/ paths are stored relative to whichever tree owns them: seeded assets
+// live under database/, and admin-uploaded overlays are written into
+// mobile-app/ (see mobile_app_overlay_root()). Check both before giving up on
+// disk and falling through to Storage.
 if (!is_file($fullPath) && (strpos($relative, 'assets/') === 0)) {
-    $altPath = $root . '/database/' . $relative;
-    if (is_file($altPath)) {
-        $fullPath = $altPath;
+    foreach (['database', 'mobile-app'] as $altRoot) {
+        $altPath = $root . '/' . $altRoot . '/' . $relative;
+        if (is_file($altPath)) {
+            $fullPath = $altPath;
+            break;
+        }
     }
 }
 
