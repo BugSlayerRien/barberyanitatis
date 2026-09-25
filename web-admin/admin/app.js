@@ -439,9 +439,13 @@ function renderActivities(activities) {
     return;
   }
 
-  const categorize = (titleText) => {
-    const text = String(titleText || "").toLowerCase();
-    if (text.includes("appointment")) return "appointments";
+  // The server classifies each entry now (api/activity_feed.php). The keyword
+  // fallback stays for anything served by an older API build.
+  const categorize = (activity) => {
+    if (activity.category) return activity.category;
+    const text = String(activity.title || "").toLowerCase();
+    if (text.includes("payment") || text.includes("refund")) return "money";
+    if (text.includes("appointment") || text.includes("walk-in")) return "appointments";
     if (text.includes("user") || text.includes("customer") || text.includes("barber") || text.includes("receptionist") || text.includes("admin")) return "users";
     if (text.includes("service")) return "services";
     return "system";
@@ -449,13 +453,14 @@ function renderActivities(activities) {
 
   const categories = {
     appointments: "Appointments",
+    money: "Money",
     users: "Users",
     services: "Services",
     system: "System",
   };
 
   const filtered = activities.filter((activity) => {
-    if (filterValue !== "all" && categorize(activity.title) !== filterValue) return false;
+    if (filterValue !== "all" && categorize(activity) !== filterValue) return false;
     const activeView = document.querySelector(".nav button.active")?.dataset.view || "dashboard";
     const query = activeView === "dashboard"
       ? String(document.getElementById("global-search")?.value || "").trim().toLowerCase()
@@ -1761,8 +1766,12 @@ function renderAudit() {
   const categoryFilter = document.getElementById("audit-category-filter")?.value || "all";
   if (!list) return;
 
-  const categorize = (text) => {
-    const source = String(text || "").toLowerCase();
+  // The server now classifies each entry (api/admin_audit.php). Keyword
+  // guessing stays only as a fallback for rows logged before that.
+  const categorize = (event) => {
+    if (event.category) return event.category;
+    const source = `${event.title ?? ""} ${event.description ?? ""}`.toLowerCase();
+    if (source.includes("payment") || source.includes("refund")) return "money";
     if (source.includes("appointment")) return "appointments";
     if (source.includes("user") || source.includes("customer") || source.includes("barber") || source.includes("receptionist") || source.includes("admin")) return "users";
     if (source.includes("service")) return "services";
@@ -1775,7 +1784,7 @@ function renderAudit() {
       || String(event.description ?? "").toLowerCase().includes(query);
     if (!textMatch) return false;
     if (categoryFilter === "all") return true;
-    return categorize(`${event.title} ${event.description}`) === categoryFilter;
+    return categorize(event) === categoryFilter;
   });
 
   list.innerHTML = "";
@@ -1803,11 +1812,13 @@ function renderAudit() {
     events.forEach((event) => {
       const item = document.createElement("div");
       item.className = "card gradient list-item";
+      const who = event.actor?.display ? `<p class="muted">by ${event.actor.display}</p>` : "";
       item.innerHTML = `
         <div class="icon-box">LOG</div>
         <div>
           <h4>${event.title || "Audit Event"}</h4>
           <p>${event.description || ""}</p>
+          ${who}
         </div>
         <div class="time">${event.time || ""}</div>
       `;

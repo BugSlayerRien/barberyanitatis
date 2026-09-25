@@ -354,14 +354,16 @@ try {
             ':message' => 'Payment intent created for booking ' . (string)$appointment['booking_code'] . '. Please complete checkout before expiry.',
         ]);
 
-        // Log payment intent creation to audit trail
-        audit_log($pdo, 'CREATE_INTENT', 'appointment_payment_intents', (string)$intent['intent_id'], null, [
+        // Log payment intent creation to audit trail. capturePayment shares
+        // this branch, so logging a flat 'CREATE_INTENT' filed a real money
+        // capture under the wrong action type.
+        audit_log($pdo, $action === 'capturePayment' ? 'CAPTURE_PAYMENT' : 'CREATE_INTENT', 'appointment_payment_intents', (string)$intent['intent_id'], null, [
             'appointment_id' => $appointmentID,
             'amount' => round($amount, 2),
             'method' => $method,
             'provider' => $provider,
             'status' => 'PendingGateway',
-        ], (int)$appointment['user_id']);
+        ], (int)$appointment['user_id'], audit_actor_customer((int)$appointment['user_id']));
 
         json_response([
             'message' => 'Payment intent created.',
@@ -445,6 +447,29 @@ try {
 
             $intent['status'] = 'Paid';
             $payment = finalize_paid_intent($pdo, $intent, $appointment, (string)$intent['method']);
+
+            // This is the path real GCash money takes. It was unaudited: the
+            // only captured-payment entry in the log came from the mock
+            // branch, so no live payment was traceable.
+            audit_log(
+                $pdo,
+                'PAYMENT_CAPTURED',
+                'appointment_payments',
+                (string)($payment['payment_id'] ?? $intent['intent_id']),
+                ['intent_status' => 'PendingGateway'],
+                [
+                    'appointment_id' => (int)$appointment['appointment_id'],
+                    'intent_id' => (int)$intent['intent_id'],
+                    'amount' => round((float)$intent['amount'], 2),
+                    'method' => (string)$intent['method'],
+                    'provider' => 'paymongo',
+                    'provider_ref' => $providerRef,
+                    'transaction_ref' => (string)$payment['transaction_ref'],
+                    'status' => 'Paid',
+                ],
+                (int)$appointment['user_id'],
+                audit_actor_customer((int)$appointment['user_id'])
+            );
             $pdo->commit();
 
             json_response([

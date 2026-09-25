@@ -314,15 +314,33 @@ try {
             json_response(['message' => 'Refund already marked as sent']);
         }
 
+        $completedBy = substr(trim((string)($input['completedBy'] ?? 'Receptionist')), 0, 120);
+        $refundNote = trim((string)($input['note'] ?? '')) ?: null;
         $pdo->prepare(
             "UPDATE appointment_refunds
              SET status = 'Completed', completed_at = NOW(), completed_by = :by, note = :note
              WHERE refund_id = :id"
         )->execute([
             ':id' => $refundId,
-            ':by' => substr(trim((string)($input['completedBy'] ?? 'Receptionist')), 0, 120),
-            ':note' => trim((string)($input['note'] ?? '')) ?: null,
+            ':by' => $completedBy,
+            ':note' => $refundNote,
         ]);
+
+        // A human marking cash as handed over. The only other record of it is
+        // completed_by, which is free text straight from the client, so this
+        // is the one place the event is independently traceable.
+        audit_log($pdo, 'COMPLETE_REFUND', 'appointment_refunds', (string)$refundId, [
+            'status' => (string)$refund['status'],
+        ], [
+            'status' => 'Completed',
+            'appointment_id' => (int)($refund['appointment_id'] ?? 0),
+            'amount' => round((float)($refund['amount'] ?? 0), 2),
+            'completed_by' => $completedBy,
+            'note' => $refundNote,
+        ], (int)($refund['user_id'] ?? 0) ?: null, audit_actor_staff([
+            'role' => 'Receptionist',
+            'full_name' => $completedBy,
+        ]));
 
         // This notification IS the customer-facing confirmation.
         if ((int)($refund['user_id'] ?? 0) > 0) {
@@ -526,6 +544,12 @@ try {
         if ($stmt->rowCount() === 0) {
             json_response(['error' => 'Walk-in not found'], 404);
         }
+
+        // 'Completed' triggers payment recording below, so this status change
+        // is a money event and belongs in the log.
+        audit_log($pdo, 'WALKIN_STATUS_UPDATE', 'walkin_queue', (string)$queueID, null, [
+            'status' => $status,
+        ], null, audit_actor_staff(['role' => 'Receptionist', 'full_name' => 'Receptionist portal']));
 
         if ($status === 'Completed') {
             try {

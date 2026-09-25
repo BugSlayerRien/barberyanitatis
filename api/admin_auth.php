@@ -4,6 +4,9 @@
 
 declare(strict_types=1);
 
+// audit_set_current_actor() / audit_actor_staff() live in db.php.
+require_once __DIR__ . '/db.php';
+
 const PORTAL_SESSION_TTL_SECONDS = 43200; // 12 hours
 
 function ensure_portal_sessions_table(PDO $pdo): void
@@ -119,10 +122,18 @@ function require_admin(PDO $pdo): array
         'UPDATE portal_sessions SET last_used_at = NOW() WHERE token_hash = :token_hash'
     )->execute([':token_hash' => hash_portal_token($token)]);
 
-    return [
+    $staff = [
         'staff_id' => (int)$row['staff_id'],
         'full_name' => (string)$row['full_name'],
         'email' => (string)$row['email'],
         'role' => (string)$row['role'],
     ];
+
+    // Every audit entry written later in this request is attributed to this
+    // admin, including the ones inside helper functions that never see the
+    // session. Their staff_id goes to actor_id, never to user_id -- that
+    // column means "the customer this record is about".
+    audit_set_current_actor(audit_actor_staff($staff));
+
+    return $staff;
 }

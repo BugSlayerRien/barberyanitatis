@@ -442,13 +442,20 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   record_id VARCHAR(100),
   old_values TEXT,
   new_values TEXT,
+  -- The customer a record belongs to, when there is one. NOT who acted --
+  -- staff, barber and customer ids come from different tables and collide.
   user_id BIGINT,
+  -- Who performed the action: customer / staff / admin / barber / system / webhook.
+  actor_type VARCHAR(20),
+  actor_id BIGINT,
+  actor_label VARCHAR(120),
   ip_address VARCHAR(45),
   user_agent TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action_date ON audit_logs (action_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs (created_at DESC);
 
 -- =========================
 -- 15. QUEUE DISPLAY VIEW

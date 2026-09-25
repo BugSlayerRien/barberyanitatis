@@ -6,6 +6,8 @@ require_once __DIR__ . '/http_bootstrap.php';
 paymongo_bootstrap(true);
 
 require_once __DIR__ . '/paymongo_client.php';
+// Provides get_db_connection() (DB_URL-aware) and audit_log().
+require_once __DIR__ . '/../db.php';
 
 $raw = file_get_contents('php://input');
 $payload = json_decode($raw, true);
@@ -240,6 +242,11 @@ function sync_payment_row(PDO $pdo, $externalId, $status, $metadataRef = null) {
             'status' => $status,
             'payment_id' => $existing['payment_id'],
         ]);
+        audit_log($pdo, 'WEBHOOK_PAYMENT_UPDATED', 'appointment_payments', (string)$existing['payment_id'], null, [
+            'appointment_id' => $appointmentId,
+            'status' => $status,
+            'transaction_ref' => $externalId,
+        ], null, audit_actor_webhook());
         return;
     }
 
@@ -254,28 +261,25 @@ function sync_payment_row(PDO $pdo, $externalId, $status, $metadataRef = null) {
         'status' => $status,
         'transaction_ref' => $externalId,
     ]);
+
+    // Gateway-initiated money movement, with no human and no app involved.
+    audit_log($pdo, 'WEBHOOK_PAYMENT_RECORDED', 'appointment_payments', $externalId, null, [
+        'appointment_id' => $appointmentId,
+        'amount' => round((float)$amount, 2),
+        'method' => $method,
+        'status' => $status,
+        'transaction_ref' => $externalId,
+    ], null, audit_actor_webhook());
 }
 
 function update_order_status($externalId, $status, $metadataRef = null) {
-    // Use PostgreSQL (Supabase) by default. Read DB config from env vars.
-    $dbHost = getenv('DB_HOST') ?: '127.0.0.1';
-    $dbPort = getenv('DB_PORT') ?: '5432';
-    $dbName = getenv('DB_NAME') ?: '';
-    $dbUser = getenv('DB_USER') ?: '';
-    $dbPass = getenv('DB_PASS') ?: '';
-    $sslMode = getenv('DB_SSLMODE'); // e.g. require
-
-    if (!$dbName || !$dbUser) {
-        @file_put_contents(__DIR__ . '/paymongo_events.log', date('c') . " DB config missing. $externalId => $status\n", FILE_APPEND);
-        return;
-    }
-
-    $dsn = "pgsql:host={$dbHost};port={$dbPort};dbname={$dbName}";
-    if ($sslMode) {
-        $dsn .= ";sslmode={$sslMode}";
-    }
+    // Was building its own DSN from DB_HOST/DB_NAME/DB_USER. This project
+    // configures Postgres with DB_URL (see db.php), so on the deployed API
+    // those were empty and every webhook bailed out at "DB config missing" --
+    // the webhook could not have been recording anything. get_db_connection()
+    // understands both, and brings audit_log() into scope.
     try {
-        $pdo = new PDO($dsn, $dbUser, $dbPass, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $pdo = get_db_connection();
 
         // Priority update order against project tables.
         $affected = try_update_table_status($pdo, 'appointment_payment_intents', $externalId, $status, $metadataRef);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/shop_schedule.php';
+require_once __DIR__ . '/activity_feed.php';
 
 try {
     $pdo = get_db_connection();
@@ -28,24 +29,9 @@ try {
     $monthlyRevenueStmt->execute();
     $monthlyRevenue = (float)$monthlyRevenueStmt->fetchColumn();
 
-    $recentAppointmentsStmt = $pdo->prepare(
-        "SELECT a.appointment_id, u.full_name, a.created_at
-         FROM appointments a
-         JOIN users u ON a.user_id = u.user_id
-         ORDER BY a.created_at DESC
-         LIMIT 5"
-    );
-    $recentAppointmentsStmt->execute();
-    $recentAppointments = $recentAppointmentsStmt->fetchAll();
-
-    $activities = array_map(function ($row) {
-        return [
-            'icon' => '📅',
-            'title' => 'New appointment created',
-            'description' => ($row['full_name'] ?? $row['fullName'] ?? 'Customer') . ' booked an appointment',
-            'time' => $row['created_at'] ?? $row['createdAt'] ?? null,
-        ];
-    }, $recentAppointments);
+    // Real multi-type feed (audit log + business tables), not just the five
+    // most recent bookings relabelled with one hardcoded title.
+    $activities = build_recent_activity($pdo, 30);
 
     // --- Shop rating -------------------------------------------------------
     // Averaged from real customer feedback (barber_feedback), NOT from

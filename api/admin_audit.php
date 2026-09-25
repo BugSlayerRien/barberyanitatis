@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
+require_once __DIR__ . '/audit_view.php';
 
 require_method('GET');
 
@@ -13,79 +14,125 @@ try {
     // client-side only -- without this, anyone who can reach the API could
     // read or change admin data with a plain HTTP request.
     require_admin($pdo);
-    // Find an audit table present in the DB (support multiple legacy naming conventions)
-    $tableStmt = $pdo->prepare(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND lower(table_name) LIKE 'audit%';"
+
+    $exists = $pdo->query(
+        "SELECT 1 FROM information_schema.tables
+         WHERE table_schema = 'public' AND table_name = 'audit_logs' LIMIT 1"
+    )->fetchColumn();
+    if ($exists === false) {
+        json_response(['events' => [], 'total' => 0, 'page' => 1, 'perPage' => 0]);
+    }
+
+    schema_ensure_once('audit_logs.actor', static function () use ($pdo): void {
+        ensure_audit_actor_columns($pdo);
+    });
+
+    $perPage = (int)($_GET['perPage'] ?? 100);
+    $perPage = max(1, min(200, $perPage));
+    $page = max(1, (int)($_GET['page'] ?? 1));
+    $search = trim((string)($_GET['search'] ?? ''));
+    $category = strtolower(trim((string)($_GET['category'] ?? 'all')));
+    $actorType = strtolower(trim((string)($_GET['actorType'] ?? '')));
+
+    // Filtering happens in SQL so a search reaches the whole history, not just
+    // whatever the old hard 200-row cap happened to include.
+    $where = [];
+    $params = [];
+    if ($search !== '') {
+        $where[] = '(action_type ILIKE :search OR table_name ILIKE :search OR record_id ILIKE :search
+                     OR actor_label ILIKE :search OR old_values ILIKE :search OR new_values ILIKE :search)';
+        $params[':search'] = '%' . $search . '%';
+    }
+    if ($actorType !== '' && $actorType !== 'all') {
+        $where[] = 'LOWER(actor_type) = :actor_type';
+        $params[':actor_type'] = $actorType;
+    }
+    $whereSql = $where === [] ? '' : ' WHERE ' . implode(' AND ', $where);
+
+    $countStmt = $pdo->prepare("SELECT COUNT(*) FROM audit_logs{$whereSql}");
+    $countStmt->execute($params);
+    $total = (int)$countStmt->fetchColumn();
+
+    $stmt = $pdo->prepare(
+        "SELECT log_id, action_type, table_name, record_id, old_values, new_values,
+                user_id, actor_type, actor_id, actor_label, ip_address, created_at
+         FROM audit_logs{$whereSql}
+         ORDER BY created_at DESC, log_id DESC
+         LIMIT :limit OFFSET :offset"
     );
-    $tableStmt->execute();
-    $tables = $tableStmt->fetchAll(PDO::FETCH_COLUMN);
-
-    if (empty($tables)) {
-        json_response(['events' => []]);
+    foreach ($params as $key => $value) {
+        $stmt->bindValue($key, $value);
     }
-
-    $auditTable = $tables[0];
-
-    // Discover columns for mapping
-    $colStmt = $pdo->prepare('SELECT column_name FROM information_schema.columns WHERE table_schema = :schema AND table_name = :table');
-    $colStmt->execute([':schema' => 'public', ':table' => $auditTable]);
-    $cols = array_map('strtolower', $colStmt->fetchAll(PDO::FETCH_COLUMN));
-
-    // Helper to pick first matching column name from candidates
-    $pick = function (array $candidates) use ($cols) {
-        foreach ($candidates as $c) {
-            if (in_array(strtolower($c), $cols, true)) return $c;
-        }
-        return null;
-    };
-
-    $map = [
-        'log_id' => $pick(['log_id', 'logid', 'id']),
-        'action_type' => $pick(['action_type', 'action', 'actiontype']),
-        'table_name' => $pick(['table_name', 'table_changed', 'tablechanged', 'tablechanged', 'tablechanged']),
-        'record_id' => $pick(['record_id', 'recordid', 'record_id']),
-        'old_values' => $pick(['old_values', 'oldvalue', 'old_value', 'oldvalues']),
-        'new_values' => $pick(['new_values', 'newvalue', 'new_value', 'newvalues']),
-        'user_id' => $pick(['user_id', 'userid', 'user']),
-        'created_at' => $pick(['created_at', 'timestamp', 'time', 'createdat']),
-    ];
-
-    // Build select list with aliases
-    $selectParts = [];
-    foreach ($map as $alias => $colName) {
-        if ($colName !== null) {
-            $selectParts[] = sprintf('"%s" AS %s', $colName, $alias);
-        }
-    }
-
-    if (empty($selectParts)) {
-        json_response(['events' => []]);
-    }
-
-    $orderBy = $map['created_at'] ?? $map['log_id'] ?? $map['action_type'];
-    $sql = sprintf('SELECT %s FROM "%s" ORDER BY "%s" DESC LIMIT 200', implode(', ', $selectParts), $auditTable, $orderBy);
-
-    $stmt = $pdo->prepare($sql);
+    $stmt->bindValue(':limit', $perPage, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', ($page - 1) * $perPage, PDO::PARAM_INT);
     $stmt->execute();
-    $rows = $stmt->fetchAll();
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $events = array_map(function (array $row): array {
-        $details = [];
-        if (!empty($row['table_name'])) {
-            $details[] = 'table: ' . $row['table_name'];
-        }
-        if (!empty($row['record_id'])) {
-            $details[] = 'record: ' . $row['record_id'];
+    $events = [];
+    foreach ($rows as $row) {
+        $actionType = (string)($row['action_type'] ?? '');
+        $tableName = $row['table_name'] !== null ? (string)$row['table_name'] : null;
+        $rowCategory = audit_event_category($actionType, $tableName);
+        if ($category !== '' && $category !== 'all' && $rowCategory !== $category) {
+            continue;
         }
 
-        return [
-            'title' => $row['action_type'] ?? 'Audit Event',
-            'description' => trim(implode(' | ', $details)),
-            'time' => $row['created_at'] ?? ($row['timestamp'] ?? null),
+        $old = audit_decode_values($row['old_values'] ?? null);
+        $new = audit_decode_values($row['new_values'] ?? null);
+        $changes = audit_event_changes($old, $new);
+
+        $actorLabel = trim((string)($row['actor_label'] ?? ''));
+        $actorType = trim((string)($row['actor_type'] ?? ''));
+        $who = $actorLabel !== ''
+            ? ($actorType !== '' ? $actorLabel . ' (' . $actorType . ')' : $actorLabel)
+            : ($actorType !== '' ? $actorType : 'Unknown');
+
+        $descriptionParts = [];
+        if ($tableName !== null && $tableName !== '') {
+            $descriptionParts[] = 'table: ' . $tableName;
+        }
+        if (($row['record_id'] ?? null) !== null && (string)$row['record_id'] !== '') {
+            $descriptionParts[] = 'record: ' . $row['record_id'];
+        }
+        $descriptionParts[] = 'by: ' . $who;
+        foreach (array_slice($changes, 0, 3) as $change) {
+            $descriptionParts[] = sprintf(
+                '%s: %s -> %s',
+                $change['field'],
+                $change['from'] === null ? '-' : (string)json_encode($change['from']),
+                $change['to'] === null ? '-' : (string)json_encode($change['to'])
+            );
+        }
+
+        $events[] = [
+            'logID' => (int)$row['log_id'],
+            'title' => audit_event_title($actionType),
+            'actionType' => $actionType,
+            'description' => implode(' | ', $descriptionParts),
+            'category' => $rowCategory,
+            'table' => $tableName,
+            'recordID' => $row['record_id'],
+            'actor' => [
+                'type' => $actorType !== '' ? $actorType : null,
+                'id' => $row['actor_id'] !== null ? (int)$row['actor_id'] : null,
+                'label' => $actorLabel !== '' ? $actorLabel : null,
+                'display' => $who,
+            ],
+            'userID' => $row['user_id'] !== null ? (int)$row['user_id'] : null,
+            'changes' => $changes,
+            'oldValues' => $old,
+            'newValues' => $new,
+            'ipAddress' => $row['ip_address'],
+            'time' => $row['created_at'],
         ];
-    }, $rows);
+    }
 
-    json_response(['events' => $events]);
+    json_response([
+        'events' => $events,
+        'total' => $total,
+        'page' => $page,
+        'perPage' => $perPage,
+    ]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
 }

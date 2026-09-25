@@ -3,6 +3,10 @@
 
 declare(strict_types=1);
 
+// audit_log() lives in db.php. Every caller already includes it, but this file
+// writes money rows -- it should not depend on include order to stay audited.
+require_once __DIR__ . '/db.php';
+
 function generate_payment_ref(PDO $pdo): string
 {
     do {
@@ -168,7 +172,11 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
         }
 
         $amount = appointment_total_amount($pdo, $appointmentId);
-        if ($amount <= 0) {
+        // Silent fallback: the audit entry below records whether the amount
+        // was computed from the booking or defaulted, so cash revenue that
+        // landed on a magic number is visible rather than indistinguishable.
+        $amountFallback = $amount <= 0;
+        if ($amountFallback) {
             $amount = 500.0;
         }
 
@@ -183,12 +191,22 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
                 'Cash', 'Paid', NOW()
              )"
         );
+        $paymentRef = generate_payment_ref($pdo);
         $insert->execute([
-            ':payment_ref' => generate_payment_ref($pdo),
+            ':payment_ref' => $paymentRef,
             ':appointment_id' => $appointmentId,
             ':amount' => $amount,
             ':total_amount' => $amount,
         ]);
+
+        // All cash revenue for appointments enters here and was invisible to
+        // the audit log.
+        audit_log($pdo, 'CASH_PAYMENT_RECORDED', 'payments', $paymentRef, null, [
+            'appointment_id' => $appointmentId,
+            'amount' => round($amount, 2),
+            'payment_method' => 'Cash',
+            'amount_defaulted' => $amountFallback,
+        ], null, audit_actor_system('Completion payment'));
 
         return;
     }
@@ -208,7 +226,8 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
     }
 
     $amount = walkin_total_amount($pdo, $queueId);
-    if ($amount <= 0) {
+    $amountFallback = $amount <= 0;
+    if ($amountFallback) {
         $amount = 100.0;
     }
 
@@ -223,10 +242,18 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
             'Cash', 'Paid', NOW()
          )"
     );
+    $paymentRef = generate_payment_ref($pdo);
     $insert->execute([
-        ':payment_ref' => generate_payment_ref($pdo),
+        ':payment_ref' => $paymentRef,
         ':queue_id' => $queueId,
         ':amount' => $amount,
         ':total_amount' => $amount,
     ]);
+
+    audit_log($pdo, 'CASH_PAYMENT_RECORDED', 'payments', $paymentRef, null, [
+        'queue_id' => $queueId,
+        'amount' => round($amount, 2),
+        'payment_method' => 'Cash',
+        'amount_defaulted' => $amountFallback,
+    ], null, audit_actor_system('Walk-in completion payment'));
 }

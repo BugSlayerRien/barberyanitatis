@@ -229,28 +229,117 @@ function ensure_walkin_queue_timestamp_columns(PDO $pdo): void
     $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS actual_end TIMESTAMPTZ');
 }
 
-function audit_log(PDO $pdo, string $action_type, ?string $table_name, ?string $record_id, ?array $old_values, ?array $new_values, ?int $user_id = null): bool
+/**
+ * Who performed an audited action.
+ *
+ * `user_id` alone could not answer this: staff are `staff_users.staff_id`,
+ * barbers are `barbers.barber_id` and customers are `users.user_id` — three
+ * separate id spaces, so the same number means three different people
+ * depending on the row. Every existing call site passes null, which made the
+ * column useless anyway. The actor is recorded separately and `user_id` keeps
+ * its original meaning: the customer a record belongs to.
+ */
+function ensure_audit_actor_columns(PDO $pdo): void
+{
+    $pdo->exec('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_type VARCHAR(20)');
+    $pdo->exec('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_id BIGINT');
+    $pdo->exec('ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS actor_label VARCHAR(120)');
+}
+
+/** Actor descriptor for a signed-in portal staff member (see require_admin). */
+function audit_actor_staff(array $staff): array
+{
+    $role = strtolower(trim((string)($staff['role'] ?? '')));
+    $name = trim((string)($staff['full_name'] ?? ''));
+    $email = trim((string)($staff['email'] ?? ''));
+
+    return [
+        'type' => $role === 'admin' ? 'admin' : 'staff',
+        'id' => isset($staff['staff_id']) ? (int)$staff['staff_id'] : null,
+        'label' => $name !== '' ? $name : ($email !== '' ? $email : 'Staff'),
+    ];
+}
+
+/** Actor descriptor for work with no human behind it (sweeps, webhooks). */
+function audit_actor_system(string $label = 'System'): array
+{
+    return ['type' => 'system', 'id' => null, 'label' => $label];
+}
+
+function audit_actor_webhook(string $label = 'PayMongo webhook'): array
+{
+    return ['type' => 'webhook', 'id' => null, 'label' => $label];
+}
+
+function audit_actor_customer(?int $userId, ?string $label = null): array
+{
+    return [
+        'type' => 'customer',
+        'id' => $userId,
+        'label' => $label !== null && trim($label) !== '' ? trim($label) : 'Customer',
+    ];
+}
+
+/**
+ * Remembers who is acting for the rest of this request, so audit_log() calls
+ * buried inside helper functions do not each have to be handed the identity.
+ * Set once after authentication; an explicit $actor argument still wins.
+ */
+function audit_set_current_actor(?array $actor): void
+{
+    $GLOBALS['__audit_current_actor'] = $actor;
+}
+
+function audit_current_actor(): ?array
+{
+    $actor = $GLOBALS['__audit_current_actor'] ?? null;
+
+    return is_array($actor) ? $actor : null;
+}
+
+/**
+ * @param array|null $actor ['type' => ..., 'id' => ..., 'label' => ...], from
+ *                          one of the audit_actor_* helpers. Falls back to
+ *                          audit_set_current_actor() when omitted.
+ */
+function audit_log(PDO $pdo, string $action_type, ?string $table_name, ?string $record_id, ?array $old_values, ?array $new_values, ?int $user_id = null, ?array $actor = null): bool
 {
     try {
+        schema_ensure_once('audit_logs.actor', static function () use ($pdo): void {
+            ensure_audit_actor_columns($pdo);
+        });
+
         $ip_address = $_SERVER['REMOTE_ADDR'] ?? null;
         $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? null;
 
+        $actor = $actor ?? audit_current_actor();
+        $actorLabel = isset($actor['label']) ? trim((string)$actor['label']) : '';
+
         $stmt = $pdo->prepare(
-            'INSERT INTO audit_logs (action_type, table_name, record_id, old_values, new_values, user_id, ip_address, user_agent, created_at)
-             VALUES (:action_type, :table_name, :record_id, :old_values, :new_values, :user_id, :ip_address, :user_agent, NOW())'
+            'INSERT INTO audit_logs (action_type, table_name, record_id, old_values, new_values, user_id, actor_type, actor_id, actor_label, ip_address, user_agent, created_at)
+             VALUES (:action_type, :table_name, :record_id, :old_values, :new_values, :user_id, :actor_type, :actor_id, :actor_label, :ip_address, :user_agent, NOW())'
         );
 
         return $stmt->execute([
             ':action_type' => $action_type,
             ':table_name' => $table_name,
-            ':record_id' => (string)$record_id,
+            // Cast only when there is something to cast: (string)null is '',
+            // which stored an empty string instead of leaving record_id NULL.
+            ':record_id' => $record_id === null ? null : (string)$record_id,
             ':old_values' => $old_values ? json_encode($old_values) : null,
             ':new_values' => $new_values ? json_encode($new_values) : null,
             ':user_id' => $user_id,
+            ':actor_type' => isset($actor['type']) ? (string)$actor['type'] : null,
+            ':actor_id' => isset($actor['id']) && $actor['id'] !== null ? (int)$actor['id'] : null,
+            ':actor_label' => $actorLabel !== '' ? $actorLabel : null,
             ':ip_address' => $ip_address,
             ':user_agent' => $user_agent,
         ]);
     } catch (PDOException $e) {
+        // Audit failure must not break the action being audited, but silence
+        // made a wrong column look like a working log. Leave a trace.
+        error_log('audit_log failed (' . $action_type . '): ' . $e->getMessage());
+
         return false;
     }
 }

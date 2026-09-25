@@ -1260,6 +1260,16 @@ try {
                     'contactPhone' => $phone,
                 ];
 
+                // The cancellation is audited; the refund it creates was not,
+                // so money owed to a customer appeared from nowhere.
+                audit_log($pdo, 'REFUND_REQUESTED', 'appointment_refunds', (string)$refundRow['refundId'], null, [
+                    'appointment_id' => $appointmentID,
+                    'payment_id' => $paidRow['payment_id'] ?? null,
+                    'amount' => round((float)$paidRow['total_amount'], 2),
+                    'status' => 'Pending',
+                    'reason' => $cancelReason !== '' ? substr($cancelReason, 0, 80) : 'Customer cancelled',
+                ], $userID, audit_actor_customer($userID));
+
                 // Receptionists need to see this without polling the DB.
                 //
                 // 'Admin'/'System', not 'Staff'/'Refund': the notifications table
@@ -1575,6 +1585,20 @@ try {
             ':title' => 'Appointment rescheduled',
             ':message' => 'Booking ' . (string)$appt['booking_code'] . ' was moved to ' . $newDate . ' at ' . $newStartTime . '.',
         ]);
+
+        // Moving a paid slot was unaudited, so there was no record of who
+        // moved a booking, from when, or how many moves it had used.
+        audit_log($pdo, 'RESCHEDULE_APPOINTMENT', 'appointments', (string)$appointmentID, [
+            'appointment_date' => (string)$appt['appointment_date'],
+            'start_time' => (string)$appt['start_time'],
+            'end_time' => (string)$appt['end_time'],
+            'reschedule_count' => (int)$appt['reschedule_count'],
+        ], [
+            'appointment_date' => $newDate,
+            'start_time' => $newStartTime,
+            'end_time' => $newEndTime,
+            'reschedule_count' => (int)$appt['reschedule_count'] + 1,
+        ], (int)$appt['user_id'], audit_actor_customer((int)$appt['user_id']));
 
         $pdo->commit();
 
