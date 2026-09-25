@@ -12,6 +12,7 @@ import 'saved_haircuts_page.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/barber_avatar.dart';
 import 'api_config.dart';
 import 'services/booking_draft_service.dart';
 
@@ -103,11 +104,20 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
         context: context,
         builder: (_) => BarberDetailDialog(
           barberName: barber['full_name']?.toString() ?? 'Barber',
+          profileImage: BarberAvatar.imageFieldOf(barber),
           specialty: barber['specialty']?.toString() ?? 'General',
           yearsExperience: barber['years_experience'] is int
               ? barber['years_experience'] as int
               : int.tryParse('${barber['years_experience']}') ?? 0,
           rating: double.tryParse('${barber['rating']}') ?? 5.0,
+          // ratingCount and recentFeedback were already in the response and
+          // thrown away, leaving a bare score with nothing behind it.
+          ratingCount: int.tryParse('${data['ratingCount']}') ?? 0,
+          recentFeedback: (data['recentFeedback'] as List?)
+                  ?.whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList() ??
+              const [],
           bio: barber['bio']?.toString() ?? '',
           todayAppointments: todayCount,
         ),
@@ -169,9 +179,6 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
         itemBuilder: (context, index) {
           final barber = _barbers[index];
           final barberName = barber['full_name']?.toString() ?? 'Barber';
-          final initials = barberName.isNotEmpty
-              ? barberName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join()
-              : 'B';
 
           return Container(
               margin: const EdgeInsets.only(bottom: 12),
@@ -187,23 +194,12 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
               ),
                 child: Row(
                 children: [
-                  Container(
-                    width: 80,
-                    height: 80,
-                    decoration: BoxDecoration(
-                      color: Colors.black,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Center(
-                      child: Text(
-                        initials,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 24,
-                        ),
-                      ),
-                    ),
+                  // profile_image already comes back on the list action; it
+                  // was simply never read here.
+                  BarberAvatar(
+                    profileImage: BarberAvatar.imageFieldOf(barber),
+                    barberName: barberName,
+                    size: 80,
                   ),
                   const SizedBox(width: 16),
                   Expanded(
@@ -247,20 +243,24 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
                         final loadingDetails = _detailsLoadingBarberId == barberId;
                         final openingCalendar = _openingCalendarBarberId == barberId;
 
-                        return TextButton(
+                        // An icon on its own is invisible to a screen reader,
+                        // so it keeps the label the text button used to give.
+                        return IconButton(
                           onPressed: (loadingDetails || openingCalendar || barberId <= 0)
                               ? null
                               : () => _showBarberDetails(barberId),
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                          ),
-                          child: loadingDetails
+                          tooltip: 'About $barberName',
+                          color: Colors.white,
+                          iconSize: 22,
+                          constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                          padding: EdgeInsets.zero,
+                          icon: loadingDetails
                               ? const SizedBox(
                                   width: 14,
                                   height: 14,
                                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                 )
-                              : const Text('View'),
+                              : const Icon(Icons.info_outline),
                         );
                       }),
                       const SizedBox(height: 6),
@@ -386,9 +386,12 @@ class _BarberSelectionPageState extends State<BarberSelectionPage> {
 
 class BarberDetailDialog extends StatelessWidget {
   final String barberName;
+  final String profileImage;
   final String specialty;
   final int yearsExperience;
   final double rating;
+  final int ratingCount;
+  final List<Map<String, dynamic>> recentFeedback;
   final String bio;
   final int todayAppointments;
 
@@ -400,6 +403,9 @@ class BarberDetailDialog extends StatelessWidget {
     required this.rating,
     required this.bio,
     required this.todayAppointments,
+    this.profileImage = '',
+    this.ratingCount = 0,
+    this.recentFeedback = const [],
   });
 
   @override
@@ -409,15 +415,11 @@ class BarberDetailDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
-          CircleAvatar(
-            radius: 22,
-            backgroundColor: AppBrand.accent,
-            child: Text(
-              barberName.isNotEmpty
-                  ? barberName.trim().split(' ').map((e) => e.isNotEmpty ? e[0] : '').take(2).join()
-                  : 'B',
-              style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-            ),
+          BarberAvatar(
+            profileImage: profileImage,
+            barberName: barberName,
+            size: 44,
+            background: AppBrand.accent,
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -428,19 +430,41 @@ class BarberDetailDialog extends StatelessWidget {
           ),
         ],
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _detailRow('Specialty', specialty),
-          _detailRow('Experience', '$yearsExperience yrs'),
-          _detailRow('Rating', rating.toStringAsFixed(1)),
-          _detailRow('Appointments today', '$todayAppointments'),
-          if (bio.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(bio, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+      // Scrollable now that a bio and up to three comments can follow the
+      // fixed rows -- an AlertDialog's content does not scroll on its own.
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _detailRow('Specialty', specialty),
+            _detailRow('Experience', '$yearsExperience yrs'),
+            // A lone score says nothing about how much it is worth trusting, so
+            // the number of ratings behind it goes on the same line.
+            _detailRow(
+              'Rating',
+              ratingCount > 0
+                  ? '${rating.toStringAsFixed(1)} ($ratingCount ${ratingCount == 1 ? 'rating' : 'ratings'})'
+                  : 'No ratings yet',
+            ),
+            _detailRow('Appointments today', '$todayAppointments'),
+            if (bio.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(bio, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            ],
+            if (recentFeedback.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              const Text(
+                'Recent feedback',
+                style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 6),
+              // Capped so the dialog cannot grow past the screen on a barber
+              // with a long history; the API already returns at most 20.
+              ...recentFeedback.take(3).map(_feedbackRow),
+            ],
           ],
-        ],
+        ),
       ),
       actions: [
         TextButton(
@@ -448,6 +472,37 @@ class BarberDetailDialog extends StatelessWidget {
           child: const Text('Close', style: TextStyle(color: Colors.white)),
         ),
       ],
+    );
+  }
+
+  Widget _feedbackRow(Map<String, dynamic> entry) {
+    final stars = int.tryParse('${entry['rating']}') ?? 0;
+    final comment = entry['comment']?.toString().trim() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: List.generate(
+              5,
+              (i) => Icon(
+                i < stars ? Icons.star : Icons.star_border,
+                size: 13,
+                color: AppBrand.accent,
+              ),
+            ),
+          ),
+          if (comment.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                comment,
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

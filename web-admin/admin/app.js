@@ -58,6 +58,15 @@ navButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const view = button.dataset.view;
     if (view === "logout") {
+      // Only the deliberate nav-button sign-out confirms. The identical
+      // clear-and-redirect used as the 401/403 auto-kick stays silent -- an
+      // expired session must not stop to ask.
+      const ok = await confirmAction("Sign out of the admin portal?", {
+        title: "Sign out",
+        confirmLabel: "Sign out",
+        danger: true,
+      });
+      if (!ok) return;
       sessionStorage.clear();
       window.location.href = "../login.html";
       return;
@@ -1502,6 +1511,10 @@ function renderHaircutOverlayUploads(hairstyle) {
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
       if (!file || !state.haircutEditor?.hairstyleId) return;
+      // A file input has no button to spin, and the upload is followed by a
+      // detail re-fetch and a full editor re-render -- so cover the whole
+      // overlay block instead of leaving the section looking idle.
+      setRegionLoading(container, true, "Uploading overlay...");
       try {
         const folderInput = document.getElementById("hc-overlay-folder");
         await uploadHaircutOverlay(
@@ -1517,6 +1530,10 @@ function renderHaircutOverlayUploads(hairstyle) {
       } catch (error) {
         toast(error.message || "Upload failed", "error");
       } finally {
+        // openHaircutEditor() rebuilds this container on success, so the
+        // cover is gone with it; clearing again is harmless and covers the
+        // error path where the old markup survives.
+        setRegionLoading(container, false);
         input.value = "";
       }
     });
@@ -2868,12 +2885,15 @@ document.addEventListener("click", async (event) => {
   if (target.classList.contains("btn-haircut")) {
     const id = target.dataset.id;
     if (!id) return;
-    try {
-      const detail = await fetchHaircutDetail(Number(id));
-      openHaircutEditor(detail.hairstyle, detail.variants);
-    } catch (error) {
-      toast(error.message || "Failed to open haircut", "error");
-    }
+    // Delegated handler, so the button is `target`, not `event.currentTarget`.
+    await withButtonLoading(target, async () => {
+      try {
+        const detail = await fetchHaircutDetail(Number(id));
+        openHaircutEditor(detail.hairstyle, detail.variants);
+      } catch (error) {
+        toast(error.message || "Failed to open haircut", "error");
+      }
+    }, { label: "Opening..." });
   }
 
   if (target.classList.contains("btn-haircut-delete")) {
@@ -2885,13 +2905,15 @@ document.addEventListener("click", async (event) => {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await saveHaircut("delete", { hairstyleID: Number(id) });
-      toast("Haircut deactivated.");
-      await loadHaircuts();
-    } catch (error) {
-      toast(error.message || "Delete failed", "error");
-    }
+    await withButtonLoading(target, async () => {
+      try {
+        await saveHaircut("delete", { hairstyleID: Number(id) });
+        toast("Haircut deactivated.");
+        await loadHaircuts();
+      } catch (error) {
+        toast(error.message || "Delete failed", "error");
+      }
+    }, { label: "Deactivating..." });
   }
 
   if (target.classList.contains("btn-variant-edit")) {
@@ -2911,16 +2933,18 @@ document.addEventListener("click", async (event) => {
       danger: true,
     });
     if (!ok) return;
-    try {
-      await saveVariant("deleteVariant", { variantID: Number(id) });
-      toast("Variant deleted.");
-      if (state.haircutEditor?.hairstyleId) {
-        state.haircutDetail = await fetchHaircutDetail(state.haircutEditor.hairstyleId);
-        renderHaircutVariantsList();
+    await withButtonLoading(target, async () => {
+      try {
+        await saveVariant("deleteVariant", { variantID: Number(id) });
+        toast("Variant deleted.");
+        if (state.haircutEditor?.hairstyleId) {
+          state.haircutDetail = await fetchHaircutDetail(state.haircutEditor.hairstyleId);
+          renderHaircutVariantsList();
+        }
+      } catch (error) {
+        toast(error.message || "Delete failed", "error");
       }
-    } catch (error) {
-      toast(error.message || "Delete failed", "error");
-    }
+    }, { label: "Deleting..." });
   }
 
 });
@@ -2949,7 +2973,9 @@ document.getElementById("haircuts-search")?.addEventListener("input", () => {
   resetPagination(["haircuts-table"]);
   renderHaircuts();
 });
-document.getElementById("haircut-editor-save")?.addEventListener("click", saveHaircutEditor);
+document.getElementById("haircut-editor-save")?.addEventListener("click", (event) => {
+  withButtonLoading(event.currentTarget, saveHaircutEditor, { label: "Saving..." });
+});
 document.getElementById("haircut-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("haircut-editor-dialog");
   if (dialog instanceof HTMLDialogElement) dialog.close();
@@ -2957,7 +2983,9 @@ document.getElementById("haircut-editor-cancel")?.addEventListener("click", () =
   state.haircutDetail = null;
 });
 document.getElementById("haircut-variant-add")?.addEventListener("click", () => openVariantEditor(null));
-document.getElementById("variant-editor-save")?.addEventListener("click", saveVariantEditor);
+document.getElementById("variant-editor-save")?.addEventListener("click", (event) => {
+  withButtonLoading(event.currentTarget, saveVariantEditor, { label: "Saving..." });
+});
 document.getElementById("variant-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("variant-editor-dialog");
   if (dialog instanceof HTMLDialogElement) dialog.close();
