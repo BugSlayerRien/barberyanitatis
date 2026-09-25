@@ -260,20 +260,6 @@ try {
          ORDER BY 1"
     )->fetchAll(PDO::FETCH_ASSOC);
 
-    $topServices = $pdo->query(
-        "SELECT s.service_id, s.service_name,
-                COUNT(*)::int AS booking_count,
-                COALESCE(SUM(CASE WHEN a.status = 'Completed' THEN ad.final_price ELSE 0 END), 0)::float AS revenue
-         FROM appointment_details ad
-         JOIN services s ON s.service_id = ad.service_id
-         JOIN appointments a ON a.appointment_id = ad.appointment_id
-         WHERE {$apptWhereA}
-           AND a.status IN {$activeBookingStatuses}
-         GROUP BY s.service_id, s.service_name
-         ORDER BY booking_count DESC
-         LIMIT 8"
-    )->fetchAll(PDO::FETCH_ASSOC);
-
     $barberPerformance = $pdo->query(
         "SELECT b.barber_id, b.full_name, b.barber_channel,
                 COUNT(*) FILTER (WHERE a.status = 'Completed')::int AS completed,
@@ -702,15 +688,6 @@ try {
         'appointmentsInPeriod' => $totalAppointments,
         'totalUsers' => $totalCustomers,
         'appointmentStatusCounts' => $statusCounts,
-        'topServices' => array_map(static function (array $row): array {
-            return [
-                'service_id' => (int)$row['service_id'],
-                'service_name' => (string)$row['service_name'],
-                'count' => (int)$row['booking_count'],
-                'booking_count' => (int)$row['booking_count'],
-                'revenue' => (float)$row['revenue'],
-            ];
-        }, $topServices),
         'trends' => [
             'appointments' => $appointmentTrend,
             'revenue' => $revenueTrend,

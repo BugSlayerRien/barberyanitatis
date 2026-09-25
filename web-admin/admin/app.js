@@ -2002,7 +2002,6 @@ function renderAnalyticsCharts(metrics) {
   renderTrendChart(metrics);
 
   const statusCanvas = document.getElementById("analytics-status-chart");
-  const servicesCanvas = document.getElementById("analytics-services-chart");
   const hoursCanvas = document.getElementById("analytics-hours-chart");
   const daysCanvas = document.getElementById("analytics-days-chart");
 
@@ -2030,36 +2029,6 @@ function renderAnalyticsCharts(metrics) {
         },
       },
     });
-  }
-
-  const serviceRows = metrics?.topServices ?? [];
-  if (servicesCanvas instanceof HTMLCanvasElement) {
-    state.analyticsCharts.services = new Chart(servicesCanvas, {
-      type: "bar",
-      data: {
-        labels: serviceRows.length ? serviceRows.map((r) => r.service_name || "Service") : ["No Data"],
-        datasets: [{
-          label: "Bookings",
-          data: serviceRows.length ? serviceRows.map((r) => Number(r.booking_count ?? r.count ?? 0)) : [0],
-          backgroundColor: CHART_COLORS.goldBar,
-          borderRadius: 6,
-          maxBarThickness: 42,
-        }],
-      },
-      options: chartDefaults(),
-    });
-  }
-
-  const list = document.getElementById("analytics-services-list");
-  if (list) {
-    list.innerHTML = serviceRows.length
-      ? serviceRows.map((row) => `
-          <div class="analytics-stack-item">
-            <strong>${escapeAnalyticsText(row.service_name)}</strong>
-            ${Number(row.booking_count ?? row.count ?? 0)} bookings · ${formatPeso(row.revenue ?? 0)} completed revenue
-          </div>
-        `).join("")
-      : '<div class="meta">No service bookings in this period.</div>';
   }
 
   const peakHours = metrics?.operations?.peakHours ?? [];
