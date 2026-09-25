@@ -791,6 +791,7 @@ async function updateUser(payload) {
   });
   if (!response.ok) {
     const data = await parseJsonResponse(response);
+    assertPortalSession(response, data);
     throw new Error(data.error || "Update failed");
   }
 }
@@ -803,6 +804,7 @@ async function assignPortalRole(payload) {
   });
   if (!response.ok) {
     const data = await parseJsonResponse(response);
+    assertPortalSession(response, data);
     throw new Error(data.error || "Role update failed");
   }
 }
@@ -1260,8 +1262,25 @@ async function saveService(action, payload) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    assertPortalSession(response, data);
     throw new Error(data.error || "Save failed");
   }
+}
+
+/**
+ * A write that comes back 401/403 means the admin session is gone (it lasts 12
+ * hours). The save helpers below only threw "Save failed", so the dialog sat
+ * there with no explanation and no way back to the login page -- QA reported
+ * exactly that. Surface it and send the user to sign in again.
+ */
+function assertPortalSession(response, data) {
+  if (response.status !== 401 && response.status !== 403) return;
+  toast(data?.error || "Your admin session expired. Please sign in again.", "error");
+  sessionStorage.clear();
+  window.setTimeout(() => {
+    window.location.href = "../login.html";
+  }, 1500);
+  throw new Error("Admin session expired. Please sign in again.");
 }
 
 function renderServices() {
@@ -1408,6 +1427,7 @@ async function saveHaircut(action, payload) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    assertPortalSession(response, data);
     throw new Error(data.error || "Save failed");
   }
   return data;
@@ -1421,6 +1441,7 @@ async function saveVariant(action, payload) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    assertPortalSession(response, data);
     throw new Error(data.error || "Variant save failed");
   }
   return data;
@@ -1441,6 +1462,7 @@ async function uploadHaircutOverlay(hairstyleId, view, file, overlayFolder) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    assertPortalSession(response, data);
     throw new Error(data.error || "Upload failed");
   }
   return data;
@@ -3036,7 +3058,8 @@ document.getElementById("settings-save")?.addEventListener("click", async (event
       });
       const data = await parseJsonResponse(response);
       if (!response.ok) {
-        throw new Error(data.error || "Save failed");
+        assertPortalSession(response, data);
+    throw new Error(data.error || "Save failed");
       }
       applySettingsPayload(data);
       toast(data.message || "Settings saved.", "success");

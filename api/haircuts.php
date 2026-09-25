@@ -53,7 +53,7 @@ try {
     }
 
     if ($action === 'listLibrary') {
-        $codes = overlay_library_style_codes();
+        $codes = overlay_library_style_codes($pdo);
         $inParts = [];
         $params = [];
         foreach ($codes as $index => $code) {
@@ -87,13 +87,13 @@ try {
             $normalizeHaircutRow,
             array_values(array_filter(
                 $stmt->fetchAll(),
-                static fn(array $row): bool => is_overlay_library_row($row)
+                static fn(array $row): bool => is_overlay_library_row($row, $codes)
                     && ($hairTexture === '' || variant_matches_customer_texture($row, $hairTexture))
             ))
         );
         json_response([
             'hairstyles' => $hairstyles,
-            'libraryCatalogSize' => overlay_library_catalog_size(),
+            'libraryCatalogSize' => overlay_library_catalog_size($pdo),
         ]);
     }
 

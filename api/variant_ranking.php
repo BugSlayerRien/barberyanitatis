@@ -86,13 +86,39 @@ function filter_recommendations_for_customer(array $rows, string $hairTexture, b
     }
 
     $deduped = dedupe_recommendations_by_style_name($strict);
-    if ($hairTexture === '' || count($deduped) >= 8 || !$allowLibraryRelax) {
+    if ($hairTexture === '' || !$allowLibraryRelax) {
         return $deduped;
     }
 
-    return dedupe_recommendations_by_style_name(
+    // The relax threshold used to be a flat 8. Straight hair yields exactly 8
+    // matching styles, so deactivating a single straight style tipped it over
+    // and the fallback below handed a straight-haired customer the entire
+    // catalog, curly styles included. A handful of well-matched styles is a
+    // better library than a padded, wrong one, so only relax when the strict
+    // set is genuinely too thin to browse.
+    if (count($deduped) >= 4) {
+        return $deduped;
+    }
+
+    // Still keep the customer's own texture first when padding out.
+    $relaxed = dedupe_recommendations_by_style_name(
         array_values(array_filter($rows, static fn($row): bool => is_array($row)))
     );
+    $strictKeys = [];
+    foreach ($deduped as $row) {
+        $strictKeys[strtolower(trim((string)($row['style_name'] ?? '')))] = true;
+    }
+    usort($relaxed, static function (array $a, array $b) use ($strictKeys): int {
+        $aStrict = isset($strictKeys[strtolower(trim((string)($a['style_name'] ?? '')))]) ? 0 : 1;
+        $bStrict = isset($strictKeys[strtolower(trim((string)($b['style_name'] ?? '')))]) ? 0 : 1;
+        if ($aStrict !== $bStrict) {
+            return $aStrict <=> $bStrict;
+        }
+
+        return ((float)($b['match_score'] ?? 0)) <=> ((float)($a['match_score'] ?? 0));
+    });
+
+    return $relaxed;
 }
 
 /**
@@ -164,7 +190,7 @@ function fetch_ranked_variants(PDO $pdo, string $faceShape, string $hairTexture,
         ensure_top_pick_eligible_column($pdo);
     });
 
-    $catalogSize = overlay_library_catalog_size();
+    $catalogSize = overlay_library_catalog_size($pdo);
     $limit = max(1, min(48, (int)($options['limit'] ?? $catalogSize)));
     $libraryOnly = (bool)($options['libraryOnly'] ?? true);
     $libraryFaceFilter = (bool)($options['libraryFaceFilter'] ?? false);
@@ -193,7 +219,7 @@ SQL;
         ':hair_texture' => $hairTexture,
     ];
     if ($libraryOnly) {
-        $codes = overlay_library_style_codes();
+        $codes = overlay_library_style_codes($pdo);
         $inParts = [];
         foreach ($codes as $index => $code) {
             $param = ':lib_code_' . $index;

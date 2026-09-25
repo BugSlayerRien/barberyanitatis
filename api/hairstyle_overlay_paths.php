@@ -4,19 +4,91 @@
 declare(strict_types=1);
 
 /**
- * Canonical HC-* codes for the mobile overlay haircut library (24 styles).
- * Keep in sync with scripts/seed_all_overlay_hairstyles.php and OverlayRegistry.
+ * Built-in HC-* codes with bundled overlay artwork. This is the *asset*
+ * inventory, not the catalog: a style only reaches customers if it is also
+ * active in the database and all three of its images exist. See
+ * overlay_library_style_codes().
  *
  * @return list<string>
  */
-function overlay_library_style_codes(): array
+function overlay_library_bundled_style_codes(): array
 {
     return array_keys(overlay_library_code_keys());
 }
 
-function overlay_library_catalog_size(): int
+/**
+ * The haircut catalog, from the database, gated on artwork actually existing.
+ *
+ * It used to be this hardcoded list of 24 codes, so adding a haircut meant a
+ * code change, and a style whose images were missing still appeared and then
+ * failed to render. Styles are now included when they are active in
+ * `hairstyles` and all three overlay images resolve -- either bundled artwork
+ * or per-variant uploads.
+ *
+ * Without a PDO (callers that have no connection to hand) this falls back to
+ * the bundled list, which is the old behaviour.
+ *
+ * @return list<string>
+ */
+function overlay_library_style_codes(?PDO $pdo = null): array
 {
-    return count(overlay_library_style_codes());
+    if ($pdo === null) {
+        return overlay_library_bundled_style_codes();
+    }
+
+    static $memo = null;
+    if ($memo !== null) {
+        return $memo;
+    }
+
+    require_once __DIR__ . '/schema_cache.php';
+    // Each style costs up to three existence checks, and under
+    // STORAGE_DRIVER=supabase every check is an HTTP request -- far too slow
+    // to redo on each catalog read.
+    $cached = schema_cache_get_json('overlay_library_catalog', 300);
+    if ($cached !== null && isset($cached['codes']) && is_array($cached['codes'])) {
+        $memo = array_values(array_filter($cached['codes'], 'is_string'));
+
+        return $memo;
+    }
+
+    try {
+        $stmt = $pdo->query(
+            "SELECT hs.style_code, hs.style_name,
+                    hv.front_view_url, hv.side_view_url, hv.back_view_url
+             FROM hairstyles hs
+             LEFT JOIN hairstyle_variants hv ON hv.variant_id = (
+                SELECT hv2.variant_id FROM hairstyle_variants hv2
+                WHERE hv2.hairstyle_id = hs.hairstyle_id
+                ORDER BY hv2.confidence_score DESC, hv2.variant_id ASC
+                LIMIT 1
+             )
+             WHERE hs.is_active = TRUE"
+        );
+        $codes = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = strtoupper(trim((string)($row['style_code'] ?? '')));
+            if ($code === '' || !hairstyle_overlay_files_exist($row)) {
+                continue;
+            }
+            $codes[] = $code;
+        }
+        sort($codes);
+    } catch (PDOException $e) {
+        error_log('Overlay catalog query failed, using bundled list: ' . $e->getMessage());
+
+        return overlay_library_bundled_style_codes();
+    }
+
+    schema_cache_put_json('overlay_library_catalog', ['codes' => $codes]);
+    $memo = $codes;
+
+    return $memo;
+}
+
+function overlay_library_catalog_size(?PDO $pdo = null): int
+{
+    return count(overlay_library_style_codes($pdo));
 }
 
 /**
@@ -64,11 +136,75 @@ function overlay_key_for_style_code(string $styleCode): ?string
     return overlay_library_code_keys()[$code] ?? null;
 }
 
-function is_overlay_library_row(array $row): bool
+/**
+ * Whether all three overlay images for a style are actually present. Lives
+ * here, not in admin_hairstyles.php, because the customer-facing catalog
+ * (haircuts.php, variant_ranking.php) needs the same gate -- it used to be
+ * an admin-only display flag.
+ */
+function overlay_asset_is_present(string $relativePath): bool
+{
+    static $cache = [];
+    $relativePath = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
+    if ($relativePath === '') {
+        return false;
+    }
+    if (array_key_exists($relativePath, $cache)) {
+        return $cache[$relativePath];
+    }
+
+    $present = overlay_library_local_exists($relativePath);
+    if (!$present && function_exists('storage_exists')) {
+        $present = storage_exists($relativePath);
+    }
+
+    $cache[$relativePath] = $present;
+
+    return $present;
+}
+
+function hairstyle_overlay_files_exist(array $hairstyle): bool
+{
+    $mapped = overlay_paths_for_hairstyle($hairstyle);
+    $paths = $mapped !== null
+        ? [$mapped['front'], $mapped['side'], $mapped['back']]
+        : array_values(array_filter([
+            (string)($hairstyle['front_view_url'] ?? ''),
+            (string)($hairstyle['side_view_url'] ?? ''),
+            (string)($hairstyle['back_view_url'] ?? ''),
+        ]));
+
+    if (count($paths) < 3) {
+        return false;
+    }
+
+    foreach ($paths as $path) {
+        if (!overlay_asset_is_present((string)$path)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * @param list<string>|null $allowedCodes Catalog from the database, when the
+ *        caller has one. Without it this falls back to the bundled codes,
+ *        which would reject a DB style whose artwork was uploaded rather than
+ *        shipped in the app.
+ */
+function is_overlay_library_row(array $row, ?array $allowedCodes = null): bool
 {
     $code = strtoupper(trim((string)($row['style_code'] ?? '')));
-    if ($code !== '' && in_array($code, overlay_library_style_codes(), true)) {
+    $codes = $allowedCodes ?? overlay_library_style_codes();
+    if ($code !== '' && in_array($code, $codes, true)) {
         return true;
+    }
+
+    // A style the catalog did not list is only admitted if its own images are
+    // present -- the whole point of the gate.
+    if ($allowedCodes !== null) {
+        return $code === '' && hairstyle_overlay_files_exist($row);
     }
 
     $name = (string)($row['style_name'] ?? '');
@@ -233,8 +369,13 @@ function resolve_hairstyle_overlay_key(string $styleName): ?string
         return $normalized;
     }
 
+    // Deliberately NOT a bidirectional str_contains any more. That matched a
+    // shorter name inside a longer key, so a new DB style called "Mid Fade"
+    // resolved to "curly mid fade" and silently wore the curly artwork. Only a
+    // longer name containing a full key still matches (e.g. "Classic Buzz Cut"
+    // -> "buzz cut"), and it must land on a word boundary.
     foreach (array_keys($paths) as $key) {
-        if (str_contains($normalized, $key) || str_contains($key, $normalized)) {
+        if (preg_match('/(^|\s)' . preg_quote($key, '/') . '($|\s)/', $normalized) === 1) {
             return $key;
         }
     }

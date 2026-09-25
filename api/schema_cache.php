@@ -84,3 +84,36 @@ function schema_cache_done(string $key): void
     $memory[$key] = true;
     schema_cache_mark_fresh($key);
 }
+
+/**
+ * Small JSON value cache, same directory and TTL idea as the markers above.
+ *
+ * Added for the haircut catalog: deciding whether a style is usable means
+ * checking that three overlay images exist, and under STORAGE_DRIVER=supabase
+ * each check is an HTTP round trip. Recomputing that per request would put
+ * dozens of calls on the customer's hot path.
+ */
+function schema_cache_get_json(string $key, int $ttlSeconds): ?array
+{
+    $path = schema_cache_marker_path($key) . '.json';
+    if (!is_file($path)) {
+        return null;
+    }
+    $age = time() - (int)@filemtime($path);
+    if ($age > $ttlSeconds) {
+        return null;
+    }
+    $raw = @file_get_contents($path);
+    if ($raw === false || $raw === '') {
+        return null;
+    }
+    $decoded = json_decode($raw, true);
+
+    return is_array($decoded) ? $decoded : null;
+}
+
+function schema_cache_put_json(string $key, array $value): void
+{
+    $path = schema_cache_marker_path($key) . '.json';
+    @file_put_contents($path, json_encode($value), LOCK_EX);
+}

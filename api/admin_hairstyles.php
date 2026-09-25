@@ -345,51 +345,6 @@ function variant_overlay_paths_for_hairstyle(PDO $pdo, int $hairstyleId): array
     return $paths ?? [];
 }
 
-function overlay_asset_is_present(string $relativePath): bool
-{
-    static $cache = [];
-    $relativePath = ltrim(str_replace('\\', '/', trim($relativePath)), '/');
-    if ($relativePath === '') {
-        return false;
-    }
-    if (array_key_exists($relativePath, $cache)) {
-        return $cache[$relativePath];
-    }
-
-    $present = overlay_library_local_exists($relativePath);
-    if (!$present && function_exists('storage_exists')) {
-        $present = storage_exists($relativePath);
-    }
-
-    $cache[$relativePath] = $present;
-
-    return $present;
-}
-
-function hairstyle_overlay_files_exist(array $hairstyle): bool
-{
-    $mapped = overlay_paths_for_hairstyle($hairstyle);
-    $paths = $mapped !== null
-        ? [$mapped['front'], $mapped['side'], $mapped['back']]
-        : array_values(array_filter([
-            (string)($hairstyle['front_view_url'] ?? ''),
-            (string)($hairstyle['side_view_url'] ?? ''),
-            (string)($hairstyle['back_view_url'] ?? ''),
-        ]));
-
-    if (count($paths) < 3) {
-        return false;
-    }
-
-    foreach ($paths as $path) {
-        if (!overlay_asset_is_present((string)$path)) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 function handle_upload_overlay(PDO $pdo): void
 {
     $hairstyleID = (int)($_POST['hairstyleID'] ?? $_POST['hairstyle_id'] ?? 0);

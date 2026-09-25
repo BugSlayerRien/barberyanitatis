@@ -4,6 +4,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
+require_once __DIR__ . '/admin_input.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/auth_sync.php';
 require_once __DIR__ . '/supabase_admin_auth.php';
@@ -173,16 +174,15 @@ function update_account(PDO $pdo, string $type, int $id, array $input): array
         json_response(['error' => 'Account not found'], 404);
     }
 
-    $fullName = trim((string)($input['fullName'] ?? ''));
-    $email = trim((string)($input['email'] ?? ''));
+    // Validated rather than stored verbatim: QA created a customer whose name
+    // was an SQL fragment. Prepared statements made it inert, but it should
+    // never have been accepted as a person's name.
+    $fullName = admin_input_person_name($input['fullName'] ?? '', 'Name');
+    $email = admin_input_email($input['email'] ?? '');
     $isActive = normalize_bool($input['isActive'] ?? true);
 
-    if ($fullName === '' || $email === '') {
-        json_response(['error' => 'Name and email are required'], 422);
-    }
-
     if ($type === 'customer') {
-        $phone = trim((string)($input['phone'] ?? ''));
+        $phone = admin_input_phone($input['phone'] ?? '');
         $stmt = $pdo->prepare(
               "UPDATE users
              SET full_name = :full_name, email = :email, phone = :phone, is_active = :is_active, updated_at = NOW()
@@ -394,12 +394,12 @@ function assert_email_unique_across_tables(PDO $pdo, string $email): void
 function create_account(PDO $pdo, array $input): array
 {
     $kind = strtolower(trim((string)($input['accountKind'] ?? '')));
-    $fullName = trim((string)($input['fullName'] ?? ''));
-    $email = strtolower(trim((string)($input['email'] ?? '')));
+    $fullName = admin_input_person_name($input['fullName'] ?? '', 'Full name');
+    $email = admin_input_email($input['email'] ?? '');
     $password = (string)($input['password'] ?? '');
 
-    if ($fullName === '' || $email === '' || strlen($password) < 8) {
-        json_response(['error' => 'Full name, email, and password (8+ characters) are required'], 422);
+    if (strlen($password) < 8) {
+        json_response(['error' => 'Password must be at least 8 characters.'], 422);
     }
 
     assert_email_unique_across_tables($pdo, $email);

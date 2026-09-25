@@ -5,6 +5,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/service_channel.php';
+require_once __DIR__ . '/admin_input.php';
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -35,17 +36,22 @@ try {
     $action = trim((string)($input['action'] ?? ''));
 
     if ($action === 'create') {
-        $serviceName = trim((string)($input['serviceName'] ?? ''));
-        $description = trim((string)($input['description'] ?? ''));
-        $baseDuration = (int)($input['baseDuration'] ?? 30);
-        $basePrice = (float)($input['basePrice'] ?? 0);
-        $category = trim((string)($input['category'] ?? 'Haircut'));
+        // Validated at the boundary: a rejected value returns 422 with a
+        // reason, instead of being stored as-is (QA filed an SQL fragment as a
+        // service name and it was accepted verbatim).
+        $serviceName = admin_input_text($input['serviceName'] ?? '', 'Service name', 80, true);
+        $description = admin_input_text($input['description'] ?? '', 'Description', 300);
+        $baseDuration = admin_input_int($input['baseDuration'] ?? null, 'Duration', 5, 480, 30);
+        $basePrice = admin_input_money($input['basePrice'] ?? null, 'Price', 0, 100000, 0);
+        $category = admin_input_choice(
+            $input['category'] ?? '',
+            ['Haircut', 'Styling', 'Beard', 'Treatment'],
+            'Category',
+            'Haircut'
+        );
         $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? 'appointment') ?? 'appointment';
         $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
 
-        if ($serviceName === '' || $baseDuration <= 0) {
-            json_response(['error' => 'Service name and duration are required'], 422);
-        }
 
         $codeBase = strtoupper(preg_replace('/[^A-Z0-9]+/', '_', $serviceName) ?? 'SVC');
         $codeBase = substr($codeBase, 0, 12) ?: 'SVC';
@@ -80,15 +86,23 @@ try {
 
     if ($action === 'update') {
         $serviceID = (int)($input['serviceID'] ?? $input['service_id'] ?? 0);
-        $serviceName = trim((string)($input['serviceName'] ?? ''));
-        $description = trim((string)($input['description'] ?? ''));
-        $baseDuration = (int)($input['baseDuration'] ?? 30);
-        $basePrice = (float)($input['basePrice'] ?? 0);
-        $category = trim((string)($input['category'] ?? 'Haircut'));
+        // Validated at the boundary: a rejected value returns 422 with a
+        // reason, instead of being stored as-is (QA filed an SQL fragment as a
+        // service name and it was accepted verbatim).
+        $serviceName = admin_input_text($input['serviceName'] ?? '', 'Service name', 80, true);
+        $description = admin_input_text($input['description'] ?? '', 'Description', 300);
+        $baseDuration = admin_input_int($input['baseDuration'] ?? null, 'Duration', 5, 480, 30);
+        $basePrice = admin_input_money($input['basePrice'] ?? null, 'Price', 0, 100000, 0);
+        $category = admin_input_choice(
+            $input['category'] ?? '',
+            ['Haircut', 'Styling', 'Beard', 'Treatment'],
+            'Category',
+            'Haircut'
+        );
         $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? null);
         $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
 
-        if ($serviceID <= 0 || $serviceName === '' || $baseDuration <= 0) {
+        if ($serviceID <= 0) {
             json_response(['error' => 'Invalid service payload'], 422);
         }
 
