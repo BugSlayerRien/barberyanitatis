@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/auth_sync.php';
 require_once __DIR__ . '/supabase_admin_auth.php';
@@ -530,6 +531,10 @@ function delete_account(PDO $pdo, string $type, int $id): array
 try {
     $pdo = get_db_connection();
     ensure_barber_channel_column($pdo);
+    // Server-side admin gate. The portal UI checks sessionStorage, which is
+    // client-side only -- without this, anyone who can reach the API could
+    // read or change admin data with a plain HTTP request.
+    require_admin($pdo);
     $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
     if ($method === 'GET') {
