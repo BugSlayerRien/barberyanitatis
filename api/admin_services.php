@@ -3,12 +3,17 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/service_channel.php';
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 try {
     $pdo = get_db_connection();
+    // Server-side admin gate. The portal UI checks sessionStorage, which is
+    // client-side only -- without this, anyone who can reach the API could
+    // read or change admin data with a plain HTTP request.
+    require_admin($pdo);
     ensure_service_channel_column($pdo);
 
     if ($method === 'GET') {

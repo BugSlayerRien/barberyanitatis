@@ -406,7 +406,12 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
     // The detail page can delete the look, so refresh rather than leaving a
     // removed card on screen.
     if (changed == true && mounted) {
-      setState(() => _savedLooksFuture = _loadSavedLooks());
+      // Block body, not an arrow: `() => x = f()` returns the value of the
+      // assignment, so an arrow here hands setState a Future and trips its
+      // assertion. Matches _refresh() above.
+      setState(() {
+        _savedLooksFuture = _loadSavedLooks();
+      });
     }
   }
 
@@ -443,7 +448,10 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
     try {
       await SavedPreviewsService.delete(savedId);
       if (!mounted) return;
-      setState(() => _savedLooksFuture = _loadSavedLooks());
+      // Block body, not an arrow -- see _openSavedLook above.
+      setState(() {
+        _savedLooksFuture = _loadSavedLooks();
+      });
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

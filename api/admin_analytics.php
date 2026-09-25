@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/admin_auth.php';
 
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 if (!in_array($method, ['GET', 'POST'], true)) {
@@ -120,6 +121,10 @@ function analytics_period_config(string $period): array
 
 try {
     $pdo = get_db_connection();
+    // Server-side admin gate. The portal UI checks sessionStorage, which is
+    // client-side only -- without this, anyone who can reach the API could
+    // read or change admin data with a plain HTTP request.
+    require_admin($pdo);
 
     $periodInput = $_GET['period'] ?? null;
     if ($method === 'POST') {
@@ -258,20 +263,6 @@ try {
          WHERE {$apptWhere}
          GROUP BY 1, status
          ORDER BY 1"
-    )->fetchAll(PDO::FETCH_ASSOC);
-
-    $topServices = $pdo->query(
-        "SELECT s.service_id, s.service_name,
-                COUNT(*)::int AS booking_count,
-                COALESCE(SUM(CASE WHEN a.status = 'Completed' THEN ad.final_price ELSE 0 END), 0)::float AS revenue
-         FROM appointment_details ad
-         JOIN services s ON s.service_id = ad.service_id
-         JOIN appointments a ON a.appointment_id = ad.appointment_id
-         WHERE {$apptWhereA}
-           AND a.status IN {$activeBookingStatuses}
-         GROUP BY s.service_id, s.service_name
-         ORDER BY booking_count DESC
-         LIMIT 8"
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $barberPerformance = $pdo->query(
@@ -702,15 +693,6 @@ try {
         'appointmentsInPeriod' => $totalAppointments,
         'totalUsers' => $totalCustomers,
         'appointmentStatusCounts' => $statusCounts,
-        'topServices' => array_map(static function (array $row): array {
-            return [
-                'service_id' => (int)$row['service_id'],
-                'service_name' => (string)$row['service_name'],
-                'count' => (int)$row['booking_count'],
-                'booking_count' => (int)$row['booking_count'],
-                'revenue' => (float)$row['revenue'],
-            ];
-        }, $topServices),
         'trends' => [
             'appointments' => $appointmentTrend,
             'revenue' => $revenueTrend,
