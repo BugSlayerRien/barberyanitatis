@@ -217,36 +217,27 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       _hourlyTemp = _parseHourlySeries(hourly, 'temperature_2m');
 
       final weatherSummary = _buildWeatherSummary(maxTemp, minTemp, rainChance);
-      final recommendedSlot = _pickMostBufferedSlot(
-        availableSlots: availableSlots,
-        allSlots: _slots,
+      // The sentence is written from the same inputs that chose the slot, so
+      // it cannot contradict the recommendation. It used to prefer a Gemini
+      // sentence that was only checked for containing a digit, which let
+      // through the wrong date format ("Best 2026-09-25" instead of "Best
+      // today") and reasoning that argued against the slot it was naming --
+      // "a good time to beat the afternoon heat" for a 1:00 PM booking.
+      // Dropping it also takes a model round trip off a screen the customer
+      // is waiting on.
+      final advice = _buildHeuristicAdvice(
         maxTemp: maxTemp,
-        rainChance: rainChance,
-      );
-      final fallbackAdvice = _buildHeuristicAdvice(
-        maxTemp: maxTemp,
-        rainChance: rainChance,
-        availableSlots: availableSlots,
-        allSlots: _slots,
-      );
-      final aiAdvice = await _getAiTimeAdvice(
-        date: date,
-        weatherSummary: weatherSummary,
-        maxTemp: maxTemp,
-        minTemp: minTemp,
         rainChance: rainChance,
         availableSlots: availableSlots,
         allSlots: _slots,
-        recommendedSlot: recommendedSlot,
       );
-      final validatedAiAdvice = _validateAiAdvice(aiAdvice, availableSlots);
 
       if (!mounted) {
         return;
       }
       setState(() {
         _weatherSummary = weatherSummary;
-        _timeAdvice = validatedAiAdvice ?? fallbackAdvice;
+        _timeAdvice = advice;
         _loadingWeatherAdvice = false;
       });
     } catch (_) {
@@ -322,115 +313,6 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       return '$prefix: $displayTime. It stays buffered from occupied times and avoids hotter commute hours.';
     }
     return '$prefix: $displayTime. It is the most buffered slot from currently taken times.';
-  }
-
-  String? _validateAiAdvice(String? aiAdvice, List<Map<String, dynamic>> availableSlots) {
-    if (aiAdvice == null) {
-      return null;
-    }
-
-    final cleaned = aiAdvice.trim().replaceAll(RegExp(r'\s+'), ' ');
-    if (cleaned.isEmpty) {
-      return null;
-    }
-
-    final lower = cleaned.toLowerCase();
-    if (lower.startsWith('best today:') && cleaned.length <= 'best today:'.length + 1) {
-      return null;
-    }
-    if (cleaned.endsWith(':')) {
-      return null;
-    }
-
-    final hasTimeToken = RegExp(r'\b\d{1,2}(:\d{2})?\s?(AM|PM|am|pm)?\b').hasMatch(cleaned);
-    final mentionsKnownSlot = availableSlots.any((slot) {
-      final display = slot['display_time']?.toString() ?? '';
-      final canonical = slot['slot_time']?.toString() ?? '';
-      return (display.isNotEmpty && cleaned.contains(display)) ||
-          (canonical.isNotEmpty && cleaned.contains(canonical));
-    });
-
-    if (!hasTimeToken && !mentionsKnownSlot) {
-      return null;
-    }
-
-    return cleaned;
-  }
-
-  Future<String?> _getAiTimeAdvice({
-    required String date,
-    required String weatherSummary,
-    required double? maxTemp,
-    required double? minTemp,
-    required double? rainChance,
-    required List<Map<String, dynamic>> availableSlots,
-    required List<Map<String, dynamic>> allSlots,
-    required Map<String, dynamic> recommendedSlot,
-  }) async {
-    if (availableSlots.isEmpty) {
-      return null;
-    }
-
-    final slotText = availableSlots
-        .map((slot) => slot['display_time']?.toString() ?? slot['slot_time']?.toString() ?? '')
-        .where((slot) => slot.isNotEmpty)
-        .join(', ');
-    final occupiedText = allSlots
-      .where(_isSlotTaken)
-      .map((slot) => slot['display_time']?.toString() ?? slot['slot_time']?.toString() ?? '')
-      .where((slot) => slot.isNotEmpty)
-      .join(', ');
-    final recommendedTime = recommendedSlot['display_time']?.toString() ??
-      recommendedSlot['slot_time']?.toString() ??
-      '';
-    if (slotText.isEmpty) {
-      return null;
-    }
-
-    final bestPrefix = _bestTimePrefix();
-    final prompt = '''
-You are a scheduling assistant for a barbershop.
-Pick the best appointment time for the customer based on weather and available slots for the selected date only.
-Selected date: $date
-Weather summary for that date: $weatherSummary
-High temp: ${maxTemp?.toStringAsFixed(1) ?? 'n/a'}
-Low temp: ${minTemp?.toStringAsFixed(1) ?? 'n/a'}
-Rain chance: ${rainChance?.toStringAsFixed(1) ?? 'n/a'}
-Available slots: $slotText
-Taken slots: ${occupiedText.isEmpty ? 'none' : occupiedText}
-Preferred buffered slot: $recommendedTime
-
-Return exactly one short sentence in this format:
-$bestPrefix: <time>. <reason>
-Use the preferred buffered slot as the time unless it is not in available slots.
-Do not say "today" unless the selected date is actually today.
-Keep the total response under 24 words.
-''';
-
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/chatbot.php'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'message': prompt,
-          'skipFaq': true,
-          'history': <Map<String, dynamic>>[],
-        }),
-      );
-
-      if (response.statusCode < 200 || response.statusCode >= 300 || response.body.isEmpty) {
-        return null;
-      }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final text = data['reply']?.toString().trim();
-      if (text == null || text.isEmpty) {
-        return null;
-      }
-      return text;
-    } catch (_) {
-      return null;
-    }
   }
 
   Future<void> _loadDefaultService() async {
