@@ -58,6 +58,15 @@ navButtons.forEach((button) => {
   button.addEventListener("click", async () => {
     const view = button.dataset.view;
     if (view === "logout") {
+      // Only the deliberate nav-button sign-out confirms. The identical
+      // clear-and-redirect used as the 401/403 auto-kick stays silent -- an
+      // expired session must not stop to ask.
+      const ok = await confirmAction("Sign out of the admin portal?", {
+        title: "Sign out",
+        confirmLabel: "Sign out",
+        danger: true,
+      });
+      if (!ok) return;
       sessionStorage.clear();
       window.location.href = "../login.html";
       return;
