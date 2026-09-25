@@ -45,7 +45,8 @@ class _SavedLookDetailPageState extends State<SavedLookDetailPage> {
       ];
 
   Future<void> _confirmDelete() async {
-    final savedId = (widget.look['saved_preview_id'] as num?)?.toInt() ?? 0;
+    // See the note in saved_haircuts_page.dart: BIGINT can arrive stringified.
+    final savedId = int.tryParse('${widget.look['saved_preview_id']}') ?? 0;
     if (savedId <= 0) return;
 
     final confirmed = await showDialog<bool>(
