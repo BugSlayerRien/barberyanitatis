@@ -1,7 +1,14 @@
 # Handover — Brilliante Barbershop
 
-Branch: `claude/friendly-rubin-iovthr` (pushed, **not merged to `main`**).
-Written at the point where session budget ran out. Everything below is verified fact, not assumption.
+Branch: `claude/friendly-rubin-iovthr`.
+
+**Merge status** (corrected — an earlier revision of this file wrongly said nothing was merged):
+- The eight phase-1 commits `ecc461a`..`c368522` **are already in `main`**, via PR #4 and merge `7ce6d19`.
+- `main` also carries `ec6e3bf` (book from saved look, suggested time on direct library booking, load times after picking a slot, paid appointment still reading as pending, bookings page loading) — work done outside this session.
+- Still **not** in `main`: the `db89bff` hotfix, `8c951a9` (Top services), `45b618b` (admin auth) and this file. `main` therefore currently has the saved-look delete bug in its most visible form, because the change that made delete succeed is merged but the `setState` fix is not.
+- `origin/main` has been merged into this branch (`fe3d896`) — clean, no file overlap — so this branch is one mergeable history.
+
+Everything below is verified fact, not assumption.
 
 ---
 
