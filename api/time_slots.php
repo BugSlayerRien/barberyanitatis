@@ -9,6 +9,7 @@ require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/slot_recommendation.php';
 require_once __DIR__ . '/customer_auth.php';
+require_once __DIR__ . '/schema_cache.php';
 
 require_method('POST');
 
@@ -34,21 +35,34 @@ function seed_slots_for_barber_dates(PDO $pdo, int $barberID, array $dates): voi
     }
 
     $slotDuration = shop_slot_duration_minutes();
-    $insertStmt = $pdo->prepare(
-        "INSERT INTO time_slots (barber_id, slot_date, slot_time, duration, status)
-         VALUES (:barber_id, :slot_date, :slot_time, :duration, 'Available')
-         ON CONFLICT (barber_id, slot_date, slot_time) DO NOTHING"
-    );
 
+    // One row per statement meant ~10 slots x 30 days x every barber round
+    // trips to a remote database before suggestBestSlot could answer, which on
+    // a cold container blew past the client's timeout and pushed the customer
+    // into the manual barber picker. Batched, the same seed is a handful of
+    // statements.
+    $rows = [];
     foreach ($dates as $slotDate) {
         foreach (default_slot_times($slotDate) as $slotTime) {
-            $insertStmt->execute([
-                ':barber_id' => $barberID,
-                ':slot_date' => $slotDate,
-                ':slot_time' => $slotTime,
-                ':duration' => $slotDuration,
-            ]);
+            $rows[] = [$barberID, $slotDate, $slotTime, $slotDuration];
         }
+    }
+    if ($rows === []) {
+        return;
+    }
+
+    foreach (array_chunk($rows, 200) as $chunk) {
+        $placeholders = implode(',', array_fill(0, count($chunk), "(?, ?, ?, ?, 'Available')"));
+        $stmt = $pdo->prepare(
+            "INSERT INTO time_slots (barber_id, slot_date, slot_time, duration, status)
+             VALUES {$placeholders}
+             ON CONFLICT (barber_id, slot_date, slot_time) DO NOTHING"
+        );
+        $params = [];
+        foreach ($chunk as $row) {
+            array_push($params, ...$row);
+        }
+        $stmt->execute($params);
     }
 }
 
@@ -345,7 +359,11 @@ try {
         };
 
         $candidates = $fetchCandidates();
-        if ($candidates === []) {
+        // Seeding every active barber across the whole booking window is the
+        // most expensive thing this endpoint can do. Throttled so a genuinely
+        // fully-booked shop doesn't pay for it on every suggestion request --
+        // only a real gap in the calendar triggers a re-seed.
+        if ($candidates === [] && schema_cache_should_run('suggest_seed_all_barbers', 300)) {
             $seedStmt = $pdo->prepare(
                 "SELECT barber_id FROM barbers WHERE is_active = TRUE{$appointmentFilter}"
             );
@@ -356,6 +374,7 @@ try {
                     ensure_week_seeded_for_barber($pdo, $barberID, $bookingWindowDays);
                 }
             }
+            schema_cache_done('suggest_seed_all_barbers');
             $candidates = $fetchCandidates();
         }
 

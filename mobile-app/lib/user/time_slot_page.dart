@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,7 +6,6 @@ import 'package:http/http.dart' as http;
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
 import 'appointments_page.dart';
-import 'booking_guard.dart';
 import 'payment_page.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
@@ -736,18 +736,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                         if (!context.mounted) return;
                         if (UserSession.selectedVariantId == null) return;
                       }
-                      final hasActive = await BookingGuard.hasActiveAppointment(userId: UserSession.userId);
-                      if (!context.mounted) return;
-                      if (hasActive) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('You already have an active appointment.')),
-                        );
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const AppointmentsPage()),
-                        );
-                        return;
-                      }
-
+                      // No pre-check round trip: booking.php 'create' already
+                      // rejects a second active appointment with 409, handled
+                      // below. Asking first only added a wait before every
+                      // booking to catch a case the server catches anyway.
                       final selectedDateTime = tryParseSlotDateTime(
                         date: _activeDate,
                         time: _selectedTime ?? '',
@@ -811,9 +803,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                         return;
                       }
                       final appointmentId = int.tryParse(bookingData['appointmentID']?.toString() ?? '') ?? 0;
-                      await BookingDraftService.clear();
+                      unawaited(BookingDraftService.clear());
+                      // Analytics and preview linking are bookkeeping the
+                      // customer never sees. Awaiting them held the payment
+                      // screen behind two more round trips on a slow
+                      // connection; they finish on their own.
                       if (appointmentId > 0 && UserSession.userId != null && UserSession.selectedVariantId != null) {
-                        await AiFunnelService.trackBookingCreated(
+                        unawaited(AiFunnelService.trackBookingCreated(
                           scanSessionId: UserSession.ensureScanSessionId(),
                           userId: UserSession.userId!,
                           variantId: UserSession.selectedVariantId!,
@@ -823,20 +819,20 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
                           sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
                           backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
-                        );
+                        ));
                         if (bookingData['previewsAttached'] != true) {
-                          try {
-                            await FaceScanService.attachPreviewsToAppointment(
+                          unawaited(
+                            FaceScanService.attachPreviewsToAppointment(
                               appointmentId: appointmentId,
                               scanSessionId: UserSession.ensureScanSessionId(),
                               variantId: UserSession.selectedVariantId!,
-                            );
-                          } catch (e) {
-                            // Silent: booking a Library haircut with no
-                            // generated preview has nothing to link, so this
-                            // warned on a perfectly successful booking.
-                            debugPrint('Preview attach failed: $e');
-                          }
+                            ).catchError((Object e) {
+                              // Silent: booking a Library haircut with no
+                              // generated preview has nothing to link, so this
+                              // warned on a perfectly successful booking.
+                              debugPrint('Preview attach failed: $e');
+                            }),
+                          );
                         }
                       }
 

@@ -11,6 +11,7 @@ require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/booking_codes.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/appointment_expiry.php';
+require_once __DIR__ . '/paymongo_reconcile.php';
 require_once __DIR__ . '/face_scan_attach.php';
 require_once __DIR__ . '/customer_auth.php';
 
@@ -266,8 +267,16 @@ try {
     if (in_array($action, ['listByCustomer', 'listByBarber'], true)) {
         try {
             $trackingAutomation = run_tracking_automation($pdo, true);
+            // Ask the gateway about payments the app never got to confirm (a
+            // dropped connection on the way back from GCash), so the two syncs
+            // below have something to promote instead of the customer being
+            // asked to pay twice.
+            reconcile_pending_gateway_payments($pdo);
             sync_paid_groups_from_payments($pdo);
-            sync_paid_appointments_from_payments($pdo, true);
+            // Throttled like the rest: this used to be forced on every list
+            // load, which made the Bookings page re-run the whole sweep on each
+            // open, tab switch and cancel.
+            sync_paid_appointments_from_payments($pdo);
             // Strictly after the two syncs above: they promote bookings that
             // did pay but were never flipped off PendingPayment, and expiring
             // first would cancel them.
