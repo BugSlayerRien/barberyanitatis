@@ -4,6 +4,9 @@
 (function initPortalUi(global) {
   let loadingCount = 0;
 
+  const supportsPopover =
+    typeof HTMLElement !== "undefined" && typeof HTMLElement.prototype.showPopover === "function";
+
   function ensureToastHost() {
     let host = document.getElementById("toast-host");
     if (!host) {
@@ -11,9 +14,37 @@
       host.id = "toast-host";
       host.className = "toast-host";
       host.setAttribute("aria-live", "polite");
+      // A <dialog> opened with showModal() sits in the browser's top layer,
+      // which paints above every normal-flow element whatever its z-index --
+      // so a toast fired from inside a modal was invisible. Making the host a
+      // popover puts it in the top layer too. "manual" so it never
+      // light-dismisses, and unlike a second showModal() it takes no focus.
+      // Where popover is unsupported the host stays in flow on its z-index.
+      if (supportsPopover) {
+        host.setAttribute("popover", "manual");
+      }
       document.body.appendChild(host);
     }
     return host;
+  }
+
+  // Top-layer elements paint in promotion order, so a dialog opened after the
+  // host was promoted would cover it again. Re-promote whenever a dialog is
+  // open; skipping that in the common no-dialog case avoids needlessly
+  // restarting the entry animation of toasts already on screen.
+  function raiseToastHost(host) {
+    if (!supportsPopover || !host.isConnected) return;
+    try {
+      const isOpen = host.matches(":popover-open");
+      if (isOpen && document.querySelector("dialog[open]")) {
+        host.hidePopover();
+      } else if (isOpen) {
+        return;
+      }
+      host.showPopover();
+    } catch (_) {
+      // Racing show/hide calls throw; a toast is never worth failing over.
+    }
   }
 
   function showLoading(message) {
@@ -157,6 +188,7 @@
 
     item.append(icon, text);
     host.appendChild(item);
+    raiseToastHost(host);
     window.setTimeout(() => {
       item.classList.add("toast-out");
       window.setTimeout(() => item.remove(), 220);
