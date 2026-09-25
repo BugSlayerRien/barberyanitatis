@@ -19,18 +19,6 @@ class SavedPreviewsService {
         .toList();
   }
 
-  static Future<bool> isSaved({
-    required int variantId,
-    required String scanSessionId,
-  }) async {
-    final data = await CustomerApi.postDecoded('saved_previews.php', {
-      'action': 'status',
-      'variantID': variantId,
-      'scanSessionId': scanSessionId,
-    });
-    return data['isSaved'] == true;
-  }
-
   /// Returns the saved row's id, needed to delete it again without a re-list.
   static Future<int?> save({
     required int variantId,
@@ -58,10 +46,37 @@ class SavedPreviewsService {
 
   /// Removes the saved entry only. The underlying image is left alone --
   /// it may still be serving that scan session's cache or an attached booking.
+  ///
+  /// Idempotent: the API 404s ("Saved preview not found") when the row is
+  /// already gone, which happens whenever a caller is holding an id from
+  /// before another screen deleted it. The customer asked for the look to be
+  /// removed and it is removed, so that is a success, not an error to show
+  /// them. Every other failure still throws.
   static Future<void> delete(int savedPreviewId) async {
-    await CustomerApi.postDecoded('saved_previews.php', {
-      'action': 'delete',
-      'savedPreviewID': savedPreviewId,
+    try {
+      await CustomerApi.postDecoded('saved_previews.php', {
+        'action': 'delete',
+        'savedPreviewID': savedPreviewId,
+      });
+    } on CustomerApiException catch (error) {
+      if (error.statusCode != 404) rethrow;
+    }
+  }
+
+  /// The saved row's id for a look, or null if it is not saved.
+  ///
+  /// Lets a caller holding a possibly-stale id re-resolve it before deleting,
+  /// rather than firing a delete that can only 404.
+  static Future<int?> savedIdFor({
+    required int variantId,
+    required String scanSessionId,
+  }) async {
+    final data = await CustomerApi.postDecoded('saved_previews.php', {
+      'action': 'status',
+      'variantID': variantId,
+      'scanSessionId': scanSessionId,
     });
+    if (data['isSaved'] != true) return null;
+    return int.tryParse('${data['savedPreviewID']}');
   }
 }

@@ -329,7 +329,9 @@ class _SavedHaircutsPageState extends State<SavedHaircutsPage> {
   }
 
   Widget _buildSavedLookCard(Map<String, dynamic> look) {
-    final savedId = (look['saved_preview_id'] as num?)?.toInt() ?? 0;
+    // Parsed defensively rather than cast: saved_preview_id is a BIGINT and
+    // PDO can hand it back as a string, which `as num?` would throw on.
+    final savedId = int.tryParse('${look['saved_preview_id']}') ?? 0;
     final styleName = look['style_name']?.toString().trim();
     final frontUrl = look['front_url']?.toString().trim() ?? '';
 

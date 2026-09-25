@@ -243,22 +243,13 @@ function filter_top_picks_with_quality_gate(array $variants, int $maxPicks = 3):
     }
 
     // Excluded styles still appear in their category list -- they are only kept
-    // out of the general Top 3. If exclusions leave too few to fill the section,
-    // fall back to the full list rather than showing a short or empty Top picks.
-    $eligible = array_values(array_filter($variants, 'variant_is_top_pick_eligible'));
-    if (count($eligible) >= $maxPicks) {
-        $variants = $eligible;
-    } elseif ($eligible !== []) {
-        $seen = [];
-        foreach ($eligible as $row) {
-            $seen[(int)($row['variant_id'] ?? 0)] = true;
-        }
-        foreach ($variants as $row) {
-            if (!isset($seen[(int)($row['variant_id'] ?? 0)])) {
-                $eligible[] = $row;
-            }
-        }
-        $variants = $eligible;
+    // out of the general Top 3. The exclusion is absolute: a short Top picks
+    // section is correct, and padding it back up with excluded styles (as this
+    // used to do when fewer than $maxPicks remained) silently broke the admin
+    // switch in exactly the thin-catalog case where it matters most.
+    $variants = array_values(array_filter($variants, 'variant_is_top_pick_eligible'));
+    if ($variants === []) {
+        return [];
     }
 
     $bestRaw = (float)($variants[0]['match_score'] ?? 0);
@@ -339,7 +330,11 @@ function variant_catalog_line(array $row): string
     $texture = (string)($row['hair_texture'] ?? '');
     $score = (float)($row['match_score'] ?? 0);
     $desc = substr((string)($row['description'] ?? ''), 0, 120);
-    return "variant_id={$id}; style=\"{$name}\"; face={$face}; texture={$texture}; score={$score}; notes={$desc}";
+    // top_pick_ok lets the model honour the admin's "exclude from Top 3"
+    // switch. The style stays in the catalog because it must still be
+    // offered under formal/alternative -- only the Top 3 is off limits.
+    $topPickOk = variant_is_top_pick_eligible($row) ? 'yes' : 'no';
+    return "variant_id={$id}; style=\"{$name}\"; face={$face}; texture={$texture}; score={$score}; top_pick_ok={$topPickOk}; notes={$desc}";
 }
 
 function categorize_variant_rule(array $row): string
@@ -602,6 +597,55 @@ function build_rule_based_insights(array $variants, string $faceShape, string $h
     return $insights;
 }
 
+/**
+ * Hard guarantee behind the prompt's top_pick_ok rule: drop any style the
+ * admin excluded from Top 3 and backfill from the eligible ranked rows, so a
+ * hallucinated or stale variant_id can never reintroduce one.
+ *
+ * @param list<array<string, mixed>> $topPicks  what the model chose, enriched
+ * @param list<array<string, mixed>> $ranked    score-ordered candidate pool
+ * @return list<array<string, mixed>>
+ */
+function enforce_top_pick_eligibility(
+    array $topPicks,
+    array $ranked,
+    int $maxPicks,
+    string $faceShape,
+    string $hairTexture
+): array {
+    $kept = [];
+    $seen = [];
+    foreach ($topPicks as $row) {
+        if (!is_array($row) || !variant_is_top_pick_eligible($row)) {
+            continue;
+        }
+        // The prompt asks for distinct ids but a model can still repeat one,
+        // which would both duplicate a card and burn a backfill slot.
+        $id = (int)($row['variant_id'] ?? 0);
+        if ($id <= 0 || isset($seen[$id])) {
+            continue;
+        }
+        $seen[$id] = true;
+        $kept[] = $row;
+    }
+
+    foreach ($ranked as $row) {
+        if (count($kept) >= $maxPicks) {
+            break;
+        }
+        $id = (int)($row['variant_id'] ?? 0);
+        if ($id <= 0 || isset($seen[$id]) || !variant_is_top_pick_eligible($row)) {
+            continue;
+        }
+        $copy = $row;
+        $copy['fit_reason'] = build_rule_based_fit_reason($row, $faceShape, $hairTexture, '');
+        $seen[$id] = true;
+        $kept[] = $copy;
+    }
+
+    return array_slice($kept, 0, $maxPicks);
+}
+
 function build_gemini_insights(array $variants, string $faceShape, string $hairTexture, string $hairDensity): ?array
 {
     if (!ai_gemini_enabled() || $variants === []) {
@@ -636,6 +680,7 @@ Return strict JSON with this schema:
 
 Rules:
 - topPicks: exactly 3 distinct variant_ids (best overall matches).
+- NEVER put a variant with top_pick_ok=no in topPicks. Those styles are still valid for formal/alternative.
 - formal: exactly 2 distinct variant_ids (clean/professional).
 - alternative: exactly 2 distinct variant_ids (bold/edgy).
 - fit_reason MUST be unique per variant_id — never reuse the same sentence.
@@ -679,7 +724,13 @@ PROMPT;
         return $out;
     };
 
-    $topPicks = merge_match_fields_from_index($enrich($parsed['topPicks'] ?? [], $byId), $byId);
+    $topPicks = enforce_top_pick_eligibility(
+        merge_match_fields_from_index($enrich($parsed['topPicks'] ?? [], $byId), $byId),
+        $variants,
+        3,
+        $faceShape,
+        $hairTexture
+    );
     $categoriesIn = $parsed['categories'] ?? [];
     $categories = [
         'formal' => merge_match_fields_from_index($enrich($categoriesIn['formal'] ?? [], $byId, 'formal'), $byId),

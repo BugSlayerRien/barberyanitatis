@@ -150,6 +150,33 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     // So the "X of Y" chip is visible immediately, not only after the first
     // generate attempt on this visit.
     unawaited(_refreshQuotaStatus());
+    // The bookmark state was previously only ever set by taps on this page, so
+    // it drifted from the server the moment a look was saved or deleted
+    // anywhere else -- the Saved tab most obviously. One list call sets both
+    // maps from the truth.
+    unawaited(_hydrateSavedLooks());
+  }
+
+  Future<void> _hydrateSavedLooks() async {
+    if (UserSession.userId == null) return;
+    try {
+      final saved = await SavedPreviewsService.list();
+      if (!mounted) return;
+      setState(() {
+        _savedVariantIds.clear();
+        _savedLookIds.clear();
+        for (final row in saved) {
+          final variantId = int.tryParse('${row['variant_id']}') ?? 0;
+          final savedId = int.tryParse('${row['saved_preview_id']}') ?? 0;
+          if (variantId <= 0 || savedId <= 0) continue;
+          _savedVariantIds.add(variantId);
+          _savedLookIds[variantId] = savedId;
+        }
+      });
+    } catch (_) {
+      // Bookmarks stay as they were; the unsave path re-resolves the id
+      // anyway, so a failure here costs accuracy, never correctness.
+    }
   }
 
   Future<void> _refreshQuotaStatus() async {
@@ -1214,7 +1241,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     setState(() => _savingLook = true);
     try {
       if (_savedVariantIds.contains(variantId)) {
-        final savedId = _savedLookIds[variantId];
+        // The cached id goes stale as soon as the look is deleted from the
+        // Saved tab while this page is still on the navigation stack, so fall
+        // back to resolving it from the server. Without this, an unsave either
+        // 404'd or -- when nothing was cached -- silently skipped the server
+        // entirely and left the row in place while the UI claimed otherwise.
+        final savedId = _savedLookIds[variantId] ??
+            await SavedPreviewsService.savedIdFor(
+              variantId: variantId,
+              scanSessionId: UserSession.ensureScanSessionId(),
+            );
         if (savedId != null) {
           await SavedPreviewsService.delete(savedId);
         }

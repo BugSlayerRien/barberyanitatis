@@ -2224,6 +2224,24 @@ table.table {
   max-width: min(92vw, 380px);
 }
 
+/* The host joins the browser's top layer as a popover so toasts paint above
+   modal dialogs -- something z-index alone can never do (see ensureToastHost
+   in ui.js). Popovers carry UA defaults (inset: 0, auto margins, a border,
+   padding, an opaque background) that would wreck the corner stack, so undo
+   them. :where() keeps this at zero specificity, leaving the positioning
+   above and the narrow-screen override below in charge. */
+:where(.toast-host[popover]) {
+  inset: auto;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
+}
+
 .toast {
   display: flex;
   align-items: flex-start;
