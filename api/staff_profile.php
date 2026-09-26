@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/admin_auth.php';
 
 require_method('POST');
 
@@ -13,7 +14,16 @@ if ($action !== 'updateProfile') {
     json_response(['error' => 'Invalid action'], 400);
 }
 
+$pdo = get_db_connection();
+// Had no gate at all: any caller could rewrite any staff member's name,
+// email or role by passing their id. A receptionist may edit only their own
+// profile; an admin may edit anyone (that is what admin_users.php is for).
+$actor = require_staff($pdo);
+
 $staffId = (int)($input['staffID'] ?? 0);
+if (strtolower($actor['role']) !== 'admin' && $staffId !== (int)$actor['staff_id']) {
+    json_response(['error' => 'You can only update your own profile.'], 403);
+}
 $fullName = trim((string)($input['fullName'] ?? ''));
 $email = trim((string)($input['email'] ?? ''));
 $role = strtolower(trim((string)($input['role'] ?? '')));

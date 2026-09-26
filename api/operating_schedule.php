@@ -197,6 +197,12 @@ try {
         json_response(['error' => 'Method not allowed'], 405);
     }
 
+    // Reads stay open (shop hours are public), but changing them is staff
+    // work and had no gate: anyone could rewrite opening times or close the
+    // shop for a day.
+    require_once __DIR__ . '/admin_auth.php';
+    require_staff($pdo);
+
     $input = get_json_input();
     $action = trim((string)($input['action'] ?? 'get'));
 

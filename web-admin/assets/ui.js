@@ -304,6 +304,29 @@
           throw new Error("Invalid server response");
         }
       }
+      if (response.status === 401 || response.status === 403) {
+        // The portal session (12 hours) is gone or not accepted. Without this
+        // the caller only saw "Request failed" and stayed on a dead page with
+        // no way back to sign in.
+        try {
+          sessionStorage.clear();
+        } catch (_) {
+          /* private mode */
+        }
+        const message = data.error || "Your session expired. Please sign in again.";
+        try {
+          toast(message, "error");
+        } catch (_) {
+          /* toast host not ready */
+        }
+        global.setTimeout(() => {
+          global.location.href = global.location.pathname.includes("/admin/")
+            || global.location.pathname.includes("/receptionist/")
+            ? "../login.html"
+            : "login.html";
+        }, 1500);
+        throw new Error(message);
+      }
       if (!response.ok) {
         const detail = data.details ? ` (${data.details})` : "";
         throw new Error((data.error || "Request failed") + detail);

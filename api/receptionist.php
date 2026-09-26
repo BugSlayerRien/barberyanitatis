@@ -9,6 +9,8 @@ require_once __DIR__ . '/payment_recording.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/admin_auth.php';
+require_once __DIR__ . '/system_settings_store.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -84,6 +86,11 @@ if (!in_array($action, $allowedActions, true)) {
 
 try {
     $pdo = get_db_connection();
+    // Every action here runs the front desk: it reads customer details and
+    // moves money (completeRefund, walk-in completion). The endpoint had no
+    // authentication at all -- anyone who could reach the URL could drive it.
+    // Admins are allowed through too, since they can already do more.
+    require_staff($pdo);
     ensure_walkin_guest_name_column($pdo);
     ensure_walkin_queue_timestamp_columns($pdo);
     ensure_barber_channel_column($pdo);
@@ -91,13 +98,6 @@ try {
     $trackingAutomation = run_tracking_automation($pdo, true);
 
     if ($action === 'setQueueMerge') {
-        // The receptionist runs the floor, so they own this switch -- but it
-        // changes what every barber list shows, so it needs a real session
-        // rather than anyone who can reach the endpoint.
-        require_once __DIR__ . '/admin_auth.php';
-        require_once __DIR__ . '/system_settings_store.php';
-        require_staff($pdo);
-
         $enabled = !empty($input['enabled']) && (string)$input['enabled'] !== '0';
         upsert_setting($pdo, 'queue_merge_enabled', $enabled ? '1' : '0', 'Boolean', 'operations');
         audit_log($pdo, 'QUEUE_MERGE_TOGGLE', 'system_settings', 'queue_merge_enabled', null, [
