@@ -6,6 +6,7 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/activity_feed.php';
+require_once __DIR__ . '/data_retention.php';
 
 try {
     $pdo = get_db_connection();
@@ -14,6 +15,10 @@ try {
     // read or change admin data with a plain HTTP request.
     require_admin($pdo);
     auto_complete_due_appointments($pdo);
+    // Housekeeping runs on staff traffic, not a customer's: deleting expired
+    // face photos can touch a lot of files, and no customer should wait for it.
+    // Throttled to once a day inside the sweep.
+    run_data_retention_sweep($pdo);
 
     $totalUsers = (int)$pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
     $activeServices = (int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_active = TRUE')->fetchColumn();

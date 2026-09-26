@@ -102,6 +102,36 @@ void main() {
     });
   });
 
+  group('a link suppressed mid-poll is not lost', () {
+    test('the link is kept while a poll is running', () {
+      PaymentReturnGuard.enter();
+      expect(
+        PaymentReturnGuard.shouldSkipDeepLink({'source': 'src_held'}),
+        isTrue,
+      );
+      // The poll gives up: whoever was waiting can replay the return instead
+      // of the customer being told the payment did not complete.
+      PaymentReturnGuard.exit(resolved: false);
+      final held = PaymentReturnGuard.takeSuppressedLink();
+      expect(held, isNotNull);
+      expect(held!['source'], 'src_held');
+    });
+
+    test('taking it twice yields nothing the second time', () {
+      PaymentReturnGuard.enter();
+      PaymentReturnGuard.shouldSkipDeepLink({'source': 'src_once'});
+      PaymentReturnGuard.exit(resolved: false);
+      expect(PaymentReturnGuard.takeSuppressedLink(), isNotNull);
+      expect(PaymentReturnGuard.takeSuppressedLink(), isNull);
+    });
+
+    test('nothing is held when no link arrived', () {
+      PaymentReturnGuard.enter();
+      PaymentReturnGuard.exit(resolved: false);
+      expect(PaymentReturnGuard.takeSuppressedLink(), isNull);
+    });
+  });
+
   group('cold start', () {
     test('a deep-link-only return is NOT suppressed', () {
       // App killed mid-payment and relaunched: no poll ran in this process, so

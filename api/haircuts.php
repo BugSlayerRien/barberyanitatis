@@ -3,6 +3,7 @@
 
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
 require_once __DIR__ . '/variant_ranking.php';
 

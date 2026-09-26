@@ -261,10 +261,20 @@ class HairCompatibilityBadge extends StatelessWidget {
   final HairCompatibilityResult result;
   final bool compact;
 
+  /// Icon in a circle, no words.
+  ///
+  /// Every card in a grid carried a full-width bar reading "Recommended for
+  /// your hair texture", which wrapped to two lines and covered most of the
+  /// photo -- the same sentence repeated down the page says very little. The
+  /// labelled form stays on the detail page, where there is room and only one
+  /// of them, and the library explains the icons once in its banner.
+  final bool iconOnly;
+
   const HairCompatibilityBadge({
     super.key,
     required this.result,
     this.compact = true,
+    this.iconOnly = false,
   });
 
   Color get _accent {
@@ -281,17 +291,37 @@ class HairCompatibilityBadge extends StatelessWidget {
   IconData get _icon {
     switch (result.level) {
       case HairCompatibilityLevel.recommended:
-        return Icons.check_circle_outline;
+        return Icons.check_rounded;
       case HairCompatibilityLevel.possible:
-        return Icons.info_outline;
+        return Icons.priority_high_rounded;
       case HairCompatibilityLevel.notRecommended:
-        return Icons.warning_amber_rounded;
+        return Icons.close_rounded;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final color = _accent;
+
+    if (iconOnly) {
+      return Semantics(
+        // The icon alone is meaningless to a screen reader, so it still
+        // announces the full label.
+        label: result.shortLabel,
+        child: Container(
+          width: 26,
+          height: 26,
+          decoration: BoxDecoration(
+            color: const Color(0xFF0A0A0A).withValues(alpha: 0.92),
+            shape: BoxShape.circle,
+            border: Border.all(color: color.withValues(alpha: 0.85), width: 1.5),
+          ),
+          alignment: Alignment.center,
+          child: Icon(_icon, size: 15, color: color),
+        ),
+      );
+    }
+
     return Container(
       width: compact ? double.infinity : null,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),

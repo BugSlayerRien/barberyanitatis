@@ -80,6 +80,15 @@ function overlay_library_style_codes(?PDO $pdo = null): array
         return overlay_library_bundled_style_codes();
     }
 
+    if ($codes === []) {
+        // No style qualified. That is far more likely to be a broken asset
+        // check than a shop with no haircuts, and caching it would keep the
+        // library empty for everyone. Fall back, and do not cache.
+        error_log('Overlay catalog resolved to zero styles; using bundled list.');
+
+        return overlay_library_bundled_style_codes();
+    }
+
     schema_cache_put_json('overlay_library_catalog', ['codes' => $codes]);
     $memo = $codes;
 
@@ -165,14 +174,23 @@ function overlay_asset_is_present(string $relativePath): bool
 
 function hairstyle_overlay_files_exist(array $hairstyle): bool
 {
-    $mapped = overlay_paths_for_hairstyle($hairstyle);
-    $paths = $mapped !== null
-        ? [$mapped['front'], $mapped['side'], $mapped['back']]
-        : array_values(array_filter([
-            (string)($hairstyle['front_view_url'] ?? ''),
-            (string)($hairstyle['side_view_url'] ?? ''),
-            (string)($hairstyle['back_view_url'] ?? ''),
-        ]));
+    // Bundled artwork ships inside the Flutter app, not the API image. The
+    // deployed API is built from api/ alone (render.yaml rootDir: api), so
+    // mobile-app/assets never exists there and probing for it failed for every
+    // style -- which emptied the customer library completely. A style that
+    // maps to a bundled overlay key is present by definition; the app has the
+    // files even when the server cannot see them.
+    if (overlay_paths_for_hairstyle($hairstyle) !== null) {
+        return true;
+    }
+
+    // Uploaded artwork is the case this gate is actually for: those files live
+    // in storage the server CAN check.
+    $paths = array_values(array_filter([
+        (string)($hairstyle['front_view_url'] ?? ''),
+        (string)($hairstyle['side_view_url'] ?? ''),
+        (string)($hairstyle['back_view_url'] ?? ''),
+    ]));
 
     if (count($paths) < 3) {
         return false;
@@ -196,15 +214,19 @@ function hairstyle_overlay_files_exist(array $hairstyle): bool
 function is_overlay_library_row(array $row, ?array $allowedCodes = null): bool
 {
     $code = strtoupper(trim((string)($row['style_code'] ?? '')));
-    $codes = $allowedCodes ?? overlay_library_style_codes();
+    // An empty catalog means the catalog could not be determined, not that
+    // nothing qualifies. Treating [] as "allow nothing" rejected every row and
+    // emptied the library; fall back to the bundled list instead.
+    $codes = ($allowedCodes === null || $allowedCodes === [])
+        ? overlay_library_style_codes()
+        : $allowedCodes;
     if ($code !== '' && in_array($code, $codes, true)) {
         return true;
     }
 
-    // A style the catalog did not list is only admitted if its own images are
-    // present -- the whole point of the gate.
-    if ($allowedCodes !== null) {
-        return $code === '' && hairstyle_overlay_files_exist($row);
+    // Not in the catalog: admit it only if its own artwork is there.
+    if (hairstyle_overlay_files_exist($row)) {
+        return true;
     }
 
     $name = (string)($row['style_name'] ?? '');
@@ -519,7 +541,25 @@ function overlay_target_for_view(string $styleName, string $view, string $styleC
 
 function mobile_app_overlay_root(): string
 {
-    return dirname(__DIR__) . '/mobile-app/assets/images/overlays';
+    static $resolved = null;
+    if ($resolved !== null) {
+        return $resolved;
+    }
+
+    // Repo layout (api/ sits beside mobile-app/) vs a flat docroot deploy.
+    // Neither exists on Render, where only api/ is copied into the image --
+    // hairstyle_overlay_files_exist() no longer depends on this being found.
+    foreach ([
+        dirname(__DIR__) . '/mobile-app/assets/images/overlays',
+        __DIR__ . '/mobile-app/assets/images/overlays',
+        __DIR__ . '/assets/images/overlays',
+    ] as $candidate) {
+        if (is_dir($candidate)) {
+            return $resolved = $candidate;
+        }
+    }
+
+    return $resolved = dirname(__DIR__) . '/mobile-app/assets/images/overlays';
 }
 
 function slugify_overlay_folder(string $value): string

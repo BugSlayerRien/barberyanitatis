@@ -109,6 +109,24 @@ $newFromDb = array_values(array_diff($catalog, $bundled));
 echo '  NOTE  catalog=' . count($catalog) . ' bundled=' . count($bundled)
     . ($newFromDb === [] ? '' : ', from DB only: ' . implode(', ', $newFromDb)) . "\n";
 
+// The deployed API is built from api/ alone, so the bundled overlay artwork
+// (which ships inside the Flutter app) is NOT on the server. Gating the
+// catalog on those files emptied the customer library in production while
+// every local check passed. A style that maps to a bundled key must qualify
+// without the files being readable here.
+check(
+    'a bundled style qualifies without readable artwork',
+    is_overlay_library_row(['style_code' => 'HC-BUZZ-CUT', 'style_name' => 'Buzz Cut'], $catalog)
+);
+check(
+    'an empty catalog does not reject everything',
+    is_overlay_library_row(['style_code' => 'HC-BUZZ-CUT', 'style_name' => 'Buzz Cut'], [])
+);
+check(
+    'a style with neither bundled art nor uploads is rejected',
+    is_overlay_library_row(['style_code' => 'NOT-A-STYLE', 'style_name' => 'Totally Invented'], $catalog) === false
+);
+
 echo "\nTexture relax threshold\n";
 
 $straight = [];

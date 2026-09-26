@@ -43,9 +43,14 @@ class _PaymentPageState extends State<PaymentPage> {
 
   String _paymentReturnUrl(bool success) {
     final base = _paymongoBase();
+    // purpose + appointment_id ride through payment-success.php's query
+    // forwarding, so a return handled by PaymentResultPage knows which
+    // booking it is about instead of parsing 0 and highlighting nothing.
+    final query = '?purpose=booking&appointment_id=${widget.appointmentID}';
+
     return success
-        ? '$base/paymongo/payment-success.php'
-        : '$base/paymongo/payment-failed.php';
+        ? '$base/paymongo/payment-success.php$query'
+        : '$base/paymongo/payment-failed.php$query';
   }
 
   String? _extractCheckoutUrl(Map<String, dynamic> body) {
@@ -136,6 +141,15 @@ class _PaymentPageState extends State<PaymentPage> {
       }
       if (!mounted) return;
       if (statusData == null) {
+        // The OS delivered the return while this poll was running, so the
+        // guard held it back. The poll has now given up, so hand it over
+        // rather than losing the only confirmation we were given.
+        final suppressed = PaymentReturnGuard.takeSuppressedLink();
+        if (suppressed != null) {
+          Navigator.of(context).pushNamed('/payment-result', arguments: suppressed);
+
+          return;
+        }
         // The gateway never answered in time -- usually a dropped connection on
         // the way back from GCash, not a failed payment. Leaving the customer
         // on this screen made them think nothing happened; the server
@@ -220,9 +234,13 @@ class _PaymentPageState extends State<PaymentPage> {
         final data = CustomerApi.decodeJsonObject(response);
 
         if (response.statusCode != 200) {
+          // A hiccup from the status endpoint is not an answer about the
+          // payment. Returning here ended the poll, marked the return
+          // "handled", and told a customer who had paid that the payment did
+          // not complete -- inviting a second payment. Keep waiting instead.
           debugPrint('Payment status check failed (attempt $attempt): ${response.statusCode}');
-          debugPrint('Response: ${response.body}');
-          return {'paymentState': 'Unknown', 'raw': data};
+          await Future.delayed(const Duration(seconds: 2));
+          continue;
         }
 
         final status = data['data']?['attributes']?['status']?.toString().toLowerCase() ?? '';

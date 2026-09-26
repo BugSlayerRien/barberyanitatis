@@ -250,6 +250,46 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     );
   }
 
+  /// Explains the corner icons once, so the cards do not each have to repeat
+  /// the sentence they replaced.
+  Widget _buildFitLegend() {
+    Widget item(IconData icon, Color color, String label) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 18,
+            height: 18,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: color.withValues(alpha: 0.85), width: 1.2),
+            ),
+            alignment: Alignment.center,
+            child: Icon(icon, size: 11, color: color),
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+        ],
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Wrap(
+        spacing: 14,
+        runSpacing: 6,
+        children: [
+          item(Icons.check_rounded, const Color(0xFF8FD49A), 'Suits your hair'),
+          item(Icons.priority_high_rounded, const Color(0xFFE0B35A), 'May need styling'),
+          item(Icons.close_rounded, const Color(0xFFE07A7A), 'Not recommended'),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final inSearch = _searchQuery.isNotEmpty;
@@ -284,6 +324,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             ),
             const SizedBox(height: 12),
             _buildTextureBasisBanner(),
+            _buildFitLegend(),
             const SizedBox(height: 16),
 
             TextField(
@@ -494,11 +535,15 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                       builder: (_) {
                         final compat = HairCompatibility.evaluateStyleMap(style);
                         if (compat == null) return const SizedBox.shrink();
+                        // Top-right corner: a small marker that does not sit
+                        // over the haircut itself.
                         return Positioned(
-                          left: 6,
+                          top: 6,
                           right: 6,
-                          bottom: 6,
-                          child: HairCompatibilityBadge(result: compat),
+                          child: HairCompatibilityBadge(
+                            result: compat,
+                            iconOnly: true,
+                          ),
                         );
                       },
                     ),

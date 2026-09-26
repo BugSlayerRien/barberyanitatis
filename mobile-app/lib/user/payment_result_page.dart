@@ -132,6 +132,18 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
                   _params['id'] ??
                   _params['resource_id'] ??
                   '';
+              // The in-page path says "Payment successful"; this one said
+              // nothing at all, so a return handled here looked like nothing
+              // had happened.
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    receiptRef.isNotEmpty
+                        ? 'Payment successful ($receiptRef)'
+                        : 'Payment successful.',
+                  ),
+                ),
+              );
               Navigator.of(context).pushAndRemoveUntil(
                 MaterialPageRoute(
                   builder: (_) => AppointmentsPage(

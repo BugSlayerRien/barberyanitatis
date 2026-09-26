@@ -43,6 +43,22 @@ class PaymentReturnGuard {
 
   static DateTime? _lastResolvedAt;
 
+  /// A return link that was suppressed while a poll was running.
+  ///
+  /// The OS usually delivers the link on resume, i.e. mid-poll, so it is
+  /// dropped. If that poll then gives up, the link it was counting on has
+  /// already been and gone and nothing ever resolves the payment -- the
+  /// customer is told "not completed" for a payment they made. Keeping it
+  /// means the caller can replay it instead.
+  static Map<String, String>? _suppressedLink;
+
+  static Map<String, String>? takeSuppressedLink() {
+    final link = _suppressedLink;
+    _suppressedLink = null;
+
+    return link;
+  }
+
   static bool get isPollerActive => _activePollers > 0;
 
   static bool get _withinGrace {
@@ -86,7 +102,12 @@ class PaymentReturnGuard {
   /// `api/paymongo/payment-success.php` forwards the gateway's own fields
   /// through, so a resource id is usually present.
   static bool shouldSkipDeepLink(Map<String, String> params) {
-    if (isPollerActive) return true;
+    if (isPollerActive) {
+      // Held, not discarded: see _suppressedLink.
+      _suppressedLink = Map<String, String>.from(params);
+
+      return true;
+    }
 
     final id = (params['source'] ??
             params['source_id'] ??
@@ -106,5 +127,6 @@ class PaymentReturnGuard {
     _activePollers = 0;
     _handledResourceIds.clear();
     _lastResolvedAt = null;
+    _suppressedLink = null;
   }
 }

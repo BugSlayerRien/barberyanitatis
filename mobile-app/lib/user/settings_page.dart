@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'app_brand.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../barber/barber_edit_profile_page.dart';
 import 'change_password_page.dart';
 import 'faq_library_page.dart';
 import 'privacy_data_page.dart';
@@ -19,7 +20,6 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   bool _appointmentReminders = true;
-  bool _promotionAlerts = false;
   bool _loadingPrefs = true;
   bool _loggingOut = false;
 
@@ -34,7 +34,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (!mounted) return;
     setState(() {
       _appointmentReminders = prefs.getBool('settings_appointment_reminders') ?? true;
-      _promotionAlerts = prefs.getBool('settings_promotion_alerts') ?? false;
       _loadingPrefs = false;
     });
   }
@@ -83,6 +82,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isBarber = UserSession.roles.contains('barber');
     return Scaffold(
       backgroundColor: const Color(0xFF0A0A0A),
       appBar: AppBar(
@@ -103,10 +103,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 _settingsTile(
                   icon: Icons.person_outline,
                   title: 'Edit profile',
-                  subtitle: 'Name, phone, photo, hair texture',
+                  subtitle: isBarber
+                      ? 'Name, specialty, about you'
+                      : 'Name, phone, photo, hair texture',
+                  // Barbers and customers are separate accounts in separate
+                  // tables. Sending a barber to the customer profile screen
+                  // made the API reject them outright.
                   onTap: () {
                     Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ProfilePage()),
+                      MaterialPageRoute(
+                        builder: (_) => isBarber
+                            ? const BarberEditProfilePage()
+                            : const ProfilePage(),
+                      ),
                     );
                   },
                 ),
@@ -132,20 +141,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 _sectionTitle('Notifications'),
                 _switchTile(
                   title: 'Appointment reminders',
-                  subtitle: 'Booking confirmations and schedule updates',
+                  // No push notifications exist, so promising a phone alert
+                  // would be a lie: reminders show in the in-app bell only.
+                  subtitle: 'Shown in your notifications inside the app',
                   value: _appointmentReminders,
                   onChanged: (v) async {
                     setState(() => _appointmentReminders = v);
                     await _savePref('settings_appointment_reminders', v);
-                  },
-                ),
-                _switchTile(
-                  title: 'Promotions & offers',
-                  subtitle: 'Deals and shop announcements',
-                  value: _promotionAlerts,
-                  onChanged: (v) async {
-                    setState(() => _promotionAlerts = v);
-                    await _savePref('settings_promotion_alerts', v);
                   },
                 ),
                 const SizedBox(height: 20),

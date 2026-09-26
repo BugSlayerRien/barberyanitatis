@@ -165,6 +165,22 @@ Future<void> main() async {
     }
   }, onError: (_) {});
 
+  // A payment return that relaunches a killed app arrives as the INITIAL link,
+  // not on the stream above. It was handed only to AuthBootstrap, which tests
+  // for a Supabase callback and drops anything else -- so the customer landed
+  // on the dashboard with no word about the payment they had just made.
+  if (startupLink != null &&
+      startupLink.scheme == 'tatisapp' &&
+      startupLink.host == 'payment-return') {
+    final params = startupLink.queryParameters;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // After the first frame: navigatorKey has no state before runApp().
+      try {
+        navigatorKey.currentState?.pushNamed('/payment-result', arguments: params);
+      } catch (_) {}
+    });
+  }
+
   runApp(const TatisBarbershopApp());
 }
 

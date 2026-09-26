@@ -347,6 +347,56 @@ function storage_supabase_request(string $relativePath, bool $headOnly): array
     ];
 }
 
+/**
+ * Delete an object from wherever it lives. Used by the data-retention sweep
+ * (data_retention.php); returns true when the object is gone afterwards,
+ * including when it was already absent.
+ */
+function storage_delete(string $relativePath): bool
+{
+    $relativePath = ltrim(trim(str_replace(chr(92), '/', $relativePath)), '/');
+    if ($relativePath === '') {
+        return false;
+    }
+
+    try {
+        $relativePath = storage_normalize_relative_path($relativePath);
+    } catch (InvalidArgumentException $e) {
+        // Refuses anything that escapes the storage root.
+        return false;
+    }
+
+    $ok = true;
+
+    $local = storage_local_full_path($relativePath);
+    if (is_file($local)) {
+        $ok = @unlink($local);
+    }
+
+    if (storage_remote_configured()) {
+        $key = storage_service_role_key();
+        $ch = curl_init(storage_supabase_object_url($relativePath));
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_CUSTOMREQUEST => 'DELETE',
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $key,
+                'apikey: ' . $key,
+            ],
+        ] + api_curl_ssl_options());
+        curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        // 404 is fine: the point is that it is not there any more.
+        if (!(($code >= 200 && $code < 300) || $code === 404)) {
+            $ok = false;
+        }
+    }
+
+    return $ok;
+}
+
 function storage_exists_local(string $relativePath): bool
 {
     $full = storage_local_full_path($relativePath);

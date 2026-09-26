@@ -72,7 +72,7 @@ class TermsAndConditionsPage extends StatelessWidget {
           _section(
             title: '7. Data retention and deletion',
             body:
-                'Account, appointment, and scan data are retained while your account remains active and for a reasonable period afterward for record-keeping and dispute resolution. You may request deletion of your account and associated data at any time by contacting shop staff or through Settings. Some records (such as completed payment records) may be retained longer where required for accounting or legal purposes.',
+                'Your face scan photos and the AI previews made from them are deleted automatically 90 days after they are created. The plain description derived from a scan (face shape and hair texture) is kept so recommendations continue to work. Account and appointment records are kept for up to 3 years of inactivity, after which they may be removed. Completed payment records may be retained longer where required for accounting or legal purposes. You may request deletion of your account and associated data at any time by contacting shop staff.',
           ),
           _section(
             title: '8. Kiosk mode (walk-in scans)',

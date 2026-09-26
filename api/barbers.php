@@ -6,13 +6,14 @@ require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/customer_auth.php';
+require_once __DIR__ . '/admin_input.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? 'list'));
 
-if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage'], true)) {
+if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage', 'updateProfile'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -152,6 +153,59 @@ try {
         json_response([
             'message' => 'Feedback submitted',
             'barberRating' => round($avgRating, 2),
+        ]);
+    }
+
+    if ($action === 'updateProfile') {
+        // A barber's identity lives in `barbers`, not `users`. The customer
+        // profile endpoint resolves the session email against `users` and so
+        // rejected barbers outright ("You are not authorized to access this
+        // account"), which is why they had no way to edit their details.
+        $barberID = (int)($input['barberID'] ?? $input['barberId'] ?? $input['userID'] ?? 0);
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $resolvedBarberID = find_active_barber_id($pdo, $barberID, $email);
+        if ($resolvedBarberID <= 0) {
+            json_response(['error' => 'Barber not found'], 404);
+        }
+
+        // Same validation the admin portal uses, so a barber cannot store a
+        // name the admin screens would have refused.
+        $fullName = admin_input_person_name($input['fullName'] ?? '', 'Name');
+        $specialty = admin_input_text($input['specialty'] ?? '', 'Specialty', 80);
+        $bio = admin_input_text($input['bio'] ?? '', 'Bio', 300);
+
+        $existingStmt = $pdo->prepare(
+            'SELECT full_name, specialty, bio FROM barbers WHERE barber_id = ? LIMIT 1'
+        );
+        $existingStmt->execute([$resolvedBarberID]);
+        $existing = $existingStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $pdo->prepare(
+            'UPDATE barbers
+             SET full_name = :full_name, specialty = :specialty, bio = :bio
+             WHERE barber_id = :id'
+        )->execute([
+            ':full_name' => $fullName,
+            ':specialty' => $specialty !== '' ? $specialty : null,
+            ':bio' => $bio !== '' ? $bio : null,
+            ':id' => $resolvedBarberID,
+        ]);
+
+        audit_log($pdo, 'BARBER_PROFILE_UPDATE', 'barbers', (string)$resolvedBarberID, $existing, [
+            'full_name' => $fullName,
+            'specialty' => $specialty,
+            'bio' => $bio,
+        ], null, ['type' => 'barber', 'id' => $resolvedBarberID, 'label' => $fullName]);
+
+        $row = $pdo->prepare(
+            'SELECT barber_id, full_name, email, specialty, bio, profile_image, years_experience, rating
+             FROM barbers WHERE barber_id = ? LIMIT 1'
+        );
+        $row->execute([$resolvedBarberID]);
+
+        json_response([
+            'message' => 'Profile updated',
+            'barber' => $row->fetch(PDO::FETCH_ASSOC) ?: [],
         ]);
     }
 
