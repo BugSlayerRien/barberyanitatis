@@ -81,6 +81,69 @@ function attach_staff_portal_session(PDO $pdo, array $userPayload, int $staffId)
 /**
  * @return array{staff_id:int, full_name:string, email:string, role:string}
  */
+/**
+ * Any signed-in portal staff member, with a role allow-list.
+ *
+ * require_admin() is the strict version. Some actions belong to whoever runs
+ * the floor -- the receptionist manages the live queue -- so they need a gate
+ * that admits Receptionist as well, without handing over the admin APIs.
+ *
+ * @param list<string> $roles Lower-case roles allowed through.
+ * @return array{staff_id: int, full_name: string, email: string, role: string}
+ */
+function require_staff(PDO $pdo, array $roles = ['admin', 'receptionist']): array
+{
+    ensure_portal_sessions_table($pdo);
+
+    $token = portal_token_from_request();
+    if ($token === '') {
+        json_response(['error' => 'Staff authentication required.'], 401);
+    }
+
+    $stmt = $pdo->prepare(
+        'SELECT s.staff_id, s.full_name, s.email, s.role, s.is_active, p.expires_at
+         FROM portal_sessions p
+         JOIN staff_users s ON s.staff_id = p.staff_id
+         WHERE p.token_hash = :token_hash
+         LIMIT 1'
+    );
+    $stmt->execute([':token_hash' => hash_portal_token($token)]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$row) {
+        json_response(['error' => 'Invalid or expired staff session.'], 401);
+    }
+
+    $expires = strtotime((string)$row['expires_at']);
+    if ($expires !== false && $expires < time()) {
+        json_response(['error' => 'Invalid or expired staff session.'], 401);
+    }
+
+    $active = $row['is_active'] === true || $row['is_active'] === 't' || (int)$row['is_active'] === 1;
+    if (!$active) {
+        json_response(['error' => 'Staff permission required.'], 403);
+    }
+
+    if (!in_array(strtolower(trim((string)$row['role'])), $roles, true)) {
+        json_response(['error' => 'Staff permission required.'], 403);
+    }
+
+    $pdo->prepare(
+        'UPDATE portal_sessions SET last_used_at = NOW() WHERE token_hash = :token_hash'
+    )->execute([':token_hash' => hash_portal_token($token)]);
+
+    $staff = [
+        'staff_id' => (int)$row['staff_id'],
+        'full_name' => (string)$row['full_name'],
+        'email' => (string)$row['email'],
+        'role' => (string)$row['role'],
+    ];
+
+    audit_set_current_actor(audit_actor_staff($staff));
+
+    return $staff;
+}
+
 function require_admin(PDO $pdo): array
 {
     ensure_portal_sessions_table($pdo);

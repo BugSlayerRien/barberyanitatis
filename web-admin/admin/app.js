@@ -481,10 +481,13 @@ function renderActivities(activities) {
 
   const paged = paginateRows("activity-list", filtered);
 
-  const grouped = { appointments: [], users: [], services: [], system: [] };
+  // Built from `categories` rather than a second hardcoded list: when "money"
+  // was added to one and not the other, grouped.money was undefined and the
+  // dashboard died on `grouped[key].length`.
+  const grouped = Object.fromEntries(Object.keys(categories).map((key) => [key, []]));
   paged.items.forEach((activity) => {
-    const bucket = categorize(activity.title);
-    grouped[bucket].push(activity);
+    const bucket = categorize(activity);
+    (grouped[bucket] ?? grouped.system).push(activity);
   });
 
   Object.entries(categories).forEach(([key, label]) => {

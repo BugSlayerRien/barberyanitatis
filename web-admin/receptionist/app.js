@@ -1337,6 +1337,8 @@ async function loadDashboard(showOverlay = false) {
     state.walkins = data.walkins ?? [];
     state.todayRevenue = Number(data.todayRevenue ?? 0);
     state.automation = data.automation ?? { events: [], counts: {} };
+    state.queueMergeEnabled = Number(data.queueMergeEnabled ?? 0) === 1;
+    syncQueueMergeToggle();
     renderStats(data.stats ?? []);
     renderAppointments(state.appointments);
     renderWalkins(state.walkins);
@@ -1877,4 +1879,41 @@ document.getElementById("refunds-table")?.addEventListener("click", async (event
     target.disabled = false;
     window.alert(`Could not mark refund as sent: ${error.message}`);
   }
+});
+
+/**
+ * Queue merge switch. The receptionist runs the floor, so the same toggle the
+ * admin has in Settings is here too -- both write the one system setting that
+ * barber_channel_filter_sql() reads. Read-side only: pricing is untouched and
+ * switching back restores the split immediately.
+ */
+function syncQueueMergeToggle() {
+  const input = document.getElementById("queue-merge-toggle");
+  if (input) input.checked = Boolean(state.queueMergeEnabled);
+}
+
+async function setQueueMerge(enabled) {
+  const input = document.getElementById("queue-merge-toggle");
+  try {
+    if (input) input.disabled = true;
+    const data = await postJson(
+      apiUrl("receptionist.php"),
+      { action: "setQueueMerge", enabled: enabled ? 1 : 0 },
+      false,
+    );
+    state.queueMergeEnabled = Number(data.queueMergeEnabled ?? 0) === 1;
+    toast(data.message || "Queue setting saved.", "success");
+    await loadDashboard();
+  } catch (error) {
+    // Put the switch back where it was: the change did not happen.
+    state.queueMergeEnabled = !enabled;
+    syncQueueMergeToggle();
+    toast(error?.message || "Could not change the queue setting.", "error");
+  } finally {
+    if (input) input.disabled = false;
+  }
+}
+
+document.getElementById("queue-merge-toggle")?.addEventListener("change", (event) => {
+  setQueueMerge(event.target.checked);
 });

@@ -77,7 +77,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? 'dashboard';
 
-$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin', 'listRefunds', 'completeRefund'];
+$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin', 'listRefunds', 'completeRefund', 'setQueueMerge'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -89,6 +89,26 @@ try {
     ensure_barber_channel_column($pdo);
     ensure_financial_tables($pdo);
     $trackingAutomation = run_tracking_automation($pdo, true);
+
+    if ($action === 'setQueueMerge') {
+        // The receptionist runs the floor, so they own this switch -- but it
+        // changes what every barber list shows, so it needs a real session
+        // rather than anyone who can reach the endpoint.
+        require_once __DIR__ . '/admin_auth.php';
+        require_once __DIR__ . '/system_settings_store.php';
+        require_staff($pdo);
+
+        $enabled = !empty($input['enabled']) && (string)$input['enabled'] !== '0';
+        upsert_setting($pdo, 'queue_merge_enabled', $enabled ? '1' : '0', 'Boolean', 'operations');
+        audit_log($pdo, 'QUEUE_MERGE_TOGGLE', 'system_settings', 'queue_merge_enabled', null, [
+            'enabled' => $enabled,
+        ]);
+
+        json_response([
+            'message' => $enabled ? 'Queues merged.' : 'Queues split back.',
+            'queueMergeEnabled' => $enabled ? 1 : 0,
+        ]);
+    }
 
     if ($action === 'dashboard') {
         $deskStats = fetch_receptionist_front_desk_stats($pdo);
@@ -241,6 +261,9 @@ try {
                 ];
             }, $walkins),
             'automation' => $trackingAutomation,
+            // So the floor can see, and change, whether the two queues are
+            // currently merged (see barber_channel.php).
+            'queueMergeEnabled' => queue_merge_enabled($pdo) ? 1 : 0,
         ]);
     }
 

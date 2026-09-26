@@ -6,21 +6,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/admin_auth.php';
-
-function ensure_system_settings_table(PDO $pdo): void
-{
-    $pdo->exec(
-        "CREATE TABLE IF NOT EXISTS system_settings (
-            setting_key VARCHAR(100) PRIMARY KEY,
-            setting_value TEXT,
-            setting_type TEXT NOT NULL DEFAULT 'String',
-            category VARCHAR(50),
-            description TEXT,
-            is_editable BOOLEAN NOT NULL DEFAULT TRUE,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-        )"
-    );
-}
+require_once __DIR__ . '/system_settings_store.php';
 
 function setting_defaults(): array
 {
@@ -48,22 +34,6 @@ function load_settings_map(PDO $pdo): array
         $map[(string)$row['setting_key']] = (string)($row['setting_value'] ?? '');
     }
     return $map;
-}
-
-function upsert_setting(PDO $pdo, string $key, string $value, string $type = 'String', string $category = 'admin'): void
-{
-    $stmt = $pdo->prepare(
-        "INSERT INTO system_settings (setting_key, setting_value, setting_type, category, description, is_editable, updated_at)
-         VALUES (:setting_key, :setting_value, :setting_type, :category, '', TRUE, NOW())
-         ON CONFLICT (setting_key)
-         DO UPDATE SET setting_value = EXCLUDED.setting_value, updated_at = NOW()"
-    );
-    $stmt->execute([
-        ':setting_key' => $key,
-        ':setting_value' => $value,
-        ':setting_type' => $type,
-        ':category' => $category,
-    ]);
 }
 
 function settings_payload(array $map): array
