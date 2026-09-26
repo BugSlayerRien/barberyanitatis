@@ -16,6 +16,9 @@ const state = {
   scheduleCalendar: null,
   leaveCalSelected: null,
   leaveCalBarberId: "",
+  // Mirrors the system setting; drives whether the tracking and barber views
+  // show one merged list or the Regular/Exclusive split.
+  queueMergeEnabled: false,
 };
 
 const DEFAULT_PAGE_SIZE = 5;
@@ -131,12 +134,12 @@ function applyGlobalSearch() {
     return;
   }
   if (activeView === "tracking") {
-    resetPagination(["tracking-regular-list", "tracking-exclusive-list"]);
+    resetPagination(["tracking-regular-list", "tracking-exclusive-list", "tracking-merged-list"]);
     renderSplitTracking(state.appointments, state.walkins);
     return;
   }
   if (activeView === "barbers") {
-    resetPagination(["barbers-regular-list", "barbers-exclusive-list"]);
+    resetPagination(["barbers-regular-list", "barbers-exclusive-list", "barbers-merged-list"]);
     renderSplitBarbers(window.__barbersCache || []);
   }
 }
@@ -990,6 +993,21 @@ function renderSplitTracking(appointments, walkins) {
   const tracking = buildTracking(appointments, walkins).filter((item) =>
     matchesQuery(query, item.name, item.service, item.barber, item.status, item.queueNumber, item.schedule),
   );
+
+  // Merging the queues has to show as one queue. Leaving the Regular and
+  // Exclusive columns up while the setting says "merged" told the floor the
+  // opposite of what the switch did.
+  const merged = Boolean(state.queueMergeEnabled);
+  const mergedCard = document.getElementById("tracking-merged-card");
+  const splitColumns = document.getElementById("tracking-split-columns");
+  if (mergedCard) mergedCard.hidden = !merged;
+  if (splitColumns) splitColumns.hidden = merged;
+
+  if (merged) {
+    renderTracking(tracking, "tracking-merged-list");
+    return;
+  }
+
   renderTracking(tracking.filter((item) => item.kind === "walkin"), "tracking-regular-list");
   renderTracking(tracking.filter((item) => item.kind === "appointment"), "tracking-exclusive-list");
 }
@@ -1032,6 +1050,25 @@ function renderBarbers(items, listId) {
 
 function renderSplitBarbers(barbers) {
   const query = headerSearchValue();
+  const merged = Boolean(state.queueMergeEnabled);
+  const mergedCard = document.getElementById("barbers-merged-card");
+  const splitColumns = document.getElementById("barbers-split-columns");
+  if (mergedCard) mergedCard.hidden = !merged;
+  if (splitColumns) splitColumns.hidden = merged;
+
+  if (merged) {
+    // One list, and no per-barber channel badge: while merged the label would
+    // say "Exclusive" about someone now taking walk-ins.
+    const all = [
+      ...mapBarberCards(barbers, "walk_in"),
+      ...mapBarberCards(barbers, "appointment"),
+    ]
+      .map((item) => ({ ...item, channelLabel: "" }))
+      .filter((item) => matchesQuery(query, item.name, item.specialty));
+    renderBarbers(all, "barbers-merged-list");
+    return;
+  }
+
   const regular = mapBarberCards(barbers, "walk_in").filter((item) =>
     matchesQuery(query, item.name, item.specialty, item.channelLabel),
   );
@@ -1902,6 +1939,12 @@ async function setQueueMerge(enabled) {
       false,
     );
     state.queueMergeEnabled = Number(data.queueMergeEnabled ?? 0) === 1;
+    syncQueueMergeToggle();
+    // Swap the view straight away, then refresh: the barber lists behind it
+    // change server-side too.
+    resetPagination(["tracking-regular-list", "tracking-exclusive-list", "tracking-merged-list"]);
+    renderSplitTracking(state.appointments ?? [], state.walkins ?? []);
+    renderSplitBarbers(window.__barbersCache || []);
     toast(data.message || "Queue setting saved.", "success");
     await loadDashboard();
   } catch (error) {

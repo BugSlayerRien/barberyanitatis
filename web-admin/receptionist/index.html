@@ -210,7 +210,20 @@
               <div class="list" id="tracking-automation-list"></div>
             </div>
 
-            <div class="tracking-columns">
+            <!-- Shown instead of the two columns below while the queues are
+                 merged: one list, in arrival order, regardless of channel. -->
+            <div class="card" id="tracking-merged-card" hidden>
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Queue</h3>
+                  <p class="card-sub">Walk-ins and appointments together, in order.</p>
+                </div>
+                <span class="status status--neutral no-dot">Merged</span>
+              </div>
+              <div class="list" id="tracking-merged-list"></div>
+            </div>
+
+            <div class="tracking-columns" id="tracking-split-columns">
               <div class="card">
                 <div class="card-head">
                   <div class="card-head-text">
@@ -298,7 +311,20 @@
               <div class="time-off-grid" id="barber-unavailability-list"></div>
             </div>
 
-            <div class="split split-even">
+            <!-- While the queues are merged every barber serves both channels,
+                 so splitting them into Regular and Exclusive would misreport it. -->
+            <div class="card" id="barbers-merged-card" hidden>
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Barbers</h3>
+                  <p class="card-sub">Serving walk-ins and appointments.</p>
+                </div>
+                <span class="status status--neutral no-dot">Merged</span>
+              </div>
+              <div class="list barber-grid" id="barbers-merged-list"></div>
+            </div>
+
+            <div class="split split-even" id="barbers-split-columns">
               <div class="card">
                 <div class="card-head">
                   <div class="card-head-text">

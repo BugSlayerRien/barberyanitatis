@@ -2535,6 +2535,18 @@ table.table {
   grid-template-columns: minmax(0, 1.5fr) minmax(280px, 0.9fr);
 }
 
+/* A single short control (the queue switch) sat in the stretched ops grid and
+   was padded out to the height of the tall Notifications card beside it. Its
+   own full-width row, sized to its content. */
+.settings-panel-wide {
+  align-self: start;
+  margin-bottom: var(--s-4);
+}
+
+.settings-panel-wide .settings-editable-block {
+  padding-top: 0;
+}
+
 .settings-layout-status {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

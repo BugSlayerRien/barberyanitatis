@@ -640,8 +640,7 @@
             <div class="settings-desk" id="settings-desk">
               <div class="settings-group">
                 <div class="settings-group-label">Operations</div>
-                <div class="settings-layout settings-layout-ops">
-                  <div class="card settings-panel is-editable">
+                <div class="card settings-panel is-editable settings-panel-wide">
                     <div class="settings-panel-head">
                       <div>
                         <h3>Queue</h3>
@@ -660,6 +659,8 @@
                       </div>
                     </div>
                   </div>
+                <div class="settings-layout settings-layout-ops">
+                  
                   <div class="card settings-panel is-editable">
                     <div class="settings-panel-head">
                       <div>
@@ -720,6 +721,19 @@
                   <div class="card settings-panel is-readonly">
                     <div class="settings-panel-head">
                       <div>
+                        <h3>Operating schedule</h3>
+                        <p class="meta settings-panel-sub">Summary · managed separately</p>
+                      </div>
+                      <span class="settings-badge muted">Summary</span>
+                    </div>
+                    <div class="settings-kv" id="settings-schedule-meta"></div>
+                    <div class="settings-actions">
+                      <button class="btn secondary" data-jump="schedule" type="button">Manage operating schedule</button>
+                    </div>
+                  </div>
+                  <div class="card settings-panel is-readonly">
+                    <div class="settings-panel-head">
+                      <div>
                         <h3>Security</h3>
                         <p class="meta settings-panel-sub">Read-only status</p>
                       </div>
@@ -728,7 +742,6 @@
                     <div class="settings-kv" id="settings-security-meta"></div>
                     <p class="meta settings-footnote">Staff MFA enforcement and admin-editable password policies are not implemented in this build. API keys and database credentials are never shown here.</p>
                   </div>
-
                   <div class="card settings-panel is-readonly">
                     <div class="settings-panel-head">
                       <div>
@@ -742,21 +755,6 @@
                       <button class="btn secondary" id="settings-refresh-ai" type="button">Refresh AI status</button>
                     </div>
                   </div>
-
-                  <div class="card settings-panel is-readonly">
-                    <div class="settings-panel-head">
-                      <div>
-                        <h3>Operating schedule</h3>
-                        <p class="meta settings-panel-sub">Summary · managed separately</p>
-                      </div>
-                      <span class="settings-badge muted">Summary</span>
-                    </div>
-                    <div class="settings-kv" id="settings-schedule-meta"></div>
-                    <div class="settings-actions">
-                      <button class="btn secondary" data-jump="schedule" type="button">Manage operating schedule</button>
-                    </div>
-                  </div>
-
                   <div class="card settings-panel is-readonly">
                     <div class="settings-panel-head">
                       <div>
