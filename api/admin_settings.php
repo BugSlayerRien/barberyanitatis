@@ -31,6 +31,10 @@ function setting_defaults(): array
         'force_mfa' => '0',
         'shop_open_time' => '09:00',
         'shop_close_time' => '20:00',
+        // Read-side only: shows every barber in both the kiosk queue and the
+        // appointment views. Pricing tiers are unaffected, and turning it off
+        // restores the split immediately (see barber_channel.php).
+        'queue_merge_enabled' => '0',
     ];
 }
 
@@ -71,6 +75,8 @@ function settings_payload(array $map): array
         'forceMfa' => (int)($map['force_mfa'] === '1' || strtolower($map['force_mfa']) === 'true'),
         'openTime' => $map['shop_open_time'] ?? '09:00',
         'closeTime' => $map['shop_close_time'] ?? '20:00',
+        'queueMergeEnabled' => (int)(($map['queue_merge_enabled'] ?? '0') === '1'
+            || strtolower((string)($map['queue_merge_enabled'] ?? '')) === 'true'),
     ];
 }
 
@@ -641,6 +647,15 @@ try {
         upsert_setting($pdo, 'email_notifications_enabled', !empty($input['emailNotificationsEnabled']) ? '1' : '0', 'Boolean', 'notifications');
         if (!empty($input['notificationFromEmail'])) {
             upsert_setting($pdo, 'notification_from_email', trim((string)$input['notificationFromEmail']), 'String', 'notifications');
+        }
+        // Unlike MFA/backups above, this flag IS enforced: it drives
+        // barber_channel_filter_sql(), so accepting it here is honest.
+        if (array_key_exists('queueMergeEnabled', $input)) {
+            $merge = !empty($input['queueMergeEnabled']) && (string)$input['queueMergeEnabled'] !== '0';
+            upsert_setting($pdo, 'queue_merge_enabled', $merge ? '1' : '0', 'Boolean', 'operations');
+            audit_log($pdo, 'QUEUE_MERGE_TOGGLE', 'system_settings', 'queue_merge_enabled', null, [
+                'enabled' => $merge,
+            ]);
         }
 
         $map = load_settings_map($pdo);

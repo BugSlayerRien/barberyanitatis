@@ -583,7 +583,8 @@ try {
         if ($barberID > 0) {
             $barberChannelStmt = $pdo->prepare(
                 "SELECT COUNT(*) FROM barbers
-                 WHERE barber_id = :barber_id AND is_active = TRUE AND barber_channel = 'walk_in'"
+                 WHERE barber_id = :barber_id AND is_active = TRUE"
+                 . barber_channel_filter_sql('walk_in')
             );
             $barberChannelStmt->execute([':barber_id' => $barberID]);
             if ((int)$barberChannelStmt->fetchColumn() === 0) {

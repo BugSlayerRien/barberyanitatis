@@ -46,6 +46,8 @@ class KioskApi {
     required String styleName,
     required String scanMode,
     String entryPath = '',
+    bool consentAccepted = false,
+    String paymentMode = 'counter',
   }) async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),
@@ -59,6 +61,8 @@ class KioskApi {
         'styleName': styleName,
         'scanMode': scanMode,
         'entryPath': entryPath,
+        'consentAccepted': consentAccepted,
+        'paymentMode': paymentMode,
       }),
     );
     return _decode(response);

@@ -34,6 +34,7 @@ try {
     if ($action === 'services' || $action === 'barberQueue' || $action === 'todayQueue') {
         with_pdo_retry(function (PDO $pdo) use ($action): void {
             ensure_walkin_guest_name_column($pdo);
+            ensure_walkin_kiosk_columns($pdo);
             ensure_barber_channel_column($pdo);
             run_tracking_automation($pdo, true);
 
@@ -160,8 +161,7 @@ try {
             $barberChannelStmt = $pdo->prepare(
                 "SELECT COUNT(*) FROM barbers
                  WHERE barber_id = :barber_id
-                   AND is_active = TRUE
-                   AND barber_channel = 'walk_in'"
+                   AND is_active = TRUE" . barber_channel_filter_sql('walk_in')
             );
             $barberChannelStmt->execute([':barber_id' => $barberID]);
             if ((int)$barberChannelStmt->fetchColumn() === 0) {
@@ -185,9 +185,20 @@ try {
 
         $status = $barberID > 0 ? 'Assigned' : 'Waiting';
 
+        // Consent and payment choice are captured at the kiosk but only reach
+        // the database here: nothing exists to attach them to until the guest
+        // actually joins the queue.
+        $consentAccepted = !empty($input['consentAccepted']);
+        $paymentMode = strtolower(trim((string)($input['paymentMode'] ?? '')));
+        if (!in_array($paymentMode, ['counter', 'gcash'], true)) {
+            $paymentMode = 'counter';
+        }
+
         $insertQueue = $pdo->prepare(
-            'INSERT INTO walkin_queue (queue_number, barber_id, status, wait_time_minutes, guest_name)
-             VALUES (:queue_number, :barber_id, :status, :wait_time_minutes, :guest_name)
+            'INSERT INTO walkin_queue (queue_number, barber_id, status, wait_time_minutes, guest_name,
+                                       consent_accepted_at, payment_mode)
+             VALUES (:queue_number, :barber_id, :status, :wait_time_minutes, :guest_name,
+                     :consent_accepted_at, :payment_mode)
              RETURNING queue_id'
         );
         $insertQueue->execute([
@@ -196,6 +207,8 @@ try {
             ':status' => $status,
             ':wait_time_minutes' => $waitMinutes,
             ':guest_name' => $guestName,
+            ':consent_accepted_at' => $consentAccepted ? date('c') : null,
+            ':payment_mode' => $paymentMode,
         ]);
 
         $queueID = (int)$insertQueue->fetchColumn();

@@ -51,6 +51,16 @@ class KioskSession {
   static String? selectedStyleName;
   static int? selectedVariantId;
 
+  /// Terms accepted for THIS walk-in. Deliberately not persisted: a kiosk is
+  /// used by a different person each time, so a remembered "already agreed"
+  /// would be someone else's agreement. reset() clears it with everything else.
+  static bool consentAccepted = false;
+
+  /// How the guest says they will pay: 'counter' or 'gcash'. An intention
+  /// only -- the kiosk never talks to the payment gateway; staff collect the
+  /// money and completing the visit is what records the payment.
+  static String paymentMode = 'counter';
+
   static void reset() {
     guestName = null;
     entryPath = null;
@@ -59,6 +69,8 @@ class KioskSession {
     selectedBarberId = null;
     selectedStyleName = null;
     selectedVariantId = null;
+    consentAccepted = false;
+    paymentMode = 'counter';
   }
 
   static bool get isThreeAngle => scanMode == KioskScanMode.threeAngle;

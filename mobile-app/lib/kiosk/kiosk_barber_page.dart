@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'kiosk_api.dart';
 import 'kiosk_done_page.dart';
+import 'kiosk_payment_mode_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_theme.dart';
 import 'widgets/kiosk_scaffold.dart';
@@ -113,6 +114,17 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
       return;
     }
 
+    // Ask how they will pay before the queue row is created, so the choice is
+    // stored with it rather than having to be corrected at the till.
+    final mode = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => KioskPaymentModePage(
+          onConfirm: (selected) async => Navigator.of(context).pop(selected),
+        ),
+      ),
+    );
+    if (!mounted || mode == null) return;
+
     setState(() => _submitting = true);
     try {
       final result = await KioskApi.createWalkin(
@@ -124,6 +136,8 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
             (KioskSession.entryPath == KioskEntryPath.knownStyle ? 'Walk-in' : 'Style'),
         scanMode: KioskSession.scanModeLabel,
         entryPath: KioskSession.entryPathLabel,
+        consentAccepted: KioskSession.consentAccepted,
+        paymentMode: mode,
       );
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(

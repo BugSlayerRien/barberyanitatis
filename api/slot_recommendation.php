@@ -4,6 +4,9 @@
 
 declare(strict_types=1);
 
+// barber_channel_filter_sql(), used by the favourite-barber lookup below.
+require_once __DIR__ . '/barber_channel.php';
+
 /**
  * @return array{
  *   weight_barber: int,
@@ -714,8 +717,7 @@ function slot_recommendation_load_rated_favorite(PDO $pdo, int $userId): ?array
                FROM barber_feedback bf
                JOIN barbers b ON b.barber_id = bf.barber_id
               WHERE bf.user_id = :user_id
-                AND b.is_active = TRUE
-                AND b.barber_channel = 'appointment'
+                AND b.is_active = TRUE" . barber_channel_filter_sql('appointment', 'b.barber_channel') . "
               GROUP BY b.barber_id, b.full_name
               ORDER BY AVG(bf.rating) DESC, COUNT(*) DESC
               LIMIT 1"

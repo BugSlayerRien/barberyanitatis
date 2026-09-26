@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../user/app_brand.dart';
 import 'kiosk_api.dart';
-import 'kiosk_guest_page.dart';
+import 'kiosk_consent_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_theme.dart';
 import 'widgets/kiosk_scaffold.dart';
@@ -55,8 +55,10 @@ class _KioskHomePageState extends State<KioskHomePage> {
 
   void _startWalkIn() {
     KioskSession.reset();
+    // Terms first: the next screens capture a name and photos, so consent has
+    // to come before anything is collected, not after.
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const KioskGuestPage()),
+      MaterialPageRoute(builder: (_) => const KioskConsentPage()),
     );
   }
 

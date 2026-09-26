@@ -413,10 +413,12 @@ try {
         }
 
         $barberCheck = $pdo->prepare(
+            // Uses the shared filter so the queue-merge toggle reaches this
+            // check too; hardcoded, it kept rejecting walk-in barbers even
+            // when the two queues were merged.
             "SELECT COUNT(*) FROM barbers
              WHERE barber_id = :barber_id
-               AND is_active = TRUE
-               AND barber_channel = 'appointment'"
+               AND is_active = TRUE" . barber_channel_filter_sql('appointment')
         );
         $barberCheck->execute([':barber_id' => $barberID]);
         if ((int)$barberCheck->fetchColumn() === 0) {

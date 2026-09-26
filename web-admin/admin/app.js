@@ -2437,6 +2437,11 @@ function applySettingsPayload(data) {
   const emailEl = document.getElementById("setting-email");
   if (emailEl) emailEl.checked = settings.emailNotificationsEnabled === 1 || settings.emailNotificationsEnabled === true;
 
+  const queueMergeEl = document.getElementById("setting-queue-merge");
+  if (queueMergeEl) {
+    queueMergeEl.checked = settings.queueMergeEnabled === 1 || settings.queueMergeEnabled === true;
+  }
+
   const fromEmail = document.getElementById("setting-from-email");
   if (fromEmail) {
     fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
@@ -3049,6 +3054,7 @@ document.getElementById("settings-save")?.addEventListener("click", async (event
       const payload = {
         action: "update",
         emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
+        queueMergeEnabled: document.getElementById("setting-queue-merge")?.checked ? 1 : 0,
         notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
       };
       const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {

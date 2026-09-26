@@ -231,6 +231,14 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
         $amount = 100.0;
     }
 
+    // The kiosk records how the guest said they would pay; staff still collect
+    // it. 'Digital' is already allowed by the payments CHECK constraint, so a
+    // GCash walk-in no longer lands in the books as cash.
+    $modeStmt = $pdo->prepare('SELECT payment_mode FROM walkin_queue WHERE queue_id = :queue_id LIMIT 1');
+    $modeStmt->execute([':queue_id' => $queueId]);
+    $paymentMode = strtolower(trim((string)($modeStmt->fetchColumn() ?: 'counter')));
+    $paymentMethod = $paymentMode === 'gcash' ? 'Digital' : 'Cash';
+
     $insert = $pdo->prepare(
         "INSERT INTO payments (
             payment_ref, appointment_id, queue_id,
@@ -239,7 +247,7 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
          ) VALUES (
             :payment_ref, NULL, :queue_id,
             :amount, 0, 0, :total_amount,
-            'Cash', 'Paid', NOW()
+            :payment_method, 'Paid', NOW()
          )"
     );
     $paymentRef = generate_payment_ref($pdo);
@@ -248,12 +256,14 @@ function record_completion_payment(PDO $pdo, ?int $appointmentId, ?int $queueId)
         ':queue_id' => $queueId,
         ':amount' => $amount,
         ':total_amount' => $amount,
+        ':payment_method' => $paymentMethod,
     ]);
 
     audit_log($pdo, 'CASH_PAYMENT_RECORDED', 'payments', $paymentRef, null, [
         'queue_id' => $queueId,
         'amount' => round($amount, 2),
-        'payment_method' => 'Cash',
+        'payment_method' => $paymentMethod,
+        'kiosk_payment_mode' => $paymentMode,
         'amount_defaulted' => $amountFallback,
     ], null, audit_actor_system('Walk-in completion payment'));
 }

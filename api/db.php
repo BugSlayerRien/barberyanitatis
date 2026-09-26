@@ -230,6 +230,34 @@ function ensure_walkin_queue_timestamp_columns(PDO $pdo): void
 }
 
 /**
+ * Kiosk walk-in: when the guest accepted the terms, and how they said they
+ * would pay.
+ *
+ * Consent is recorded per walk-in rather than per device -- a kiosk is used by
+ * a different person every time, so a stored "already agreed" flag would be
+ * someone else's agreement.
+ *
+ * payment_mode is an intention, not a payment: the kiosk never calls the
+ * gateway. Staff still take the money and complete the visit, which is what
+ * records the actual payment (payment_recording.php).
+ */
+function ensure_walkin_kiosk_columns(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    if ((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'pgsql') {
+        return;
+    }
+
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ');
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20)');
+}
+
+/**
  * Who performed an audited action.
  *
  * `user_id` alone could not answer this: staff are `staff_users.staff_id`,
