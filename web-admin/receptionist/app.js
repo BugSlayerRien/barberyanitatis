@@ -521,11 +521,22 @@ function rerenderByPaginationKey(key) {
     renderWalkins(state.walkins);
     return;
   }
-  if (key === "tracking-regular-list" || key === "tracking-exclusive-list") {
+  // The merged list ids belong here too: while the queues are merged they are
+  // the only lists on screen, and leaving them out meant Next/Previous moved
+  // the page number but never re-rendered.
+  if (
+    key === "tracking-regular-list"
+    || key === "tracking-exclusive-list"
+    || key === "tracking-merged-list"
+  ) {
     renderSplitTracking(state.appointments, state.walkins);
     return;
   }
-  if (key === "barbers-regular-list" || key === "barbers-exclusive-list") {
+  if (
+    key === "barbers-regular-list"
+    || key === "barbers-exclusive-list"
+    || key === "barbers-merged-list"
+  ) {
     renderSplitBarbers(window.__barbersCache || []);
   }
 }
