@@ -202,16 +202,37 @@ try {
         json_response(['message' => 'Hairstyle updated']);
     }
 
-    if ($action === 'delete') {
+    // Deactivation, not deletion: past scans and saved looks point at the
+    // hairstyle, and a customer's history should not change shape because the
+    // shop stopped offering the style.
+    if ($action === 'delete' || $action === 'restore') {
         $hairstyleID = (int)($input['hairstyleID'] ?? $input['hairstyle_id'] ?? 0);
         if ($hairstyleID <= 0) {
             json_response(['error' => 'Invalid hairstyleID'], 422);
         }
 
-        $pdo->prepare('UPDATE hairstyles SET is_active = FALSE WHERE hairstyle_id = :id')
-            ->execute([':id' => $hairstyleID]);
+        $activate = $action === 'restore';
+        $stmt = $pdo->prepare(
+            'UPDATE hairstyles SET is_active = :is_active WHERE hairstyle_id = :id
+             RETURNING hairstyle_id, style_name, style_code, is_active'
+        );
+        $stmt->execute([':is_active' => (int)$activate, ':id' => $hairstyleID]);
+        $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$updated) {
+            json_response(['error' => 'Hairstyle not found'], 404);
+        }
 
-        json_response(['message' => 'Hairstyle deactivated']);
+        audit_log(
+            $pdo,
+            $activate ? 'HAIRSTYLE_RESTORE' : 'HAIRSTYLE_DEACTIVATE',
+            'hairstyles',
+            (string)$hairstyleID,
+            null,
+            $updated,
+            null
+        );
+
+        json_response(['message' => $activate ? 'Hairstyle reactivated' : 'Hairstyle deactivated']);
     }
 
     if ($action === 'createVariant') {

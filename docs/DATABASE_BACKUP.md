@@ -131,9 +131,24 @@ Never commit these values. The workflow does not echo connection strings.
 ### First-time setup
 
 1. Add the three secrets above.
-2. In Supabase, confirm Storage is enabled. The script creates private bucket `tatis-backups` if needed.
+2. In Supabase, confirm Storage is enabled. The script creates private bucket `tatis-backups` if needed. The bucket is created with **no per-bucket size limit**, inheriting the project's global upload limit — a per-bucket limit above the global one is rejected.
 3. Run the workflow once with **Run workflow** and confirm a `.dump` appears in Storage.
 4. Confirm GitHub Actions is allowed to run on `main` (Actions tab not disabled).
+
+### Troubleshooting a failed run
+
+Read the log from the bottom. The step that fails tells you which half broke:
+
+| Log line | Meaning |
+|---|---|
+| `Wrote tatis_public_*.dump (N bytes)` then `Storage API ... failed` | The dump worked. The problem is **Storage**, not the database. |
+| `Storage API POST failed (400): ... EntityTooLarge` | Bucket creation was refused. Do not set `file_size_limit` above the project's global upload limit. |
+| `Private bucket ... does not exist and could not be created` | Storage rejected the bucket. The message carries Supabase's own reason. |
+| `Bucket ... is PUBLIC` | Refused on purpose. Dumps hold customer data and password hashes. Make the bucket private. |
+| `Direct host is IPv6-only ...` | Normal on GitHub runners. The script falls back to the session pooler on port 5432. |
+| `pg_dump: error: ...` | The database connection or dump itself failed — check `DB_DIRECT_URL`. |
+
+Storage errors always print the API's response body. That body contains no secrets.
 
 GitHub-hosted runners are **IPv4-only**. Supabase Direct (`db.<project-ref>.supabase.co`) is **IPv6-only** unless the IPv4 add-on is enabled. The backup script still starts from `DB_DIRECT_URL`; if that host has no IPv4 address, it dumps through the **session** pooler on port **5432** (never transaction pooler port `6543`).
 

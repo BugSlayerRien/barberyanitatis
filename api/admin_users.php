@@ -498,6 +498,15 @@ function create_account(PDO $pdo, array $input): array
     json_response(['error' => 'accountKind must be customer, barber, or staff'], 422);
 }
 
+/**
+ * Deactivates an account. This is deliberately not a row delete.
+ *
+ * appointments, appointment_groups, time_slots, walkin_queue and user_favorites
+ * all reference these rows with NO ACTION, so a real DELETE either fails or, if
+ * the constraints were loosened, would take paid bookings and accounting
+ * history with it. Deactivation hides the account and blocks sign-in while the
+ * history it is attached to stays intact; restore_account() puts it back.
+ */
 function delete_account(PDO $pdo, string $type, int $id): array
 {
     $existing = fetch_account_row($pdo, $type, $id);
@@ -528,6 +537,37 @@ function delete_account(PDO $pdo, string $type, int $id): array
     return $updated ?: $existing;
 }
 
+/** Reverses delete_account(). Mirrors it column for column. */
+function restore_account(PDO $pdo, string $type, int $id): array
+{
+    $existing = fetch_account_row($pdo, $type, $id);
+    if (!$existing) {
+        json_response(['error' => 'Account not found'], 404);
+    }
+
+    if ($type === 'customer') {
+        $stmt = $pdo->prepare("UPDATE users SET is_active = TRUE, updated_at = NOW() WHERE user_id = :id RETURNING user_id, full_name, email, phone, is_active, created_at, 'customer' AS role");
+        $stmt->execute([':id' => $id]);
+        $updated = $stmt->fetch();
+        audit_log($pdo, 'USER_RESTORE', 'users', (string)$id, $existing, $updated, null);
+        return $updated ?: $existing;
+    }
+
+    if ($type === 'barber') {
+        $stmt = $pdo->prepare("UPDATE barbers SET is_active = TRUE WHERE barber_id = :id RETURNING barber_id, full_name, email, specialty, years_experience, rating, is_active, created_at, 'barber' AS role");
+        $stmt->execute([':id' => $id]);
+        $updated = $stmt->fetch();
+        audit_log($pdo, 'USER_RESTORE', 'barbers', (string)$id, $existing, $updated, null);
+        return $updated ?: $existing;
+    }
+
+    $stmt = $pdo->prepare('UPDATE staff_users SET is_active = TRUE, updated_at = NOW() WHERE staff_id = :id RETURNING staff_id, full_name, email, role, is_active, created_at');
+    $stmt->execute([':id' => $id]);
+    $updated = $stmt->fetch();
+    audit_log($pdo, 'USER_RESTORE', 'staff_users', (string)$id, $existing, $updated, null);
+    return $updated ?: $existing;
+}
+
 try {
     $pdo = get_db_connection();
     ensure_barber_channel_column($pdo);
@@ -548,7 +588,7 @@ try {
     $input = get_json_input();
     $action = strtolower(trim((string)($input['action'] ?? '')));
 
-    if (!in_array($action, ['update', 'delete', 'assignPortalRole', 'removePortalRole', 'create'], true)) {
+    if (!in_array($action, ['update', 'delete', 'restore', 'assignPortalRole', 'removePortalRole', 'create'], true)) {
         json_response(['error' => 'Invalid action'], 400);
     }
 
@@ -578,14 +618,18 @@ try {
 
     [$type, $id] = require_account_payload($input);
 
-    $result = $action === 'delete'
-        ? delete_account($pdo, $type, $id)
-        : update_account($pdo, $type, $id, $input);
+    if ($action === 'delete') {
+        $result = delete_account($pdo, $type, $id);
+        $message = 'Account deactivated successfully';
+    } elseif ($action === 'restore') {
+        $result = restore_account($pdo, $type, $id);
+        $message = 'Account reactivated successfully';
+    } else {
+        $result = update_account($pdo, $type, $id, $input);
+        $message = 'Account updated successfully';
+    }
 
-    json_response([
-        'message' => $action === 'delete' ? 'Account deactivated successfully' : 'Account updated successfully',
-        'record' => $result,
-    ]);
+    json_response(['message' => $message, 'record' => $result]);
 } catch (PDOException $e) {
     json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
 }

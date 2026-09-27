@@ -624,13 +624,46 @@ const COLUMN_WEIGHTS = {
   role: 0.9,
 };
 
+/** The API returns is_active as a bool, an int, or Postgres' 't'/'f'. */
+function isInactiveValue(value) {
+  return value === false || value === 0 || value === "0" || value === "f" || value === "No";
+}
+
+function isRowInactive(row) {
+  return isInactiveValue(row?.is_active);
+}
+
 /** Presentation only: renders an active/inactive flag as a status badge. */
 function activeBadge(value) {
-  const inactive =
-    value === false || value === 0 || value === "0" || value === "f" || value === "No";
-  return inactive
+  return isInactiveValue(value)
     ? '<span class="status status--neutral">Inactive</span>'
     : '<span class="status status--success">Active</span>';
+}
+
+/**
+ * Deactivated rows are hidden by default so the list shows what the shop
+ * actually offers. Nothing is ever deleted here, so the count of what is
+ * hidden is reported next to the toggle -- otherwise a deactivated record
+ * looks lost rather than put away.
+ *
+ * Returns whether inactive rows should be shown; call with the rows already
+ * in scope for the section.
+ */
+function inactiveFilterState(section, rowsInScope) {
+  const box = document.getElementById(`${section}-include-inactive`);
+  const hint = document.getElementById(`${section}-inactive-hint`);
+  const include = box instanceof HTMLInputElement && box.checked;
+  const count = rowsInScope.filter(isRowInactive).length;
+  if (hint) {
+    if (count === 0) {
+      hint.textContent = "None deactivated";
+    } else if (include) {
+      hint.textContent = count === 1 ? "1 shown" : `${count} shown`;
+    } else {
+      hint.textContent = count === 1 ? "1 hidden" : `${count} hidden`;
+    }
+  }
+  return include;
 }
 
 function renderTable(containerId, columns, rows) {
@@ -688,6 +721,24 @@ function renderUserTables() {
     admins: removeGhostRows(filterRows(state.users.admins, query, ["full_name", "email", "role"])),
   };
 
+  // The hidden-count only covers roles the current filter would show, so it
+  // never reports rows the admin cannot get to anyway.
+  const inScope = (key) => roleFilter === "all" || roleFilter === key;
+  const includeInactive = inactiveFilterState(
+    "users",
+    Object.entries(data).flatMap(([key, rows]) => (inScope(key) ? rows : [])),
+  );
+  const visible = (key) => {
+    if (!inScope(key)) return [];
+    return includeInactive ? data[key] : data[key].filter((row) => !isRowInactive(row));
+  };
+
+  const accountActions = (type, id, row) =>
+    `<button class="btn secondary btn-edit" data-type="${type}" data-id="${id}">Edit</button> ` +
+    (isRowInactive(row)
+      ? `<button class="btn secondary btn-restore" data-type="${type}" data-id="${id}">Restore</button>`
+      : `<button class="btn danger btn-delete" data-type="${type}" data-id="${id}">Deactivate</button>`);
+
   renderTable(
     "customers-table",
     [
@@ -699,13 +750,11 @@ function renderUserTables() {
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
     ],
-    (roleFilter === "all" || roleFilter === "customers"
-      ? data.customers.map((row) => ({
+    visible("customers").map((row) => ({
           ...row,
           is_active: activeBadge(row.is_active),
-          actions: `<button class="btn secondary btn-edit" data-type="customer" data-id="${row.user_id}">Edit</button> <button class="btn danger btn-delete" data-type="customer" data-id="${row.user_id}">Delete</button>`,
-        }))
-      : [])
+          actions: accountActions("customer", row.user_id, row),
+        })),
   );
 
   renderTable(
@@ -720,14 +769,12 @@ function renderUserTables() {
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
     ],
-    (roleFilter === "all" || roleFilter === "barbers"
-      ? data.barbers.map((row) => ({
+    visible("barbers").map((row) => ({
           ...row,
           is_active: activeBadge(row.is_active),
           queue_label: String(row.barber_channel || "").toLowerCase() === "walk_in" ? "Regular" : "Exclusive",
-          actions: `<button class="btn secondary btn-edit" data-type="barber" data-id="${row.barber_id}">Edit</button> <button class="btn danger btn-delete" data-type="barber" data-id="${row.barber_id}">Delete</button>`,
-        }))
-      : [])
+          actions: accountActions("barber", row.barber_id, row),
+        })),
   );
 
   renderTable(
@@ -740,13 +787,11 @@ function renderUserTables() {
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
     ],
-    (roleFilter === "all" || roleFilter === "receptionists"
-      ? data.receptionists.map((row) => ({
+    visible("receptionists").map((row) => ({
           ...row,
           is_active: activeBadge(row.is_active),
-          actions: `<button class="btn secondary btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn danger btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
-        }))
-      : [])
+          actions: accountActions("staff", row.staff_id, row),
+        })),
   );
 
   renderTable(
@@ -759,13 +804,11 @@ function renderUserTables() {
       { key: "created_at", label: "Created" },
       { key: "actions", label: "Actions" },
     ],
-    (roleFilter === "all" || roleFilter === "admins"
-      ? data.admins.map((row) => ({
+    visible("admins").map((row) => ({
           ...row,
           is_active: activeBadge(row.is_active),
-          actions: `<button class="btn secondary btn-edit" data-type="staff" data-id="${row.staff_id}">Edit</button> <button class="btn danger btn-delete" data-type="staff" data-id="${row.staff_id}">Delete</button>`,
-        }))
-      : [])
+          actions: accountActions("staff", row.staff_id, row),
+        })),
   );
 }
 
@@ -1144,11 +1187,15 @@ async function saveAccountEditor() {
 
 async function deleteAccount(type, id) {
   const label = type === "customer" ? "customer" : type === "barber" ? "barber" : "staff account";
-  const ok = await confirmAction(`Delete this ${label}? This will deactivate the account.`, {
-    title: "Deactivate account",
-    confirmLabel: "Deactivate",
-    danger: true,
-  });
+  const ok = await confirmAction(
+    `Deactivate this ${label}? It stops appearing in the app and can no longer sign in. ` +
+      "Past bookings stay on record, so the account cannot be erased outright — you can restore it later.",
+    {
+      title: "Deactivate account",
+      confirmLabel: "Deactivate",
+      danger: true,
+    },
+  );
   if (!ok) {
     return;
   }
@@ -1158,7 +1205,26 @@ async function deleteAccount(type, id) {
     toast("Account deactivated.");
     await loadUsers();
   } catch (error) {
-    toast(error.message || "Delete failed");
+    toast(error.message || "Deactivation failed");
+  }
+}
+
+async function restoreAccount(type, id) {
+  const label = type === "customer" ? "customer" : type === "barber" ? "barber" : "staff account";
+  const ok = await confirmAction(`Reactivate this ${label}? It can sign in and appear in the app again.`, {
+    title: "Restore account",
+    confirmLabel: "Restore",
+  });
+  if (!ok) {
+    return;
+  }
+
+  try {
+    await updateUser({ action: "restore", type, id });
+    toast("Account reactivated.");
+    await loadUsers();
+  } catch (error) {
+    toast(error.message || "Restore failed");
   }
 }
 
@@ -1294,10 +1360,14 @@ function renderServices() {
     category: r.category || r.service_category || "(Uncategorized)",
     channel_label: formatServiceChannel(r.service_channel),
     base_price: `₱${Number(r.base_price ?? 0).toFixed(2)}`,
+    // Kept beside the badge: is_active itself becomes markup on the next line.
+    _inactive: isRowInactive(r),
     is_active: activeBadge(r.is_active),
   }));
 
-  const rows = filterRows(normalized, query, ["service_name", "category", "description", "channel_label"]);
+  const matches = filterRows(normalized, query, ["service_name", "category", "description", "channel_label"]);
+  const includeInactive = inactiveFilterState("services", matches);
+  const rows = includeInactive ? matches : matches.filter((row) => !row._inactive);
   renderTable(
     "services-table",
     [
@@ -1313,7 +1383,9 @@ function renderServices() {
       ...row,
       actions: `
         <button class="btn secondary btn-service" data-id="${row.service_id}" type="button">Edit</button>
-        <button class="btn danger btn-service-delete" data-id="${row.service_id}" type="button">Delete</button>
+        ${row._inactive
+          ? `<button class="btn secondary btn-service-restore" data-id="${row.service_id}" type="button">Restore</button>`
+          : `<button class="btn danger btn-service-delete" data-id="${row.service_id}" type="button">Deactivate</button>`}
       `,
     })),
   );
@@ -1383,9 +1455,12 @@ function renderHaircuts() {
     overlay_status: row.has_overlay_assets
       ? '<span class="status status--success">Ready</span>'
       : '<span class="status status--warning">Missing PNGs</span>',
+    _inactive: isRowInactive(row),
     is_active: activeBadge(row.is_active),
   }));
-  const rows = filterRows(normalized, query, ["style_name", "style_code", "description", "gender"]);
+  const matches = filterRows(normalized, query, ["style_name", "style_code", "description", "gender"]);
+  const includeInactive = inactiveFilterState("haircuts", matches);
+  const rows = includeInactive ? matches : matches.filter((row) => !row._inactive);
   renderTable(
     "haircuts-table",
     [
@@ -1403,7 +1478,9 @@ function renderHaircuts() {
       ...row,
       actions: `
         <button class="btn secondary btn-haircut" data-id="${row.hairstyle_id}" type="button">Manage</button>
-        <button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Deactivate</button>
+        ${row._inactive
+          ? `<button class="btn secondary btn-haircut-restore" data-id="${row.hairstyle_id}" type="button">Restore</button>`
+          : `<button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Deactivate</button>`}
       `,
     })),
   );
@@ -2867,6 +2944,13 @@ document.addEventListener("click", async (event) => {
     await deleteAccount(type, Number(id));
   }
 
+  if (target.classList.contains("btn-restore")) {
+    const type = target.dataset.type;
+    const id = target.dataset.id;
+    if (!type || !id) return;
+    await restoreAccount(type, Number(id));
+  }
+
   if (target.classList.contains("btn-service")) {
     const id = target.dataset.id;
     if (!id) return;
@@ -2888,7 +2972,24 @@ document.addEventListener("click", async (event) => {
       toast("Service deactivated.");
       await loadServices();
     } catch (error) {
-      toast(error.message || "Delete failed");
+      toast(error.message || "Deactivation failed");
+    }
+  }
+
+  if (target.classList.contains("btn-service-restore")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction("Reactivate this service? It becomes bookable again.", {
+      title: "Restore service",
+      confirmLabel: "Restore",
+    });
+    if (!ok) return;
+    try {
+      await saveService("restore", { serviceID: Number(id) });
+      toast("Service reactivated.");
+      await loadServices();
+    } catch (error) {
+      toast(error.message || "Restore failed");
     }
   }
 
@@ -2921,9 +3022,28 @@ document.addEventListener("click", async (event) => {
         toast("Haircut deactivated.");
         await loadHaircuts();
       } catch (error) {
-        toast(error.message || "Delete failed", "error");
+        toast(error.message || "Deactivation failed", "error");
       }
     }, { label: "Deactivating..." });
+  }
+
+  if (target.classList.contains("btn-haircut-restore")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction("Reactivate this haircut? It reappears in the customer library.", {
+      title: "Restore haircut",
+      confirmLabel: "Restore",
+    });
+    if (!ok) return;
+    await withButtonLoading(target, async () => {
+      try {
+        await saveHaircut("restore", { hairstyleID: Number(id) });
+        toast("Haircut reactivated.");
+        await loadHaircuts();
+      } catch (error) {
+        toast(error.message || "Restore failed", "error");
+      }
+    }, { label: "Restoring..." });
   }
 
   if (target.classList.contains("btn-variant-edit")) {
@@ -2966,6 +3086,18 @@ document.getElementById("users-search")?.addEventListener("input", () => {
 document.getElementById("users-role-filter")?.addEventListener("change", () => {
   resetPagination(["customers-table", "barbers-table", "receptionists-table", "admins-table"]);
   renderUserTables();
+});
+document.getElementById("users-include-inactive")?.addEventListener("change", () => {
+  resetPagination(["customers-table", "barbers-table", "receptionists-table", "admins-table"]);
+  renderUserTables();
+});
+document.getElementById("services-include-inactive")?.addEventListener("change", () => {
+  resetPagination(["services-table"]);
+  renderServices();
+});
+document.getElementById("haircuts-include-inactive")?.addEventListener("change", () => {
+  resetPagination(["haircuts-table"]);
+  renderHaircuts();
 });
 document.getElementById("services-search")?.addEventListener("input", () => {
   resetPagination(["services-table"]);

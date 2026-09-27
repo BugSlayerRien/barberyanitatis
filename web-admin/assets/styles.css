@@ -1409,6 +1409,23 @@ input[type="file"].input::file-selector-button:hover {
   min-width: 220px;
 }
 
+/* "Show inactive" filter: a checkbox that has to line up with the inputs
+   beside it, which are taller than a bare checkbox. */
+.filter-bar .filter-toggle {
+  min-width: 170px;
+}
+
+.filter-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  min-height: 38px;
+}
+
+.filter-toggle-row .field-hint {
+  white-space: nowrap;
+}
+
 .filter-bar-actions {
   display: flex;
   gap: var(--s-2);

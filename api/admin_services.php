@@ -50,7 +50,9 @@ try {
             'Haircut'
         );
         $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? 'appointment') ?? 'appointment';
-        $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
+        // Cast to int: PDO binds PHP false as '', which Postgres rejects for a
+        // boolean column, so saving a service with Active = No used to throw.
+        $isActive = (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0');
 
 
         $codeBase = strtoupper(preg_replace('/[^A-Z0-9]+/', '_', $serviceName) ?? 'SVC');
@@ -100,7 +102,9 @@ try {
             'Haircut'
         );
         $channel = normalize_service_channel($input['serviceChannel'] ?? $input['service_channel'] ?? null);
-        $isActive = !empty($input['isActive']) && (string)$input['isActive'] !== '0';
+        // Cast to int: PDO binds PHP false as '', which Postgres rejects for a
+        // boolean column, so saving a service with Active = No used to throw.
+        $isActive = (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0');
 
         if ($serviceID <= 0) {
             json_response(['error' => 'Invalid service payload'], 422);
@@ -133,16 +137,37 @@ try {
         json_response(['message' => 'Service updated']);
     }
 
-    if ($action === 'delete') {
+    // Deactivation, not deletion: appointment_details and walkin_service_details
+    // reference services with NO ACTION, so removing a service that was ever
+    // booked would either fail or orphan the booking it was part of.
+    if ($action === 'delete' || $action === 'restore') {
         $serviceID = (int)($input['serviceID'] ?? $input['service_id'] ?? 0);
         if ($serviceID <= 0) {
             json_response(['error' => 'Invalid serviceID'], 422);
         }
 
-        $pdo->prepare('UPDATE services SET is_active = FALSE WHERE service_id = :service_id')
-            ->execute([':service_id' => $serviceID]);
+        $activate = $action === 'restore';
+        $stmt = $pdo->prepare(
+            'UPDATE services SET is_active = :is_active WHERE service_id = :service_id
+             RETURNING service_id, service_name, is_active'
+        );
+        $stmt->execute([':is_active' => (int)$activate, ':service_id' => $serviceID]);
+        $updated = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$updated) {
+            json_response(['error' => 'Service not found'], 404);
+        }
 
-        json_response(['message' => 'Service deactivated']);
+        audit_log(
+            $pdo,
+            $activate ? 'SERVICE_RESTORE' : 'SERVICE_DEACTIVATE',
+            'services',
+            (string)$serviceID,
+            null,
+            $updated,
+            null
+        );
+
+        json_response(['message' => $activate ? 'Service reactivated' : 'Service deactivated']);
     }
 
     json_response(['error' => 'Invalid action'], 400);

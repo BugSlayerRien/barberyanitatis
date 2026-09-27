@@ -76,17 +76,42 @@ def req(method, url, data=None, headers=None, binary=False, allow_http=()):
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
         if exc.code in allow_http:
-            return {"error": True, "status": exc.code}
-        raise SystemExit(f"Storage API {method} failed ({exc.code}).") from None
+            return {"error": True, "status": exc.code, "detail": detail}
+        # The body is the only thing that says WHY. It carries no secrets --
+        # without it a failure reads as a bare "(400)" and costs a round trip
+        # through the Actions log to diagnose.
+        raise SystemExit(
+            f"Storage API {method} failed ({exc.code}): {detail}"
+        ) from None
 
-created = req(
+# No file_size_limit: a per-bucket limit above the project's global upload
+# limit is rejected with 400, and that 400 used to be swallowed as "already
+# exists" -- so the bucket was never created and every upload since failed
+# against a bucket that was not there.
+req(
     "POST",
     f"{base}/storage/v1/bucket",
-    {"id": bucket, "name": bucket, "public": False, "file_size_limit": 524288000},
-    allow_http=(400, 409),
+    {"id": bucket, "name": bucket, "public": False},
+    allow_http=(409,),
 )
-if created.get("status") in (400, 409):
-    pass
+
+# Creation is not assumed to have worked. If the bucket is still missing the
+# upload cannot succeed, and failing here names the real cause.
+existing = req(
+    "GET",
+    f"{base}/storage/v1/bucket/{bucket}",
+    allow_http=(400, 404),
+)
+if existing.get("error"):
+    raise SystemExit(
+        f"Private bucket {bucket} does not exist and could not be created: "
+        + str(existing.get("detail") or "no detail from Storage")
+    )
+if existing.get("public"):
+    raise SystemExit(
+        f"Bucket {bucket} is PUBLIC. Dumps contain customer data and password "
+        "hashes; refusing to upload. Make it private in Supabase Storage."
+    )
 
 with open(dump, "rb") as fh:
     payload = fh.read()
@@ -96,9 +121,10 @@ uploaded = req(
     payload,
     {"Content-Type": "application/octet-stream", "x-upsert": "true"},
     binary=True,
-    allow_http=(400,),
+    allow_http=(409,),
 )
-if uploaded.get("status") == 400:
+if uploaded.get("status") == 409:
+    # Same filename already there (a re-run inside the same second). Overwrite.
     req(
         "PUT",
         f"{base}/storage/v1/object/{bucket}/{object_path}",
