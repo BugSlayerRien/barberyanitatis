@@ -175,10 +175,11 @@ try {
         $stmt = $pdo->prepare(
             "SELECT wq.queue_id, wq.queue_number, wq.claim_code, wq.status, wq.guest_name,
                     wq.wait_time_minutes, wq.people_count, wq.payment_mode, wq.actual_start,
-                    wq.paused_at, wq.paused_seconds, wq.created_at,
+                    wq.paused_at, wq.paused_seconds, wq.created_at, wq.scan_session_id,
                     COALESCE(NULLIF(string_agg(DISTINCT s.service_name, ', ' ORDER BY s.service_name), ''), 'Walk-in') AS service,
                     COALESCE(SUM(DISTINCT wsd.final_price), 0) AS price,
                     MAX(wsd.selected_view) AS selected_view,
+                    MAX(wsd.variant_id) AS booked_variant_id,
                     MAX(wsd.special_instructions) AS instructions
              FROM walkin_queue wq
              LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
@@ -188,14 +189,63 @@ try {
                AND wq.status NOT IN ('Cancelled')
              GROUP BY wq.queue_id, wq.queue_number, wq.claim_code, wq.status, wq.guest_name,
                       wq.wait_time_minutes, wq.people_count, wq.payment_mode, wq.actual_start,
-                      wq.paused_at, wq.paused_seconds, wq.created_at
+                      wq.paused_at, wq.paused_seconds, wq.created_at, wq.scan_session_id
              ORDER BY wq.queue_id ASC"
         );
         $stmt->execute([':barber_id' => $resolvedBarberID]);
+        $walkinRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // The previews the guest generated at the kiosk are the clearest
+        // statement of what they want, so the barber should see the same
+        // picture they were shown. Fetched per session rather than joined into
+        // the query above: a session can hold several previews and the join
+        // would multiply the service aggregation.
+        $previewsBySession = [];
+        $sessionIds = array_values(array_filter(array_map(
+            static fn(array $row): string => trim((string)($row['scan_session_id'] ?? '')),
+            $walkinRows
+        )));
+        if ($sessionIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($sessionIds), '?'));
+            $previewStmt = $pdo->prepare(
+                "SELECT p.scan_session_id, p.variant_id, p.front_url, p.left_url, p.right_url,
+                        h.style_name
+                 FROM face_scan_previews p
+                 LEFT JOIN hairstyle_variants hv ON hv.variant_id = p.variant_id
+                 LEFT JOIN hairstyles h ON h.hairstyle_id = hv.hairstyle_id
+                 WHERE p.scan_session_id IN ({$placeholders})
+                   AND p.front_url IS NOT NULL
+                 ORDER BY p.created_at DESC"
+            );
+            $previewStmt->execute($sessionIds);
+            foreach ($previewStmt->fetchAll(PDO::FETCH_ASSOC) as $preview) {
+                $key = (string)$preview['scan_session_id'];
+                $previewsBySession[$key][] = [
+                    'variantId' => (int)($preview['variant_id'] ?? 0),
+                    'styleName' => (string)($preview['style_name'] ?? ''),
+                    'front' => (string)($preview['front_url'] ?? ''),
+                    'left' => (string)($preview['left_url'] ?? ''),
+                    'right' => (string)($preview['right_url'] ?? ''),
+                ];
+            }
+        }
 
         json_response([
-            'walkins' => array_map(static function (array $row): array {
+            'walkins' => array_map(static function (array $row) use ($previewsBySession): array {
                 $instructions = (string)($row['instructions'] ?? '');
+                $sessionId = trim((string)($row['scan_session_id'] ?? ''));
+                $previews = $previewsBySession[$sessionId] ?? [];
+
+                // The guest may have previewed several styles before settling.
+                // The one they actually queued for leads, so the barber is not
+                // left guessing which picture is the job.
+                $bookedVariantId = (int)($row['booked_variant_id'] ?? 0);
+                if ($bookedVariantId > 0 && count($previews) > 1) {
+                    usort($previews, static function (array $a, array $b) use ($bookedVariantId): int {
+                        return (($b['variantId'] ?? 0) === $bookedVariantId ? 1 : 0)
+                            <=> (($a['variantId'] ?? 0) === $bookedVariantId ? 1 : 0);
+                    });
+                }
 
                 return [
                     'queueId' => (int)$row['queue_id'],
@@ -217,8 +267,12 @@ try {
                     'paused' => !empty($row['paused_at']),
                     'actualStart' => $row['actual_start'] ?? null,
                     'createdAt' => $row['created_at'] ?? null,
+                    'scanSessionId' => $sessionId,
+                    // Newest first; the one matching the booked variant leads,
+                    // because that is the cut actually being asked for.
+                    'previews' => $previews,
                 ];
-            }, $stmt->fetchAll(PDO::FETCH_ASSOC)),
+            }, $walkinRows),
         ]);
     }
 

@@ -203,6 +203,10 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     final people = (walkin['peopleCount'] as num?)?.toInt() ?? 1;
     final waitMinutes = (walkin['waitMinutes'] as num?)?.toInt() ?? 0;
     final paused = walkin['paused'] == true;
+    final previews = (walkin['previews'] as List<dynamic>? ?? [])
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .where((preview) => (preview['front']?.toString() ?? '').isNotEmpty)
+        .toList();
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -258,6 +262,25 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               style: const TextStyle(color: AppBrand.gold, fontSize: 13, height: 1.4),
             ),
           ],
+          if (previews.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            // What the guest was actually shown. A description of a fade is
+            // open to interpretation; the picture they agreed to is not.
+            const Text(
+              'AI preview the guest generated',
+              style: TextStyle(color: AppBrand.textMuted, fontSize: 12),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 120,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: previews.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) => _previewThumb(context, previews[index]),
+              ),
+            ),
+          ],
           const SizedBox(height: 10),
           Wrap(
             spacing: 14,
@@ -271,6 +294,134 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _previewThumb(BuildContext context, Map<String, dynamic> preview) {
+    final front = ApiConfig.resolveImageUrl(preview['front']?.toString() ?? '');
+    final styleName = preview['styleName']?.toString() ?? '';
+
+    return GestureDetector(
+      onTap: () => _openPreview(context, preview),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: Image.network(
+              front,
+              width: 96,
+              height: styleName.isEmpty ? 120 : 96,
+              fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => Container(
+                width: 96,
+                height: styleName.isEmpty ? 120 : 96,
+                color: AppBrand.panel,
+                child: const Icon(Icons.image_not_supported_outlined, color: AppBrand.textMuted),
+              ),
+            ),
+          ),
+          if (styleName.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 96,
+              child: Text(
+                styleName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppBrand.textMuted, fontSize: 11),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Front, left and right at a size the barber can actually work from.
+  void _openPreview(BuildContext context, Map<String, dynamic> preview) {
+    final views = <String, String>{
+      'Front': preview['front']?.toString() ?? '',
+      'Left': preview['left']?.toString() ?? '',
+      'Right': preview['right']?.toString() ?? '',
+    }..removeWhere((_, url) => url.isEmpty);
+    if (views.isEmpty) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (dialogCtx) => Dialog(
+        backgroundColor: AppBrand.surface,
+        insetPadding: const EdgeInsets.all(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                preview['styleName']?.toString().isNotEmpty == true
+                    ? preview['styleName'].toString()
+                    : 'AI preview',
+                style: const TextStyle(
+                  color: AppBrand.text,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: views.entries
+                        .map((entry) => Padding(
+                              padding: const EdgeInsets.only(right: 10),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Image.network(
+                                      ApiConfig.resolveImageUrl(entry.value),
+                                      width: 220,
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        width: 220,
+                                        height: 260,
+                                        color: AppBrand.panel,
+                                        child: const Icon(
+                                          Icons.image_not_supported_outlined,
+                                          color: AppBrand.textMuted,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    entry.key,
+                                    style: const TextStyle(color: AppBrand.textMuted, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: () => Navigator.of(dialogCtx).pop(),
+                  child: const Text('Close'),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

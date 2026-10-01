@@ -7,6 +7,7 @@ import 'kiosk_done_page.dart';
 import 'kiosk_payment_mode_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_theme.dart';
+import '../user/user_session.dart';
 import 'widgets/kiosk_scaffold.dart';
 
 class KioskBarberPage extends StatefulWidget {
@@ -136,6 +137,12 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
             (KioskSession.entryPath == KioskEntryPath.knownStyle ? 'Walk-in' : 'Style'),
         scanMode: KioskSession.scanModeLabel,
         entryPath: KioskSession.entryPathLabel,
+        // Carries the AI previews this guest generated through to the
+        // barber: a walk-in has no account, so the scan session is the
+        // only handle on that work.
+        scanSessionId: UserSession.completedScanSessionId ??
+            UserSession.activeScanSessionId ??
+            '',
         consentAccepted: KioskSession.consentAccepted,
         paymentMode: mode,
       );

@@ -258,6 +258,11 @@ function ensure_walkin_kiosk_columns(PDO $pdo): void
     // Tells two walk-ins apart when the names collide. Staff see it on the
     // card; the customer is never required to produce it.
     $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS claim_code VARCHAR(4)');
+    // Links the queue row back to the kiosk scan it came from, so the AI
+    // previews the guest generated can be shown to the barber who has to
+    // reproduce them. Walk-ins have no account, so the session id is the
+    // only handle on that work.
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS scan_session_id VARCHAR(120)');
 }
 
 /**

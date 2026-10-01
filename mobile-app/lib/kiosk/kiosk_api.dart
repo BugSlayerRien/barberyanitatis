@@ -72,6 +72,7 @@ class KioskApi {
     required String styleName,
     required String scanMode,
     String entryPath = '',
+    String scanSessionId = '',
     bool consentAccepted = false,
     String paymentMode = 'counter',
   }) async {
@@ -87,6 +88,7 @@ class KioskApi {
         'styleName': styleName,
         'scanMode': scanMode,
         'entryPath': entryPath,
+        'scanSessionId': scanSessionId,
         'consentAccepted': consentAccepted,
         'paymentMode': paymentMode,
       }),

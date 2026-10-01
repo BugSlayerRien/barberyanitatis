@@ -204,6 +204,9 @@ try {
         $variantID = (int)($input['variantID'] ?? 0);
         $styleName = trim((string)($input['styleName'] ?? ''));
         $scanMode = trim((string)($input['scanMode'] ?? ''));
+        // Kiosk guests have no account, so the scan session is the only way
+        // back to the AI previews they generated before joining the queue.
+        $scanSessionId = trim((string)($input['scanSessionId'] ?? ''));
 
         if (!is_array($serviceIDs) || count($serviceIDs) === 0) {
             json_response(['error' => 'Missing serviceIDs'], 422);
@@ -271,9 +274,9 @@ try {
 
         $insertQueue = $pdo->prepare(
             'INSERT INTO walkin_queue (queue_number, barber_id, status, wait_time_minutes, guest_name,
-                                       consent_accepted_at, payment_mode, claim_code)
+                                       consent_accepted_at, payment_mode, claim_code, scan_session_id)
              VALUES (:queue_number, :barber_id, :status, :wait_time_minutes, :guest_name,
-                     :consent_accepted_at, :payment_mode, :claim_code)
+                     :consent_accepted_at, :payment_mode, :claim_code, :scan_session_id)
              RETURNING queue_id'
         );
         $insertQueue->execute([
@@ -285,6 +288,7 @@ try {
             ':consent_accepted_at' => $consentAccepted ? date('c') : null,
             ':payment_mode' => $paymentMode,
             ':claim_code' => $claimCode,
+            ':scan_session_id' => $scanSessionId !== '' ? $scanSessionId : null,
         ]);
 
         $queueID = (int)$insertQueue->fetchColumn();
