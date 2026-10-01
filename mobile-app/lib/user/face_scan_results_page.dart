@@ -6,7 +6,6 @@ import 'ai_credit_purchase_page.dart';
 import 'ai_face_scan_page.dart';
 import 'ai_funnel_service.dart';
 import 'app_brand.dart';
-import 'feature_flags.dart';
 import 'appointments_page.dart';
 import 'barber_selection_page.dart';
 import 'booking_guard.dart';
@@ -560,39 +559,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
     }
     UserSession.commitCompletedScan();
-  }
-
-  Future<void> _openLivePreview() async {
-    if (!kEnableLiveScanner) {
-      if (_selected == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Select a style below, then tap Generate preview.'),
-          ),
-        );
-        return;
-      }
-      unawaited(_onRegeneratePreviewPressed());
-      return;
-    }
-
-    UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
-    final selectedBefore = _selected;
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AiFaceScanPage(
-          livePreviewOnly: true,
-          presetRecommendation: _selected,
-        ),
-      ),
-    );
-    if (!mounted) {
-      return;
-    }
-    if (selectedBefore != null) {
-      _selected = selectedBefore;
-    }
-    await _loadRecommendations(preserveSelection: true);
   }
 
   String _variantKey(Map<String, dynamic> item) =>
@@ -2008,14 +1974,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                       ),
               ),
             ),
-            if (!widget.kioskMode && kEnableLiveScanner) ...[
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                onPressed: _openLivePreview,
-                icon: const Icon(Icons.videocam_outlined, color: Colors.white),
-                label: const Text('Try live preview (optional)', style: TextStyle(color: Colors.white)),
-              ),
-            ],
           ],
         ),
       ],

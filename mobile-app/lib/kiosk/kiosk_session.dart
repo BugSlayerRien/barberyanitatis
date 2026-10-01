@@ -1,7 +1,6 @@
 /// Walk-in kiosk flow state (no customer login).
 enum KioskScanMode {
   threeAngle,
-  liveOnly,
 }
 
 enum KioskEntryPath {
@@ -74,14 +73,11 @@ class KioskSession {
   }
 
   static bool get isThreeAngle => scanMode == KioskScanMode.threeAngle;
-  static bool get isLiveOnly => scanMode == KioskScanMode.liveOnly;
 
   static String get scanModeLabel {
     switch (scanMode) {
       case KioskScanMode.threeAngle:
         return '3-angle capture';
-      case KioskScanMode.liveOnly:
-        return 'Live preview';
       default:
         return '';
     }

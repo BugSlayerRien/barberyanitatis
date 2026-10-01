@@ -12,8 +12,6 @@ import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'hair_compatibility.dart';
 import 'profile_page.dart';
-import 'ai_face_scan_page.dart';
-import 'feature_flags.dart';
 import 'saved_haircuts_page.dart';
 import 'suggested_appointment_page.dart';
 import 'widgets/app_top_bar.dart';
@@ -341,49 +339,6 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     catch (_) {
       // Ignore favorite status errors so the page still loads.
     }
-  }
-
-  void _openTryHaircut() {
-    if (!kEnableLiveScanner) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Run a 3-angle face scan, then use Generate preview on your results.',
-          ),
-        ),
-      );
-      return;
-    }
-
-    final hasCaptures = UserSession.capturedFaceImages != null &&
-        UserSession.capturedFaceImages!.isNotEmpty;
-
-    if (!hasCaptures) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Complete a 3-angle face scan first, then use Try Haircut for live preview.',
-          ),
-        ),
-      );
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => AiFaceScanPage(
-            presetRecommendation: widget.style,
-          ),
-        ),
-      );
-      return;
-    }
-
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AiFaceScanPage(
-          livePreviewOnly: true,
-          presetRecommendation: widget.style,
-        ),
-      ),
-    );
   }
 
   Future<void> _toggleFavorite() async {
@@ -732,23 +687,6 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                         ),
                       ),
                     ),
-                    if (kEnableLiveScanner) ...[
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: _openTryHaircut,
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: Colors.transparent,
-                          foregroundColor: Colors.white,
-                          minimumSize: const Size.fromHeight(56),
-                          side: const BorderSide(color: Colors.white54, width: 1.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        ),
-                        child: const Text(
-                          'Try Haircut',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 0.4),
-                        ),
-                      ),
-                    ],
                     const SizedBox(height: 30),
                   ],
                 ),

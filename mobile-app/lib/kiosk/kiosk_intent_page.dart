@@ -1,10 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../user/ai_face_scan_page.dart';
-import '../user/feature_flags.dart';
 import '../user/user_session.dart';
 import 'kiosk_barber_page.dart';
-import 'kiosk_scan_mode_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_style_pick_page.dart';
 import 'kiosk_theme.dart';
@@ -16,16 +14,10 @@ class KioskIntentPage extends StatelessWidget {
 
   void _goScan(BuildContext context) {
     KioskSession.entryPath = KioskEntryPath.scanFace;
-    if (!kEnableLiveScanner) {
-      KioskSession.scanMode = KioskScanMode.threeAngle;
-      UserSession.resetScanState();
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const AiFaceScanPage(kioskMode: true)),
-      );
-      return;
-    }
+    KioskSession.scanMode = KioskScanMode.threeAngle;
+    UserSession.resetScanState();
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const KioskScanModePage()),
+      MaterialPageRoute(builder: (_) => const AiFaceScanPage(kioskMode: true)),
     );
   }
 

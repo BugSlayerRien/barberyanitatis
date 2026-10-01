@@ -4,9 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
-import '../user/ai_face_scan_page.dart';
 import '../user/api_config.dart';
-import '../user/feature_flags.dart';
 import '../user/scanner/overlay_preview_image.dart';
 import '../user/scanner/overlay_registry.dart';
 import '../user/user_session.dart';
@@ -17,9 +15,8 @@ import 'widgets/kiosk_scaffold.dart';
 
 /// Simplified style list for live-preview kiosk path.
 class KioskStylePickPage extends StatefulWidget {
-  final bool livePreviewNext;
 
-  const KioskStylePickPage({super.key, this.livePreviewNext = false});
+  const KioskStylePickPage({super.key});
 
   @override
   State<KioskStylePickPage> createState() => _KioskStylePickPageState();
@@ -157,27 +154,9 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
     UserSession.selectedVariantId = variantId;
     UserSession.selectedStyleName = KioskSession.selectedStyleName;
 
-    final preset = {
-      'style_name': style['name'],
-      'variant_id': variantId,
-      'variantId': variantId,
-    };
-
-    if (widget.livePreviewNext && kEnableLiveScanner) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => AiFaceScanPage(
-            kioskMode: true,
-            livePreviewOnly: true,
-            presetRecommendation: preset,
-          ),
-        ),
-      );
-    } else {
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const KioskBarberPage()),
-      );
-    }
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const KioskBarberPage()),
+    );
   }
 
   Widget _styleImage(String image) {
@@ -197,9 +176,7 @@ class _KioskStylePickPageState extends State<KioskStylePickPage> {
     final styles = _visibleStyles;
 
     return KioskScaffold(
-      title: widget.livePreviewNext && kEnableLiveScanner
-          ? 'Pick a style to preview'
-          : 'Pick your haircut',
+      title: 'Pick your haircut',
       body: Column(
         children: [
           Padding(
