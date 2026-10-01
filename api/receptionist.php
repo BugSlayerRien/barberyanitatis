@@ -11,6 +11,7 @@ require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/slot_locking.php';
 require_once __DIR__ . '/admin_auth.php';
 require_once __DIR__ . '/system_settings_store.php';
+require_once __DIR__ . '/walkin_presentation.php';
 
 function ensure_financial_tables(PDO $pdo): void
 {
@@ -79,7 +80,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? 'dashboard';
 
-$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin', 'listRefunds', 'completeRefund', 'setQueueMerge'];
+$allowedActions = ['dashboard', 'updateAppointmentStatus', 'updateWalkinStatus', 'createWalkin', 'listRefunds', 'completeRefund', 'setQueueMerge', 'setServicePause'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -93,6 +94,8 @@ try {
     require_staff($pdo);
     ensure_walkin_guest_name_column($pdo);
     ensure_walkin_queue_timestamp_columns($pdo);
+    ensure_walkin_kiosk_columns($pdo);
+    ensure_service_pause_columns($pdo);
     ensure_barber_channel_column($pdo);
     ensure_financial_tables($pdo);
     $trackingAutomation = run_tracking_automation($pdo, true);
@@ -123,7 +126,8 @@ try {
         sync_paid_appointments_from_payments($pdo, true);
 
         $appointmentsStmt = $pdo->prepare(
-            'SELECT a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
+            'SELECT a.appointment_id, a.barber_id, a.booking_group_id,
+                    a.paused_at, a.paused_seconds, a.group_member_name, a.group_sequence,
                     u.full_name AS booker_name,
                     string_agg(s.service_name, \', \' ORDER BY s.service_name) AS service,
                     a.appointment_date,
@@ -201,6 +205,8 @@ try {
 
         $walkinsStmt = $pdo->prepare(
             'SELECT wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start,
+                    wq.claim_code, wq.paused_at, wq.paused_seconds,
+                    MAX(wsd.special_instructions) AS instructions,
                     COALESCE(NULLIF(TRIM(wq.guest_name), \'\'), \'Walk-in #\' || RIGHT(wq.queue_number, 3)) AS name,
                     COALESCE(NULLIF(string_agg(DISTINCT s.service_name, \', \' ORDER BY s.service_name), \'\'), \'Walk-in\') AS service,
                     COALESCE(NULLIF(SUM(s.base_duration), 0), :walkin_duration)::int AS estimated_minutes,
@@ -213,7 +219,8 @@ try {
              LEFT JOIN barbers b ON wq.barber_id = b.barber_id
              WHERE DATE(wq.created_at) = CURRENT_DATE'
                . $walkinChannelSql . '
-             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start, wq.guest_name, wq.wait_time_minutes, wq.status, b.full_name
+             GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start, wq.guest_name,
+                      wq.wait_time_minutes, wq.status, wq.claim_code, wq.paused_at, wq.paused_seconds, b.full_name
              ORDER BY wq.queue_id ASC'
         );
         $walkinsStmt->bindValue(':walkin_duration', shop_walkin_duration_minutes(), PDO::PARAM_INT);
@@ -263,6 +270,14 @@ try {
                     'barber' => $row['barber'],
                     'actual_start' => $row['actual_start'] ?? null,
                     'estimated_minutes' => (int)($row['estimated_minutes'] ?? shop_walkin_duration_minutes()),
+                    // Shown beside the name so staff can call "Mark, for the
+                    // fade" -- the check a real customer passes without having
+                    // been told anything to remember.
+                    'claim_code' => (string)($row['claim_code'] ?? ''),
+                    'style' => kiosk_style_from_instructions((string)($row['instructions'] ?? '')),
+                    'notes' => walkin_free_text_instructions((string)($row['instructions'] ?? '')),
+                    'paused_at' => $row['paused_at'] ?? null,
+                    'paused_seconds' => (int)($row['paused_seconds'] ?? 0),
                 ];
             }, $walkins),
             'automation' => $trackingAutomation,
@@ -525,6 +540,66 @@ try {
         $pdo->commit();
 
         json_response(['message' => 'Appointment updated']);
+    }
+
+    // Pausing stops the clock rather than the service: paused_seconds keeps
+    // accumulating across however many interruptions, so the progress bar and
+    // the auto-complete sweep both see the real time spent cutting.
+    if ($action === 'setServicePause') {
+        $kind = strtolower(trim((string)($input['kind'] ?? '')));
+        $paused = !empty($input['paused']);
+        $id = (int)($input['queueID'] ?? $input['appointmentID'] ?? 0);
+
+        if (!in_array($kind, ['walkin', 'appointment'], true) || $id <= 0) {
+            json_response(['error' => 'Invalid pause payload'], 422);
+        }
+
+        [$table, $idColumn] = $kind === 'walkin'
+            ? ['walkin_queue', 'queue_id']
+            : ['appointments', 'appointment_id'];
+
+        if ($paused) {
+            $stmt = $pdo->prepare(
+                "UPDATE {$table}
+                 SET paused_at = NOW()
+                 WHERE {$idColumn} = :id AND paused_at IS NULL
+                 RETURNING paused_at, paused_seconds"
+            );
+        } else {
+            // Fold the open span into the running total in one statement, so a
+            // double-tap cannot count the same pause twice.
+            $stmt = $pdo->prepare(
+                "UPDATE {$table}
+                 SET paused_seconds = paused_seconds
+                         + GREATEST(0, EXTRACT(EPOCH FROM (NOW() - paused_at))::int),
+                     paused_at = NULL
+                 WHERE {$idColumn} = :id AND paused_at IS NOT NULL
+                 RETURNING paused_at, paused_seconds"
+            );
+        }
+
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            // Already in the requested state: report it rather than erroring,
+            // so two receptionists tapping at once do not see a failure.
+            json_response(['message' => $paused ? 'Already paused' : 'Already running']);
+        }
+
+        audit_log(
+            $pdo,
+            $paused ? 'SERVICE_PAUSED' : 'SERVICE_RESUMED',
+            $table,
+            (string)$id,
+            null,
+            ['paused_seconds' => (int)($row['paused_seconds'] ?? 0)],
+            null
+        );
+
+        json_response([
+            'message' => $paused ? 'Service paused' : 'Service resumed',
+            'pausedSeconds' => (int)($row['paused_seconds'] ?? 0),
+        ]);
     }
 
     if ($action === 'updateWalkinStatus') {

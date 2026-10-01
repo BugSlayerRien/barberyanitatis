@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../user/app_brand.dart';
 import 'kiosk_api.dart';
 import 'kiosk_consent_page.dart';
+import 'kiosk_queue_lookup_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_theme.dart';
 import 'widgets/kiosk_scaffold.dart';
@@ -53,6 +54,12 @@ class _KioskHomePageState extends State<KioskHomePage> {
     }
   }
 
+  void _checkQueue() {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const KioskQueueLookupPage()),
+    );
+  }
+
   void _startWalkIn() {
     KioskSession.reset();
     // Terms first: the next screens capture a name and photos, so consent has
@@ -75,7 +82,10 @@ class _KioskHomePageState extends State<KioskHomePage> {
             queue: _queue,
             onRetry: _loadQueue,
           );
-          final startPanel = _StartWalkInPanel(onStart: _startWalkIn);
+          final startPanel = _StartWalkInPanel(
+            onStart: _startWalkIn,
+            onCheckQueue: _checkQueue,
+          );
 
           if (wide) {
             return Row(
@@ -254,8 +264,9 @@ class _WalkInQueuePanel extends StatelessWidget {
 
 class _StartWalkInPanel extends StatelessWidget {
   final VoidCallback onStart;
+  final VoidCallback onCheckQueue;
 
-  const _StartWalkInPanel({required this.onStart});
+  const _StartWalkInPanel({required this.onStart, required this.onCheckQueue});
 
   @override
   Widget build(BuildContext context) {
@@ -276,6 +287,16 @@ class _StartWalkInPanel extends StatelessWidget {
               ),
               const SizedBox(height: 32),
               KioskPrimaryButton(label: 'Start walk-in', onPressed: onStart),
+              const SizedBox(height: 12),
+              // A walk-in who forgot their number may have no phone to have
+              // photographed it with, so the kiosk is the way back to it.
+              TextButton(
+                onPressed: onCheckQueue,
+                child: const Text(
+                  'Already in the queue? Check my number',
+                  style: TextStyle(color: KioskColors.textMuted),
+                ),
+              ),
             ],
           ),
         ),

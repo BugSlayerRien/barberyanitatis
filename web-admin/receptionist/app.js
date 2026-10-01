@@ -392,6 +392,7 @@ const STATUS_TONES = {
   inservice: "success",
   ready: "gold",
   completing: "warning",
+  paused: "neutral",
   pendingpayment: "warning",
   checkedin: "info",
   scheduled: "info",
@@ -587,9 +588,25 @@ function estimatedMinutesOf(item, fallbackMinutes) {
   return fallbackMinutes;
 }
 
-function estimatedTimeProgress(start, estimatedMinutes, now) {
+/**
+ * Seconds this service has spent paused, including the pause open right now.
+ *
+ * Without this the bar keeps filling while the chair is empty, and the card
+ * tips into COMPLETING over an interruption nobody chose.
+ */
+function pausedSecondsOf(item, now) {
+  const banked = Number(item?.paused_seconds ?? item?.pausedSeconds ?? 0) || 0;
+  const pausedAt = parsePersistedTimestamp(item?.paused_at ?? item?.pausedAt);
+  if (!pausedAt) return banked;
+  return banked + Math.max(0, (now.getTime() - pausedAt.getTime()) / 1000);
+}
+
+function estimatedTimeProgress(start, estimatedMinutes, now, pausedSeconds = 0) {
   const totalSeconds = Math.max(1, estimatedMinutes) * 60;
-  const elapsedSeconds = Math.max(0, (now.getTime() - start.getTime()) / 1000);
+  const elapsedSeconds = Math.max(
+    0,
+    (now.getTime() - start.getTime()) / 1000 - Math.max(0, pausedSeconds),
+  );
   const ratio = elapsedSeconds / totalSeconds;
   const overtime = ratio >= 1;
   const remainingMins = Math.max(0, Math.ceil((totalSeconds - elapsedSeconds) / 60));
@@ -645,12 +662,22 @@ function buildTracking(appointments, walkins) {
       displayStatus = "IN PROGRESS";
       color = "#4CAF50";
       if (start) {
-        const timed = estimatedTimeProgress(start, estimatedMinutes, now);
+        const timed = estimatedTimeProgress(
+          start,
+          estimatedMinutes,
+          now,
+          pausedSecondsOf(item, now),
+        );
         progress = timed.progress;
         timeRemaining = timed.timeRemaining;
         if (timed.overtime) {
           displayStatus = "COMPLETING";
           color = "#FF9800";
+        }
+        if (parsePersistedTimestamp(item.paused_at)) {
+          displayStatus = "PAUSED";
+          color = "#9E9E9E";
+          timeRemaining = "Paused";
         }
       } else {
         timeRemaining = "In service";
@@ -696,12 +723,22 @@ function buildTracking(appointments, walkins) {
       const serviceStart = parsePersistedTimestamp(item.actual_start);
       const estimatedMinutes = estimatedMinutesOf(item, 35);
       if (serviceStart) {
-        const timed = estimatedTimeProgress(serviceStart, estimatedMinutes, now);
+        const timed = estimatedTimeProgress(
+          serviceStart,
+          estimatedMinutes,
+          now,
+          pausedSecondsOf(item, now),
+        );
         progress = timed.progress;
         timeRemaining = timed.timeRemaining;
         if (timed.overtime) {
           displayStatus = "COMPLETING";
           color = "#FF9800";
+        }
+        if (parsePersistedTimestamp(item.paused_at)) {
+          displayStatus = "PAUSED";
+          color = "#9E9E9E";
+          timeRemaining = "Paused";
         }
       } else {
         timeRemaining = "In service";
@@ -722,6 +759,10 @@ function buildTracking(appointments, walkins) {
       kind: "walkin",
       queueId: item.queue_id,
       queueNumber: queueLabel,
+      claimCode: item.claim_code || "",
+      style: item.style || "",
+      notes: item.notes || "",
+      paused: Boolean(parsePersistedTimestamp(item.paused_at)),
       rawStatus: status,
       name: item.name,
       service: item.service || "Walk-in",
@@ -928,6 +969,8 @@ function renderTracking(items, listId) {
       item.kind === "walkin" &&
       item.queueId > 0 &&
       (item.rawStatus === "Waiting" || item.rawStatus === "Assigned");
+    // A haircut gets interrupted; pausing stops the clock rather than the job.
+    const canPause = item.rawStatus === "InProgress";
     const timing = String(item.timeRemaining ?? "");
     const timingMeta = [];
     if (item.status === "IN PROGRESS") timingMeta.push(`${pct}%`);
@@ -940,9 +983,11 @@ function renderTracking(items, listId) {
           <h4 class="queue-name">
             ${item.name}
             ${item.queueNumber ? `<span class="status status--gold no-dot">${item.queueNumber}</span>` : ""}
+            ${item.claimCode ? `<span class="status status--neutral no-dot" title="Only needed if two people share a name">#${item.claimCode}</span>` : ""}
             ${item.isGroup ? `<span class="status status--info no-dot">Group · ${item.peopleCount}</span>` : ""}
           </h4>
-          <p class="queue-service">${item.service}</p>
+          <p class="queue-service">${[item.service, item.style].filter(Boolean).join(" · ")}</p>
+          ${item.notes ? `<p class="queue-schedule">Asked for: ${item.notes}</p>` : ""}
           ${item.schedule ? `<p class="queue-schedule">${item.schedule}</p>` : ""}
           ${item.barber ? `<p class="queue-barber">Barber: ${item.barber}</p>` : ""}
         </div>
@@ -953,10 +998,12 @@ function renderTracking(items, listId) {
       </div>
       <div class="queue-foot">
         <span class="queue-timing">${[timing, ...timingMeta].filter(Boolean).join(" • ")}</span>
-        ${canCancel || canComplete ? `
+        ${canCancel || canComplete || canPause ? `
           <div class="queue-actions">
             ${canStartWalkin ? `<button type="button" class="btn primary tracking-start" title="Start service"
               data-kind="${item.kind}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">Start</button>` : ""}
+            ${canPause ? `<button type="button" class="btn secondary tracking-pause" title="${item.paused ? "Resume the clock" : "Stop the clock without ending the service"}"
+              data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-paused="${item.paused ? "1" : "0"}" data-name="${item.name}">${item.paused ? "Resume" : "Pause"}</button>` : ""}
             ${canComplete ? `<button type="button" class="btn success tracking-complete" title="Mark completed"
               data-kind="${item.kind}" data-appointment-id="${item.appointmentId || ""}" data-queue-id="${item.queueId || ""}" data-name="${item.name}">Complete</button>` : ""}
             ${canCancel ? `<button type="button" class="btn danger tracking-cancel" title="Cancel / remove"
@@ -1562,6 +1609,35 @@ document.addEventListener("click", async (event) => {
         toast(error.message || "Unable to start walk-in", "error");
       }
     }, { label: "Starting..." });
+    return;
+  }
+
+  // Pausing is a correction, not a decision about the customer, so it skips
+  // the confirm dialog that Start/Complete/Cancel use -- and it is reversible.
+  if (target.classList.contains("tracking-pause")) {
+    const kind = target.dataset.kind || "walkin";
+    const paused = target.dataset.paused === "1";
+    const appointmentId = Number(target.dataset.appointmentId || "0");
+    const queueId = Number(target.dataset.queueId || "0");
+    await withButtonLoading(target, async () => {
+      try {
+        await postJson(
+          apiUrl("receptionist.php"),
+          {
+            action: "setServicePause",
+            kind,
+            paused: !paused,
+            queueID: queueId,
+            appointmentID: appointmentId,
+          },
+          false,
+        );
+        toast(paused ? "Service resumed." : "Service paused — the clock is stopped.", "success");
+        await loadDashboard(false);
+      } catch (error) {
+        toast(error.message || "Unable to change the pause state", "error");
+      }
+    }, { label: paused ? "Resuming..." : "Pausing..." });
     return;
   }
 

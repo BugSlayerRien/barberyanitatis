@@ -29,6 +29,32 @@ class KioskApi {
         .toList();
   }
 
+  /// Whether someone is already waiting under this name today.
+  ///
+  /// Asked before the name is accepted, so a second Mark can be prompted for
+  /// a surname while he is still standing at the kiosk.
+  static Future<Map<String, dynamic>> checkGuestName(String guestName) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'checkGuestName', 'guestName': guestName}),
+    );
+    return _decode(response);
+  }
+
+  /// Walk-ins still queued today whose name starts with [guestName].
+  static Future<List<Map<String, dynamic>>> lookupQueue(String guestName) async {
+    final response = await http.post(
+      Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'lookupQueue', 'guestName': guestName}),
+    );
+    final data = _decode(response);
+    return (data['matches'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
   static Future<Map<String, dynamic>> loadBarberQueue() async {
     final response = await http.post(
       Uri.parse('${ApiConfig.baseUrl}/kiosk.php'),

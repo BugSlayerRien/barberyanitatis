@@ -255,6 +255,35 @@ function ensure_walkin_kiosk_columns(PDO $pdo): void
 
     $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ');
     $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20)');
+    // Tells two walk-ins apart when the names collide. Staff see it on the
+    // card; the customer is never required to produce it.
+    $pdo->exec('ALTER TABLE walkin_queue ADD COLUMN IF NOT EXISTS claim_code VARCHAR(4)');
+}
+
+/**
+ * Lets a service be paused without the progress bar running on regardless.
+ *
+ * A haircut gets interrupted -- a phone call, a walk-out, a power cut -- and
+ * the card would otherwise tip into COMPLETING while nothing is happening.
+ * `paused_seconds` accumulates across however many pauses; `paused_at` is set
+ * only while one is open.
+ */
+function ensure_service_pause_columns(PDO $pdo): void
+{
+    static $checked = false;
+    if ($checked) {
+        return;
+    }
+    $checked = true;
+
+    if ((string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'pgsql') {
+        return;
+    }
+
+    foreach (['walkin_queue', 'appointments'] as $table) {
+        $pdo->exec("ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS paused_at TIMESTAMPTZ");
+        $pdo->exec("ALTER TABLE {$table} ADD COLUMN IF NOT EXISTS paused_seconds INTEGER NOT NULL DEFAULT 0");
+    }
 }
 
 /**

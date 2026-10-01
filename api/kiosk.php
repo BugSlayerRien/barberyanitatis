@@ -8,13 +8,14 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/service_channel.php';
 require_once __DIR__ . '/kiosk_guest_name.php';
+require_once __DIR__ . '/walkin_presentation.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-$allowedActions = ['barberQueue', 'createWalkin', 'services', 'todayQueue'];
+$allowedActions = ['barberQueue', 'createWalkin', 'services', 'todayQueue', 'checkGuestName', 'lookupQueue'];
 if (!in_array($action, $allowedActions, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -118,9 +119,82 @@ try {
         });
     }
 
+    // Asked while the customer is still at the kiosk, so a second Mark can be
+    // prompted for a surname before anything is written.
+    if ($action === 'checkGuestName') {
+        $pdo = get_db_connection();
+        ensure_walkin_guest_name_column($pdo);
+        ensure_walkin_kiosk_columns($pdo);
+
+        $guestName = trim((string)($input['guestName'] ?? ''));
+        $error = kiosk_guest_name_validation_error($guestName);
+        if ($error !== null) {
+            json_response(['error' => $error], 422);
+        }
+
+        $taken = kiosk_count_open_walkins_named($pdo, $guestName);
+        json_response([
+            'duplicate' => $taken > 0,
+            'count' => $taken,
+            'message' => $taken > 0
+                ? 'Someone called ' . $guestName . ' is already waiting. Add your last name so the barber calls the right person.'
+                : null,
+        ]);
+    }
+
+    // "Check my queue": the kiosk is the recovery path, so nobody has to
+    // carry, memorise or photograph anything to find their number again.
+    if ($action === 'lookupQueue') {
+        $pdo = get_db_connection();
+        ensure_walkin_guest_name_column($pdo);
+        ensure_walkin_kiosk_columns($pdo);
+
+        $guestName = trim((string)($input['guestName'] ?? ''));
+        if (mb_strlen($guestName, 'UTF-8') < 2) {
+            json_response(['error' => 'Enter at least 2 letters of your name.'], 422);
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT wq.queue_id, wq.queue_number, wq.claim_code, wq.status,
+                    wq.wait_time_minutes, wq.guest_name,
+                    COALESCE(NULLIF(string_agg(DISTINCT s.service_name, ', ' ORDER BY s.service_name), ''), 'Walk-in') AS service,
+                    MAX(wsd.special_instructions) AS instructions,
+                    b.full_name AS barber
+             FROM walkin_queue wq
+             LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
+             LEFT JOIN services s ON s.service_id = wsd.service_id
+             LEFT JOIN barbers b ON b.barber_id = wq.barber_id
+             WHERE DATE(wq.created_at) = CURRENT_DATE
+               AND wq.status IN ('Waiting', 'Assigned', 'InProgress')
+               AND LOWER(TRIM(wq.guest_name)) LIKE LOWER(TRIM(:name)) || '%'
+             GROUP BY wq.queue_id, wq.queue_number, wq.claim_code, wq.status,
+                      wq.wait_time_minutes, wq.guest_name, b.full_name
+             ORDER BY wq.queue_id ASC"
+        );
+        $stmt->execute([':name' => $guestName]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        json_response([
+            'matches' => array_map(static function (array $row): array {
+                return [
+                    'queueID' => (int)$row['queue_id'],
+                    'queueNumber' => (string)$row['queue_number'],
+                    'claimCode' => (string)($row['claim_code'] ?? ''),
+                    'guestName' => (string)($row['guest_name'] ?? ''),
+                    'status' => (string)$row['status'],
+                    'service' => (string)$row['service'],
+                    'style' => kiosk_style_from_instructions((string)($row['instructions'] ?? '')),
+                    'barber' => (string)($row['barber'] ?? ''),
+                    'waitMinutes' => (int)($row['wait_time_minutes'] ?? 0),
+                ];
+            }, $rows),
+        ]);
+    }
+
     if ($action === 'createWalkin') {
         $pdo = get_db_connection();
         ensure_walkin_guest_name_column($pdo);
+        ensure_walkin_kiosk_columns($pdo);
         ensure_barber_channel_column($pdo);
         run_tracking_automation($pdo, true);
 
@@ -182,6 +256,7 @@ try {
         $countStmt->execute();
         $sequence = (int)$countStmt->fetchColumn() + 1;
         $queueNumber = 'W-' . str_pad((string)$sequence, 3, '0', STR_PAD_LEFT);
+        $claimCode = kiosk_generate_claim_code($pdo);
 
         $status = $barberID > 0 ? 'Assigned' : 'Waiting';
 
@@ -196,9 +271,9 @@ try {
 
         $insertQueue = $pdo->prepare(
             'INSERT INTO walkin_queue (queue_number, barber_id, status, wait_time_minutes, guest_name,
-                                       consent_accepted_at, payment_mode)
+                                       consent_accepted_at, payment_mode, claim_code)
              VALUES (:queue_number, :barber_id, :status, :wait_time_minutes, :guest_name,
-                     :consent_accepted_at, :payment_mode)
+                     :consent_accepted_at, :payment_mode, :claim_code)
              RETURNING queue_id'
         );
         $insertQueue->execute([
@@ -209,6 +284,7 @@ try {
             ':guest_name' => $guestName,
             ':consent_accepted_at' => $consentAccepted ? date('c') : null,
             ':payment_mode' => $paymentMode,
+            ':claim_code' => $claimCode,
         ]);
 
         $queueID = (int)$insertQueue->fetchColumn();
@@ -267,6 +343,7 @@ try {
             'waitLabel' => $waitMinutes <= 0 ? 'You are next' : 'About ' . $waitMinutes . ' min',
             'guestName' => $guestName,
             'styleName' => $styleName,
+            'claimCode' => $claimCode,
         ]);
     }
 } catch (PDOException $e) {

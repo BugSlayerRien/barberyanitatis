@@ -254,6 +254,30 @@ function find_split_barber_option(array $barberMaps, string $slotDate, int $coun
     return null;
 }
 
+/** How many start times to offer before the list stops being a choice. */
+const GROUP_BOOKING_MAX_OPTIONS = 10;
+
+/**
+ * @param list<int> $barberIds
+ * @return array<int, string>
+ */
+function fetch_barber_names(PDO $pdo, array $barberIds): array
+{
+    if ($barberIds === []) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare('SELECT barber_id, full_name FROM barbers WHERE barber_id = :id');
+    $names = [];
+    foreach ($barberIds as $id) {
+        $stmt->execute([':id' => (int)$id]);
+        $row = $stmt->fetch();
+        $names[(int)$id] = (string)($row['full_name'] ?? 'Barber');
+    }
+
+    return $names;
+}
+
 /**
  * @return array<string, mixed>
  */
@@ -288,52 +312,111 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
         ];
     }
 
-    $nameStmt = $pdo->prepare('SELECT barber_id, full_name FROM barbers WHERE barber_id = :id');
-    $barberNames = [];
-    foreach ($barberIds as $id) {
-        $nameStmt->execute([':id' => $id]);
-        $row = $nameStmt->fetch();
-        $barberNames[$id] = (string)($row['full_name'] ?? 'Barber');
-    }
+    $barberNames = fetch_barber_names($pdo, $barberIds);
 
     $options = [];
+    $seen = [];
 
-    // Priority 1 & 2: consecutive runs, preferred barber first, earliest date/time.
+    /**
+     * Every start time that fits the party, not just the first.
+     *
+     * find_consecutive_runs() already computes all of them; this used to take
+     * $runs[0] and return immediately, which is why the customer was handed one
+     * slot with no say in it. The cap keeps the response small and stops the
+     * date scan early -- a day with free hours usually fills it outright.
+     */
+    $pushRun = static function (array $run, int $barberId, string $slotDate) use (
+        &$options,
+        &$seen,
+        $barberNames,
+        $preferredDate,
+        $peopleCount
+    ): void {
+        $firstTime = (string)($run[0]['slotTime'] ?? '');
+        $key = $barberId . '|' . $slotDate . '|' . $firstTime;
+        if ($firstTime === '' || isset($seen[$key])) {
+            return;
+        }
+        $seen[$key] = true;
+
+        $options[] = [
+            'type' => ($preferredDate === null || $slotDate === $preferredDate)
+                ? 'exact'
+                : 'alternate_day',
+            'barberID' => $barberId,
+            'barberName' => $barberNames[$barberId] ?? 'Barber',
+            'slotDate' => $slotDate,
+            'slots' => array_map(
+                static fn(array $slot, int $index): array => [
+                    'slotTime' => $slot['slotTime'],
+                    'barberID' => $barberId,
+                    'sequence' => $index + 1,
+                ],
+                $run,
+                array_keys($run)
+            ),
+            'description' => $peopleCount . ' consecutive hour(s) with '
+                . ($barberNames[$barberId] ?? 'barber')
+                . ' on ' . $slotDate . ' starting ' . substr($firstTime, 0, 5) . '.',
+        ];
+    };
+
+    // Collected across every barber first, then ordered by when they start, so
+    // the list reads as a choice of time rather than one barber's whole day.
+    $candidates = [];
     foreach ($dates as $slotDate) {
         foreach ($barberIds as $barberId) {
             $map = fetch_barber_slot_map($pdo, $barberId, $slotDate);
-            $runs = find_consecutive_runs($map, $slotDate, $peopleCount);
-            if ($runs === []) {
-                continue;
+            foreach (find_consecutive_runs($map, $slotDate, $peopleCount) as $run) {
+                $candidates[] = ['run' => $run, 'barberId' => $barberId, 'date' => $slotDate];
             }
-
-            $first = $runs[0];
-            $options[] = [
-                'type' => $slotDate === ($preferredDate ?? $slotDate) ? 'exact' : 'alternate_day',
-                'barberID' => $barberId,
-                'barberName' => $barberNames[$barberId] ?? 'Barber',
-                'slotDate' => $slotDate,
-                'slots' => array_map(
-                    static fn(array $slot, int $index): array => [
-                        'slotTime' => $slot['slotTime'],
-                        'barberID' => $barberId,
-                        'sequence' => $index + 1,
-                    ],
-                    $first,
-                    array_keys($first)
-                ),
-                'description' => $peopleCount . ' consecutive hour(s) with '
-                    . ($barberNames[$barberId] ?? 'barber')
-                    . ' on ' . $slotDate . ' starting ' . substr($first[0]['slotTime'], 0, 5) . '.',
-            ];
-
-            return [
-                'status' => 'exact',
-                'reason' => null,
-                'options' => $options,
-                'requiresConfirmation' => true,
-            ];
         }
+        // One day with free hours is already more choice than fits on screen;
+        // scanning the rest of the window would only add slower, later slots.
+        if (count($candidates) >= GROUP_BOOKING_MAX_OPTIONS) {
+            break;
+        }
+    }
+
+    usort($candidates, static function (array $a, array $b) use ($barberNames): int {
+        return [$a['date'], (string)($a['run'][0]['slotTime'] ?? ''), $barberNames[$a['barberId']] ?? '']
+            <=> [$b['date'], (string)($b['run'][0]['slotTime'] ?? ''), $barberNames[$b['barberId']] ?? ''];
+    });
+
+    foreach ($candidates as $candidate) {
+        $pushRun($candidate['run'], $candidate['barberId'], $candidate['date']);
+        if (count($options) >= GROUP_BOOKING_MAX_OPTIONS) {
+            break;
+        }
+    }
+
+    // Splitting the party across barbers is offered as a choice, not only as a
+    // fallback: a group that would rather all be seen at the same hour should
+    // not have to wait for one barber to have the whole block free.
+    if ($peopleCount > 1) {
+        $splitDate = $preferredDate ?? $dates[0] ?? null;
+        if ($splitDate !== null) {
+            $maps = [];
+            foreach (fetch_appointment_barber_ids($pdo) as $barberId) {
+                $maps[$barberId] = fetch_barber_slot_map($pdo, $barberId, $splitDate);
+            }
+            $allNames = $barberNames + fetch_barber_names($pdo, array_keys($maps));
+            $split = find_split_barber_option($maps, $splitDate, $peopleCount, $allNames);
+            if ($split !== null) {
+                $options[] = $split;
+            }
+        }
+    }
+
+    if ($options !== []) {
+        return [
+            'status' => 'exact',
+            'reason' => count($options) > 1
+                ? 'Pick the start time that suits your group.'
+                : null,
+            'options' => $options,
+            'requiresConfirmation' => true,
+        ];
     }
 
     // Priority 3: split across barbers (same time).
@@ -342,7 +425,12 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
         foreach (fetch_appointment_barber_ids($pdo) as $barberId) {
             $maps[$barberId] = fetch_barber_slot_map($pdo, $barberId, $slotDate);
         }
-        $split = find_split_barber_option($maps, $slotDate, $peopleCount, $barberNames);
+        $split = find_split_barber_option(
+            $maps,
+            $slotDate,
+            $peopleCount,
+            $barberNames + fetch_barber_names($pdo, array_keys($maps))
+        );
         if ($split !== null) {
             $options[] = $split;
 

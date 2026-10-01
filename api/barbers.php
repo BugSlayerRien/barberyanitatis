@@ -7,13 +7,14 @@ require_once __DIR__ . '/barber_channel.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/customer_auth.php';
 require_once __DIR__ . '/admin_input.php';
+require_once __DIR__ . '/walkin_presentation.php';
 
 require_method('POST');
 
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? 'list'));
 
-if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage', 'updateProfile'], true)) {
+if (!in_array($action, ['list', 'detail', 'submitFeedback', 'updateProfileImage', 'updateProfile', 'listWalkinsByBarber'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -153,6 +154,71 @@ try {
         json_response([
             'message' => 'Feedback submitted',
             'barberRating' => round($avgRating, 2),
+        ]);
+    }
+
+    // A barber could see their appointments but not the walk-ins queued to
+    // them, so whatever the guest chose at the kiosk never reached the person
+    // holding the clippers.
+    if ($action === 'listWalkinsByBarber') {
+        ensure_walkin_guest_name_column($pdo);
+        ensure_walkin_kiosk_columns($pdo);
+        ensure_service_pause_columns($pdo);
+
+        $barberID = (int)($input['barberID'] ?? $input['barberId'] ?? $input['userID'] ?? 0);
+        $email = strtolower(trim((string)($input['email'] ?? '')));
+        $resolvedBarberID = find_active_barber_id($pdo, $barberID, $email);
+        if ($resolvedBarberID <= 0) {
+            json_response(['error' => 'Barber not found'], 404);
+        }
+
+        $stmt = $pdo->prepare(
+            "SELECT wq.queue_id, wq.queue_number, wq.claim_code, wq.status, wq.guest_name,
+                    wq.wait_time_minutes, wq.people_count, wq.payment_mode, wq.actual_start,
+                    wq.paused_at, wq.paused_seconds, wq.created_at,
+                    COALESCE(NULLIF(string_agg(DISTINCT s.service_name, ', ' ORDER BY s.service_name), ''), 'Walk-in') AS service,
+                    COALESCE(SUM(DISTINCT wsd.final_price), 0) AS price,
+                    MAX(wsd.selected_view) AS selected_view,
+                    MAX(wsd.special_instructions) AS instructions
+             FROM walkin_queue wq
+             LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
+             LEFT JOIN services s ON s.service_id = wsd.service_id
+             WHERE wq.barber_id = :barber_id
+               AND DATE(wq.created_at) = CURRENT_DATE
+               AND wq.status NOT IN ('Cancelled')
+             GROUP BY wq.queue_id, wq.queue_number, wq.claim_code, wq.status, wq.guest_name,
+                      wq.wait_time_minutes, wq.people_count, wq.payment_mode, wq.actual_start,
+                      wq.paused_at, wq.paused_seconds, wq.created_at
+             ORDER BY wq.queue_id ASC"
+        );
+        $stmt->execute([':barber_id' => $resolvedBarberID]);
+
+        json_response([
+            'walkins' => array_map(static function (array $row): array {
+                $instructions = (string)($row['instructions'] ?? '');
+
+                return [
+                    'queueId' => (int)$row['queue_id'],
+                    'queueNumber' => (string)$row['queue_number'],
+                    'claimCode' => (string)($row['claim_code'] ?? ''),
+                    'guestName' => (string)($row['guest_name'] ?? ''),
+                    'status' => (string)$row['status'],
+                    'service' => (string)$row['service'],
+                    // Unpacked from the kiosk's own instruction string so the
+                    // barber reads what the guest picked, not bookkeeping.
+                    'style' => kiosk_style_from_instructions($instructions),
+                    'entryPath' => kiosk_entry_path_from_instructions($instructions),
+                    'notes' => walkin_free_text_instructions($instructions),
+                    'selectedView' => (string)($row['selected_view'] ?? ''),
+                    'peopleCount' => (int)($row['people_count'] ?? 1),
+                    'paymentMode' => (string)($row['payment_mode'] ?? 'counter'),
+                    'price' => (float)($row['price'] ?? 0),
+                    'waitMinutes' => (int)($row['wait_time_minutes'] ?? 0),
+                    'paused' => !empty($row['paused_at']),
+                    'actualStart' => $row['actual_start'] ?? null,
+                    'createdAt' => $row['created_at'] ?? null,
+                ];
+            }, $stmt->fetchAll(PDO::FETCH_ASSOC)),
         ]);
     }
 

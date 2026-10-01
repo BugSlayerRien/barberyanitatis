@@ -15,6 +15,7 @@ class KioskDonePage extends StatelessWidget {
     final queueNumber = queueResult['queueNumber']?.toString() ?? '';
     final waitLabel = queueResult['waitLabel']?.toString() ?? '';
     final guestName = queueResult['guestName']?.toString() ?? KioskSession.guestName ?? '';
+    final claimCode = queueResult['claimCode']?.toString() ?? '';
 
     return KioskScaffold(
       showBack: false,
@@ -69,9 +70,29 @@ class KioskDonePage extends StatelessWidget {
                     ],
                   ),
                 ),
+                if (claimCode.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  // Only needed if two people answer to the same name and
+                  // number. Nobody is asked for it at the chair, and it can be
+                  // looked up again from the kiosk home screen.
+                  const Text(
+                    'Your code, in case someone shares your name',
+                    style: TextStyle(color: KioskColors.textDim, fontSize: 12),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    claimCode,
+                    style: const TextStyle(
+                      color: KioskColors.textPrimary,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 6,
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 16),
                 const Text(
-                  'Please have a seat. We\'ll call you when your barber is ready.',
+                  'Please have a seat. We\'ll call your name. Forgot your number? Check it at the kiosk.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: KioskColors.textDim, fontSize: 13, height: 1.4),
                 ),

@@ -33,6 +33,10 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   String? _error;
   String? _expandedStatus;
   List<Map<String, dynamic>> _appointments = [];
+  // Walk-ins were invisible here: a barber could see who had booked but not
+  // who the kiosk had queued to them, nor what those guests picked.
+  List<Map<String, dynamic>> _walkins = [];
+  bool _showingWalkins = false;
   Timer? _welcomeTimer;
 
   @override
@@ -42,7 +46,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       if (!mounted) return;
       setState(() => _showWelcomeBanner = false);
     });
-    _loadAppointments();
+    _loadToday();
   }
 
   @override
@@ -104,6 +108,214 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     }
   }
 
+  /// Both lists come from different endpoints but are one day's work, so they
+  /// are loaded together and the toggle never waits on a second request.
+  Future<void> _loadToday() async {
+    await Future.wait([_loadAppointments(), _loadWalkins()]);
+  }
+
+  Future<void> _loadWalkins() async {
+    final barberId = UserSession.userId;
+    if (barberId == null || barberId <= 0) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'listWalkinsByBarber',
+          'barberID': barberId,
+          'email': UserSession.email ?? '',
+        }),
+      );
+      if (!mounted || response.statusCode != 200) return;
+
+      final data = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      setState(() {
+        _walkins = (data['walkins'] as List<dynamic>? ?? [])
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+      });
+    } catch (_) {
+      // The appointments list is the critical half; a walk-in fetch that fails
+      // should leave the barber's day on screen rather than blanking it.
+    }
+  }
+
+  Widget _buildWorkToggle() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: SegmentedButton<bool>(
+        segments: [
+          ButtonSegment(
+            value: false,
+            label: Text('Appointments (${_appointments.length})'),
+          ),
+          ButtonSegment(
+            value: true,
+            label: Text('Walk-ins (${_walkins.length})'),
+          ),
+        ],
+        selected: {_showingWalkins},
+        showSelectedIcon: false,
+        onSelectionChanged: (selection) {
+          setState(() => _showingWalkins = selection.first);
+        },
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((states) =>
+              states.contains(WidgetState.selected) ? AppBrand.gold : AppBrand.surface),
+          foregroundColor: WidgetStateProperty.resolveWith((states) =>
+              states.contains(WidgetState.selected) ? Colors.black : AppBrand.textMuted),
+          side: const WidgetStatePropertyAll(BorderSide(color: AppBrand.border)),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildWalkinSection(BuildContext context) {
+    if (_walkins.isEmpty) {
+      return [
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 32),
+          child: Center(
+            child: Text(
+              'No walk-ins queued to you today.',
+              style: TextStyle(color: AppBrand.textMuted),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return _walkins.map(_walkinCard).toList();
+  }
+
+  Widget _walkinCard(Map<String, dynamic> walkin) {
+    final status = walkin['status']?.toString() ?? '';
+    final style = walkin['style']?.toString() ?? '';
+    final notes = walkin['notes']?.toString() ?? '';
+    final entryPath = walkin['entryPath']?.toString() ?? '';
+    final claimCode = walkin['claimCode']?.toString() ?? '';
+    final paymentMode = walkin['paymentMode']?.toString() ?? 'counter';
+    final price = (walkin['price'] as num?)?.toDouble() ?? 0;
+    final people = (walkin['peopleCount'] as num?)?.toInt() ?? 1;
+    final waitMinutes = (walkin['waitMinutes'] as num?)?.toInt() ?? 0;
+    final paused = walkin['paused'] == true;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppBrand.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppBrand.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                walkin['queueNumber']?.toString() ?? '',
+                style: const TextStyle(
+                  color: AppBrand.gold,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  letterSpacing: 1,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  walkin['guestName']?.toString() ?? 'Guest',
+                  style: const TextStyle(
+                    color: AppBrand.text,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              _walkinStatusChip(paused ? 'Paused' : status),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // What the guest picked at the kiosk. Calling "Mark, for the fade"
+          // is how the right Mark stands up when three share the name.
+          Text(
+            [
+              walkin['service']?.toString() ?? '',
+              if (style.isNotEmpty) style,
+              if (people > 1) '$people people',
+            ].where((part) => part.isNotEmpty).join(' · '),
+            style: const TextStyle(color: AppBrand.text, fontSize: 14, height: 1.4),
+          ),
+          if (notes.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              'Asked for: $notes',
+              style: const TextStyle(color: AppBrand.gold, fontSize: 13, height: 1.4),
+            ),
+          ],
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 14,
+            runSpacing: 6,
+            children: [
+              if (claimCode.isNotEmpty) _walkinMeta('Code', claimCode),
+              _walkinMeta('Pay', paymentMode == 'gcash' ? 'Paid by GCash' : 'At the counter'),
+              if (price > 0) _walkinMeta('Price', '₱${price.toStringAsFixed(2)}'),
+              if (status != 'InProgress' && waitMinutes > 0) _walkinMeta('Waited', '$waitMinutes min'),
+              if (entryPath.isNotEmpty) _walkinMeta('Came via', entryPath),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _walkinMeta(String label, String value) {
+    return RichText(
+      text: TextSpan(
+        children: [
+          TextSpan(
+            text: '$label ',
+            style: const TextStyle(color: AppBrand.textMuted, fontSize: 12),
+          ),
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: AppBrand.text,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _walkinStatusChip(String status) {
+    final readable = status.replaceAllMapped(
+      RegExp(r'([a-z])([A-Z])'),
+      (m) => '${m[1]} ${m[2]}',
+    );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppBrand.goldTint,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppBrand.goldLine),
+      ),
+      child: Text(
+        readable,
+        style: const TextStyle(color: AppBrand.gold, fontSize: 11, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -120,7 +332,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       body: RefreshIndicator(
         color: AppBrand.gold,
         backgroundColor: AppBrand.surface,
-        onRefresh: _loadAppointments,
+        onRefresh: _loadToday,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -164,8 +376,13 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
                   ),
                 ),
               )
-            else
-              ..._buildCategorizedSections(context),
+            else ...[
+              _buildWorkToggle(),
+              if (_showingWalkins)
+                ..._buildWalkinSection(context)
+              else
+                ..._buildCategorizedSections(context),
+            ],
           ],
         ),
       ),

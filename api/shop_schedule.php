@@ -1128,6 +1128,7 @@ function auto_complete_due_walkins(PDO $pdo): int
 {
     require_once __DIR__ . '/db.php';
     ensure_walkin_queue_timestamp_columns($pdo);
+    ensure_service_pause_columns($pdo);
 
     $duration = shop_walkin_duration_minutes();
 
@@ -1137,11 +1138,13 @@ function auto_complete_due_walkins(PDO $pdo): int
            LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
            LEFT JOIN services s ON s.service_id = wsd.service_id
           WHERE wq.status = 'InProgress'
-          GROUP BY wq.queue_id, wq.actual_start, wq.created_at
+            AND wq.paused_at IS NULL
+          GROUP BY wq.queue_id, wq.actual_start, wq.created_at, wq.paused_seconds
          HAVING COALESCE(wq.actual_start, wq.created_at)
                 + make_interval(
                     mins => COALESCE(NULLIF(SUM(s.base_duration), 0), :duration)::int
-                ) <= NOW()"
+                )
+                + make_interval(secs => COALESCE(wq.paused_seconds, 0)) <= NOW()"
     );
     $selectStmt->execute([':duration' => $duration]);
     $rows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1336,6 +1339,7 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
     require_once __DIR__ . '/group_booking.php';
     require_once __DIR__ . '/slot_locking.php';
     ensure_group_booking_schema($pdo);
+    ensure_service_pause_columns($pdo);
     $duration = shop_appointment_duration_minutes();
     $completedUnits = 0;
     $startTs = shop_local_ts_sql('appointment_date', 'start_time');
@@ -1354,11 +1358,13 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
          LEFT JOIN services s ON s.service_id = ad.service_id
          WHERE a.booking_group_id IS NOT NULL
            AND a.status = 'InProgress'
+           AND a.paused_at IS NULL
          GROUP BY a.booking_group_id
          HAVING MIN(COALESCE(a.checkin_time, {$startTs}))
               + make_interval(
                     mins => COALESCE(NULLIF(SUM(s.base_duration), 0), (COUNT(DISTINCT a.appointment_id) * :duration))::int
-                ) <= NOW()"
+                )
+              + make_interval(secs => COALESCE(MAX(a.paused_seconds), 0)) <= NOW()"
     );
     $groupStmt->execute([':duration' => $duration]);
     $dueGroups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1418,12 +1424,14 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
          LEFT JOIN services s ON s.service_id = ad.service_id
          WHERE a.booking_group_id IS NULL
            AND a.status = 'InProgress'
+           AND a.paused_at IS NULL
          GROUP BY a.appointment_id, a.user_id, a.barber_id, a.booking_code, a.checkin_time,
-                  a.appointment_date, a.start_time
+                  a.appointment_date, a.start_time, a.paused_seconds
          HAVING COALESCE(a.checkin_time, {$startTs})
               + make_interval(
                     mins => COALESCE(NULLIF(SUM(s.base_duration), 0), :duration)::int
-                ) <= NOW()"
+                )
+              + make_interval(secs => COALESCE(a.paused_seconds, 0)) <= NOW()"
     );
     $selectStmt->execute([':duration' => $duration]);
     $dueRows = $selectStmt->fetchAll(PDO::FETCH_ASSOC);

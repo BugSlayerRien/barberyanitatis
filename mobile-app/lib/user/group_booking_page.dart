@@ -272,9 +272,17 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                           final option = _options[index];
                           final selected = _selectedOptionIndex == index;
                           final slots = (option['slots'] as List<dynamic>? ?? []);
-                          final times = slots
+                          final slotTimes = slots
                               .map((s) => formatTo12Hour(Map<String, dynamic>.from(s as Map)['slotTime']?.toString() ?? ''))
-                              .join(' → ');
+                              .toList();
+                          // Split options put everyone in the same hour with a
+                          // different barber each, so the arrow chain would
+                          // read "9:00 AM → 9:00 AM → 9:00 AM".
+                          final sameTime = slotTimes.isNotEmpty &&
+                              slotTimes.every((t) => t == slotTimes.first);
+                          final times = sameTime
+                              ? '${slotTimes.first} · ${slotTimes.length} barbers, same time'
+                              : slotTimes.join(' → ');
                           return Padding(
                             padding: const EdgeInsets.only(bottom: 10),
                             child: InkWell(
