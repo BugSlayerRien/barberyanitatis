@@ -14,15 +14,13 @@ function variant_matches_customer_texture(array $row, string $hairTexture): bool
         return true;
     }
 
+    // Wavy and curly used to be treated as interchangeable here, which put
+    // curly styles in front of wavy customers and the reverse. They are
+    // different cuts with different maintenance, and the catalog now carries
+    // ten distinct styles for each texture, so the pair is matched as strictly
+    // as any other.
     $variantTex = strtolower(trim((string)($row['hair_texture'] ?? '')));
     if ($variantTex !== '' && $variantTex !== $user) {
-        if (
-            ($user === 'wavy' && $variantTex === 'curly')
-            || ($user === 'curly' && $variantTex === 'wavy')
-        ) {
-            return true;
-        }
-
         return false;
     }
 

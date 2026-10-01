@@ -162,9 +162,9 @@ The kiosk is **not** a separate app — `kiosk/` is a thin wrapper; all UI lives
 
 ## 5. Haircut library facts (already established)
 
-**24 styles**, all with complete artwork — 72 PNGs, zero gaps. Per texture: **Straight 8, Wavy 10, Curly 6.**
+**30 styles** across the three textures — **10 Straight, 10 Wavy, 10 Curly** (28 / 29 / 29 variants).
 
-After the texture filter (`variant_matches_customer_texture`, `api/variant_ranking.php:10-48`): straight → 8 (straight only); wavy → 16 (all wavy + all curly); curly → 16 (same pool). So **curly additions help twice as many scanners as straight ones**. Note the regex markers at `:32-45` are dead code for the current catalog — the short-circuit at `:17-27` decides everything from the `hair_texture` column.
+After the texture filter (`variant_matches_customer_texture`, `api/variant_ranking.php`): each customer sees **only their own texture** — straight → 10, wavy → 10, curly → 10, with no foreign variants in any pool. Wavy and curly used to be treated as interchangeable, so a wavy customer was shown all 16 wavy *and* curly styles; that pairing is gone, and `scripts/catalog_checks.php` now asserts both the separation and that no pool falls below 4 styles. The regex markers further down the function only apply to variants with no `hair_texture` value at all — the column decides everything else.
 
 **Four styles exist in SQL but were never wired up** (`database/migrations/hairstyle_categories_and_catalog.sql:56-97`): Mid Fade, Curly Low Fade, Curly Fringe, Curly Undercut. Absent from `overlay_library_code_keys()`, no artwork on disk — invisible. Two of them collide with the fuzzy matcher.
 

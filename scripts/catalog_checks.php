@@ -162,5 +162,49 @@ check(
     count(filter_recommendations_for_customer(array_merge(array_slice($straight, 0, 1), $curly), 'Straight', false)) === 1
 );
 
+// --- wavy and curly are separate textures ------------------------------------
+// They were deliberately interchangeable: a curly variant passed the filter for
+// a wavy customer and the reverse. Different cuts, different maintenance -- the
+// catalog carries enough of each that neither needs to borrow from the other.
+$wavyRow = ['hair_texture' => 'Wavy', 'style_name' => 'Wavy Crop', 'style_code' => 'HC-WAVY'];
+$curlyRow = ['hair_texture' => 'Curly', 'style_name' => 'Curly Crop', 'style_code' => 'HC-CURLY'];
+
+check('a curly style is not offered to a wavy customer', !variant_matches_customer_texture($curlyRow, 'Wavy'));
+check('a wavy style is not offered to a curly customer', !variant_matches_customer_texture($wavyRow, 'Curly'));
+check('a wavy style still matches a wavy customer', variant_matches_customer_texture($wavyRow, 'Wavy'));
+check('a curly style still matches a curly customer', variant_matches_customer_texture($curlyRow, 'Curly'));
+
+// Separation is only safe while each texture keeps a browsable pool of its own.
+$liveRows = $pdo->query(
+    'SELECT v.hair_texture, h.style_name, h.style_code
+     FROM hairstyle_variants v
+     JOIN hairstyles h ON h.hairstyle_id = v.hairstyle_id
+     WHERE h.is_active = TRUE'
+)->fetchAll(PDO::FETCH_ASSOC);
+
+foreach (['Straight', 'Wavy', 'Curly'] as $texture) {
+    $kept = array_values(array_filter(
+        $liveRows,
+        static fn(array $r): bool => variant_matches_customer_texture($r, $texture)
+    ));
+    $styles = array_unique(array_column($kept, 'style_name'));
+    $foreign = array_filter($kept, static function (array $r) use ($texture): bool {
+        $tex = trim((string)($r['hair_texture'] ?? ''));
+
+        return $tex !== '' && strcasecmp($tex, $texture) !== 0;
+    });
+
+    check(
+        strtolower($texture) . ' customers get a browsable pool',
+        count($styles) >= 4,
+        count($styles) . ' styles'
+    );
+    check(
+        strtolower($texture) . ' customers see no other texture',
+        $foreign === [],
+        count($foreign) . ' foreign variants'
+    );
+}
+
 echo "\n{$checks} checks, {$failures} failed\n";
 exit($failures === 0 ? 0 : 1);

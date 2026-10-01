@@ -88,11 +88,17 @@ def req(method, url, data=None, headers=None, binary=False, allow_http=()):
 # limit is rejected with 400, and that 400 used to be swallowed as "already
 # exists" -- so the bucket was never created and every upload since failed
 # against a bucket that was not there.
+#
+# 400 is allowed here all the same, because Supabase reports an existing bucket
+# as HTTP 400 with a body of {"statusCode":"409","code":"BucketAlreadyExists"} --
+# the status line alone cannot tell "already there" from "refused". Nothing is
+# masked by allowing it: the GET below is what decides whether the bucket is
+# really there, and it reports Storage's own reason when it is not.
 req(
     "POST",
     f"{base}/storage/v1/bucket",
     {"id": bucket, "name": bucket, "public": False},
-    allow_http=(409,),
+    allow_http=(400, 409),
 )
 
 # Creation is not assumed to have worked. If the bucket is still missing the
