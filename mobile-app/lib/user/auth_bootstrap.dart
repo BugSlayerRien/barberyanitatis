@@ -897,7 +897,17 @@ class AuthBootstrap {
             ? nameValue.toString().trim()
             : (user.email ?? '');
 
-    UserSession.fullName = resolvedFullName;
+    // Supabase metadata carries a name for customers who signed up through the
+    // app, but not for barbers or staff -- their name lives in the app database
+    // and resolvedFullName falls through to the email address. Letting that
+    // overwrite a name already resolved from the server is how the barber
+    // dashboard ended up greeting people as "barber@tatis.local" after a token
+    // refresh re-ran this.
+    final existingName = UserSession.fullName?.trim() ?? '';
+    final fallbackIsEmail = resolvedFullName.trim() == (user.email ?? '').trim();
+    if (!fallbackIsEmail || existingName.isEmpty) {
+      UserSession.fullName = resolvedFullName;
+    }
     UserSession.email = user.email;
     if (UserSession.roles.isEmpty) {
       UserSession.roles = role != null && role.isNotEmpty

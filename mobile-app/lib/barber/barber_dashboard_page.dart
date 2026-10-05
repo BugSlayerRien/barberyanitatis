@@ -10,6 +10,7 @@ import '../user/time_format_utils.dart';
 import '../user/widgets/app_top_bar.dart';
 import '../user/widgets/menu_sheet.dart';
 import '../user/user_session.dart';
+import '../user/widgets/pill_tabs.dart';
 import 'barber_appointment_detail_page.dart';
 import 'barber_profile_page.dart';
 import 'barber_calendar_page.dart';
@@ -27,32 +28,24 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   static const int _tabProfile = 2;
   static const int _tabMenu = 3;
 
+  // Same three states the customer's Bookings page uses, through the same
+  // control -- the two screens had drifted into different shapes for one job.
+  static const List<String> _appointmentTabs = ['Upcoming', 'Completed', 'Cancelled'];
+
   int _currentTab = _tabDashboard;
+  int _appointmentTab = 0;
   bool _loading = true;
-  bool _showWelcomeBanner = true;
   String? _error;
-  String? _expandedStatus;
   List<Map<String, dynamic>> _appointments = [];
   // Walk-ins were invisible here: a barber could see who had booked but not
   // who the kiosk had queued to them, nor what those guests picked.
   List<Map<String, dynamic>> _walkins = [];
   bool _showingWalkins = false;
-  Timer? _welcomeTimer;
 
   @override
   void initState() {
     super.initState();
-    _welcomeTimer = Timer(const Duration(seconds: 4), () {
-      if (!mounted) return;
-      setState(() => _showWelcomeBanner = false);
-    });
     _loadToday();
-  }
-
-  @override
-  void dispose() {
-    _welcomeTimer?.cancel();
-    super.dispose();
   }
 
   Future<void> _loadAppointments() async {
@@ -111,7 +104,49 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   /// Both lists come from different endpoints but are one day's work, so they
   /// are loaded together and the toggle never waits on a second request.
   Future<void> _loadToday() async {
-    await Future.wait([_loadAppointments(), _loadWalkins()]);
+    await Future.wait([_loadAppointments(), _loadWalkins(), _loadBarberName()]);
+  }
+
+  /// Reads the barber's name from `barbers`, where it actually lives.
+  ///
+  /// Sign-in resolves the display name from Supabase user metadata, which
+  /// barber accounts do not carry -- so it fell through to the email and the
+  /// dashboard greeted them with "barber@tatis.local". The name is in the
+  /// barbers table and this screen already talks to that endpoint.
+  Future<void> _loadBarberName() async {
+    final barberId = UserSession.userId;
+    final email = UserSession.email ?? '';
+    if ((barberId == null || barberId <= 0) && email.isEmpty) return;
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiConfig.baseUrl}/barbers.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'detail',
+          'barberID': barberId ?? 0,
+          'email': email,
+        }),
+      );
+      if (!mounted || response.statusCode != 200) return;
+
+      final data = response.body.isNotEmpty
+          ? jsonDecode(response.body) as Map<String, dynamic>
+          : <String, dynamic>{};
+      final name = (data['barber'] as Map?)?['full_name']?.toString().trim();
+      if (name != null && name.isNotEmpty) {
+        setState(() => UserSession.fullName = name);
+      }
+    } catch (_) {
+      // The greeting falls back to a plain "Welcome"; not worth an error.
+    }
+  }
+
+  String _greeting() {
+    final hour = DateTime.now().hour;
+    if (hour < 12) return 'GOOD MORNING';
+    if (hour < 18) return 'GOOD AFTERNOON';
+    return 'GOOD EVENING';
   }
 
   Future<void> _loadWalkins() async {
@@ -488,29 +523,48 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           children: [
-            if (_showWelcomeBanner) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppBrand.goldTint,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppBrand.goldLine),
-                ),
-                child: Text(
-                  UserSession.fullName != null
-                      ? 'Welcome, ${UserSession.fullName}'
-                      : 'Welcome',
-                  style: const TextStyle(
-                    color: AppBrand.text,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.3,
+            // Same greeting block as the customer dashboard: brand mark, the
+            // time of day, then the name. It no longer vanishes on a timer --
+            // a greeting that disappears while you are reading it is worse
+            // than one that stays.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const BrandMark(size: 52),
+                const SizedBox(width: AppBrand.s4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _greeting(),
+                        style: const TextStyle(
+                          color: AppBrand.textMuted,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.3,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        UserSession.fullName ?? 'Welcome',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppBrand.chalk,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 0.2,
+                          height: 1.1,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-            ],
+              ],
+            ),
+            const SizedBox(height: 20),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -597,177 +651,66 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     );
   }
 
+  /// Appointments under the same three tabs the customer's Bookings page uses.
+  ///
+  /// This screen used to show "Upcoming" as a heading with Completed,
+  /// Cancelled and NoShow tucked into collapsible folders -- a different shape
+  /// for the same job, which made one product look like two. Cancelled and
+  /// NoShow share a tab because to a barber they are the same outcome: the
+  /// chair stayed empty.
   List<Widget> _buildCategorizedSections(BuildContext context) {
-    if (_appointments.isEmpty) {
-      return const [
+    const upcomingStatuses = ['Scheduled', 'CheckedIn', 'InProgress', 'PendingPayment'];
+    const completedStatuses = ['Completed'];
+    const cancelledStatuses = ['Cancelled', 'NoShow'];
+
+    final wanted = switch (_appointmentTab) {
+      1 => completedStatuses,
+      2 => cancelledStatuses,
+      _ => upcomingStatuses,
+    };
+
+    final rows = _appointments.where((appt) {
+      final status = (appt['status']?.toString() ?? '').trim();
+      if (wanted.contains(status)) return true;
+      // An unrecognised status is still somebody's booking, so it shows under
+      // Upcoming rather than disappearing between the tabs.
+      return _appointmentTab == 0 &&
+          !completedStatuses.contains(status) &&
+          !cancelledStatuses.contains(status);
+    }).toList();
+
+    final widgets = <Widget>[
+      PillTabs(
+        labels: _appointmentTabs,
+        selectedIndex: _appointmentTab,
+        onSelected: (index) => setState(() => _appointmentTab = index),
+      ),
+      const SizedBox(height: 18),
+    ];
+
+    if (rows.isEmpty) {
+      widgets.add(
         Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
+          padding: const EdgeInsets.symmetric(vertical: 32),
           child: Center(
             child: Text(
-              'No appointments assigned yet.',
-              style: TextStyle(color: Colors.white70),
+              switch (_appointmentTab) {
+                1 => 'No completed appointments yet.',
+                2 => 'Nothing cancelled. Good day.',
+                _ => 'No appointments assigned yet.',
+              },
+              style: const TextStyle(color: AppBrand.textMuted),
             ),
           ),
         ),
-      ];
-    }
-
-    const upcomingStatuses = ['Scheduled', 'CheckedIn', 'InProgress'];
-    const folderStatuses = ['Completed', 'Cancelled', 'NoShow'];
-
-    final groups = <String, List<Map<String, dynamic>>>{};
-    for (final appt in _appointments) {
-      final status = (appt['status']?.toString() ?? 'Unknown').trim();
-      groups.putIfAbsent(status, () => []);
-      groups[status]!.add(appt);
-    }
-
-    final widgets = <Widget>[];
-
-    // Upcoming appointments are always visible (not tucked into folders).
-    final upcoming = <Map<String, dynamic>>[];
-    for (final status in upcomingStatuses) {
-      upcoming.addAll(groups[status] ?? const []);
-    }
-    widgets.add(
-      const Padding(
-        padding: EdgeInsets.only(bottom: 10),
-        child: Text(
-          'Upcoming appointments',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
-    );
-    if (upcoming.isEmpty) {
-      widgets.add(
-        Container(
-          width: double.infinity,
-          margin: const EdgeInsets.only(bottom: 14),
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF121212),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppBrand.border),
-          ),
-          child: const Text(
-            'No scheduled appointments right now.',
-            style: TextStyle(color: Colors.white54, fontSize: 13),
-          ),
-        ),
       );
-    } else {
-      widgets.addAll(upcoming.map((appt) => _appointmentTile(context, appt)));
-      widgets.add(const SizedBox(height: 8));
+
+      return widgets;
     }
 
-    // Completed / cancelled / no-show stay in collapsible folders.
-    for (final status in folderStatuses) {
-      final items = groups[status] ?? [];
-      if (items.isEmpty) continue;
-      final isExpanded = _expandedStatus == status;
-      widgets.add(
-        _statusHeader(
-          status: status,
-          count: items.length,
-          isExpanded: isExpanded,
-          onTap: () {
-            setState(() {
-              _expandedStatus = isExpanded ? null : status;
-            });
-          },
-        ),
-      );
-      if (isExpanded) {
-        widgets.add(const SizedBox(height: 8));
-        widgets.addAll(items.map((appt) => _appointmentTile(context, appt)));
-      }
-      widgets.add(const SizedBox(height: 14));
-    }
-
-    // Any unexpected status still appears as a folder so nothing is hidden.
-    for (final status in groups.keys) {
-      if (upcomingStatuses.contains(status) || folderStatuses.contains(status)) {
-        continue;
-      }
-      final items = groups[status] ?? [];
-      if (items.isEmpty) continue;
-      final isExpanded = _expandedStatus == status;
-      widgets.add(
-        _statusHeader(
-          status: status,
-          count: items.length,
-          isExpanded: isExpanded,
-          onTap: () {
-            setState(() {
-              _expandedStatus = isExpanded ? null : status;
-            });
-          },
-        ),
-      );
-      if (isExpanded) {
-        widgets.add(const SizedBox(height: 8));
-        widgets.addAll(items.map((appt) => _appointmentTile(context, appt)));
-      }
-      widgets.add(const SizedBox(height: 14));
-    }
+    widgets.addAll(rows.map((appt) => _appointmentTile(context, appt)));
 
     return widgets;
-  }
-
-  Widget _statusHeader({
-    required String status,
-    required int count,
-    required bool isExpanded,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF121212),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppBrand.border),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              isExpanded ? Icons.folder_open : Icons.folder,
-              color: Colors.white70,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                status,
-                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w700),
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1A1A1A),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: AppBrand.border),
-              ),
-              child: Text(
-                '$count',
-                style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(
-              isExpanded ? Icons.expand_less : Icons.expand_more,
-              color: Colors.white60,
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _appointmentTile(BuildContext context, Map<String, dynamic> appt) {

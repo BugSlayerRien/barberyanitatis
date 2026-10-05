@@ -18,6 +18,7 @@ import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'ph_phone.dart';
 import 'user_session.dart';
+import 'widgets/pill_tabs.dart';
 import 'suggested_appointment_page.dart';
 import 'barber_selection_page.dart';
 import 'services/booking_slots_service.dart';
@@ -397,108 +398,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF1A1A1A), Color(0xFF252525)],
-                  ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: Colors.white, width: 1),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedTab = 0;
-                        }),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeInOut,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: _selectedTab == 0
-                                ? Colors.white
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            'Upcoming',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: _selectedTab == 0
-                                  ? Colors.black
-                                  : Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedTab = 1;
-                        }),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeInOut,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: _selectedTab == 1
-                                ? Colors.white
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            'Completed',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: _selectedTab == 1
-                                  ? Colors.black
-                                  : Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => setState(() {
-                          _selectedTab = 2;
-                        }),
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 220),
-                          curve: Curves.easeInOut,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          decoration: BoxDecoration(
-                            color: _selectedTab == 2
-                                ? Colors.white
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Text(
-                            'Cancelled',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: _selectedTab == 2
-                                  ? Colors.black
-                                  : Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 14,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+              PillTabs(
+                labels: const ['Upcoming', 'Completed', 'Cancelled'],
+                selectedIndex: _selectedTab,
+                onSelected: (index) => setState(() => _selectedTab = index),
               ),
               const SizedBox(height: 24),
               if (_loading)
