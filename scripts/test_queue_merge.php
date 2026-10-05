@@ -55,44 +55,44 @@ check(
 );
 queue_merge_reset();
 
-// --- the receptionist dashboard must use it ------------------------------
+// --- the receptionist dashboard must NOT filter by channel ---------------
+// Channel decides which barbers a customer may pick. It must not decide what
+// the floor can see: while merged, the kiosk offers every barber, so walk-ins
+// land on Exclusive barbers -- and a channel predicate here made them vanish
+// from Live tracking mid-haircut the moment merge was switched off.
 $source = (string)file_get_contents(__DIR__ . '/../api/receptionist.php');
+// Anchored on the two dashboard queries themselves rather than the action
+// name, which is quoted in the source and awkward to match.
+$queryStart = strpos($source, '$appointmentsStmt = $pdo->prepare(');
+$queryEnd = strpos($source, '$walkinsStmt->execute()');
+$dashboard = $queryStart !== false && $queryEnd !== false && $queryEnd > $queryStart
+    ? substr($source, $queryStart, $queryEnd - $queryStart)
+    : '';
 
+check('both dashboard queries were located', $dashboard !== '');
 check(
-    'dashboard does not hardcode the appointment channel',
-    strpos($source, "AND b.barber_channel = \\'appointment\\'") === false
+    'the dashboard reads carry no barber_channel predicate',
+    strpos($dashboard, 'barber_channel') === false
 );
 check(
-    'dashboard does not hardcode the walk-in channel',
-    strpos($source, "AND (b.barber_id IS NULL OR b.barber_channel = \\'walk_in\\')") === false
-);
-check(
-    'dashboard routes the appointment queue through the filter helper',
-    strpos($source, "barber_channel_filter_sql('appointment', 'b.barber_channel')") !== false
-);
-check(
-    'dashboard routes the walk-in queue through the filter helper',
-    strpos($source, "barber_channel_filter_sql('walk_in', 'b.barber_channel')") !== false
+    'the dashboard reads do not call the channel filter helper',
+    strpos($dashboard, 'barber_channel_filter_sql') === false
 );
 
-// --- an unassigned walk-in must never be filtered out --------------------
-// It has no barber row to read a channel from, so the split predicate has to
-// allow a NULL barber or the queue loses everyone waiting to be assigned.
-$walkinPredicate = static function (bool $merged): string {
-    queue_merge_set_for_request($merged);
-    $filter = barber_channel_filter_sql('walk_in', 'b.barber_channel');
-    queue_merge_reset();
-
-    return $filter === ''
-        ? ''
-        : " AND (b.barber_id IS NULL OR b.barber_channel = 'walk_in')";
-};
-
+// An unassigned walk-in has no barber row at all, so any predicate reading a
+// barber's channel would also have dropped everyone still waiting.
 check(
-    'split: unassigned walk-ins survive the channel predicate',
-    strpos($walkinPredicate(false), 'b.barber_id IS NULL') !== false
+    'nothing in the dashboard reads a barber channel',
+    strpos($dashboard, 'b.barber_channel') === false
 );
-check('merged: no channel predicate at all', $walkinPredicate(true) === '');
+
+// The helper is still right everywhere a customer picks a barber.
+foreach (['api/kiosk.php', 'api/booking.php'] as $pickSite) {
+    check(
+        $pickSite . ' still filters who can be picked',
+        strpos((string)file_get_contents(__DIR__ . '/../' . $pickSite), 'barber_channel_filter_sql') !== false
+    );
+}
 
 echo "\n{$checks} checks, {$failures} failed\n";
 exit($failures === 0 ? 0 : 1);

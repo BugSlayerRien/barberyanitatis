@@ -281,6 +281,9 @@ try {
             // did pay but were never flipped off PendingPayment, and expiring
             // first would cancel them.
             expire_unpaid_past_appointments($pdo);
+            // Frees a hold the customer walked away from, so an abandoned
+            // payment page does not refuse their next booking attempt.
+            expire_abandoned_payment_holds($pdo);
             notify_unpaid_appointments_due_soon($pdo);
         } catch (Throwable $automationError) {
             error_log('Booking list automation skipped: ' . $automationError->getMessage());

@@ -210,37 +210,78 @@
               <div class="list" id="tracking-automation-list"></div>
             </div>
 
-            <!-- Shown instead of the two columns below while the queues are
-                 merged: one list, in arrival order, regardless of channel. -->
-            <div class="card" id="tracking-merged-card" hidden>
+            <!-- Chips are built from the statuses actually on the floor, so
+                 an empty category never offers itself. -->
+            <div class="filter-bar tracking-filter-bar">
+              <div class="tracking-chips" id="tracking-status-filters"></div>
+            </div>
+
+            <!-- What is happening right now. Kept apart from the waiting list
+                 because an appointment three days out used to bury the haircut
+                 in the chair. -->
+            <h3 class="tracking-section-title">In service</h3>
+            <div class="card" id="tracking-active-merged-card" hidden>
               <div class="card-head">
                 <div class="card-head-text">
-                  <h3 class="card-title">Queue</h3>
+                  <h3 class="card-title">In the chair</h3>
                   <p class="card-sub">Walk-ins and appointments together, in order.</p>
                 </div>
                 <span class="status status--neutral no-dot">Merged</span>
               </div>
-              <div class="list" id="tracking-merged-list"></div>
+              <div class="list" id="tracking-active-merged-list"></div>
             </div>
 
-            <div class="tracking-columns" id="tracking-split-columns">
+            <div class="tracking-columns" id="tracking-active-split">
               <div class="card">
                 <div class="card-head">
                   <div class="card-head-text">
-                    <h3 class="card-title">Regular queue</h3>
-                    <p class="card-sub">Walk-in and kiosk clients.</p>
+                    <h3 class="card-title">Regular — in service</h3>
+                    <p class="card-sub">Walk-in and kiosk clients being served.</p>
                   </div>
                 </div>
-                <div class="list" id="tracking-regular-list"></div>
+                <div class="list" id="tracking-active-regular-list"></div>
               </div>
               <div class="card">
                 <div class="card-head">
                   <div class="card-head-text">
-                    <h3 class="card-title">Exclusive queue</h3>
-                    <p class="card-sub">Booked appointments.</p>
+                    <h3 class="card-title">Exclusive — in service</h3>
+                    <p class="card-sub">Booked appointments being served.</p>
                   </div>
                 </div>
-                <div class="list" id="tracking-exclusive-list"></div>
+                <div class="list" id="tracking-active-exclusive-list"></div>
+              </div>
+            </div>
+
+            <h3 class="tracking-section-title">Waiting and upcoming</h3>
+            <div class="card" id="tracking-wait-merged-card" hidden>
+              <div class="card-head">
+                <div class="card-head-text">
+                  <h3 class="card-title">Next up</h3>
+                  <p class="card-sub">Waiting walk-ins and appointments not started yet.</p>
+                </div>
+                <span class="status status--neutral no-dot">Merged</span>
+              </div>
+              <div class="list" id="tracking-wait-merged-list"></div>
+            </div>
+
+            <div class="tracking-columns" id="tracking-wait-split">
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Regular — waiting</h3>
+                    <p class="card-sub">Walk-ins in the queue.</p>
+                  </div>
+                </div>
+                <div class="list" id="tracking-wait-regular-list"></div>
+              </div>
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Exclusive — upcoming</h3>
+                    <p class="card-sub">Booked appointments still to come.</p>
+                  </div>
+                </div>
+                <div class="list" id="tracking-wait-exclusive-list"></div>
               </div>
             </div>
           </section>

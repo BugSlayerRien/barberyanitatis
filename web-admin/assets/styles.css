@@ -680,6 +680,75 @@ a {
   align-items: start;
 }
 
+/* Live tracking is split into "in service" and "waiting", so each stretch of
+   cards needs a heading to say which is which. */
+.tracking-section-title {
+  margin: var(--s-5) 0 var(--s-3);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.tracking-section-title:first-of-type {
+  margin-top: var(--s-3);
+}
+
+.tracking-filter-bar {
+  padding-bottom: 0;
+}
+
+.tracking-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-0);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.chip:hover {
+  border-color: var(--gold);
+}
+
+/* The selected state has to survive the status badge inside the chip keeping
+   its own colour, so the ring carries the signal rather than the fill. */
+.chip--on {
+  border-color: var(--gold);
+  background: var(--gold-tint);
+}
+
+.chip .status {
+  pointer-events: none;
+}
+
+.chip-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.chip--on .chip-count {
+  color: var(--text);
+}
+
 .users-stack,
 .stack {
   display: flex;

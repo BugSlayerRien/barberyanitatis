@@ -384,7 +384,18 @@ class _PaymentPageState extends State<PaymentPage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(widget.haircutName, style: const TextStyle(color: Colors.white70)),
+                      // Group bookings pass a long label here ("Group (5
+                      // people) (Mike Toledo + 4 guests)"), and so do styles
+                      // with long names; without the flex it runs off the edge.
+                      Expanded(
+                        child: Text(
+                          widget.haircutName,
+                          style: const TextStyle(color: Colors.white70),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 2,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
                       Text('₱${servicePrice.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white)),
                     ],
                   ),

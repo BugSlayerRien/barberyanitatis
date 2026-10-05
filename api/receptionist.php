@@ -163,8 +163,7 @@ try {
                AND (
                     a.status IN (\'PendingPayment\', \'CheckedIn\', \'InProgress\')
                     OR a.appointment_date::timestamp + a.start_time + make_interval(mins => :slot_duration_filter) > NOW()
-               )'
-               . barber_channel_filter_sql('appointment', 'b.barber_channel') . '
+               )
              GROUP BY a.appointment_id, a.barber_id, a.booking_group_id, a.group_member_name, a.group_sequence,
                       u.full_name, a.appointment_date, a.start_time, a.end_time, a.checkin_time, a.status, b.full_name, pay.status, intent.status
              ORDER BY a.appointment_date ASC, a.start_time ASC'
@@ -198,11 +197,6 @@ try {
             ];
         }, $appointmentRows));
 
-        $walkinChannelFilter = barber_channel_filter_sql('walk_in', 'b.barber_channel');
-        $walkinChannelSql = $walkinChannelFilter === ''
-            ? ''
-            : " AND (b.barber_id IS NULL OR b.barber_channel = 'walk_in')";
-
         $walkinsStmt = $pdo->prepare(
             'SELECT wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start,
                     wq.claim_code, wq.paused_at, wq.paused_seconds,
@@ -217,8 +211,7 @@ try {
              LEFT JOIN walkin_service_details wsd ON wq.queue_id = wsd.queue_id
              LEFT JOIN services s ON wsd.service_id = s.service_id
              LEFT JOIN barbers b ON wq.barber_id = b.barber_id
-             WHERE DATE(wq.created_at) = CURRENT_DATE'
-               . $walkinChannelSql . '
+             WHERE DATE(wq.created_at) = CURRENT_DATE
              GROUP BY wq.queue_id, wq.queue_number, wq.barber_id, wq.actual_start, wq.guest_name,
                       wq.wait_time_minutes, wq.status, wq.claim_code, wq.paused_at, wq.paused_seconds, b.full_name
              ORDER BY wq.queue_id ASC'

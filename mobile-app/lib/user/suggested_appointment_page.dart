@@ -14,6 +14,7 @@ import 'payment_page.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'haircuts_list_page.dart';
+import 'booking_guard.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
 import 'services/booking_slots_service.dart';
@@ -345,7 +346,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         return;
       }
 
-      Navigator.of(context).push(
+      await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PaymentPage(
             appointmentID: appointmentId,
@@ -356,6 +357,13 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
             haircutName: UserSession.selectedStyleName ?? 'Haircut',
           ),
         ),
+      );
+
+      // Leaving payment without paying used to strand the PendingPayment row
+      // and refuse every later attempt.
+      await BookingGuard.releaseIfUnpaid(
+        userId: UserSession.userId,
+        appointmentId: appointmentId,
       );
     } on CustomerApiException catch (e) {
       if (mounted) {

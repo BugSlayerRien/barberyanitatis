@@ -8,6 +8,7 @@ import 'api_config.dart';
 import 'payment_page.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
+import 'booking_guard.dart';
 import 'user_session.dart';
 import 'services/booking_draft_service.dart';
 
@@ -195,6 +196,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
           ? ' ($_customerName + $_additionalGuests guest${_additionalGuests == 1 ? '' : 's'})'
           : '';
 
+      if (!mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute(
           builder: (_) => PaymentPage(
@@ -207,6 +209,18 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
           ),
         ),
       );
+
+      // Backing out of payment used to strand the whole group as
+      // PendingPayment, so picking a different time was refused with "You
+      // already have an active appointment or group booking".
+      await BookingGuard.releaseIfUnpaid(
+        userId: UserSession.userId,
+        appointmentId: appointmentId,
+      );
+      if (mounted) {
+        setState(() => _selectedOptionIndex = -1);
+        await _loadOptions();
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -216,6 +230,231 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
     } finally {
       if (mounted) setState(() => _bookingInFlight = false);
     }
+  }
+
+  /// Groups the server's options by day so the same sentence is not repeated
+  /// ten times over.
+  ///
+  /// Every option used to render as "5 consecutive hour(s) with Francis Vasallo
+  /// on 2026-10-06 starting 09:00" plus the whole arrow chain beneath it, which
+  /// is a wall of text to read one number out of. The barber and the date are
+  /// said once per group; the times become chips; the slot sequence appears
+  /// only for the chip actually chosen.
+  List<Widget> _buildOptionGroups() {
+    final groups = <String, List<int>>{};
+    final splitIndexes = <int>[];
+
+    for (var i = 0; i < _options.length; i++) {
+      final option = _options[i];
+      // Splitting the party across barbers is a different shape of choice, so
+      // it keeps its own labelled row rather than becoming a time chip.
+      if (option['type']?.toString() == 'split_barbers') {
+        splitIndexes.add(i);
+        continue;
+      }
+      final key = '${option['slotDate']}|${option['barberName'] ?? ''}';
+      groups.putIfAbsent(key, () => <int>[]).add(i);
+    }
+
+    final widgets = <Widget>[];
+    groups.forEach((key, indexes) {
+      final parts = key.split('|');
+      widgets
+        ..add(_buildDayHeading(parts.first, parts.length > 1 ? parts[1] : ''))
+        ..add(const SizedBox(height: 8))
+        ..add(Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: indexes.map(_buildTimeChip).toList(),
+        ))
+        ..add(const SizedBox(height: 18));
+    });
+
+    for (final index in splitIndexes) {
+      widgets
+        ..add(_buildSplitOption(index))
+        ..add(const SizedBox(height: 12));
+    }
+
+    return widgets;
+  }
+
+  Widget _buildDayHeading(String slotDate, String barberName) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Text(
+            _friendlyDate(slotDate),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        if (barberName.isNotEmpty)
+          Text(
+            barberName,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildTimeChip(int index) {
+    final option = _options[index];
+    final selected = _selectedOptionIndex == index;
+    final slots = (option['slots'] as List<dynamic>? ?? []);
+    final first = slots.isNotEmpty
+        ? Map<String, dynamic>.from(slots.first as Map)['slotTime']?.toString() ?? ''
+        : '';
+
+    return InkWell(
+      onTap: () => setState(() => _selectedOptionIndex = index),
+      borderRadius: BorderRadius.circular(10),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? AppBrand.accent : const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: selected ? AppBrand.accent : Colors.white24),
+        ),
+        child: Text(
+          formatTo12Hour(first),
+          style: TextStyle(
+            color: selected ? Colors.black : Colors.white,
+            fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSplitOption(int index) {
+    final option = _options[index];
+    final selected = _selectedOptionIndex == index;
+    final slots = (option['slots'] as List<dynamic>? ?? []);
+    final first = slots.isNotEmpty
+        ? Map<String, dynamic>.from(slots.first as Map)['slotTime']?.toString() ?? ''
+        : '';
+
+    return InkWell(
+      onTap: () => setState(() => _selectedOptionIndex = index),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected ? AppBrand.accent : const Color(0xFF121212),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: selected ? AppBrand.accent : Colors.white24),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.groups_outlined,
+              size: 20,
+              color: selected ? Colors.black : Colors.white70,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'All at ${formatTo12Hour(first)}, different barbers',
+                    style: TextStyle(
+                      color: selected ? Colors.black : Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${_friendlyDate(option['slotDate']?.toString() ?? '')} · nobody waits for one barber',
+                    style: TextStyle(
+                      color: selected ? Colors.black87 : Colors.white54,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// The chosen option's slot-by-slot sequence, shown once rather than on
+  /// every row.
+  Widget _buildSelectionSummary() {
+    final option = _selectedOption;
+    if (option == null) {
+      return const Text(
+        'Pick a start time above.',
+        style: TextStyle(color: Colors.white54, fontSize: 13),
+      );
+    }
+
+    final slots = (option['slots'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final times = slots
+        .map((slot) => formatTo12Hour(slot['slotTime']?.toString() ?? ''))
+        .toList();
+    final sameTime = times.isNotEmpty && times.every((t) => t == times.first);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF121212),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppBrand.accentLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            _friendlyDate(option['slotDate']?.toString() ?? ''),
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            sameTime
+                ? '${times.first} · ${times.length} barbers at the same time'
+                : times.join('  →  '),
+            style: const TextStyle(color: AppBrand.accent, fontSize: 13, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _friendlyDate(String slotDate) {
+    final parsed = DateTime.tryParse(slotDate);
+    if (parsed == null) return slotDate;
+
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    final today = DateTime.now();
+    final isToday = parsed.year == today.year &&
+        parsed.month == today.month &&
+        parsed.day == today.day;
+    final label = '${weekdays[parsed.weekday - 1]} ${parsed.day} ${months[parsed.month - 1]}';
+
+    return isToday ? 'Today · $label' : label;
   }
 
   @override
@@ -268,57 +507,8 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                           ),
                           const SizedBox(height: 16),
                         ],
-                        ...List.generate(_options.length, (index) {
-                          final option = _options[index];
-                          final selected = _selectedOptionIndex == index;
-                          final slots = (option['slots'] as List<dynamic>? ?? []);
-                          final slotTimes = slots
-                              .map((s) => formatTo12Hour(Map<String, dynamic>.from(s as Map)['slotTime']?.toString() ?? ''))
-                              .toList();
-                          // Split options put everyone in the same hour with a
-                          // different barber each, so the arrow chain would
-                          // read "9:00 AM → 9:00 AM → 9:00 AM".
-                          final sameTime = slotTimes.isNotEmpty &&
-                              slotTimes.every((t) => t == slotTimes.first);
-                          final times = sameTime
-                              ? '${slotTimes.first} · ${slotTimes.length} barbers, same time'
-                              : slotTimes.join(' → ');
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 10),
-                            child: InkWell(
-                              onTap: () => setState(() => _selectedOptionIndex = index),
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.all(14),
-                                decoration: BoxDecoration(
-                                  color: selected ? Colors.white : const Color(0xFF121212),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white24),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      option['description']?.toString() ?? 'Option ${index + 1}',
-                                      style: TextStyle(
-                                        color: selected ? Colors.black : Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      '${option['slotDate']} · $times',
-                                      style: TextStyle(
-                                        color: selected ? Colors.black87 : Colors.white60,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
+                        ..._buildOptionGroups(),
+                        _buildSelectionSummary(),
                         const SizedBox(height: 16),
                         const Text(
                           'Booking for',

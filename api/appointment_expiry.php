@@ -74,57 +74,23 @@ function ensure_expiry_cancel_reason_column(PDO $pdo): void
  *
  * @return int number of appointment rows cancelled
  */
-function expire_unpaid_past_appointments(PDO $pdo, bool $force = false): int
-{
-    static $done = false;
-    if (!$force) {
-        if ($done) {
-            return 0;
-        }
-        if (!schema_cache_should_run('expire_unpaid_past_appointments', 120)) {
-            $done = true;
-
-            return 0;
-        }
-    }
-
-    schema_ensure_once('appointments.expiry_cancel_reason', static function () use ($pdo): void {
-        ensure_expiry_cancel_reason_column($pdo);
-    });
-
-    $endTs = shop_local_ts_sql('appointment_date', 'end_time');
-    $startTs = shop_local_ts_sql('appointment_date', 'start_time');
-    $duration = shop_appointment_duration_minutes();
-    $grace = appointment_expiry_grace_minutes();
-
-    // end_time is not always populated; fall back to start + the shop's default
-    // appointment length so a row with a blank end_time still expires.
-    $slotEndExpr = "CASE
-            WHEN end_time IS NOT NULL
-                 AND end_time <> '00:00:00'::time
-                 AND end_time > start_time
-            THEN {$endTs}
-            ELSE {$startTs} + make_interval(mins => :duration)
-        END";
-
-    $stmt = $pdo->prepare(
-        "SELECT appointment_id, booking_group_id, user_id, barber_id, booking_code
-         FROM appointments
-         WHERE status = 'PendingPayment'
-           AND ({$slotEndExpr}) + make_interval(mins => :grace) <= NOW()
-         ORDER BY appointment_id"
-    );
-    $stmt->execute([':duration' => $duration, ':grace' => $grace]);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    if ($rows === []) {
-        if (!$force) {
-            schema_cache_done('expire_unpaid_past_appointments');
-        }
-
-        return 0;
-    }
-
-    $cancelReason = 'Automatically cancelled: payment was not completed before the appointment time.';
+/**
+ * Cancels a batch of PendingPayment units and tells both sides why.
+ *
+ * Shared by the two sweeps below, which differ only in which rows they pick:
+ * one writes off bookings whose slot has come and gone, the other releases a
+ * hold the customer walked away from. Group units cancel whole, and each unit
+ * is atomic even when the caller already owns a transaction.
+ *
+ * @param list<array<string, mixed>> $rows
+ */
+function cancel_pending_payment_units(
+    PDO $pdo,
+    array $rows,
+    string $cancelReason,
+    string $customerMessage,
+    string $barberMessage
+): int {
     $cancelled = 0;
     $seenGroups = [];
 
@@ -223,7 +189,7 @@ function expire_unpaid_past_appointments(PDO $pdo, bool $force = false): int
                     ':recipient_type' => 'User',
                     ':recipient_id' => $userId,
                     ':title' => 'Booking cancelled',
-                    ':message' => 'Booking ' . $code . ' was cancelled because payment was not completed before the appointment time.',
+                    ':message' => str_replace('{code}', $code, $customerMessage),
                 ]);
             }
             if ($barberId > 0) {
@@ -231,7 +197,7 @@ function expire_unpaid_past_appointments(PDO $pdo, bool $force = false): int
                     ':recipient_type' => 'Barber',
                     ':recipient_id' => $barberId,
                     ':title' => 'Booking cancelled',
-                    ':message' => 'Booking ' . $code . ' was cancelled automatically: payment was never completed.',
+                    ':message' => str_replace('{code}', $code, $barberMessage),
                 ]);
             }
         } catch (Throwable $e) {
@@ -240,6 +206,142 @@ function expire_unpaid_past_appointments(PDO $pdo, bool $force = false): int
             error_log('Expiry notification skipped for #' . $appointmentId . ': ' . $e->getMessage());
         }
     }
+
+
+    return $cancelled;
+}
+
+/**
+ * Releases a booking the customer started paying for and then walked away from.
+ *
+ * A booking is written as PendingPayment before the payment page opens, and
+ * user_has_active_booking_unit() counts that as an active booking -- so backing
+ * out stranded the row and refused every further attempt with "You already have
+ * an active appointment". The existing reservation hold could not help: it runs
+ * from intent_created_at, and someone who backs out never creates an intent.
+ *
+ * The app cancels on exit, which covers the ordinary case. This covers the rest
+ * -- a killed app, a crash, a dropped connection -- by writing off PendingPayment
+ * rows that never reached a payment intent once the same hold window has passed.
+ * A booking with any intent against it is left alone: that customer is mid-payment
+ * or has a gateway result still to come.
+ */
+function expire_abandoned_payment_holds(PDO $pdo, bool $force = false): int
+{
+    static $done = false;
+    if (!$force) {
+        if ($done) {
+            return 0;
+        }
+        if (!schema_cache_should_run('expire_abandoned_payment_holds', 120)) {
+            $done = true;
+
+            return 0;
+        }
+    }
+
+    schema_ensure_once('appointments.expiry_cancel_reason', static function () use ($pdo): void {
+        ensure_expiry_cancel_reason_column($pdo);
+    });
+
+    $holdMinutes = shop_reservation_hold_minutes();
+
+    $stmt = $pdo->prepare(
+        "SELECT a.appointment_id, a.booking_group_id, a.user_id, a.barber_id, a.booking_code
+         FROM appointments a
+         WHERE a.status = 'PendingPayment'
+           AND a.created_at + make_interval(mins => :hold_minutes) <= NOW()
+           AND NOT EXISTS (
+                SELECT 1 FROM appointment_payment_intents i
+                WHERE i.appointment_id = a.appointment_id
+           )
+         ORDER BY a.appointment_id"
+    );
+    $stmt->execute([':hold_minutes' => $holdMinutes]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if ($rows === []) {
+        if (!$force) {
+            schema_cache_done('expire_abandoned_payment_holds');
+        }
+
+        return 0;
+    }
+
+    $cancelled = cancel_pending_payment_units(
+        $pdo,
+        $rows,
+        'Automatically released: payment was never started and the reservation hold expired.',
+        'Booking {code} was released because payment was never started. The time is free to book again.',
+        'Booking {code} was released: the customer never started payment.'
+    );
+
+    if (!$force) {
+        schema_cache_done('expire_abandoned_payment_holds');
+    }
+
+    return $cancelled;
+}
+
+function expire_unpaid_past_appointments(PDO $pdo, bool $force = false): int
+{
+    static $done = false;
+    if (!$force) {
+        if ($done) {
+            return 0;
+        }
+        if (!schema_cache_should_run('expire_unpaid_past_appointments', 120)) {
+            $done = true;
+
+            return 0;
+        }
+    }
+
+    schema_ensure_once('appointments.expiry_cancel_reason', static function () use ($pdo): void {
+        ensure_expiry_cancel_reason_column($pdo);
+    });
+
+    $endTs = shop_local_ts_sql('appointment_date', 'end_time');
+    $startTs = shop_local_ts_sql('appointment_date', 'start_time');
+    $duration = shop_appointment_duration_minutes();
+    $grace = appointment_expiry_grace_minutes();
+
+    // end_time is not always populated; fall back to start + the shop's default
+    // appointment length so a row with a blank end_time still expires.
+    $slotEndExpr = "CASE
+            WHEN end_time IS NOT NULL
+                 AND end_time <> '00:00:00'::time
+                 AND end_time > start_time
+            THEN {$endTs}
+            ELSE {$startTs} + make_interval(mins => :duration)
+        END";
+
+    $stmt = $pdo->prepare(
+        "SELECT appointment_id, booking_group_id, user_id, barber_id, booking_code
+         FROM appointments
+         WHERE status = 'PendingPayment'
+           AND ({$slotEndExpr}) + make_interval(mins => :grace) <= NOW()
+         ORDER BY appointment_id"
+    );
+    $stmt->execute([':duration' => $duration, ':grace' => $grace]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($rows === []) {
+        if (!$force) {
+            schema_cache_done('expire_unpaid_past_appointments');
+        }
+
+        return 0;
+    }
+
+    $cancelReason = 'Automatically cancelled: payment was not completed before the appointment time.';
+
+    $cancelled = cancel_pending_payment_units(
+        $pdo,
+        $rows,
+        $cancelReason,
+        'Booking {code} was cancelled because payment was not completed before the appointment time.',
+        'Booking {code} was cancelled automatically: payment was never completed.'
+    );
 
     if (!$force) {
         schema_cache_done('expire_unpaid_past_appointments');

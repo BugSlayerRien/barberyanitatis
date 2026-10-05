@@ -11,6 +11,7 @@ import 'api_config.dart';
 import 'customer_api.dart';
 import 'time_format_utils.dart';
 import 'haircuts_list_page.dart';
+import 'booking_guard.dart';
 import 'user_session.dart';
 import 'services/face_scan_service.dart';
 import 'services/booking_draft_service.dart';
@@ -838,7 +839,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
 
                       if (!context.mounted) return;
 
-                      Navigator.of(context).push(MaterialPageRoute(
+                      await Navigator.of(context).push(MaterialPageRoute(
                         builder: (_) => PaymentPage(
                           appointmentID: appointmentId,
                           barberName: widget.barberName,
@@ -848,6 +849,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           haircutName: UserSession.selectedStyleName ?? 'Haircut',
                         ),
                       ));
+
+                      // Leaving payment without paying used to strand the
+                      // PendingPayment row and refuse every later attempt.
+                      await BookingGuard.releaseIfUnpaid(
+                        userId: UserSession.userId,
+                        appointmentId: appointmentId,
+                      );
                       } catch (e) {
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(

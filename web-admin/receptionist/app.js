@@ -25,8 +25,14 @@ const DEFAULT_PAGE_SIZE = 5;
 const PAGE_SIZE_BY_KEY = {
   "appointments-table": 5,
   "walkins-table": 5,
-  "tracking-regular-list": 5,
-  "tracking-exclusive-list": 5,
+  // In-service lists stay short: a chair holds one person, so a long page
+  // there means something is wrong, not that the shop is busy.
+  "tracking-active-merged-list": 5,
+  "tracking-active-regular-list": 5,
+  "tracking-active-exclusive-list": 5,
+  "tracking-wait-merged-list": 6,
+  "tracking-wait-regular-list": 6,
+  "tracking-wait-exclusive-list": 6,
   "barbers-regular-list": 9,
   "barbers-exclusive-list": 9,
 };
@@ -134,7 +140,7 @@ function applyGlobalSearch() {
     return;
   }
   if (activeView === "tracking") {
-    resetPagination(["tracking-regular-list", "tracking-exclusive-list", "tracking-merged-list"]);
+    resetPagination(["tracking-active-merged-list", "tracking-active-regular-list", "tracking-active-exclusive-list", "tracking-wait-merged-list", "tracking-wait-regular-list", "tracking-wait-exclusive-list"]);
     renderSplitTracking(state.appointments, state.walkins);
     return;
   }
@@ -525,11 +531,9 @@ function rerenderByPaginationKey(key) {
   // The merged list ids belong here too: while the queues are merged they are
   // the only lists on screen, and leaving them out meant Next/Previous moved
   // the page number but never re-rendered.
-  if (
-    key === "tracking-regular-list"
-    || key === "tracking-exclusive-list"
-    || key === "tracking-merged-list"
-  ) {
+  // Every tracking list, in service and waiting alike. Leaving one out is
+  // what made Next move the page number and re-render nothing.
+  if (key.startsWith("tracking-")) {
     renderSplitTracking(state.appointments, state.walkins);
     return;
   }
@@ -1046,28 +1050,88 @@ function renderAutomationFeed(automation) {
     .join("");
 }
 
+/** Statuses that mean someone is in the chair right now. */
+const TRACKING_ACTIVE_STATUSES = new Set(["IN PROGRESS", "COMPLETING", "PAUSED"]);
+
+function isActiveTrackingItem(item) {
+  return TRACKING_ACTIVE_STATUSES.has(String(item.status || "").toUpperCase());
+}
+
+/**
+ * Status chips, built from what is actually on the floor.
+ *
+ * Offering a filter for a status nobody holds is noise, so the chip list is
+ * derived from the current items rather than hardcoded. A chip that disappears
+ * takes its selection with it, otherwise the queue would silently stay filtered
+ * to something that no longer exists.
+ */
+function renderTrackingFilters(items) {
+  const container = document.getElementById("tracking-status-filters");
+  if (!container) return;
+
+  const present = [];
+  items.forEach((item) => {
+    const status = String(item.status || "").trim();
+    if (status && !present.includes(status)) present.push(status);
+  });
+  present.sort();
+
+  if (!(state.trackingStatusFilter instanceof Set)) {
+    state.trackingStatusFilter = new Set();
+  }
+  [...state.trackingStatusFilter].forEach((status) => {
+    if (!present.includes(status)) state.trackingStatusFilter.delete(status);
+  });
+
+  const showingAll = state.trackingStatusFilter.size === 0;
+  container.innerHTML = [
+    `<button type="button" class="chip tracking-chip${showingAll ? " chip--on" : ""}" data-status="">All</button>`,
+    ...present.map((status) => {
+      const on = state.trackingStatusFilter.has(status);
+      const count = items.filter((item) => item.status === status).length;
+      return `<button type="button" class="chip tracking-chip${on ? " chip--on" : ""}" data-status="${status}">${statusBadge(status)}<span class="chip-count">${count}</span></button>`;
+    }),
+  ].join("");
+}
+
+function applyTrackingFilter(items) {
+  const selected = state.trackingStatusFilter;
+  if (!(selected instanceof Set) || selected.size === 0) return items;
+  return items.filter((item) => selected.has(item.status));
+}
+
 function renderSplitTracking(appointments, walkins) {
   const query = headerSearchValue();
   const tracking = buildTracking(appointments, walkins).filter((item) =>
     matchesQuery(query, item.name, item.service, item.barber, item.status, item.queueNumber, item.schedule),
   );
 
+  renderTrackingFilters(tracking);
+  const visible = applyTrackingFilter(tracking);
+
   // Merging the queues has to show as one queue. Leaving the Regular and
   // Exclusive columns up while the setting says "merged" told the floor the
   // opposite of what the switch did.
   const merged = Boolean(state.queueMergeEnabled);
-  const mergedCard = document.getElementById("tracking-merged-card");
-  const splitColumns = document.getElementById("tracking-split-columns");
-  if (mergedCard) mergedCard.hidden = !merged;
-  if (splitColumns) splitColumns.hidden = merged;
+  const sections = [
+    { prefix: "tracking-active", rows: visible.filter(isActiveTrackingItem) },
+    { prefix: "tracking-wait", rows: visible.filter((item) => !isActiveTrackingItem(item)) },
+  ];
 
-  if (merged) {
-    renderTracking(tracking, "tracking-merged-list");
-    return;
-  }
+  sections.forEach(({ prefix, rows }) => {
+    const mergedCard = document.getElementById(`${prefix}-merged-card`);
+    const splitColumns = document.getElementById(`${prefix}-split`);
+    if (mergedCard) mergedCard.hidden = !merged;
+    if (splitColumns) splitColumns.hidden = merged;
 
-  renderTracking(tracking.filter((item) => item.kind === "walkin"), "tracking-regular-list");
-  renderTracking(tracking.filter((item) => item.kind === "appointment"), "tracking-exclusive-list");
+    if (merged) {
+      renderTracking(rows, `${prefix}-merged-list`);
+      return;
+    }
+
+    renderTracking(rows.filter((item) => item.kind === "walkin"), `${prefix}-regular-list`);
+    renderTracking(rows.filter((item) => item.kind === "appointment"), `${prefix}-exclusive-list`);
+  });
 }
 
 function renderBarbers(items, listId) {
@@ -1589,6 +1653,23 @@ document.addEventListener("click", async (event) => {
     return;
   }
 
+  if (target.classList.contains("tracking-chip")) {
+    const status = target.dataset.status || "";
+    if (!(state.trackingStatusFilter instanceof Set)) {
+      state.trackingStatusFilter = new Set();
+    }
+    if (status === "") {
+      state.trackingStatusFilter.clear();
+    } else if (state.trackingStatusFilter.has(status)) {
+      state.trackingStatusFilter.delete(status);
+    } else {
+      state.trackingStatusFilter.add(status);
+    }
+    resetPagination(["tracking-active-merged-list", "tracking-active-regular-list", "tracking-active-exclusive-list", "tracking-wait-merged-list", "tracking-wait-regular-list", "tracking-wait-exclusive-list"]);
+    renderSplitTracking(state.appointments ?? [], state.walkins ?? []);
+    return;
+  }
+
   if (target.classList.contains("tracking-start")) {
     const name = target.dataset.name || "this client";
     const queueId = Number(target.dataset.queueId || "0");
@@ -2029,7 +2110,7 @@ async function setQueueMerge(enabled) {
     syncQueueMergeToggle();
     // Swap the view straight away, then refresh: the barber lists behind it
     // change server-side too.
-    resetPagination(["tracking-regular-list", "tracking-exclusive-list", "tracking-merged-list"]);
+    resetPagination(["tracking-active-merged-list", "tracking-active-regular-list", "tracking-active-exclusive-list", "tracking-wait-merged-list", "tracking-wait-regular-list", "tracking-wait-exclusive-list"]);
     renderSplitTracking(state.appointments ?? [], state.walkins ?? []);
     renderSplitBarbers(window.__barbersCache || []);
     toast(data.message || "Queue setting saved.", "success");
