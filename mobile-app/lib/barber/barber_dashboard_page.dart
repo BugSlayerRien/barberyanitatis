@@ -35,6 +35,8 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   int _currentTab = _tabDashboard;
   int _appointmentTab = 0;
   bool _loading = true;
+  bool _showWelcome = true;
+  Timer? _welcomeTimer;
   String? _error;
   List<Map<String, dynamic>> _appointments = [];
   // Walk-ins were invisible here: a barber could see who had booked but not
@@ -45,7 +47,19 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   @override
   void initState() {
     super.initState();
+    // Five seconds, the same as the customer dashboard: long enough to read,
+    // short enough that it stops eating the top of the screen.
+    _welcomeTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() => _showWelcome = false);
+    });
     _loadToday();
+  }
+
+  @override
+  void dispose() {
+    _welcomeTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadAppointments() async {
@@ -527,6 +541,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             // time of day, then the name. It no longer vanishes on a timer --
             // a greeting that disappears while you are reading it is worse
             // than one that stays.
+            if (_showWelcome) ...[
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -565,6 +580,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               ],
             ),
             const SizedBox(height: 20),
+            ],
             if (_loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),

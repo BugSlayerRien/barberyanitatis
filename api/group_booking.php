@@ -258,6 +258,15 @@ function find_split_barber_option(array $barberMaps, string $slotDate, int $coun
 const GROUP_BOOKING_MAX_OPTIONS = 10;
 
 /**
+ * Days to scan even once the cap is full.
+ *
+ * One free day fills ten options on its own, so stopping at the cap showed the
+ * customer a single day and no sense that the rest of the month exists. Three
+ * days is enough to read as "and later" without scanning the whole window.
+ */
+const GROUP_BOOKING_MIN_DAYS = 3;
+
+/**
  * @param list<int> $barberIds
  * @return array<int, string>
  */
@@ -295,8 +304,12 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
         $dates[] = $cursor->format('Y-m-d');
     }
 
-    if ($preferredDate !== null && in_array($preferredDate, $dates, true)) {
-        $dates = array_values(array_unique(array_merge([$preferredDate], $dates)));
+    // A date the customer actually picked is the answer, not a hint: scan that
+    // day alone. Merging it to the front of the window did not survive the sort
+    // below, which reordered by date and buried it behind today.
+    $pinnedDate = $preferredDate !== null && in_array($preferredDate, $dates, true);
+    if ($pinnedDate) {
+        $dates = [$preferredDate];
     }
 
     $barberIds = $preferredBarberId > 0
@@ -364,6 +377,7 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
     // Collected across every barber first, then ordered by when they start, so
     // the list reads as a choice of time rather than one barber's whole day.
     $candidates = [];
+    $daysScanned = 0;
     foreach ($dates as $slotDate) {
         foreach ($barberIds as $barberId) {
             $map = fetch_barber_slot_map($pdo, $barberId, $slotDate);
@@ -371,9 +385,12 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
                 $candidates[] = ['run' => $run, 'barberId' => $barberId, 'date' => $slotDate];
             }
         }
-        // One day with free hours is already more choice than fits on screen;
-        // scanning the rest of the window would only add slower, later slots.
-        if (count($candidates) >= GROUP_BOOKING_MAX_OPTIONS) {
+        // Keep going past the cap for the first few days so the list always
+        // spans more than one date. A customer who picked a date gets that one
+        // scanned first (it is moved to the head of $dates above).
+        $daysScanned++;
+        if (($pinnedDate || $daysScanned >= GROUP_BOOKING_MIN_DAYS)
+            && count($candidates) >= GROUP_BOOKING_MAX_OPTIONS) {
             break;
         }
     }
@@ -383,10 +400,26 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
             <=> [$b['date'], (string)($b['run'][0]['slotTime'] ?? ''), $barberNames[$b['barberId']] ?? ''];
     });
 
+    // Round-robin across days so the cap cannot be eaten by the first date.
+    // Sorted order is kept within each day, so each one still reads earliest
+    // first.
+    $byDate = [];
     foreach ($candidates as $candidate) {
-        $pushRun($candidate['run'], $candidate['barberId'], $candidate['date']);
-        if (count($options) >= GROUP_BOOKING_MAX_OPTIONS) {
-            break;
+        $byDate[$candidate['date']][] = $candidate;
+    }
+    while ($byDate !== [] && count($options) < GROUP_BOOKING_MAX_OPTIONS) {
+        foreach (array_keys($byDate) as $date) {
+            $candidate = array_shift($byDate[$date]);
+            if ($candidate === null || $byDate[$date] === []) {
+                unset($byDate[$date]);
+            }
+            if ($candidate === null) {
+                continue;
+            }
+            $pushRun($candidate['run'], $candidate['barberId'], $candidate['date']);
+            if (count($options) >= GROUP_BOOKING_MAX_OPTIONS) {
+                break;
+            }
         }
     }
 

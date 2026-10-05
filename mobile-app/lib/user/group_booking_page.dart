@@ -34,6 +34,9 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
   String? _statusReason;
   List<Map<String, dynamic>> _options = [];
   int _selectedOptionIndex = 0;
+  // Null means "whatever is soonest" -- the server then spreads its answers
+  // over the next few days instead of pinning to one.
+  DateTime? _preferredDate;
   bool _confirmPartial = false;
   bool _bookingInFlight = false;
   double _pricePerPerson = 0;
@@ -87,6 +90,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
           'action': 'findGroupSlots',
           'barberID': widget.barberId,
           'peopleCount': widget.peopleCount,
+          if (_preferredDate != null) 'slotDate': _ymd(_preferredDate!),
         }),
       );
       final data = response.body.isNotEmpty
@@ -457,6 +461,82 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
     return isToday ? 'Today · $label' : label;
   }
 
+  static String _ymd(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-'
+      '${date.month.toString().padLeft(2, '0')}-'
+      '${date.day.toString().padLeft(2, '0')}';
+
+  /// Lets the group aim at a specific day.
+  ///
+  /// Without this the list only ever covered the next few days, because one
+  /// free day fills the option cap on its own. Picking a date tells the server
+  /// to search that day instead of the soonest ones.
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final first = DateTime(now.year, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _preferredDate ?? first,
+      firstDate: first,
+      // Matches the shop's 30-day booking window.
+      lastDate: first.add(const Duration(days: 30)),
+      builder: (context, child) => Theme(
+        data: ThemeData.dark().copyWith(
+          colorScheme: const ColorScheme.dark(
+            primary: AppBrand.accent,
+            onPrimary: Colors.black,
+            surface: Color(0xFF1A1A1A),
+          ),
+        ),
+        child: child ?? const SizedBox.shrink(),
+      ),
+    );
+    if (picked == null || !mounted) return;
+
+    setState(() => _preferredDate = picked);
+    await _loadOptions();
+  }
+
+  Widget _buildDateControl() {
+    final pinned = _preferredDate != null;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _loading ? null : _pickDate,
+              icon: const Icon(Icons.calendar_today_outlined, size: 18),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: pinned ? Colors.black : Colors.white,
+                backgroundColor: pinned ? AppBrand.accent : Colors.transparent,
+                side: BorderSide(color: pinned ? AppBrand.accent : Colors.white38),
+                padding: const EdgeInsets.symmetric(vertical: 14),
+              ),
+              label: Text(
+                pinned ? _friendlyDate(_ymd(_preferredDate!)) : 'Pick a date',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+          if (pinned) ...[
+            const SizedBox(width: 10),
+            TextButton(
+              onPressed: _loading
+                  ? null
+                  : () async {
+                      setState(() => _preferredDate = null);
+                      await _loadOptions();
+                    },
+              child: const Text('Soonest', style: TextStyle(color: Colors.white70)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -507,6 +587,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                           ),
                           const SizedBox(height: 16),
                         ],
+                        _buildDateControl(),
                         ..._buildOptionGroups(),
                         _buildSelectionSummary(),
                         const SizedBox(height: 16),
