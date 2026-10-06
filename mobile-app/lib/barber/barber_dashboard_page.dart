@@ -10,6 +10,8 @@ import '../user/time_format_utils.dart';
 import '../user/widgets/app_top_bar.dart';
 import '../user/widgets/menu_sheet.dart';
 import '../user/user_session.dart';
+import '../user/widgets/accent_sheen.dart';
+import '../user/widgets/app_bottom_nav.dart';
 import '../user/widgets/pill_tabs.dart';
 import 'barber_appointment_detail_page.dart';
 import 'barber_profile_page.dart';
@@ -191,6 +193,76 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       // The appointments list is the critical half; a walk-in fetch that fails
       // should leave the barber's day on screen rather than blanking it.
     }
+  }
+
+  /// Three numbers the barber actually wants on opening the app: what is
+  /// left today, what is already done, and who is waiting in the queue.
+  ///
+  /// The screen used to open straight onto a list, so answering "how much more
+  /// today?" meant counting rows.
+  Widget _buildDayStrip() {
+    const openStatuses = ['Scheduled', 'CheckedIn', 'InProgress', 'PendingPayment'];
+
+    final upcoming = _appointments
+        .where((a) => openStatuses.contains((a['status']?.toString() ?? '').trim()))
+        .length;
+    final done = _appointments
+        .where((a) => (a['status']?.toString() ?? '').trim() == 'Completed')
+        .length;
+    final waiting = _walkins
+        .where((w) => (w['status']?.toString() ?? '') != 'Completed')
+        .length;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 18),
+      child: Row(
+        children: [
+          Expanded(child: _statTile('Left today', upcoming, Icons.schedule_rounded, AppBrand.accent)),
+          const SizedBox(width: 10),
+          Expanded(child: _statTile('Finished', done, Icons.check_circle_outline, AppBrand.success)),
+          const SizedBox(width: 10),
+          Expanded(child: _statTile('Walk-ins', waiting, Icons.groups_rounded, AppBrand.warning)),
+        ],
+      ),
+    );
+  }
+
+  Widget _statTile(String label, int value, IconData icon, Color accent) {
+    return AccentSheen(
+      accent: accent,
+      borderRadius: BorderRadius.circular(14),
+      periodSeconds: 9,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: accent, size: 20),
+            const SizedBox(height: 10),
+            Text(
+              '$value',
+              style: const TextStyle(
+                color: AppBrand.chalk,
+                fontSize: 24,
+                fontWeight: FontWeight.w900,
+                height: 1,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: AppBrand.textMuted,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildWorkToggle() {
@@ -581,6 +653,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             ),
             const SizedBox(height: 20),
             ],
+            _buildDayStrip(),
             if (_loading)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 24),
@@ -607,16 +680,9 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: AppBrand.surface,
-        selectedItemColor: AppBrand.gold,
-        unselectedItemColor: AppBrand.textMuted,
-        type: BottomNavigationBarType.fixed,
+      bottomNavigationBar: AppBottomNavBar(
+        destinations: AppBottomNavBar.barberDestinations,
         currentIndex: _currentTab.clamp(0, 3),
-        showSelectedLabels: true,
-        showUnselectedLabels: true,
-        selectedFontSize: 11,
-        unselectedFontSize: 10,
         onTap: (index) async {
           if (index == _tabDashboard) {
             setState(() => _currentTab = _tabDashboard);
@@ -644,25 +710,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             if (mounted) setState(() => _currentTab = _tabDashboard);
           }
         },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.event_available),
-            label: 'Dashboard',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.calendar_month_outlined),
-            label: 'Calendar',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            label: 'Profile',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.menu),
-            label: 'Menu',
-          ),
-        ],
-      ),
+      )
     ),
     );
   }
@@ -729,6 +777,40 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     return widgets;
   }
 
+  /// Status colour, so a row's state is readable before any of it is.
+  Color _statusAccent(String status) {
+    switch (status) {
+      case 'InProgress':
+        return AppBrand.success;
+      case 'CheckedIn':
+        return AppBrand.accent;
+      case 'PendingPayment':
+        return AppBrand.warning;
+      case 'Completed':
+        return AppBrand.textMuted;
+      case 'Cancelled':
+      case 'NoShow':
+        return AppBrand.poleRedText;
+      default:
+        return AppBrand.accent;
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case 'InProgress':
+        return 'In the chair';
+      case 'CheckedIn':
+        return 'Checked in';
+      case 'PendingPayment':
+        return 'Unpaid';
+      case 'NoShow':
+        return 'No show';
+      default:
+        return status;
+    }
+  }
+
   Widget _appointmentTile(BuildContext context, Map<String, dynamic> appt) {
     final isGroup = appt['isGroup'] == true;
     final customerName = isGroup
@@ -740,68 +822,131 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     final scheduleLabel = timeRange.isNotEmpty ? timeRange : startTime;
     final status = appt['status']?.toString() ?? 'Unknown';
     final peopleCount = (appt['peopleCount'] as num?)?.toInt() ?? 1;
+    final accent = _statusAccent(status);
 
-    return InkWell(
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => BarberAppointmentDetailPage(appointment: appt),
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF121212),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppBrand.border),
-        ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: AppBrand.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => BarberAppointmentDetailPage(appointment: appt),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(14),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: AppBrand.border),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          customerName,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 15),
-                        ),
+                  // A status stripe down the edge: the row's state is legible
+                  // from a glance down the list, without reading a word.
+                  Container(
+                    width: 4,
+                    decoration: BoxDecoration(
+                      color: accent,
+                      borderRadius: const BorderRadius.horizontal(
+                        left: Radius.circular(14),
                       ),
-                      if (isGroup)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: AppBrand.goldTint,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: AppBrand.goldLine),
-                          ),
-                          child: Text(
-                            'Group · $peopleCount',
-                            style: const TextStyle(color: AppBrand.gold, fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 5),
-                  Text(
-                    '$date  $scheduleLabel',
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 13, 10, 13),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // The time leads. A barber reads this list to find
+                          // out when they are next busy, not who with.
+                          Row(
+                            children: [
+                              Icon(Icons.schedule_rounded, size: 14, color: accent),
+                              const SizedBox(width: 5),
+                              Text(
+                                scheduleLabel,
+                                style: TextStyle(
+                                  color: accent,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 0.2,
+                                ),
+                              ),
+                              if (date.isNotEmpty) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  date,
+                                  style: const TextStyle(
+                                    color: AppBrand.textSubtle,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            customerName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppBrand.chalk,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                              height: 1.15,
+                            ),
+                          ),
+                          const SizedBox(height: 7),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: [
+                              _tileChip(_statusLabel(status), accent),
+                              if (isGroup)
+                                _tileChip('Group of $peopleCount', AppBrand.accent),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Status: $status',
-                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  const Padding(
+                    padding: EdgeInsets.only(right: 10),
+                    child: Icon(
+                      Icons.chevron_right_rounded,
+                      color: AppBrand.textSubtle,
+                    ),
                   ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: Colors.white54),
-          ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tileChip(String label, Color accent) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: accent.withValues(alpha: 0.35)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          color: accent,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
         ),
       ),
     );

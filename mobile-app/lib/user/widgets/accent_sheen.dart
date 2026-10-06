@@ -58,8 +58,11 @@ class _AccentSheenState extends State<AccentSheen>
   @override
   Widget build(BuildContext context) {
     final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    final tint = widget.accent.withValues(alpha: 0.16 * widget.intensity);
-    final edge = widget.accent.withValues(alpha: 0.04 * widget.intensity);
+    // Deliberately faint. At 0.16 the wash read as a coloured card rather than
+    // a sheen, and the "Recent haircut" card's white accent turned the whole
+    // panel grey. The tint should be felt, not seen.
+    final tint = widget.accent.withValues(alpha: 0.07 * widget.intensity);
+    final edge = widget.accent.withValues(alpha: 0.02 * widget.intensity);
 
     if (reduceMotion) {
       _controller.stop();
@@ -92,7 +95,7 @@ class _AccentSheenState extends State<AccentSheen>
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: widget.borderRadius,
-        border: Border.all(color: widget.accent.withValues(alpha: 0.22)),
+        border: Border.all(color: widget.accent.withValues(alpha: 0.16)),
         gradient: LinearGradient(
           begin: begin,
           end: end,

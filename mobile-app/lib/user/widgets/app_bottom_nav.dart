@@ -2,38 +2,68 @@ import 'package:flutter/material.dart';
 
 import '../app_brand.dart';
 
-/// The customer app's bottom navigation.
+/// One destination in the bottom bar.
+class AppNavDestination {
+  final IconData icon;
+  final String label;
+
+  /// Lifted out of the bar as a circular action — reserved for the one thing
+  /// the screen is really for.
+  final bool raised;
+
+  const AppNavDestination({
+    required this.icon,
+    required this.label,
+    this.raised = false,
+  });
+}
+
+/// The app's bottom navigation, shared by the customer and barber screens.
 ///
 /// This was a stock `BottomNavigationBar` where the only sign of the current
-/// page was the icon turning gold -- a colour change on a 20px glyph, which is
-/// easy to miss and invisible to anyone who struggles with that hue. The active
-/// destination now gets a pill that slides to it, its icon lifts and its label
-/// appears, so position, shape and motion all say where you are rather than
-/// colour alone.
+/// page was the icon turning gold — a colour change on a 20px glyph, easy to
+/// miss and invisible to anyone who struggles with that hue. The active
+/// destination now sits in a pill, so position and shape carry the signal and
+/// colour only reinforces it.
+///
+/// Labels sit *under* their icons and are always shown. An earlier version
+/// expanded the label beside the icon only when selected, which overflowed on
+/// narrow phones the moment a longer word like "Bookings" was picked.
 class AppBottomNavBar extends StatelessWidget {
   final int currentIndex;
   final ValueChanged<int> onTap;
+
+  /// Defaults to the customer destinations; the barber app passes its own.
+  final List<AppNavDestination> destinations;
+
+  static const List<AppNavDestination> customerDestinations = [
+    AppNavDestination(icon: Icons.home_rounded, label: 'Home'),
+    AppNavDestination(icon: Icons.calendar_month_rounded, label: 'Bookings'),
+    AppNavDestination(icon: Icons.center_focus_strong, label: 'AI Scan', raised: true),
+    AppNavDestination(icon: Icons.bookmark_rounded, label: 'Saved'),
+    AppNavDestination(icon: Icons.menu_rounded, label: 'Menu'),
+  ];
+
+  static const List<AppNavDestination> barberDestinations = [
+    AppNavDestination(icon: Icons.event_available_rounded, label: 'Today'),
+    AppNavDestination(icon: Icons.calendar_month_rounded, label: 'Calendar'),
+    AppNavDestination(icon: Icons.person_rounded, label: 'Profile'),
+    AppNavDestination(icon: Icons.menu_rounded, label: 'Menu'),
+  ];
 
   const AppBottomNavBar({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.destinations = customerDestinations,
   });
-
-  static const List<_NavDestination> _destinations = [
-    _NavDestination(icon: Icons.home_rounded, label: 'Home'),
-    _NavDestination(icon: Icons.calendar_month_rounded, label: 'Bookings'),
-    _NavDestination(icon: Icons.center_focus_strong, label: 'AI Scan', raised: true),
-    _NavDestination(icon: Icons.bookmark_rounded, label: 'Saved'),
-    _NavDestination(icon: Icons.menu_rounded, label: 'Menu'),
-  ];
 
   @override
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: AppBrand.panel,
-        border: Border(top: BorderSide(color: AppBrand.border)),
+        border: const Border(top: BorderSide(color: AppBrand.border)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.4),
@@ -45,11 +75,10 @@ class AppBottomNavBar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: SizedBox(
-          height: 66,
+          height: 68,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: List.generate(_destinations.length, (index) {
-              final destination = _destinations[index];
+            children: List.generate(destinations.length, (index) {
+              final destination = destinations[index];
 
               return Expanded(
                 child: destination.raised
@@ -72,20 +101,8 @@ class AppBottomNavBar extends StatelessWidget {
   }
 }
 
-class _NavDestination {
-  final IconData icon;
-  final String label;
-  final bool raised;
-
-  const _NavDestination({
-    required this.icon,
-    required this.label,
-    this.raised = false,
-  });
-}
-
 class _NavItem extends StatelessWidget {
-  final _NavDestination destination;
+  final AppNavDestination destination;
   final bool selected;
   final VoidCallback onTap;
 
@@ -103,56 +120,43 @@ class _NavItem extends StatelessWidget {
       label: destination.label,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         child: Center(
           child: AnimatedContainer(
-            duration: const Duration(milliseconds: 240),
+            duration: const Duration(milliseconds: 220),
             curve: Curves.easeOutCubic,
-            padding: EdgeInsets.symmetric(
-              horizontal: selected ? 14 : 10,
-              vertical: 8,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              // The pill is the signal. Colour reinforces it; it does not
-              // carry it alone.
               color: selected ? AppBrand.accentTint : Colors.transparent,
-              borderRadius: BorderRadius.circular(18),
+              borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: selected ? AppBrand.accentLine : Colors.transparent,
               ),
             ),
-            child: Row(
+            child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 AnimatedScale(
-                  duration: const Duration(milliseconds: 240),
+                  duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOutBack,
-                  scale: selected ? 1.08 : 1,
+                  scale: selected ? 1.1 : 1,
                   child: Icon(
                     destination.icon,
                     size: 22,
                     color: selected ? AppBrand.accent : AppBrand.textSubtle,
                   ),
                 ),
-                // The label only shows for the current page, so the bar stays
-                // uncluttered and the active one reads as a word, not a glyph.
-                ClipRect(
-                  child: AnimatedAlign(
-                    duration: const Duration(milliseconds: 240),
-                    curve: Curves.easeOutCubic,
-                    alignment: Alignment.centerLeft,
-                    widthFactor: selected ? 1 : 0,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 7),
-                      child: Text(
-                        destination.label,
-                        style: const TextStyle(
-                          color: AppBrand.accent,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
+                const SizedBox(height: 3),
+                // Always visible and under the icon, so the bar's width never
+                // depends on which word happens to be selected.
+                Text(
+                  destination.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? AppBrand.accent : AppBrand.textSubtle,
+                    fontSize: 10,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                   ),
                 ),
               ],
@@ -164,10 +168,9 @@ class _NavItem extends StatelessWidget {
   }
 }
 
-/// The AI Scan button, raised out of the bar because it is the thing the app is
-/// actually for.
+/// The raised circular action, used for AI Scan on the customer app.
 class _RaisedAction extends StatelessWidget {
-  final _NavDestination destination;
+  final AppNavDestination destination;
   final bool selected;
   final VoidCallback onTap;
 
@@ -186,34 +189,46 @@ class _RaisedAction extends StatelessWidget {
       child: Center(
         child: GestureDetector(
           onTap: onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 240),
-            curve: Curves.easeOutCubic,
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  AppBrand.accent,
-                  selected ? AppBrand.accent : AppBrand.accentFill,
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: AppBrand.accent.withValues(alpha: selected ? 0.55 : 0.3),
-                  blurRadius: selected ? 20 : 12,
-                  spreadRadius: selected ? 2 : 0,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOutCubic,
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppBrand.accent,
+                      selected ? AppBrand.accent : AppBrand.accentFill,
+                    ],
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppBrand.accent.withValues(alpha: selected ? 0.5 : 0.28),
+                      blurRadius: selected ? 18 : 11,
+                      spreadRadius: selected ? 1 : 0,
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            child: Icon(
-              destination.icon,
-              color: Colors.black,
-              size: selected ? 27 : 25,
-            ),
+                child: Icon(destination.icon, color: Colors.black, size: 24),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                destination.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selected ? AppBrand.accent : AppBrand.textSubtle,
+                  fontSize: 10,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
           ),
         ),
       ),
