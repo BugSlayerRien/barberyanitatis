@@ -20,8 +20,15 @@ class AccentSheen extends StatefulWidget {
   /// Seconds for one full pass. Longer reads as ambient, shorter as busy.
   final int periodSeconds;
 
-  /// How strongly the accent tints the surface, 0..1.
+  /// How strongly the accent tints the surface. 1 is the default wash; higher
+  /// values suit a static card, which can carry more colour than a moving one
+  /// without becoming distracting.
   final double intensity;
+
+  /// Set false for a still gradient. The colour and the wash stay; only the
+  /// drift stops. Useful where several cards sit side by side -- three of them
+  /// sweeping at once pulls the eye away from the numbers they hold.
+  final bool animate;
 
   const AccentSheen({
     super.key,
@@ -30,6 +37,7 @@ class AccentSheen extends StatefulWidget {
     this.borderRadius = const BorderRadius.all(Radius.circular(16)),
     this.periodSeconds = 7,
     this.intensity = 1,
+    this.animate = true,
   });
 
   @override
@@ -46,7 +54,9 @@ class _AccentSheenState extends State<AccentSheen>
   @override
   void initState() {
     super.initState();
-    _controller.repeat(reverse: true);
+    if (widget.animate) {
+      _controller.repeat(reverse: true);
+    }
   }
 
   @override
@@ -57,7 +67,8 @@ class _AccentSheenState extends State<AccentSheen>
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    final reduceMotion = !widget.animate ||
+        (MediaQuery.maybeDisableAnimationsOf(context) ?? false);
     // Deliberately faint. At 0.16 the wash read as a coloured card rather than
     // a sheen, and the "Recent haircut" card's white accent turned the whole
     // panel grey. The tint should be felt, not seen.

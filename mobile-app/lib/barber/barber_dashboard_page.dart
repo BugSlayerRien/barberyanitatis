@@ -231,7 +231,12 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     return AccentSheen(
       accent: accent,
       borderRadius: BorderRadius.circular(14),
-      periodSeconds: 9,
+      // Still, not drifting: three tiles sweeping side by side pulled the eye
+      // away from the numbers they exist to show. A static wash can carry more
+      // colour than a moving one, so the tint is stronger here than on the
+      // customer's single-column cards.
+      animate: false,
+      intensity: 2.2,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Column(
