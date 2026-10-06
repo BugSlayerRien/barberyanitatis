@@ -12,6 +12,7 @@ import '../user/widgets/menu_sheet.dart';
 import '../user/user_session.dart';
 import '../user/widgets/app_bottom_nav.dart';
 import '../user/widgets/pill_tabs.dart';
+import 'barber_analytics_page.dart';
 import 'barber_appointment_detail_page.dart';
 import 'barber_profile_page.dart';
 import 'barber_calendar_page.dart';
@@ -26,8 +27,9 @@ class BarberDashboardPage extends StatefulWidget {
 class _BarberDashboardPageState extends State<BarberDashboardPage> {
   static const int _tabDashboard = 0;
   static const int _tabCalendar = 1;
-  static const int _tabProfile = 2;
-  static const int _tabMenu = 3;
+  static const int _tabInsights = 2;
+  static const int _tabProfile = 3;
+  static const int _tabMenu = 4;
 
   // Same three states the customer's Bookings page uses, through the same
   // control -- the two screens had drifted into different shapes for one job.
@@ -690,7 +692,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       ),
       bottomNavigationBar: AppBottomNavBar(
         destinations: AppBottomNavBar.barberDestinations,
-        currentIndex: _currentTab.clamp(0, 3),
+        currentIndex: _currentTab.clamp(0, 4),
         onTap: (index) async {
           if (index == _tabDashboard) {
             setState(() => _currentTab = _tabDashboard);
@@ -700,6 +702,14 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
             setState(() => _currentTab = _tabCalendar);
             await Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const BarberCalendarPage()),
+            );
+            if (mounted) setState(() => _currentTab = _tabDashboard);
+            return;
+          }
+          if (index == _tabInsights) {
+            setState(() => _currentTab = _tabInsights);
+            await Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BarberAnalyticsPage()),
             );
             if (mounted) setState(() => _currentTab = _tabDashboard);
             return;

@@ -47,6 +47,7 @@ class AppBottomNavBar extends StatelessWidget {
   static const List<AppNavDestination> barberDestinations = [
     AppNavDestination(icon: Icons.event_available_rounded, label: 'Today'),
     AppNavDestination(icon: Icons.calendar_month_rounded, label: 'Calendar'),
+    AppNavDestination(icon: Icons.insights_rounded, label: 'Insights'),
     AppNavDestination(icon: Icons.person_rounded, label: 'Profile'),
     AppNavDestination(icon: Icons.menu_rounded, label: 'Menu'),
   ];
