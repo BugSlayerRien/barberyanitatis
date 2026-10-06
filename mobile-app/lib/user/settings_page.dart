@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'app_brand.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../barber/barber_edit_profile_page.dart';
 import 'change_password_page.dart';
@@ -19,29 +18,7 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
-  bool _appointmentReminders = true;
-  bool _loadingPrefs = true;
   bool _loggingOut = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPrefs();
-  }
-
-  Future<void> _loadPrefs() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
-    setState(() {
-      _appointmentReminders = prefs.getBool('settings_appointment_reminders') ?? true;
-      _loadingPrefs = false;
-    });
-  }
-
-  Future<void> _savePref(String key, bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(key, value);
-  }
 
   Future<void> _confirmLogout() async {
     if (_loggingOut) return;
@@ -50,7 +27,8 @@ class _SettingsPageState extends State<SettingsPage> {
       context: context,
       builder: (dialogCtx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
-        title: const Text('Confirm logout', style: TextStyle(color: Colors.white)),
+        title:
+            const Text('Confirm logout', style: TextStyle(color: Colors.white)),
         content: const Text(
           'Are you sure you want to log out?',
           style: TextStyle(color: Colors.white70),
@@ -58,11 +36,13 @@ class _SettingsPageState extends State<SettingsPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+            child:
+                const Text('Cancel', style: TextStyle(color: Colors.white70)),
           ),
           TextButton(
             onPressed: () => Navigator.of(dialogCtx).pop(true),
-            child: const Text('Log out', style: TextStyle(color: Color(0xFFE74C3C))),
+            child: const Text('Log out',
+                style: TextStyle(color: Color(0xFFE74C3C))),
           ),
         ],
       ),
@@ -88,139 +68,131 @@ class _SettingsPageState extends State<SettingsPage> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Settings', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('Settings',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: _loadingPrefs
-          ? const Center(child: CircularProgressIndicator(color: Colors.white))
-          : ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                _sectionTitle('Account'),
-                _settingsTile(
-                  icon: Icons.person_outline,
-                  title: 'Edit profile',
-                  subtitle: isBarber
-                      ? 'Name, specialty, about you'
-                      : 'Name, phone, photo, hair texture',
-                  // Barbers and customers are separate accounts in separate
-                  // tables. Sending a barber to the customer profile screen
-                  // made the API reject them outright.
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => isBarber
-                            ? const BarberEditProfilePage()
-                            : const ProfilePage(),
-                      ),
-                    );
-                  },
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          _sectionTitle('Account'),
+          _settingsTile(
+            icon: Icons.person_outline,
+            title: 'Edit profile',
+            subtitle: isBarber
+                ? 'Name, specialty, about you'
+                : 'Name, phone, photo, hair texture',
+            // Barbers and customers are separate accounts in separate
+            // tables. Sending a barber to the customer profile screen
+            // made the API reject them outright.
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => isBarber
+                      ? const BarberEditProfilePage()
+                      : const ProfilePage(),
                 ),
-                _settingsTile(
-                  icon: Icons.lock_outline,
-                  title: 'Change password',
-                  subtitle: 'Update your account password',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const ChangePasswordPage()),
-                    );
-                  },
+              );
+            },
+          ),
+          _settingsTile(
+            icon: Icons.lock_outline,
+            title: 'Change password',
+            subtitle: 'Update your account password',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ChangePasswordPage()),
+              );
+            },
+          ),
+          _settingsTile(
+            icon: Icons.info_outline,
+            title: 'Signed in as',
+            subtitle: UserSession.email?.isNotEmpty == true
+                ? UserSession.email!
+                : 'Customer account',
+            onTap: null,
+          ),
+          // The Notifications section is hidden until reminders are
+          // actually sent. A switch that changes nothing is worse than
+          // no switch: it tells the customer they will be reminded.
+          // The stored preference is left alone so flipping this back on
+          // restores whatever they last chose.
+          const SizedBox(height: 20),
+          _sectionTitle('AI & Data'),
+          _settingsTile(
+            icon: Icons.privacy_tip_outlined,
+            title: 'Privacy & Data',
+            subtitle: 'How account, booking, and scan data are used',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PrivacyDataPage()),
+              );
+            },
+          ),
+          _settingsTile(
+            icon: Icons.description_outlined,
+            title: 'Terms and Conditions',
+            subtitle: 'The terms you agreed to when you signed up',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                    builder: (_) => const TermsAndConditionsPage()),
+              );
+            },
+          ),
+          _settingsTile(
+            icon: Icons.refresh,
+            title: 'Reset scan preferences',
+            subtitle: 'Clears saved hairstyle scan session data',
+            onTap: () async {
+              UserSession.resetScanState();
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Scan preferences cleared. Library compatibility badges are hidden until your next successful scan.',
+                  ),
                 ),
-                _settingsTile(
-                  icon: Icons.info_outline,
-                  title: 'Signed in as',
-                  subtitle: UserSession.email?.isNotEmpty == true
-                      ? UserSession.email!
-                      : 'Customer account',
-                  onTap: null,
-                ),
-                const SizedBox(height: 20),
-                _sectionTitle('Notifications'),
-                _switchTile(
-                  title: 'Appointment reminders',
-                  // No push notifications exist, so promising a phone alert
-                  // would be a lie: reminders show in the in-app bell only.
-                  subtitle: 'Shown in your notifications inside the app',
-                  value: _appointmentReminders,
-                  onChanged: (v) async {
-                    setState(() => _appointmentReminders = v);
-                    await _savePref('settings_appointment_reminders', v);
-                  },
-                ),
-                const SizedBox(height: 20),
-                _sectionTitle('AI & Data'),
-                _settingsTile(
-                  icon: Icons.privacy_tip_outlined,
-                  title: 'Privacy & Data',
-                  subtitle: 'How account, booking, and scan data are used',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const PrivacyDataPage()),
-                    );
-                  },
-                ),
-                _settingsTile(
-                  icon: Icons.description_outlined,
-                  title: 'Terms and Conditions',
-                  subtitle: 'The terms you agreed to when you signed up',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const TermsAndConditionsPage()),
-                    );
-                  },
-                ),
-                _settingsTile(
-                  icon: Icons.refresh,
-                  title: 'Reset scan preferences',
-                  subtitle: 'Clears saved hairstyle scan session data',
-                  onTap: () async {
-                    UserSession.resetScanState();
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Scan preferences cleared. Library compatibility badges are hidden until your next successful scan.',
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-                _sectionTitle('Support'),
-                _settingsTile(
-                  icon: Icons.help_outline,
-                  title: 'Help & FAQ',
-                  subtitle: 'Booking, payments, AI scan, account help',
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const FaqLibraryPage()),
-                    );
-                  },
-                ),
-                const SizedBox(height: 20),
-                _sectionTitle('Session'),
-                _settingsTile(
-                  icon: Icons.logout,
-                  title: 'Log out',
-                  subtitle: 'Sign out of this device',
-                  onTap: _loggingOut ? null : _confirmLogout,
-                  destructive: true,
-                  trailing: _loggingOut
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Color(0xFFE74C3C),
-                          ),
-                        )
-                      : null,
-                ),
-              ],
-            ),
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+          _sectionTitle('Support'),
+          _settingsTile(
+            icon: Icons.help_outline,
+            title: 'Help & FAQ',
+            subtitle: 'Booking, payments, AI scan, account help',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const FaqLibraryPage()),
+              );
+            },
+          ),
+          const SizedBox(height: 20),
+          _sectionTitle('Session'),
+          _settingsTile(
+            icon: Icons.logout,
+            title: 'Log out',
+            subtitle: 'Sign out of this device',
+            onTap: _loggingOut ? null : _confirmLogout,
+            destructive: true,
+            trailing: _loggingOut
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFFE74C3C),
+                    ),
+                  )
+                : null,
+          ),
+        ],
+      ),
     );
   }
 
@@ -229,7 +201,8 @@ class _SettingsPageState extends State<SettingsPage> {
       padding: const EdgeInsets.only(bottom: 10),
       child: Text(
         text,
-        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        style: const TextStyle(
+            color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -267,9 +240,13 @@ class _SettingsPageState extends State<SettingsPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: TextStyle(color: titleColor, fontWeight: FontWeight.bold)),
+                      Text(title,
+                          style: TextStyle(
+                              color: titleColor, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
-                      Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -278,37 +255,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 else if (onTap != null)
                   Icon(
                     Icons.chevron_right,
-                    color: destructive ? const Color(0xFFE74C3C).withValues(alpha: 0.7) : Colors.white38,
+                    color: destructive
+                        ? const Color(0xFFE74C3C).withValues(alpha: 0.7)
+                        : Colors.white38,
                   ),
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _switchTile({
-    required String title,
-    required String subtitle,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: Colors.white10),
-        ),
-        child: SwitchListTile(
-          value: value,
-          onChanged: onChanged,
-          activeThumbColor: AppBrand.accent,
-          title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-          subtitle: Text(subtitle, style: const TextStyle(color: Colors.white54, fontSize: 12)),
         ),
       ),
     );

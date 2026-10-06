@@ -11,7 +11,8 @@ class AboutPage extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('About', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('About',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.of(context).pop(),
@@ -23,7 +24,7 @@ class AboutPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Best Barbershop In San Rafael Bulacan!',
+              'Baliwag’s home for a sharp, honest haircut.',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 20,
@@ -32,11 +33,14 @@ class AboutPage extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            _ownerCard(),
+            _shopCard(),
             const SizedBox(height: 24),
             const Text(
               'Developers',
-              style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
             _devCard('Jeomir Clyde Galvez', 'Project Manager'),
@@ -48,7 +52,7 @@ class AboutPage extends StatelessWidget {
     );
   }
 
-  Widget _ownerCard() {
+  Widget _shopCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -60,13 +64,19 @@ class AboutPage extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Owner — Francis Carlo Vasallo',
-            style: TextStyle(color: AppBrand.accent, fontWeight: FontWeight.bold, fontSize: 15),
+            'Brilliante Barbershop — Baliwag, Bulacan',
+            style: TextStyle(
+                color: AppBrand.accent,
+                fontWeight: FontWeight.bold,
+                fontSize: 15),
           ),
           SizedBox(height: 8),
           Text(
-            'Francis brings 15 years of barbering experience, specializing in clean fades, '
-            'precision cuts, and styles tailored to each client’s look and lifestyle.',
+            'A neighbourhood barbershop in Baliwag, Bulacan, built on clean fades, '
+            'precision cuts and styles matched to how you actually live. Walk in for '
+            'a quick trim or book ahead for an exclusive chair — either way you '
+            'get the same care, the same chair time and a cut that still looks right '
+            'a fortnight later.',
             style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.5),
           ),
         ],
@@ -94,9 +104,12 @@ class AboutPage extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              Text(name,
+                  style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text(role, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+              Text(role,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
             ],
           ),
         ],

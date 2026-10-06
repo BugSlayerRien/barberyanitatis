@@ -6,7 +6,8 @@ class ContactPage extends StatelessWidget {
   const ContactPage({super.key});
 
   static const Color _accent = AppBrand.accent;
-  static const String _facebookUrl = 'https://www.facebook.com/BrillianteBaliwag';
+  static const String _facebookUrl =
+      'https://www.facebook.com/BrillianteBaliwag/';
   static const String _messengerUrl = 'https://m.me/BrillianteBaliwag';
 
   Future<void> _openUrl(BuildContext context, Uri uri) async {
@@ -39,7 +40,8 @@ class ContactPage extends StatelessWidget {
         children: [
           const Text(
             'Get in touch with Brilliante Barbershop',
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(
+                color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
           const Text(
@@ -47,19 +49,13 @@ class ContactPage extends StatelessWidget {
             style: TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
           ),
           const SizedBox(height: 20),
+          // One shop, one address. Two cards split the same location into
+          // "premium" and "VIP" branches that do not exist.
           _locationCard(
-            title: 'For Premium Haircuts',
+            title: 'Visit the shop',
             icon: Icons.storefront_outlined,
             lines: const [
-              'Kalsadang Luma, Pantubig, Bulacan',
-            ],
-          ),
-          const SizedBox(height: 12),
-          _locationCard(
-            title: 'For VIP Clients and Exclusive Haircuts',
-            icon: Icons.star_outline,
-            lines: const [
-              'Bartolome Sr. St Pantubig, San Rafael, Philippines, 3008',
+              'Baliwag, Bulacan',
             ],
           ),
           const SizedBox(height: 20),
@@ -82,7 +78,8 @@ class ContactPage extends StatelessWidget {
                 color: const Color(0xFF0084FF),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.chat_bubble, color: Colors.white, size: 20),
+              child:
+                  const Icon(Icons.chat_bubble, color: Colors.white, size: 20),
             ),
             title: 'Messenger',
             subtitle: 'Brilliante Barbershop',
@@ -105,12 +102,16 @@ class ContactPage extends StatelessWidget {
               children: [
                 Text(
                   'Need help with a booking?',
-                  style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold),
                 ),
                 SizedBox(height: 8),
                 Text(
                   'Visit the shop during operating hours, message us on Facebook or Messenger, or ask our receptionist when you arrive.',
-                  style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
+                  style: TextStyle(
+                      color: Colors.white70, fontSize: 13, height: 1.45),
                 ),
               ],
             ),
@@ -123,7 +124,8 @@ class ContactPage extends StatelessWidget {
   Widget _sectionLabel(String text) {
     return Text(
       text,
-      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+      style: const TextStyle(
+          color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
     );
   }
 
@@ -150,7 +152,10 @@ class ContactPage extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 ...lines.map(
@@ -158,7 +163,8 @@ class ContactPage extends StatelessWidget {
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
                       line,
-                      style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+                      style: const TextStyle(
+                          color: Colors.white70, fontSize: 13, height: 1.4),
                     ),
                   ),
                 ),
@@ -208,7 +214,8 @@ class ContactPage extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       subtitle,
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 12),
                     ),
                   ],
                 ),
