@@ -44,6 +44,10 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   // who the kiosk had queued to them, nor what those guests picked.
   List<Map<String, dynamic>> _walkins = [];
   bool _showingWalkins = false;
+  // Which day sections the barber has opened or closed by hand, keyed by tab so
+  // a choice in Upcoming does not follow them into Completed. Absent means "use
+  // the default", which is open for the nearest day and closed for the rest.
+  final Map<String, bool> _dayOpen = {};
 
   @override
   void initState() {
@@ -776,9 +780,172 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
       return widgets;
     }
 
-    widgets.addAll(rows.map((appt) => _appointmentTile(context, appt)));
+    // Upcoming reads forwards, soonest first; the two history tabs read
+    // backwards, most recent first. The endpoint returns everything newest
+    // first, which is wrong for one of the three.
+    final ascending = _appointmentTab == 0;
+
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    for (final appt in rows) {
+      final day = normalizeSqlDate(appt['appointmentDate']?.toString() ?? '');
+      grouped.putIfAbsent(day, () => []).add(appt);
+    }
+
+    final days = grouped.keys.toList()
+      ..sort((a, b) => ascending ? a.compareTo(b) : b.compareTo(a));
+
+    for (final day in days) {
+      grouped[day]!.sort((a, b) {
+        final left = a['startTime']?.toString() ?? '';
+        final right = b['startTime']?.toString() ?? '';
+        return ascending ? left.compareTo(right) : right.compareTo(left);
+      });
+    }
+
+    for (var i = 0; i < days.length; i++) {
+      widgets.add(
+        _daySection(
+          context: context,
+          dateKey: days[i],
+          rows: grouped[days[i]]!,
+          // Only the nearest day opens itself. That is the whole point: the tab
+          // should arrive at roughly a screen's worth, with the rest one tap
+          // away rather than a scroll away.
+          openByDefault: i == 0,
+        ),
+      );
+    }
 
     return widgets;
+  }
+
+  /// One day's appointments behind a header that folds.
+  ///
+  /// `listByBarber` returns the barber's entire history, not just today, so
+  /// Completed in particular grew into a single unbroken scroll with no way to
+  /// skip past it. Grouping by day gives the list a shape, and puts a count on
+  /// each header that answers "how busy was that day" without expanding it.
+  Widget _daySection({
+    required BuildContext context,
+    required String dateKey,
+    required List<Map<String, dynamic>> rows,
+    required bool openByDefault,
+  }) {
+    final stateKey = '$_appointmentTab|$dateKey';
+    final open = _dayOpen[stateKey] ?? openByDefault;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Material(
+            color: AppBrand.surface,
+            borderRadius: BorderRadius.circular(12),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => setState(() => _dayOpen[stateKey] = !open),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppBrand.border),
+                ),
+                child: Row(
+                  children: [
+                    AnimatedRotation(
+                      turns: open ? 0.25 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppBrand.textMuted,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _dayLabel(dateKey),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppBrand.chalk,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppBrand.accent.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: AppBrand.accent.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Text(
+                        '${rows.length}',
+                        style: const TextStyle(
+                          color: AppBrand.accent,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            alignment: Alignment.topCenter,
+            child: open
+                ? Padding(
+                    padding: const EdgeInsets.only(top: 10),
+                    child: Column(
+                      children: rows
+                          .map((appt) => _appointmentTile(context, appt))
+                          .toList(),
+                    ),
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// "Today" / "Tomorrow" / "Yesterday", otherwise "Mon, 12 Oct", with the year
+  /// only when it is not the current one. A header the barber has to decode is
+  /// no better than no header.
+  String _dayLabel(String ymd) {
+    final date = DateTime.tryParse(ymd);
+    if (date == null) return ymd.isEmpty ? 'No date' : ymd;
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final day = DateTime(date.year, date.month, date.day);
+
+    switch (day.difference(today).inDays) {
+      case 0:
+        return 'Today';
+      case 1:
+        return 'Tomorrow';
+      case -1:
+        return 'Yesterday';
+    }
+
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final label = '${weekdays[day.weekday - 1]}, ${day.day} ${months[day.month - 1]}';
+
+    return day.year == today.year ? label : '$label ${day.year}';
   }
 
   /// Status colour, so a row's state is readable before any of it is.
@@ -820,7 +987,6 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
     final customerName = isGroup
         ? (appt['displayTitle']?.toString() ?? appt['customerName']?.toString() ?? 'Group booking')
         : (appt['customerName']?.toString() ?? 'Customer');
-    final date = appt['appointmentDate']?.toString() ?? '';
     final timeRange = appt['timeRange']?.toString() ?? '';
     final startTime = formatTo12Hour(appt['startTime']?.toString() ?? '');
     final scheduleLabel = timeRange.isNotEmpty ? timeRange : startTime;
@@ -883,16 +1049,6 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
                                   letterSpacing: 0.2,
                                 ),
                               ),
-                              if (date.isNotEmpty) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  date,
-                                  style: const TextStyle(
-                                    color: AppBrand.textSubtle,
-                                    fontSize: 11,
-                                  ),
-                                ),
-                              ],
                             ],
                           ),
                           const SizedBox(height: 6),
