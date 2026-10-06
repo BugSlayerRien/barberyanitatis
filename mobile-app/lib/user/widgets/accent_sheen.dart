@@ -17,18 +17,14 @@ class AccentSheen extends StatefulWidget {
   final BorderRadius borderRadius;
   final Widget child;
 
-  /// Seconds for one full pass. Longer reads as ambient, shorter as busy.
+  /// Seconds for one full pass. Longer reads as ambient, shorter as busy;
+  /// under about 10 the drift starts to pull the eye off the text.
   final int periodSeconds;
 
   /// How strongly the accent tints the surface. 1 is the default wash; higher
   /// values suit a static card, which can carry more colour than a moving one
   /// without becoming distracting.
   final double intensity;
-
-  /// Set false for a still gradient. The colour and the wash stay; only the
-  /// drift stops. Useful where several cards sit side by side -- three of them
-  /// sweeping at once pulls the eye away from the numbers they hold.
-  final bool animate;
 
   const AccentSheen({
     super.key,
@@ -37,7 +33,6 @@ class AccentSheen extends StatefulWidget {
     this.borderRadius = const BorderRadius.all(Radius.circular(16)),
     this.periodSeconds = 7,
     this.intensity = 1,
-    this.animate = true,
   });
 
   @override
@@ -54,9 +49,7 @@ class _AccentSheenState extends State<AccentSheen>
   @override
   void initState() {
     super.initState();
-    if (widget.animate) {
-      _controller.repeat(reverse: true);
-    }
+    _controller.repeat(reverse: true);
   }
 
   @override
@@ -67,8 +60,7 @@ class _AccentSheenState extends State<AccentSheen>
 
   @override
   Widget build(BuildContext context) {
-    final reduceMotion = !widget.animate ||
-        (MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+    final reduceMotion = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     // Deliberately faint. At 0.16 the wash read as a coloured card rather than
     // a sheen, and the "Recent haircut" card's white accent turned the whole
     // panel grey. The tint should be felt, not seen.
@@ -87,8 +79,11 @@ class _AccentSheenState extends State<AccentSheen>
         // the card's contrast constant, so text never dips below legibility
         // mid-animation.
         final t = Curves.easeInOut.transform(_controller.value);
-        final begin = Alignment(-1.2 + (t * 1.1), -1);
-        final end = Alignment(0.2 + (t * 1.1), 1);
+        // A short travel over a long period: the wash shifts rather than
+        // sweeps, so it reads as the card breathing, not as something sliding
+        // past behind the text.
+        final begin = Alignment(-1.0 + (t * 0.5), -1);
+        final end = Alignment(0.4 + (t * 0.5), 1);
 
         return _surface(begin, end, tint, edge, child);
       },

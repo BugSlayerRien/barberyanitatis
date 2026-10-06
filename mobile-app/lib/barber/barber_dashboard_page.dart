@@ -10,7 +10,6 @@ import '../user/time_format_utils.dart';
 import '../user/widgets/app_top_bar.dart';
 import '../user/widgets/menu_sheet.dart';
 import '../user/user_session.dart';
-import '../user/widgets/accent_sheen.dart';
 import '../user/widgets/app_bottom_nav.dart';
 import '../user/widgets/pill_tabs.dart';
 import 'barber_appointment_detail_page.dart';
@@ -228,15 +227,15 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
   }
 
   Widget _statTile(String label, int value, IconData icon, Color accent) {
-    return AccentSheen(
-      accent: accent,
-      borderRadius: BorderRadius.circular(14),
-      // Still, not drifting: three tiles sweeping side by side pulled the eye
-      // away from the numbers they exist to show. A static wash can carry more
-      // colour than a moving one, so the tint is stronger here than on the
-      // customer's single-column cards.
-      animate: false,
-      intensity: 2.2,
+    // Flat accent panels, no gradient. Side by side, three washes read as
+    // noise; the colour on its own -- blue, green, amber -- already tells the
+    // three numbers apart, which is all the gradient was there to do.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.13),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: accent.withValues(alpha: 0.32)),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         child: Column(

@@ -1622,6 +1622,11 @@ class _InsightCard extends StatelessWidget {
       child: AccentSheen(
         accent: accent,
         borderRadius: BorderRadius.circular(16),
+        // Deliberately slow and faint. At 7 seconds and full tint the drift was
+        // the first thing noticed on the card; the wash is meant to be felt
+        // while reading the text, not watched instead of it.
+        periodSeconds: 18,
+        intensity: 0.7,
         child: Material(
           color: Colors.transparent,
           child: InkWell(
