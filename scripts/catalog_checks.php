@@ -206,5 +206,89 @@ foreach (['Straight', 'Wavy', 'Curly'] as $texture) {
     );
 }
 
+// --- an unmeasured texture must not be invented -------------------------------
+// A scan taken with a shirt over the head returned "Hair: Wavy" and a full set
+// of recommendations, because PHP substituted a texture the sidecar had
+// deliberately left blank. The whole fix leans on an empty texture degrading
+// gracefully instead, so that behaviour is pinned here.
+$anyTexture = $pdo->query(
+    'SELECT v.hair_texture, h.style_name, h.style_code, v.confidence_score
+     FROM hairstyle_variants v
+     JOIN hairstyles h ON h.hairstyle_id = v.hairstyle_id
+     WHERE h.is_active = TRUE'
+)->fetchAll(PDO::FETCH_ASSOC);
+
+$unfiltered = array_values(array_filter(
+    $anyTexture,
+    static fn(array $r): bool => variant_matches_customer_texture($r, '')
+));
+check(
+    'an empty texture filters nothing out',
+    count($unfiltered) === count($anyTexture),
+    count($unfiltered) . ' of ' . count($anyTexture)
+);
+
+$allTextures = array_unique(array_filter(array_map(
+    static fn(array $r): string => trim((string)($r['hair_texture'] ?? '')),
+    $unfiltered
+)));
+check(
+    'every texture stays available when none was measured',
+    count($allTextures) >= 3,
+    implode(', ', $allTextures)
+);
+
+$noTexture = filter_recommendations_for_customer($anyTexture, '', true);
+check('recommendations still come back with no texture', count($noTexture) > 0, count($noTexture) . ' styles');
+
+// With no texture the bonus must stay neutral for everyone, so ranking falls
+// through to face shape and catalog confidence rather than favouring a guess.
+//
+// compute_match_components() lives in ai_scan.php, which calls require_method()
+// at the top level -- including it would run the endpoint and exit. Lift the
+// one function out instead.
+if (!function_exists('compute_match_components')) {
+    $rankSource = (string)file_get_contents(__DIR__ . '/../api/ai_scan.php');
+    $fnStart = strpos($rankSource, 'function compute_match_components(');
+    // chr(10) rather than a literal newline: this file is CRLF and
+    // ai_scan.php is LF, so an inline newline would never match.
+    $fnEnd = strpos($rankSource, chr(10) . '}' . chr(10), (int)$fnStart);
+    if ($fnStart !== false && $fnEnd !== false) {
+        eval(substr($rankSource, $fnStart, $fnEnd - $fnStart + 3));
+    }
+}
+
+$bonuses = [];
+foreach (['Straight', 'Wavy', 'Curly'] as $variantTexture) {
+    $components = compute_match_components(
+        ['hair_texture' => $variantTexture, 'face_shape' => 'oval', 'confidence_score' => 0.88, 'style_name' => 'Test Cut'],
+        'oval',
+        ''
+    );
+    foreach ($components['match_breakdown'] as $part) {
+        if ($part['key'] === 'hair_texture') {
+            $bonuses[$variantTexture] = $part['contribution'];
+        }
+    }
+}
+check(
+    'no texture means no texture bonus for anyone',
+    count(array_unique($bonuses)) === 1,
+    json_encode($bonuses)
+);
+
+// And the server must not be putting a texture back on its own.
+$scanSource = (string)file_get_contents(__DIR__ . '/../api/face_scan.php');
+$analyzeStart = strpos($scanSource, '$faceShape = (string)($data[');
+$analyzeEnd = strpos($scanSource, '$updateStmt = $pdo->prepare(', (int)$analyzeStart);
+$analyze = $analyzeStart !== false && $analyzeEnd !== false
+    ? substr($scanSource, $analyzeStart, $analyzeEnd - $analyzeStart)
+    : '';
+check('the analyze block was located', $analyze !== '');
+check(
+    'a blank texture is never replaced with a default',
+    strpos($analyze, "= 'Wavy'") === false && strpos($analyze, "?? 'Wavy'") === false
+);
+
 echo "\n{$checks} checks, {$failures} failed\n";
 exit($failures === 0 ? 0 : 1);

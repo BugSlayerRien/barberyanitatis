@@ -304,6 +304,16 @@ class UserSession {
     return _normalizeHairTexture(raw ?? '') ?? fallback;
   }
 
+  /// Like [normalizeHairTextureLabel], but keeps "we don't know" as null.
+  ///
+  /// The scan path must use this one. The server deliberately returns a blank
+  /// texture when it cannot see the hair, and passing that through the
+  /// defaulting version above would re-fabricate [neutralHairTexture] on the
+  /// client -- the exact guess the server just refused to make.
+  static String? normalizeHairTextureOrNull(String? raw) {
+    return _normalizeHairTexture(raw ?? '');
+  }
+
   static Future<UserCalibration?> loadUserCalibration() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_userCalibrationKey);

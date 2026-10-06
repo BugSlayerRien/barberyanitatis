@@ -106,6 +106,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   late String _faceShape;
   late String _hairTexture;
   late bool _noHairDetected;
+  String _hairVisibility = 'ok';
+  bool _textureFromProfile = false;
   String? _analysisProvider;
   double? _hairTextureScore;
   String? _hairColorLabel;
@@ -131,8 +133,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         (widget.analysisProvider != null
             ? widget.noHairDetected
             : scan?['noHairDetected'] == true);
+    // 'ok' | 'none' (bald/shaved) | 'obstructed' (cap, hood, hand).
+    _hairVisibility = scan?['hairVisibility']?.toString() ?? 'ok';
     _hairTextureScore = widget.hairTextureScore ??
         (scan?['hairTextureScore'] as num?)?.toDouble();
+    // Fall back to what the customer already told us about themselves, rather
+    // than to a guess. Labelled as coming from their profile, not the scan.
+    if (_hairTexture.trim().isEmpty) {
+      _textureFromProfile = true;
+      unawaited(_fillTextureFromProfile());
+    }
     _hairColorLabel =
         widget.hairColorLabel ?? scan?['hairColor']?.toString();
     _selected = widget.presetRecommendation;
@@ -224,9 +234,23 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     _replicatePreviewsByVariant['$variantId'] = Map<String, String>.from(urls);
   }
 
+  /// Uses the texture saved on the customer's profile when the scan could not
+  /// measure one. Their own stated answer, not an inference.
+  Future<void> _fillTextureFromProfile() async {
+    final preferred = await UserSession.loadPreferredHairTexture();
+    final normalized = UserSession.normalizeHairTextureOrNull(preferred);
+    if (!mounted || normalized == null || normalized.isEmpty) return;
+
+    setState(() => _hairTexture = normalized);
+    await _loadRecommendations(preserveSelection: true);
+  }
+
   Future<void> _applyHairTextureOverride(String texture) async {
     final normalized = UserSession.normalizeHairTextureLabel(texture);
-    setState(() => _hairTexture = normalized);
+    setState(() {
+      _hairTexture = normalized;
+      _textureFromProfile = false;
+    });
     UserSession.lastScan = {
       ...?UserSession.lastScan,
       'userId': UserSession.userId,
@@ -1722,7 +1746,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               runSpacing: 8,
               children: [
                 _chip('Face: $_faceShape'),
-                _chip('Hair: $_hairTexture'),
+                // Never show a texture the scan did not measure; that is
+                // how a shirt over the head produced "Hair: Wavy".
+                if (_hairTexture.trim().isEmpty)
+                  _chip('Hair: not measured')
+                else if (_textureFromProfile)
+                  _chip('Hair: $_hairTexture (from your profile)')
+                else
+                  _chip('Hair: $_hairTexture'),
                 _chip('Length: ${widget.hairLengthLabel}'),
                 // Colour chip removed: the detected value is sampled from a
                 // geometric hair mask that also picks up background, so it was
@@ -1731,10 +1762,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ],
             ),
             const SizedBox(height: 8),
-            _buildHairTypeAdjustment(),
-            if (_noHairDetected && _analysisProvider == 'ai-service') ...[
+            if (_hairVisibility != 'ok') ...[
+              const SizedBox(height: 2),
+              _buildHairVisibilityNotice(),
               const SizedBox(height: 10),
-              _buildLowHairNotice(),
+            ] else ...[
+              _buildHairTypeAdjustment(),
+              if (_noHairDetected && _analysisProvider == 'ai-service') ...[
+                const SizedBox(height: 10),
+                _buildLowHairNotice(),
+              ],
             ],
             const SizedBox(height: 8),
             const Text(
@@ -2026,6 +2063,115 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           if (trailing != null) ...[
             const Spacer(),
             trailing,
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Explains why no texture is shown, and offers the one action that helps.
+  ///
+  /// Bald and covered share a data state -- texture unknown -- but not a
+  /// message. Telling someone with a shaved head to remove their cap is
+  /// useless; telling someone in a hood that they have no hair is wrong. So the
+  /// mechanism is shared and the wording is not. Neither blocks: a customer who
+  /// cannot uncover their head keeps the feature, with results based on face
+  /// shape.
+  Widget _buildHairVisibilityNotice() {
+    final obstructed = _hairVisibility == 'obstructed';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A2E),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: obstructed ? AppBrand.warning : Colors.white24,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                obstructed ? Icons.visibility_off_outlined : Icons.info_outline,
+                size: 18,
+                color: obstructed ? AppBrand.warning : Colors.white70,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  obstructed
+                      ? "We couldn't see your hair"
+                      : 'Little or no visible hair',
+                  style: TextStyle(
+                    color: obstructed ? AppBrand.warning : Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            obstructed
+                ? 'A cap, hood or covering is hiding it, so we have not guessed '
+                    'a hair type. These styles are matched to your face shape. '
+                    'Uncover your hair and scan again for a closer match.'
+                : 'There is nothing to measure yet, so these styles are matched '
+                    'to your face shape. You can still preview any of them.',
+            style: const TextStyle(color: Colors.white70, fontSize: 12, height: 1.45),
+          ),
+          const SizedBox(height: 12),
+          // Asking beats guessing: the chips below already re-rank on tap.
+          const Text(
+            'Know your hair type? Pick it and we will match the styles to it.',
+            style: TextStyle(color: Colors.white54, fontSize: 11),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _textureOptions.map((texture) {
+              final selected = _hairTexture == texture;
+
+              return ChoiceChip(
+                label: Text(texture, style: const TextStyle(fontSize: 11)),
+                selected: selected,
+                onSelected: (_) => _applyHairTextureOverride(texture),
+                selectedColor: Colors.white,
+                labelStyle: TextStyle(
+                  color: selected ? Colors.black : Colors.white70,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+                ),
+                backgroundColor: const Color(0xFF1E1E1E),
+                side: const BorderSide(color: Colors.white24),
+              );
+            }).toList(),
+          ),
+          if (obstructed) ...[
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pushReplacement(
+                    MaterialPageRoute(
+                      builder: (_) => const AiFaceScanPage(startFresh: true),
+                    ),
+                  );
+                },
+                style: AppBrand.primaryButton,
+                icon: const Icon(Icons.center_focus_strong, size: 18),
+                label: const Text(
+                  'Scan again',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
           ],
         ],
       ),

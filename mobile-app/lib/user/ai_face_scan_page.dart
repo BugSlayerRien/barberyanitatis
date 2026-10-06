@@ -178,10 +178,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     double? _minSmoothHeadRoll;
     static const double _minSmoothRectAlpha = 0.82;
     static const double _minSmoothAngleAlpha = 0.75;
-  // Seeded neutral, not 'Straight'. This value is the last-resort fallback for
-  // _hairTextureFromAnalysis(), so whatever sits here is what the customer is
-  // told when the server returns no texture at all.
-  String _hairTexture = UserSession.neutralHairTexture;
+  // Empty until something measures it. _primeHairTextureHint() may fill it from
+  // the customer's saved profile, and a scan overwrites it with what was
+  // actually seen -- including nothing, when the hair is covered or shaved.
+  // This used to be seeded with a neutral guess, which meant a scan that
+  // measured no texture still showed one.
+  String _hairTexture = '';
   String _status = 'Center your face in the guide.';
 
   final List<Map<String, dynamic>> _recommendations = [];
@@ -315,7 +317,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         _stageIndex = 0;
         _capturedImages = {};
         _capturedFaceRects.clear();
-        _hairTexture = 'Wavy';
+        // Unknown until a scan measures it.
+        _hairTexture = '';
       });
       return;
     }
@@ -410,11 +413,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     setState(() => _hairTexture = hint);
   }
 
+  /// The measured texture, or '' when the scan could not see the hair.
+  ///
+  /// This used to fall back to whatever `_hairTexture` already held, so a blank
+  /// from the server quietly became the previous screen's value and the
+  /// customer was shown a texture nothing had measured.
   String _hairTextureFromAnalysis(Map<String, dynamic> analysis) {
-    return UserSession.normalizeHairTextureLabel(
-      analysis['hairTexture']?.toString() ?? analysis['hair_texture']?.toString(),
-      fallback: _hairTexture,
-    );
+    return UserSession.normalizeHairTextureOrNull(
+          analysis['hairTexture']?.toString() ??
+              analysis['hair_texture']?.toString(),
+        ) ??
+        '';
   }
 
   Future<void> _openResultsPage() async {
@@ -2052,6 +2061,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     var analysisProvider = 'fallback';
     var hairTextureScore = 0.0;
     var noHairDetected = false;
+    // 'ok' | 'none' (bald/shaved) | 'obstructed' (cap, hood, hand, tied back).
+    var hairVisibility = 'ok';
     var hairColorLabel = '';
     List<dynamic> pythonTopStyles = [];
     try {
@@ -2064,6 +2075,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       hairTextureScore =
           double.tryParse('${analysis['hairTextureScore']}') ?? 0.0;
       noHairDetected = analysis['noHairDetected'] == true;
+      hairVisibility = analysis['hairVisibility']?.toString() ?? 'ok';
       hairColorLabel = analysis['hairColor']?.toString() ?? '';
       pythonTopStyles = analysis['topStyles'] as List<dynamic>? ?? [];
       // A degraded response is HTTP 200 but carries placeholder values, not a
@@ -2094,6 +2106,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
         'hairTextureScore': hairTextureScore,
         'scanSucceeded': !degraded,
         'noHairDetected': noHairDetected,
+        'hairVisibility': hairVisibility,
         'hairColor': hairColorLabel,
         'pythonTopStyles': pythonTopStyles,
         'achievableStyles': analysis['achievableStyles'] ?? [],

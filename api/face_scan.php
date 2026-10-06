@@ -473,10 +473,20 @@ try {
         $analysisDegraded = ($data['degraded'] ?? false) === true
             || (string)($data['landmarker'] ?? '') === 'unavailable';
         $faceShape = (string)($data['face_shape'] ?? 'oval');
-        $hairTexture = (string)($data['hair_texture'] ?? 'Wavy');
+        // A blank texture is an answer, not a gap. The sidecar deliberately
+        // returns nothing when it cannot see the hair -- bald, or covered by a
+        // cap, hood or hand -- and substituting 'Wavy' here turned "we could
+        // not measure this" into a measurement, which is how a shirt wrapped
+        // over someone's head produced "Hair: Wavy" and a full set of
+        // recommendations built on it.
+        //
+        // Empty flows through the ranking fine: variant_matches_customer_texture()
+        // passes every style for an empty texture and compute_match_components()
+        // keeps the neutral bonus, so results fall back to face shape on their own.
+        $hairTexture = trim((string)($data['hair_texture'] ?? ''));
         $allowedTextures = ['Straight', 'Wavy', 'Curly'];
-        if (!in_array($hairTexture, $allowedTextures, true)) {
-            $hairTexture = 'Wavy';
+        if ($hairTexture !== '' && !in_array($hairTexture, $allowedTextures, true)) {
+            $hairTexture = '';
         }
         $hairLengthLevel = (int)($data['hair_length_level'] ?? 1);
         $hairLengthLabel = (string)($data['hair_length'] ?? 'short');
@@ -495,7 +505,9 @@ try {
         );
         $updateStmt->execute([
             ':face_shape' => $faceShape,
-            ':hair_texture' => $hairTexture,
+            // NULL, not '', so a later read cannot mistake the empty string
+            // for a measured result.
+            ':hair_texture' => $hairTexture !== '' ? $hairTexture : null,
             ':hair_length_level' => $hairLengthLevel,
             ':hair_length_label' => $hairLengthLabel,
             ':hair_color_label' => $hairColorLabel !== '' ? $hairColorLabel : null,
