@@ -17,6 +17,7 @@ import 'customer_navigation.dart';
 import 'face_scan_results_page.dart';
 import 'hair_texture_onboarding.dart';
 import 'user_session.dart';
+import 'widgets/accent_sheen.dart';
 import '../main.dart';
 import 'services/booking_draft_service.dart';
 import 'services/booking_slots_service.dart';
@@ -1423,12 +1424,9 @@ class _DashboardPageState extends State<DashboardPage>
           ),
         ),
         const SizedBox(height: 10),
-        ...cards.map(
-          (card) => Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: card,
-          ),
-        ),
+        // _InsightCard carries its own bottom spacing now, so wrapping it in
+        // another Padding doubled the gap.
+        ...cards,
       ],
     );
   }
@@ -1617,85 +1615,101 @@ class _InsightCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppBrand.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppBrand.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: accent.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: accent, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  eyebrow,
-                  style: TextStyle(
-                    fontFamily: _DashboardPageState._fontFamily,
-                    color: accent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+    // The whole card is the tap target now. The chevron used to be the only
+    // way in, which is a 40px goal on a card the width of the screen.
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: AccentSheen(
+        accent: accent,
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onAction,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(14, 14, 12, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 46,
+                    height: 46,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(13),
+                      border: Border.all(color: accent.withValues(alpha: 0.35)),
+                    ),
+                    child: Icon(icon, color: accent, size: 23),
                   ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontFamily: _DashboardPageState._fontFamily,
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+                  const SizedBox(width: 13),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // The label is the quiet part. It says which card this
+                        // is, in one small line, and then gets out of the way.
+                        Text(
+                          eyebrow.toUpperCase(),
+                          style: TextStyle(
+                            fontFamily: _DashboardPageState._fontFamily,
+                            color: accent.withValues(alpha: 0.85),
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                        const SizedBox(height: 5),
+                        // The answer -- the barber's name, the haircut -- is
+                        // what the eye should land on, so it is the largest and
+                        // brightest thing in the card.
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: _DashboardPageState._fontFamily,
+                            color: AppBrand.chalk,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            height: 1.1,
+                            letterSpacing: 0.1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          subtitle,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontFamily: _DashboardPageState._fontFamily,
+                            color: AppBrand.textMuted,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    fontFamily: _DashboardPageState._fontFamily,
-                    color: Colors.white54,
-                    fontSize: 12,
-                    height: 1.35,
+                  const SizedBox(width: 8),
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: accent.withValues(alpha: 0.14),
+                    ),
+                    child: Icon(
+                      Icons.arrow_forward_rounded,
+                      color: accent,
+                      size: 18,
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: onAction,
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppBrand.borderStrong),
-                ),
-                child: const Icon(
-                  Icons.arrow_forward_ios,
-                  color: Colors.white70,
-                  size: 16,
-                ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }

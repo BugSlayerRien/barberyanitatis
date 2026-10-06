@@ -14,6 +14,7 @@ import 'widgets/shimmer_skeleton.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
 import 'user_session.dart';
+import 'widgets/tier_badge.dart';
 
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -791,8 +792,10 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _buildTierBadge() {
     final tier = _tierLabel(_haircutsDone);
-    final color = _tierColor(tier);
-    return InkWell(
+
+    return TierBadge(
+      tier: tier,
+      color: _tierColor(tier),
       onTap: () {
         showDialog(
           context: context,
@@ -818,25 +821,6 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         );
       },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color, width: 1),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.verified, color: color, size: 16),
-            const SizedBox(width: 6),
-            Text(
-              tier,
-              style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
