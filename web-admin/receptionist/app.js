@@ -1945,7 +1945,7 @@ const TRACKING_PROGRESS_TICK_MS = 1000;
 
 function refreshTrackingProgressUi() {
   const trackingView = document.getElementById("tracking-view");
-  if (!trackingView || trackingView.hidden) {
+  if (!trackingView || trackingView.hidden || document.hidden) {
     return;
   }
   const hasQueue = (state.walkins?.length ?? 0) > 0 || (state.appointments?.length ?? 0) > 0;
@@ -1971,15 +1971,39 @@ function adjustTrackingRefreshInterval() {
     ? TRACKING_REFRESH_MS_COMPLETING
     : TRACKING_REFRESH_MS_DEFAULT;
   trackingRefreshTimer = setInterval(() => {
-    const trackingView = document.getElementById("tracking-view");
-    if (trackingView && !trackingView.hidden) {
+    // Poll on any view, not only Tracking. The server runs its auto-start and
+    // auto-complete sweep inside this request, so sitting on the Dashboard tab
+    // meant nothing was ever swept.
+    if (!document.hidden) {
       loadDashboard(false);
     }
   }, ms);
 }
 
+/**
+ * Catch up after the tab was hidden or the machine slept.
+ *
+ * Progress is computed from real timestamps, so it is never wrong -- but it is
+ * only recomputed when something re-renders, and browsers throttle background
+ * timers to about once a minute and stop them altogether while a laptop is
+ * asleep. The bar therefore froze at whatever it last drew: a 5pm service still
+ * reading "51%, 20 min remaining" at 6:27pm. Re-rendering the moment the page
+ * comes back makes the figure honest again, and re-polling gives the server the
+ * request it needs to run the sweep.
+ */
+function resumeTrackingAfterIdle() {
+  if (document.hidden) {
+    return;
+  }
+  refreshTrackingProgressUi();
+  loadDashboard(false);
+}
+
 function startTrackingAutoRefresh() {
   adjustTrackingRefreshInterval();
+  document.addEventListener("visibilitychange", resumeTrackingAfterIdle);
+  window.addEventListener("focus", resumeTrackingAfterIdle);
+  window.addEventListener("online", resumeTrackingAfterIdle);
 }
 
 async function init() {

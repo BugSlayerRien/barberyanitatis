@@ -1350,21 +1350,37 @@ function auto_complete_due_appointments(PDO $pdo, bool $force = false): int
          VALUES ('User', ?, 'Appointment', 'Appointment completed', ?, TRUE)"
     );
 
+    // A group is finished when its LAST member is, which is wall-clock, not the
+    // sum of everyone's service time.
+    //
+    // Summing meant a four-way split -- four barbers cutting at once, done in an
+    // hour -- was not considered due until four hours after check-in, so it sat
+    // in "Completing" all afternoon. The span is how far the last member starts
+    // after the first, plus that member's own service time.
     $groupStmt = $pdo->prepare(
-        "SELECT a.booking_group_id, MIN(a.appointment_id) AS lead_appointment_id,
-                MAX(a.user_id) AS user_id, MAX(a.booking_code) AS booking_code
-         FROM appointments a
-         LEFT JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
-         LEFT JOIN services s ON s.service_id = ad.service_id
-         WHERE a.booking_group_id IS NOT NULL
-           AND a.status = 'InProgress'
-           AND a.paused_at IS NULL
-         GROUP BY a.booking_group_id
-         HAVING MIN(COALESCE(a.checkin_time, {$startTs}))
-              + make_interval(
-                    mins => COALESCE(NULLIF(SUM(s.base_duration), 0), (COUNT(DISTINCT a.appointment_id) * :duration))::int
-                )
-              + make_interval(secs => COALESCE(MAX(a.paused_seconds), 0)) <= NOW()"
+        "SELECT m.booking_group_id,
+                MIN(m.appointment_id) AS lead_appointment_id,
+                MAX(m.user_id) AS user_id,
+                MAX(m.booking_code) AS booking_code
+         FROM (
+             SELECT a.appointment_id, a.booking_group_id, a.user_id, a.booking_code,
+                    a.checkin_time, a.paused_seconds,
+                    {$startTs} AS member_start,
+                    COALESCE(NULLIF(SUM(s.base_duration), 0), :duration)::int AS member_minutes
+             FROM appointments a
+             LEFT JOIN appointment_details ad ON ad.appointment_id = a.appointment_id
+             LEFT JOIN services s ON s.service_id = ad.service_id
+             WHERE a.booking_group_id IS NOT NULL
+               AND a.status = 'InProgress'
+               AND a.paused_at IS NULL
+             GROUP BY a.appointment_id, a.booking_group_id, a.user_id, a.booking_code,
+                      a.checkin_time, a.paused_seconds, a.appointment_date, a.start_time
+         ) m
+         GROUP BY m.booking_group_id
+         HAVING MIN(COALESCE(m.checkin_time, m.member_start))
+              + (MAX(m.member_start) - MIN(m.member_start))
+              + make_interval(mins => MAX(m.member_minutes))
+              + make_interval(secs => COALESCE(MAX(m.paused_seconds), 0)) <= NOW()"
     );
     $groupStmt->execute([':duration' => $duration]);
     $dueGroups = $groupStmt->fetchAll(PDO::FETCH_ASSOC);
