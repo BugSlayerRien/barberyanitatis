@@ -102,7 +102,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// its one retry). Distinguishes "still loading, nothing cached yet" (show a
   /// skeleton) from "loaded and unlimited/errored" (show nothing).
   bool _quotaLoading = true;
-  String? _lengthNote;
   late String _faceShape;
   late String _hairTexture;
   late bool _noHairDetected;
@@ -1005,7 +1004,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         _replicatePreviewsByVariant['$variantId'] = urls;
         _previewDiagnostics = diagnostics;
         _previewImageCacheBuster = DateTime.now().millisecondsSinceEpoch;
-        _lengthNote = data['lengthNote']?.toString();
         _previewGenerating = false;
         _previewError = null;
       });
@@ -1780,22 +1778,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               style: TextStyle(color: Colors.white38, fontSize: 12),
             ),
               const SizedBox(height: 12),
-            if (_lengthNote != null && _lengthNote!.isNotEmpty) ...[
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF2A2208),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppBrand.accent),
-                ),
-                child: Text(
-                  _lengthNote!,
-                  style: const TextStyle(color: AppBrand.accent, fontSize: 12),
-                ),
-              ),
-              const SizedBox(height: 10),
-            ],
             ScannerLayout.previewFrame(
               context: context,
               child: Stack(

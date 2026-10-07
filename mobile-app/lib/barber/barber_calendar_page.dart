@@ -22,6 +22,10 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
   static const Color _closedHolidayFill = Color(0xFF3A1F1F);
   static const Color _closedHolidayText = Color(0xFFFFB4B4);
   static const Color _closedWeeklyFill = Color(0xFF1C1C1C);
+  // Distinct from both the closed-shop reds and the past-day grey: an approved
+  // day off is the barber's own, not the shop being shut.
+  static const Color _approvedOffFill = Color(0xFF2B1D33);
+  static const Color _approvedOffText = Color(0xFFC9A6E0);
 
   late DateTime _currentMonth;
   late DateTime _selectedDate;
@@ -273,31 +277,20 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
       return;
     }
 
-    final noteController = TextEditingController();
-    final confirmed = await showDialog<bool>(
+    // The dialog owns its controller.
+    //
+    // It used to be created here and disposed the moment showDialog returned.
+    // showDialog returns as soon as pop() is called, while the route is still
+    // animating out and its TextField is still mounted and listening -- so the
+    // dispose tore down a widget that still had dependents, which is the
+    // '_dependents.isEmpty' assertion that red-screened on Cancel. Tying the
+    // controller's lifetime to the widget that uses it is the same fix the
+    // customer cancel sheet already carries.
+    final note = await showDialog<String>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1A1A1A),
-        title: Text(
-          'Request day off · ${day.month}/${day.day}',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: TextField(
-          controller: noteController,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Optional note for receptionist',
-            hintStyle: TextStyle(color: Colors.white38),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Submit')),
-        ],
-      ),
+      builder: (ctx) => _DayOffNoteDialog(day: day),
     );
-    if (confirmed != true) {
-      noteController.dispose();
+    if (note == null) {
       return;
     }
 
@@ -308,10 +301,9 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         'action': 'submitUnavailability',
         'barberID': barberId,
         'requestDate': dateKey,
-        'note': noteController.text.trim(),
+        'note': note,
       }),
     );
-    noteController.dispose();
     if (!mounted) return;
 
     final data = response.body.isNotEmpty
@@ -378,7 +370,9 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
               if (status != null) ...[
                 const SizedBox(height: 6),
                 Text(
-                  'Time-off request: $status',
+                  status == 'Approved'
+                      ? 'Approved day off'
+                      : 'Time-off request: $status',
                   style: TextStyle(
                     color: status == 'Approved'
                         ? Colors.redAccent
@@ -577,8 +571,11 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                           bg = isHolidayClosed ? _closedHolidayFill : _closedWeeklyFill;
                           fg = isHolidayClosed ? _closedHolidayText : Colors.white54;
                         } else if (isApprovedOff) {
-                          bg = Colors.white12;
-                          fg = Colors.white38;
+                          // Its own colour, not the past-day grey it used to
+                          // borrow: an approved day off and a day that has
+                          // simply gone by looked identical.
+                          bg = _approvedOffFill;
+                          fg = _approvedOffText;
                         } else if (booked > 0) {
                           bg = Colors.white;
                           fg = Colors.black;
@@ -615,6 +612,18 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                                     '$booked',
                                     style: TextStyle(color: fg.withValues(alpha: 0.8), fontSize: 9),
                                   ),
+                                // Says what the colour means, so the barber
+                                // does not have to learn the legend first.
+                                if (isApprovedOff)
+                                  const Text(
+                                    'OFF',
+                                    style: TextStyle(
+                                      color: _approvedOffText,
+                                      fontSize: 8,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
                                 if (isPending)
                                   const Text('*', style: TextStyle(color: _kGold, fontSize: 10)),
                               ],
@@ -632,7 +641,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                       _LegendDot(color: Colors.white, label: 'Has bookings'),
                       _LegendDot(color: Color(0xFF3A1F1F), label: 'Closed'),
                       _LegendDot(color: _kGold, label: 'Pending off'),
-                      _LegendDot(color: Colors.white38, label: 'Approved off / unavailable'),
+                      _LegendDot(color: _approvedOffText, label: 'Approved day off'),
                     ],
                   ),
                 ],
@@ -707,6 +716,63 @@ class _LegendDot extends StatelessWidget {
         Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 6),
         Text(label, style: const TextStyle(color: Colors.white54, fontSize: 11)),
+      ],
+    );
+  }
+}
+
+/// The note prompt for a day-off request.
+///
+/// A StatefulWidget purely so the TextEditingController's lifetime belongs to
+/// the widget that uses it. Returns the trimmed note on Submit, or null when
+/// dismissed, so the caller can tell "no note" from "cancelled".
+class _DayOffNoteDialog extends StatefulWidget {
+  final DateTime day;
+
+  const _DayOffNoteDialog({required this.day});
+
+  @override
+  State<_DayOffNoteDialog> createState() => _DayOffNoteDialogState();
+}
+
+class _DayOffNoteDialogState extends State<_DayOffNoteDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _close(String? result) {
+    // Drop focus before popping: tearing the focus tree down in the same frame
+    // as the route is what trips the framework assertion.
+    FocusScope.of(context).unfocus();
+    Navigator.of(context).pop(result);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: Text(
+        'Request day off · ${widget.day.month}/${widget.day.day}',
+        style: const TextStyle(color: Colors.white),
+      ),
+      content: TextField(
+        controller: _controller,
+        style: const TextStyle(color: Colors.white),
+        decoration: const InputDecoration(
+          hintText: 'Optional note for receptionist',
+          hintStyle: TextStyle(color: Colors.white38),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => _close(null), child: const Text('Cancel')),
+        TextButton(
+          onPressed: () => _close(_controller.text.trim()),
+          child: const Text('Submit'),
+        ),
       ],
     );
   }
