@@ -118,35 +118,35 @@ STYLE_PROMPTS = {
     "buzz_cut": "buzz cut: the whole head clipped to one uniform #1 guard length with no graduation anywhere, scalp visible through the hair, a crisp straight edge line at the temples and a squared-off neckline, no fringe, the head shape fully revealed",
     "crew_cut": "crew cut: about 1 inch left at the front graduating shorter towards the crown, back and sides tapered with a #2 to #3 guard, a rounded natural silhouette with no fringe and a tapered neckline, neat and conservative",
     "french_crop": "french crop: a short blunt fringe cut straight across the forehead, about 1.5 inches of choppy textured length on top pushed forward, a high skin fade on the back and sides starting above the ear, a sharp disconnected line at the temple",
-    "caesar_cut": "caesar cut: a short horizontal fringe about an inch long combed forward onto the forehead, a uniform 1.5 inches all over the top cut flat and even, tapered short sides, a level silhouette with no volume at the front",
+    "caesar_cut": "caesar cut: a short horizontal fringe about an inch long combed forward onto the forehead, a uniform 1.5 inches all over the top cut flat and even, tapered short sides and back, a level silhouette with no volume at the front",
     "edgar_cut": "edgar cut: a blunt horizontal fringe cut in a hard straight line across the forehead with a sharp right-angled corner at each temple, a flat short top, a high skin fade on the back and sides, no blending between the fringe and the sides",
     "low_fade": "low fade: the clipper fade begins just above the ear and finishes at the hairline, skin-bare at the bottom blending up to a #3 within two inches, about 2 inches left on top combed back naturally, a tapered neckline, the silhouette staying close to the skull",
     "mid_fade": "mid fade: the clipper fade starts level with the temples halfway up the side, skin-tight at the bottom blending smoothly to a #2 at the parietal ridge with no visible steps, about 2 inches left on top styled loosely back, a tapered neckline",
     "blowout_taper": "blowout taper: the top blown upward and outward into a rounded dome of volume roughly 3 inches tall, the sides tapered short and tight from the temple down in a soft gradient with no hard fade line, the front swept up and back off the forehead",
     "pompadour": "pompadour: the front swept dramatically up and back into a tall rounded volume about 3 inches high above the forehead, shortening gradually towards the crown, the sides tapered short and combed back flat, a glossy styled finish with a clean edge at the temple",
-    "two_block": "two block cut: a clear disconnection between a long full top of 3 to 4 inches and sides clipped short underneath, the top sitting over the short sides like a separate layer, a straight heavy fringe falling to the eyebrows, korean style",
+    "two_block": "two block cut: a clear disconnection between a long full top of 3 to 4 inches and the sides AND lower back clipped short underneath, the top sitting over them like a separate layer, nothing left long at the nape or over the collar, a straight heavy fringe falling to the eyebrows, korean style",
     "barbers_cut": "classic barbers cut: short back and sides tapered by hand with scissors, about 1.5 inches on top with a neat side part combed over, a natural tapered neckline, a traditional finish with no fade line anywhere",
     "modern_mullet": "modern mullet: a short textured top and fringe with tapered sides, the length deliberately kept long at the back and falling to the nape, a clear contrast between the cropped crown and the long back section",
-    "modern_curtains": "modern curtains: the hair parted down the middle and falling to either side of the forehead in two soft sweeping sections about 4 inches long reaching the eyebrows, the sides tapered short behind the ears",
+    "modern_curtains": "modern curtains: the hair parted down the middle and falling to either side of the forehead in two soft sweeping sections about 4 inches long reaching the eyebrows, the sides and back tapered short above the collar",
     "messy_quiff": "messy quiff: the front lifted up and back into a loose tousled volume about 2.5 inches high, deliberately imperfect with separated pieces, the sides tapered short, no hard parting, a matte undone finish",
-    "textured_crop": "textured crop: about 2 inches of choppy point-cut texture on top pushed forward into a soft irregular fringe, the sides faded short from the temple, visible separation between the pieces rather than one solid block of hair",
-    "wavy_mod_cut": "wavy mod cut: a rounded bowl-shaped silhouette with wavy hair cut to one even length around the head, a full fringe sitting straight across the forehead, the sides left long enough to curve naturally over the ears",
-    "wavy_fringe": "wavy fringe: natural waves left about 3 inches long on top falling forward into a soft wavy fringe across the forehead, the sides tapered short, the wave pattern clearly visible and left undefined by product",
+    "textured_crop": "textured crop: about 2 inches of choppy point-cut texture on top pushed forward into a soft irregular fringe, the sides and back faded short from the temple down, visible separation between the pieces rather than one solid block",
+    "wavy_mod_cut": "wavy mod cut: a rounded bowl-shaped silhouette with wavy hair cut to one even length around the head, a full fringe sitting straight across the forehead, the sides curving over the ears and the back cut level above the collar",
+    "wavy_fringe": "wavy fringe: natural waves left about 3 inches long on top falling forward into a soft wavy fringe across the forehead, the sides and back tapered short to a clean neckline, the wave pattern clearly visible and undefined by product",
     "wavy_burst_fade": "wavy burst fade: a semicircular fade curving around and behind the ear like a sunburst with the back length left untouched, wavy textured hair 2 to 3 inches long on top, the wave pattern clearly visible, no straight fade line anywhere",
-    "wavy_side_sweep": "wavy side sweep: wavy hair about 3 inches long combed over to one side in a single sweeping motion from a soft side parting, shorter tapered sides, the waves falling diagonally across the forehead",
-    "wavy_messy_top": "wavy messy top: natural waves left about 3 inches long on top and tousled in no fixed direction, the sides tapered short, a matte texture with clearly separated wavy strands and no product shine",
+    "wavy_side_sweep": "wavy side sweep: wavy hair about 3 inches long combed over to one side in a single sweeping motion from a soft side parting, the sides and back tapered short above the collar, the waves falling diagonally across the forehead",
+    "wavy_messy_top": "wavy messy top: natural waves left about 3 inches long on top and tousled in no fixed direction, the sides and back tapered short to a clean neckline, a matte texture with clearly separated wavy strands and no product shine",
     "afro_taper": "afro taper: natural afro-textured hair left full and rounded on top about 3 inches deep, the sides and back tapered gradually shorter towards the hairline, a dense sponge-textured coil pattern throughout, a clean line-up at the forehead",
     "curly_taper": "curly taper: tight curls left full on top about 2 inches deep, the sides and back tapered gradually shorter from the temple down to the neckline, the curls kept intact on top with a soft blend rather than a hard fade line",
     "curly_taper_fade": "curly taper fade: curls left full on top about 2.5 inches deep with the coil pattern intact, the sides and back tapered down to skin at the neckline and around the ear, a smooth gradient with the curls blending into the taper rather than sitting on a hard line",
     "curly_low_fade": "curly low fade: the fade begins just above the ear and stays low on the head, the curls left full on top about 2.5 inches with the coil pattern intact, a soft blend into the curly crown, a clean neckline and temple line-up",
-    "curly_mid_fade": "curly mid fade: the clipper fade starts level with the temples and blends from skin to a #2, the curls left 2 to 3 inches long on top with a defined coil pattern, a clean line-up along the forehead hairline",
+    "curly_mid_fade": "curly mid fade: the clipper fade starts level with the temples and wraps the back, blending from skin to a #2, the curls left 2 to 3 inches long on top with a defined coil pattern, a clean line-up along the forehead hairline",
     "curly_drop_fade": "curly drop fade: the fade line drops in a curve behind the ear and down towards the nape instead of running straight, the curls left full on top at about 2.5 inches in defined clumps, a sharp temple line-up",
     "curly_burst_fade": "curly burst fade: a semicircular fade arcing around the ear, tight curls left full and round on top about 3 inches deep with the curl pattern clearly defined, the back length left uncut behind the burst",
     "curly_top_fade": "curly top fade: the sides and back faded short while a thick round mass of curls is left standing on top 3 to 4 inches tall, a strong contrast between the bare sides and the full curly crown, a clean line-up at the forehead",
     "curly_undercut": "curly undercut: the sides and back clipped to one short length with a hard disconnected line and no blending at all, the full curly top left long at 3 to 4 inches and sitting over the shortened sides like a separate layer",
-    "curly_fringe": "curly fringe: the curls left long enough at the front to fall forward onto the forehead as a defined curly fringe about 3 inches long, the sides tapered short, the curl pattern clearly visible through the fringe",
+    "curly_fringe": "curly fringe: the curls left long enough at the front to fall forward onto the forehead as a defined curly fringe about 3 inches long, the sides and back tapered short above the collar, the curl pattern clearly visible through the fringe",
     "curly_modern_mullet": "curly modern mullet: the curls cropped short at the sides and crown with the curly length deliberately kept long at the back reaching the nape, a clear contrast between the tight sides and the full curly back section",
-    "curly_short_crop": "curly short crop: tight curls cut short and even to about 1 inch all over the top, the sides tapered shorter, the curl pattern still visible as small defined coils, a rounded close-cut silhouette",
+    "curly_short_crop": "curly short crop: tight curls cut short and even to about 1 inch all over the top, the sides and back tapered shorter, the curl pattern still visible as small defined coils, a rounded close-cut silhouette",
     "curly_crew_cut": "curly crew cut: the curls clipped to a short uniform length of about 1 inch on top, graduating shorter towards the sides and back, the curl texture still visible, a rounded even silhouette with a tapered neckline",
     "curly_edgar": "curly edgar: a blunt straight horizontal fringe line cut across the forehead through curly hair, a flat short curly top, a high skin fade on the back and sides, a hard contrast between the fringe line and the bare sides",
 }
@@ -592,18 +592,6 @@ def build_hair_only_prompt(
         "Keep the same facial features, skin tone, eyebrows, eyes, eyeglasses if present, ears, "
         "neck, shirt, and room background. "
         "Maintain the original head pose, camera angle, framing, and indoor lighting."
-    )
-
-
-def build_aspirational_hair_prompt(
-    style_description: str,
-    style_key: str = "",
-) -> str:
-    display_name = STYLE_NAMES.get(style_key, style_description)
-    return (
-        f"Change only the hair on this person to preview a {display_name}: {style_description}. "
-        "Show how the style could look with slightly more length than today. "
-        "Keep the same face, skin, eyes, glasses, clothing, pose, background, and lighting."
     )
 
 
@@ -2174,18 +2162,14 @@ async def generate_hairstyle(
                 },
             )
         style_desc = STYLE_PROMPTS[style_key]
+        # The level still feeds the prompt's length hints, but no longer gates
+        # which prompt is used. The old feasibility branch swapped in a much
+        # weaker "aspirational" prompt whenever the measured level fell below a
+        # style's minimum -- and the level defaults to 1 on every measurement
+        # failure, so a failed scan silently downgraded the prompt.
         length_level, _, _, mask_cov = effective_hair_length_level(
             int(hair_length_level), list(views.values())
         )
-        achievable = set(styles_for_length(length_level))
-        feasible_today = style_key in achievable
-        length_note = None
-        if not feasible_today:
-            required = STYLE_MIN_LENGTH.get(style_key, 1)
-            length_note = (
-                f"This style usually needs {HAIR_LENGTH_LABELS.get(required, 'more')} hair. "
-                "Preview shows the target look — ask your barber what is achievable today."
-            )
 
         profile_note = (
             " Use the same haircut design on all three photos, but each output must keep "
@@ -2197,13 +2181,10 @@ async def generate_hairstyle(
             color_info = detect_hair_color(list(views.values()))
             color_label = str(color_info.get("label", ""))
 
-        if feasible_today:
-            base_prompt = (
-                build_hair_only_prompt(style_desc, length_level, color_label, style_key)
-                + profile_note
-            )
-        else:
-            base_prompt = build_aspirational_hair_prompt(style_desc, style_key) + profile_note
+        base_prompt = (
+            build_hair_only_prompt(style_desc, length_level, color_label, style_key)
+            + profile_note
+        )
 
         replicate_timeout = httpx.Timeout(600.0, connect=60.0)
         result_images: dict[str, str] = {}
@@ -2263,8 +2244,6 @@ async def generate_hairstyle(
             "result_images": result_images,
             "result_image": result_images["front"],
             "style": style_key,
-            "feasible_today": feasible_today,
-            "length_note": length_note,
             "preview_diagnostics": preview_diagnostics,
         }
 

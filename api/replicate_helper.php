@@ -60,7 +60,7 @@ function replicate_style_prompts(): array
             . 'on the back and sides starting above the ear, a sharp disconnected line at the temple',
         'caesar_cut' => 'caesar cut: a short horizontal fringe about an inch long combed forward '
             . 'onto the forehead, a uniform 1.5 inches all over the top cut flat and even, '
-            . 'tapered short sides, a level silhouette with no volume at the front',
+            . 'tapered short sides and back, a level silhouette with no volume at the front',
         'edgar_cut' => 'edgar cut: a blunt horizontal fringe cut in a hard straight line across '
             . 'the forehead with a sharp right-angled corner at each temple, a flat short top, '
             . 'a high skin fade on the back and sides, no blending between the fringe and the sides',
@@ -81,8 +81,9 @@ function replicate_style_prompts(): array
             . 'crown, the sides tapered short and combed back flat, a glossy styled finish with '
             . 'a clean edge at the temple',
         'two_block' => 'two block cut: a clear disconnection between a long full top of 3 to 4 '
-            . 'inches and sides clipped short underneath, the top sitting over the short sides '
-            . 'like a separate layer, a straight heavy fringe falling to the eyebrows, korean style',
+            . 'inches and the sides AND lower back clipped short underneath, the top sitting over '
+            . 'them like a separate layer, nothing left long at the nape or over the collar, '
+            . 'a straight heavy fringe falling to the eyebrows, korean style',
         'barbers_cut' => 'classic barbers cut: short back and sides tapered by hand with scissors, '
             . 'about 1.5 inches on top with a neat side part combed over, a natural tapered '
             . 'neckline, a traditional finish with no fade line anywhere',
@@ -91,28 +92,28 @@ function replicate_style_prompts(): array
             . 'contrast between the cropped crown and the long back section',
         'modern_curtains' => 'modern curtains: the hair parted down the middle and falling to '
             . 'either side of the forehead in two soft sweeping sections about 4 inches long '
-            . 'reaching the eyebrows, the sides tapered short behind the ears',
+            . 'reaching the eyebrows, the sides and back tapered short above the collar',
         'messy_quiff' => 'messy quiff: the front lifted up and back into a loose tousled volume '
             . 'about 2.5 inches high, deliberately imperfect with separated pieces, the sides '
             . 'tapered short, no hard parting, a matte undone finish',
         'textured_crop' => 'textured crop: about 2 inches of choppy point-cut texture on top '
-            . 'pushed forward into a soft irregular fringe, the sides faded short from the temple, '
-            . 'visible separation between the pieces rather than one solid block of hair',
+            . 'pushed forward into a soft irregular fringe, the sides and back faded short from '
+            . 'the temple down, visible separation between the pieces rather than one solid block',
         'wavy_mod_cut' => 'wavy mod cut: a rounded bowl-shaped silhouette with wavy hair cut to '
             . 'one even length around the head, a full fringe sitting straight across the '
-            . 'forehead, the sides left long enough to curve naturally over the ears',
+            . 'forehead, the sides curving over the ears and the back cut level above the collar',
         'wavy_fringe' => 'wavy fringe: natural waves left about 3 inches long on top falling '
-            . 'forward into a soft wavy fringe across the forehead, the sides tapered short, the '
-            . 'wave pattern clearly visible and left undefined by product',
+            . 'forward into a soft wavy fringe across the forehead, the sides and back tapered '
+            . 'short to a clean neckline, the wave pattern clearly visible and undefined by product',
         'wavy_burst_fade' => 'wavy burst fade: a semicircular fade curving around and behind the '
             . 'ear like a sunburst with the back length left untouched, wavy textured hair 2 to 3 '
             . 'inches long on top, the wave pattern clearly visible, no straight fade line anywhere',
         'wavy_side_sweep' => 'wavy side sweep: wavy hair about 3 inches long combed over to one '
-            . 'side in a single sweeping motion from a soft side parting, shorter tapered sides, '
-            . 'the waves falling diagonally across the forehead',
+            . 'side in a single sweeping motion from a soft side parting, the sides and back '
+            . 'tapered short above the collar, the waves falling diagonally across the forehead',
         'wavy_messy_top' => 'wavy messy top: natural waves left about 3 inches long on top and '
-            . 'tousled in no fixed direction, the sides tapered short, a matte texture with '
-            . 'clearly separated wavy strands and no product shine',
+            . 'tousled in no fixed direction, the sides and back tapered short to a clean '
+            . 'neckline, a matte texture with clearly separated wavy strands and no product shine',
         'afro_taper' => 'afro taper: natural afro-textured hair left full and rounded on top '
             . 'about 3 inches deep, the sides and back tapered gradually shorter towards the '
             . 'hairline, a dense sponge-textured coil pattern throughout, a clean line-up at the '
@@ -128,8 +129,8 @@ function replicate_style_prompts(): array
             . 'the head, the curls left full on top about 2.5 inches with the coil pattern intact, '
             . 'a soft blend into the curly crown, a clean neckline and temple line-up',
         'curly_mid_fade' => 'curly mid fade: the clipper fade starts level with the temples and '
-            . 'blends from skin to a #2, the curls left 2 to 3 inches long on top with a defined '
-            . 'coil pattern, a clean line-up along the forehead hairline',
+            . 'wraps the back, blending from skin to a #2, the curls left 2 to 3 inches long on '
+            . 'top with a defined coil pattern, a clean line-up along the forehead hairline',
         'curly_drop_fade' => 'curly drop fade: the fade line drops in a curve behind the ear and '
             . 'down towards the nape instead of running straight, the curls left full on top at '
             . 'about 2.5 inches in defined clumps, a sharp temple line-up',
@@ -143,14 +144,14 @@ function replicate_style_prompts(): array
             . 'a hard disconnected line and no blending at all, the full curly top left long at '
             . '3 to 4 inches and sitting over the shortened sides like a separate layer',
         'curly_fringe' => 'curly fringe: the curls left long enough at the front to fall forward '
-            . 'onto the forehead as a defined curly fringe about 3 inches long, the sides tapered '
-            . 'short, the curl pattern clearly visible through the fringe',
+            . 'onto the forehead as a defined curly fringe about 3 inches long, the sides and back '
+            . 'tapered short above the collar, the curl pattern clearly visible through the fringe',
         'curly_modern_mullet' => 'curly modern mullet: the curls cropped short at the sides and '
             . 'crown with the curly length deliberately kept long at the back reaching the nape, '
             . 'a clear contrast between the tight sides and the full curly back section',
         'curly_short_crop' => 'curly short crop: tight curls cut short and even to about 1 inch '
-            . 'all over the top, the sides tapered shorter, the curl pattern still visible as '
-            . 'small defined coils, a rounded close-cut silhouette',
+            . 'all over the top, the sides and back tapered shorter, the curl pattern still '
+            . 'visible as small defined coils, a rounded close-cut silhouette',
         'curly_crew_cut' => 'curly crew cut: the curls clipped to a short uniform length of about '
             . '1 inch on top, graduating shorter towards the sides and back, the curl texture '
             . 'still visible, a rounded even silhouette with a tapered neckline',
@@ -258,8 +259,16 @@ function replicate_resolve_style_key(string $styleName, ?string $styleCode = nul
  * The same twelve lines were copy-pasted into the Replicate, Grok and Gemini
  * entry points, which is how Gemini ended up without the eyeglasses clause.
  *
+ * There is no longer a second, weaker "aspirational" prompt for styles the
+ * measured hair is deemed too short for. That branch was gated on
+ * hairLengthLevel, which defaults to 1 at four separate layers and where 1
+ * means both "short hair" and "the measurement failed" -- so a failed scan
+ * silently swapped the full identity-locked prompt for a much shorter one that
+ * dropped the length hints and most of the identity lock. The full prompt is
+ * strictly better, and it is now always what gets sent.
+ *
  * @return array{ok: bool, error: string, styleKey: string, styleDesc: string,
- *                feasibleToday: bool, lengthNote: ?string, basePrompt: string}
+ *                basePrompt: string}
  */
 function replicate_style_brief(
     string $styleName,
@@ -272,8 +281,6 @@ function replicate_style_brief(
         'error' => '',
         'styleKey' => '',
         'styleDesc' => '',
-        'feasibleToday' => true,
-        'lengthNote' => null,
         'basePrompt' => '',
     ];
 
@@ -287,34 +294,17 @@ function replicate_style_brief(
 
     $prompts = replicate_style_prompts();
     $styleDesc = $prompts[$styleKey];
-    $minLengths = replicate_style_min_length();
-    $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
-    $lengthNote = $feasibleToday
-        ? null
-        : 'This style usually needs more length than detected today. '
-            . 'Preview shows the target look — ask your barber what is achievable today.';
 
     $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
         . "that photo's original head turn and camera angle — do not make every frame face the camera.";
-
-    if ($feasibleToday) {
-        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
-            . $profileNote;
-    } else {
-        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
-            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
-            . replicate_glasses_preservation_clause()
-            . "Identity and background must match the input.{$profileNote}";
-    }
 
     return [
         'ok' => true,
         'error' => '',
         'styleKey' => $styleKey,
         'styleDesc' => $styleDesc,
-        'feasibleToday' => $feasibleToday,
-        'lengthNote' => $lengthNote,
-        'basePrompt' => $basePrompt,
+        'basePrompt' => replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
+            . $profileNote,
     ];
 }
 
@@ -778,7 +768,7 @@ function replicate_generate_view_image(string $absolutePath, string $basePrompt,
  * Generate front/left/right try-on images from stored captures.
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
- * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string}
+ * @return array{ok: bool, images: array<string, string>, error: string}
  */
 function replicate_generate_three_view_previews(
     array $capturePaths,
@@ -789,17 +779,14 @@ function replicate_generate_three_view_previews(
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
-            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'error' => "Missing capture: {$angle}"];
+            return ['ok' => false, 'images' => [], 'error' => "Missing capture: {$angle}"];
         }
     }
 
     $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
     if (!$brief['ok']) {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true,
-                'lengthNote' => null, 'error' => $brief['error']];
+        return ['ok' => false, 'images' => [], 'error' => $brief['error']];
     }
-    $feasibleToday = $brief['feasibleToday'];
-    $lengthNote = $brief['lengthNote'];
     $basePrompt = $brief['basePrompt'];
 
     $resultImages = [];
@@ -810,8 +797,6 @@ function replicate_generate_three_view_previews(
             return [
                 'ok' => false,
                 'images' => [],
-                'feasibleToday' => $feasibleToday,
-                'lengthNote' => $lengthNote,
                 'error' => $generated['error'],
             ];
         }
@@ -825,8 +810,6 @@ function replicate_generate_three_view_previews(
     return [
         'ok' => true,
         'images' => $resultImages,
-        'feasibleToday' => $feasibleToday,
-        'lengthNote' => $lengthNote,
         'error' => '',
     ];
 }

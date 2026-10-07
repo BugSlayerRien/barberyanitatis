@@ -92,9 +92,16 @@ check('and says which style it was', str_contains($brief['error'], 'Mohawk With 
 // --- the prompts are specifications, not labels ------------------------------
 $tooShort = [];
 $noDetail = [];
+$noBack = [];
+$tooLong = [];
 foreach ($prompts as $key => $text) {
     if (str_word_count($text) < 25) {
         $tooShort[] = $key;
+    }
+    // A prompt padded past this competes with itself: every extra clause
+    // dilutes the fade and guard-number detail doing the real work.
+    if (str_word_count($text) > 60) {
+        $tooLong[] = $key;
     }
     // A haircut is defined by what happens to the sides and how much length is
     // left. "low fade hairstyle, gradual fade on sides, natural top" answered
@@ -104,13 +111,26 @@ foreach ($prompts as $key => $text) {
     if (!$saysSides || !$saysLength) {
         $noDetail[] = $key;
     }
+
+    // Two Block generated long hair at the back because the prompt described
+    // the top and the sides and left the back unsaid -- and an image model
+    // fills whatever you do not specify from its own prior. Eleven of the
+    // thirty-four prompts had the same hole.
+    if (preg_match('/\b(back|nape|neckline|collar)\b/i', $text) !== 1) {
+        $noBack[] = $key;
+    }
 }
 
+check('no prompt exceeds 60 words' . ($tooLong ? ' (' . implode(', ', $tooLong) . ')' : ''),
+    $tooLong === []);
 check('every prompt is at least 25 words' . ($tooShort ? ' (' . implode(', ', $tooShort) . ')' : ''),
     $tooShort === []);
 check('every prompt says what happens to the sides, and a length'
     . ($noDetail ? ' (' . implode(', ', $noDetail) . ')' : ''),
     $noDetail === []);
+check('every prompt says what happens at the back of the head'
+    . ($noBack ? ' (' . implode(', ', $noBack) . ')' : ''),
+    $noBack === []);
 
 // --- the lookup tables agree with each other ---------------------------------
 $missingLength = array_diff(array_keys($prompts), array_keys($minLengths));

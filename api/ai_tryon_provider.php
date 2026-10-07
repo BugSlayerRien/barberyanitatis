@@ -73,7 +73,7 @@ function ai_tryon_allow_fallback(): bool
  * to other configured providers on failure (only when allowed — see ai_tryon_allow_fallback).
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
- * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string, provider: string}
+ * @return array{ok: bool, images: array<string, string>, error: string, provider: string}
  */
 function ai_tryon_generate_three_view_previews(
     array $capturePaths,
@@ -151,8 +151,6 @@ function ai_tryon_generate_three_view_previews(
     return [
         'ok' => false,
         'images' => [],
-        'feasibleToday' => true,
-        'lengthNote' => null,
         'error' => 'No AI try-on provider is configured. Set XAI_API_KEY, GEMINI_API_KEY, or REPLICATE_API_TOKEN in .env.',
         'provider' => 'none',
     ];

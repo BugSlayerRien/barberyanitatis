@@ -146,7 +146,7 @@ function gemini_generate_image_edit(string $absoluteImagePath, string $prompt): 
  * router can treat both providers identically.
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
- * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string}
+ * @return array{ok: bool, images: array<string, string>, error: string}
  */
 function gemini_generate_three_view_previews(
     array $capturePaths,
@@ -157,17 +157,14 @@ function gemini_generate_three_view_previews(
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
-            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'error' => "Missing capture: {$angle}"];
+            return ['ok' => false, 'images' => [], 'error' => "Missing capture: {$angle}"];
         }
     }
 
     $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
     if (!$brief['ok']) {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true,
-                'lengthNote' => null, 'error' => $brief['error']];
+        return ['ok' => false, 'images' => [], 'error' => $brief['error']];
     }
-    $feasibleToday = $brief['feasibleToday'];
-    $lengthNote = $brief['lengthNote'];
     $basePrompt = $brief['basePrompt'];
 
     $hints = replicate_view_angle_hints();
@@ -180,8 +177,6 @@ function gemini_generate_three_view_previews(
             return [
                 'ok' => false,
                 'images' => [],
-                'feasibleToday' => $feasibleToday,
-                'lengthNote' => $lengthNote,
                 'error' => $viewKey . ' view: ' . $generated['error'],
             ];
         }
@@ -203,8 +198,6 @@ function gemini_generate_three_view_previews(
     return [
         'ok' => true,
         'images' => $resultImages,
-        'feasibleToday' => $feasibleToday,
-        'lengthNote' => $lengthNote,
         'error' => '',
     ];
 }

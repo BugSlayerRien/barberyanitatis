@@ -677,8 +677,6 @@ try {
             'right' => (string)$captures['right'],
         ]);
 
-        $feasibleToday = true;
-        $lengthNote = null;
         $provider = ai_tryon_provider_name();
         $images = [];
         $previewDiagnostics = [];
@@ -719,8 +717,6 @@ try {
                 ], $isBilling ? 402 : 502);
             }
             $images = $generated['images'];
-            $feasibleToday = $generated['feasibleToday'];
-            $lengthNote = $generated['lengthNote'];
             $previewDiagnostics = $generated['previewDiagnostics'] ?? [];
             $provider = 'ai-service';
         } else {
@@ -766,8 +762,6 @@ try {
                 ], $isBilling ? 402 : 502);
             }
             $images = $generated['images'];
-            $feasibleToday = $generated['feasibleToday'];
-            $lengthNote = $generated['lengthNote'];
 
             // The cloud helpers produce an orientation report but nothing ever
             // read it, so the per-angle warning banner the app already renders
@@ -823,8 +817,6 @@ try {
             'sideViewUrl' => $left,
             'backViewUrl' => $right,
             'provider' => $provider,
-            'feasibleToday' => $feasibleToday,
-            'lengthNote' => $lengthNote,
             'cached' => false,
             'previewDiagnostics' => $previewDiagnostics,
             'quota' => $userID !== null

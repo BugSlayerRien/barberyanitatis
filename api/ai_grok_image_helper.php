@@ -134,7 +134,7 @@ function grok_generate_image_edit(string $absoluteImagePath, string $prompt): ar
  * Generate front/left/right try-on images via Grok Imagine from stored captures.
  *
  * @param array{front: string, left: string, right: string} $capturePaths relative paths
- * @return array{ok: bool, images: array<string, string>, feasibleToday: bool, lengthNote: ?string, error: string}
+ * @return array{ok: bool, images: array<string, string>, error: string}
  */
 function grok_generate_three_view_previews(
     array $capturePaths,
@@ -145,17 +145,14 @@ function grok_generate_three_view_previews(
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
-            return ['ok' => false, 'images' => [], 'feasibleToday' => true, 'lengthNote' => null, 'error' => "Missing capture: {$angle}"];
+            return ['ok' => false, 'images' => [], 'error' => "Missing capture: {$angle}"];
         }
     }
 
     $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
     if (!$brief['ok']) {
-        return ['ok' => false, 'images' => [], 'feasibleToday' => true,
-                'lengthNote' => null, 'error' => $brief['error']];
+        return ['ok' => false, 'images' => [], 'error' => $brief['error']];
     }
-    $feasibleToday = $brief['feasibleToday'];
-    $lengthNote = $brief['lengthNote'];
     $basePrompt = $brief['basePrompt'];
 
     $hints = replicate_view_angle_hints();
@@ -168,8 +165,6 @@ function grok_generate_three_view_previews(
             return [
                 'ok' => false,
                 'images' => [],
-                'feasibleToday' => $feasibleToday,
-                'lengthNote' => $lengthNote,
                 'error' => $viewKey . ' view: ' . $generated['error'],
             ];
         }
@@ -186,8 +181,6 @@ function grok_generate_three_view_previews(
         'ok' => true,
         'images' => $resultImages,
         'orientation' => $orientationReport,
-        'feasibleToday' => $feasibleToday,
-        'lengthNote' => $lengthNote,
         'error' => '',
     ];
 }
