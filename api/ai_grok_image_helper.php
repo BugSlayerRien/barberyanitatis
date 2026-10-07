@@ -149,30 +149,14 @@ function grok_generate_three_view_previews(
         }
     }
 
-    $styleKey = replicate_resolve_style_key($styleName, $styleCode);
-    $prompts = replicate_style_prompts();
-    $styleDesc = $prompts[$styleKey] ?? ($styleName . ' hairstyle');
-    $minLengths = replicate_style_min_length();
-    $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
-    $lengthNote = null;
-    if (!$feasibleToday) {
-        $lengthNote = 'This style usually needs more length than detected today. '
-            . 'Preview shows the target look — ask your barber what is achievable today.';
+    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+    if (!$brief['ok']) {
+        return ['ok' => false, 'images' => [], 'feasibleToday' => true,
+                'lengthNote' => null, 'error' => $brief['error']];
     }
-
-    $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
-        . "that photo's original head turn and camera angle — do not make every frame face the camera.";
-
-    if ($feasibleToday) {
-        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
-    } else {
-        // Previously had no eyeglasses instruction at all — see the same fix in
-        // replicate_generate_three_view_previews.
-        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
-            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
-            . replicate_glasses_preservation_clause()
-            . "Identity and background must match the input.{$profileNote}";
-    }
+    $feasibleToday = $brief['feasibleToday'];
+    $lengthNote = $brief['lengthNote'];
+    $basePrompt = $brief['basePrompt'];
 
     $hints = replicate_view_angle_hints();
     $resultImages = [];

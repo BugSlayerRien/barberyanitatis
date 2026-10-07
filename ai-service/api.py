@@ -11,6 +11,7 @@ import os
 import shutil
 import ssl
 from pathlib import Path
+from typing import Optional
 
 import certifi
 
@@ -111,34 +112,43 @@ def httpx_ssl_verify() -> ssl.SSLContext | bool:
         return False
     return ssl.create_default_context(cafile=certifi.where())
 
+# GENERATED from api/replicate_helper.php by scripts/sync_tryon_prompts.php.
+# Edit the PHP table, then re-run that script. Do not edit by hand.
 STYLE_PROMPTS = {
-    "buzz_cut": "buzz cut hairstyle, very short uniform hair, clean fade",
-    "french_crop": "french crop hairstyle, short textured top, faded sides",
-    "low_fade": "low fade hairstyle, gradual fade on sides, natural top",
-    "blowout_taper": "blowout taper hairstyle, voluminous top, tapered sides",
-    "two_block": "two block hairstyle, long top short sides korean style",
-    "barbers_cut": "classic barbers cut, neat professional hairstyle",
-    "modern_mullet": "modern mullet hairstyle, short sides long back",
-    "edgar_cut": "edgar cut hairstyle, straight fringe sharp line",
-    "caesar_cut": "caesar cut hairstyle, short horizontal fringe",
-    "textured_crop": "textured crop wavy hairstyle, messy natural waves",
-    "messy_quiff": "messy quiff wavy hairstyle, voluminous front",
-    "modern_curtains": "modern curtains hairstyle, middle part wavy",
-    "wavy_mod_cut": "wavy mod cut hairstyle, bowl shape with waves",
-    "wavy_fringe": "wavy fringe hairstyle, wavy hair with fringe",
-    "wavy_burst_fade": "wavy burst fade hairstyle, waves on top fade sides",
-    "wavy_side_sweep": "wavy side sweep hairstyle, swept to one side",
-    "wavy_messy_top": "wavy messy top hairstyle, natural messy waves",
-    "curly_taper": "curly taper hairstyle, curly top tapered sides",
-    "curly_modern_mullet": "curly modern mullet, curly long back short sides",
-    "curly_burst_fade": "curly burst fade, curly afro burst fade sides",
-    "curly_mid_fade": "curly mid fade hairstyle, curls on top mid fade",
-    "curly_drop_fade": "curly drop fade hairstyle, curly top drop fade",
-    "curly_short_crop": "curly short crop hairstyle, short tight curls",
-    "curly_crew_cut": "curly crew cut hairstyle, short curly uniform",
-    "curly_edgar": "curly edgar hairstyle, curly hair straight fringe",
-    "crew_cut": "classic crew cut, short tapered sides, short textured top",
-    "pompadour": "pompadour hairstyle, volume swept up and back, faded sides",
+    "buzz_cut": "buzz cut: the whole head clipped to one uniform #1 guard length with no graduation anywhere, scalp visible through the hair, a crisp straight edge line at the temples and a squared-off neckline, no fringe, the head shape fully revealed",
+    "crew_cut": "crew cut: about 1 inch left at the front graduating shorter towards the crown, back and sides tapered with a #2 to #3 guard, a rounded natural silhouette with no fringe and a tapered neckline, neat and conservative",
+    "french_crop": "french crop: a short blunt fringe cut straight across the forehead, about 1.5 inches of choppy textured length on top pushed forward, a high skin fade on the back and sides starting above the ear, a sharp disconnected line at the temple",
+    "caesar_cut": "caesar cut: a short horizontal fringe about an inch long combed forward onto the forehead, a uniform 1.5 inches all over the top cut flat and even, tapered short sides, a level silhouette with no volume at the front",
+    "edgar_cut": "edgar cut: a blunt horizontal fringe cut in a hard straight line across the forehead with a sharp right-angled corner at each temple, a flat short top, a high skin fade on the back and sides, no blending between the fringe and the sides",
+    "low_fade": "low fade: the clipper fade begins just above the ear and finishes at the hairline, skin-bare at the bottom blending up to a #3 within two inches, about 2 inches left on top combed back naturally, a tapered neckline, the silhouette staying close to the skull",
+    "mid_fade": "mid fade: the clipper fade starts level with the temples halfway up the side, skin-tight at the bottom blending smoothly to a #2 at the parietal ridge with no visible steps, about 2 inches left on top styled loosely back, a tapered neckline",
+    "blowout_taper": "blowout taper: the top blown upward and outward into a rounded dome of volume roughly 3 inches tall, the sides tapered short and tight from the temple down in a soft gradient with no hard fade line, the front swept up and back off the forehead",
+    "pompadour": "pompadour: the front swept dramatically up and back into a tall rounded volume about 3 inches high above the forehead, shortening gradually towards the crown, the sides tapered short and combed back flat, a glossy styled finish with a clean edge at the temple",
+    "two_block": "two block cut: a clear disconnection between a long full top of 3 to 4 inches and sides clipped short underneath, the top sitting over the short sides like a separate layer, a straight heavy fringe falling to the eyebrows, korean style",
+    "barbers_cut": "classic barbers cut: short back and sides tapered by hand with scissors, about 1.5 inches on top with a neat side part combed over, a natural tapered neckline, a traditional finish with no fade line anywhere",
+    "modern_mullet": "modern mullet: a short textured top and fringe with tapered sides, the length deliberately kept long at the back and falling to the nape, a clear contrast between the cropped crown and the long back section",
+    "modern_curtains": "modern curtains: the hair parted down the middle and falling to either side of the forehead in two soft sweeping sections about 4 inches long reaching the eyebrows, the sides tapered short behind the ears",
+    "messy_quiff": "messy quiff: the front lifted up and back into a loose tousled volume about 2.5 inches high, deliberately imperfect with separated pieces, the sides tapered short, no hard parting, a matte undone finish",
+    "textured_crop": "textured crop: about 2 inches of choppy point-cut texture on top pushed forward into a soft irregular fringe, the sides faded short from the temple, visible separation between the pieces rather than one solid block of hair",
+    "wavy_mod_cut": "wavy mod cut: a rounded bowl-shaped silhouette with wavy hair cut to one even length around the head, a full fringe sitting straight across the forehead, the sides left long enough to curve naturally over the ears",
+    "wavy_fringe": "wavy fringe: natural waves left about 3 inches long on top falling forward into a soft wavy fringe across the forehead, the sides tapered short, the wave pattern clearly visible and left undefined by product",
+    "wavy_burst_fade": "wavy burst fade: a semicircular fade curving around and behind the ear like a sunburst with the back length left untouched, wavy textured hair 2 to 3 inches long on top, the wave pattern clearly visible, no straight fade line anywhere",
+    "wavy_side_sweep": "wavy side sweep: wavy hair about 3 inches long combed over to one side in a single sweeping motion from a soft side parting, shorter tapered sides, the waves falling diagonally across the forehead",
+    "wavy_messy_top": "wavy messy top: natural waves left about 3 inches long on top and tousled in no fixed direction, the sides tapered short, a matte texture with clearly separated wavy strands and no product shine",
+    "afro_taper": "afro taper: natural afro-textured hair left full and rounded on top about 3 inches deep, the sides and back tapered gradually shorter towards the hairline, a dense sponge-textured coil pattern throughout, a clean line-up at the forehead",
+    "curly_taper": "curly taper: tight curls left full on top about 2 inches deep, the sides and back tapered gradually shorter from the temple down to the neckline, the curls kept intact on top with a soft blend rather than a hard fade line",
+    "curly_taper_fade": "curly taper fade: curls left full on top about 2.5 inches deep with the coil pattern intact, the sides and back tapered down to skin at the neckline and around the ear, a smooth gradient with the curls blending into the taper rather than sitting on a hard line",
+    "curly_low_fade": "curly low fade: the fade begins just above the ear and stays low on the head, the curls left full on top about 2.5 inches with the coil pattern intact, a soft blend into the curly crown, a clean neckline and temple line-up",
+    "curly_mid_fade": "curly mid fade: the clipper fade starts level with the temples and blends from skin to a #2, the curls left 2 to 3 inches long on top with a defined coil pattern, a clean line-up along the forehead hairline",
+    "curly_drop_fade": "curly drop fade: the fade line drops in a curve behind the ear and down towards the nape instead of running straight, the curls left full on top at about 2.5 inches in defined clumps, a sharp temple line-up",
+    "curly_burst_fade": "curly burst fade: a semicircular fade arcing around the ear, tight curls left full and round on top about 3 inches deep with the curl pattern clearly defined, the back length left uncut behind the burst",
+    "curly_top_fade": "curly top fade: the sides and back faded short while a thick round mass of curls is left standing on top 3 to 4 inches tall, a strong contrast between the bare sides and the full curly crown, a clean line-up at the forehead",
+    "curly_undercut": "curly undercut: the sides and back clipped to one short length with a hard disconnected line and no blending at all, the full curly top left long at 3 to 4 inches and sitting over the shortened sides like a separate layer",
+    "curly_fringe": "curly fringe: the curls left long enough at the front to fall forward onto the forehead as a defined curly fringe about 3 inches long, the sides tapered short, the curl pattern clearly visible through the fringe",
+    "curly_modern_mullet": "curly modern mullet: the curls cropped short at the sides and crown with the curly length deliberately kept long at the back reaching the nape, a clear contrast between the tight sides and the full curly back section",
+    "curly_short_crop": "curly short crop: tight curls cut short and even to about 1 inch all over the top, the sides tapered shorter, the curl pattern still visible as small defined coils, a rounded close-cut silhouette",
+    "curly_crew_cut": "curly crew cut: the curls clipped to a short uniform length of about 1 inch on top, graduating shorter towards the sides and back, the curl texture still visible, a rounded even silhouette with a tapered neckline",
+    "curly_edgar": "curly edgar: a blunt straight horizontal fringe line cut across the forehead through curly hair, a flat short curly top, a high skin fade on the back and sides, a hard contrast between the fringe line and the bare sides",
 }
 
 FACE_SHAPE_STYLES = {
@@ -157,34 +167,43 @@ FACE_SHAPE_STYLES = {
     ],
 }
 
+# GENERATED from api/replicate_helper.php by scripts/sync_tryon_prompts.php.
+# Edit the PHP table, then re-run that script. Do not edit by hand.
 STYLE_MIN_LENGTH = {
     "buzz_cut": 0,
+    "crew_cut": 0,
     "french_crop": 0,
     "caesar_cut": 0,
-    "low_fade": 0,
     "edgar_cut": 0,
-    "barbers_cut": 0,
-    "curly_crew_cut": 0,
-    "curly_short_crop": 0,
-    "curly_edgar": 0,
+    "low_fade": 0,
+    "mid_fade": 0,
     "blowout_taper": 1,
-    "textured_crop": 1,
+    "pompadour": 2,
+    "two_block": 2,
+    "barbers_cut": 0,
+    "modern_mullet": 2,
+    "modern_curtains": 2,
     "messy_quiff": 1,
+    "textured_crop": 1,
+    "wavy_mod_cut": 2,
     "wavy_fringe": 1,
     "wavy_burst_fade": 1,
     "wavy_side_sweep": 1,
     "wavy_messy_top": 1,
+    "afro_taper": 1,
     "curly_taper": 1,
-    "curly_burst_fade": 1,
+    "curly_taper_fade": 1,
+    "curly_low_fade": 1,
     "curly_mid_fade": 1,
     "curly_drop_fade": 1,
-    "two_block": 2,
-    "modern_curtains": 2,
-    "wavy_mod_cut": 2,
-    "modern_mullet": 2,
+    "curly_burst_fade": 1,
+    "curly_top_fade": 2,
+    "curly_undercut": 2,
+    "curly_fringe": 1,
     "curly_modern_mullet": 3,
-    "crew_cut": 0,
-    "pompadour": 2,
+    "curly_short_crop": 0,
+    "curly_crew_cut": 0,
+    "curly_edgar": 0,
 }
 
 HAIR_LENGTH_LABELS = {0: "very short", 1: "short", 2: "medium", 3: "long"}
@@ -196,34 +215,43 @@ LENGTH_STYLE_HINTS = {
     3: "You may reshape or shorten slightly, but do not remove all length if the style needs volume.",
 }
 
+# GENERATED from api/replicate_helper.php by scripts/sync_tryon_prompts.php.
+# Edit the PHP table, then re-run that script. Do not edit by hand.
 STYLE_NAMES = {
     "buzz_cut": "Buzz Cut",
+    "crew_cut": "Crew Cut",
     "french_crop": "French Crop",
+    "caesar_cut": "Caesar Cut",
+    "edgar_cut": "Edgar Cut",
     "low_fade": "Low Fade",
+    "mid_fade": "Mid Fade",
     "blowout_taper": "Blowout Taper",
+    "pompadour": "Pompadour",
     "two_block": "Two Block",
     "barbers_cut": "Barbers Cut",
     "modern_mullet": "Modern Mullet",
-    "edgar_cut": "Edgar Cut",
-    "caesar_cut": "Caesar Cut",
-    "textured_crop": "Textured Crop",
-    "messy_quiff": "Messy Quiff",
     "modern_curtains": "Modern Curtains",
+    "messy_quiff": "Messy Quiff",
+    "textured_crop": "Textured Crop",
     "wavy_mod_cut": "Wavy Mod Cut",
     "wavy_fringe": "Wavy Fringe",
     "wavy_burst_fade": "Wavy Burst Fade",
     "wavy_side_sweep": "Wavy Side Sweep",
     "wavy_messy_top": "Wavy Messy Top",
+    "afro_taper": "Afro Taper",
     "curly_taper": "Curly Taper",
-    "curly_modern_mullet": "Curly Modern Mullet",
-    "curly_burst_fade": "Curly Burst Fade",
+    "curly_taper_fade": "Curly Taper Fade",
+    "curly_low_fade": "Curly Low Fade",
     "curly_mid_fade": "Curly Mid Fade",
     "curly_drop_fade": "Curly Drop Fade",
+    "curly_burst_fade": "Curly Burst Fade",
+    "curly_top_fade": "Curly Top Fade",
+    "curly_undercut": "Curly Undercut",
+    "curly_fringe": "Curly Fringe",
+    "curly_modern_mullet": "Curly Modern Mullet",
     "curly_short_crop": "Curly Short Crop",
     "curly_crew_cut": "Curly Crew Cut",
     "curly_edgar": "Curly Edgar",
-    "crew_cut": "Crew Cut",
-    "pompadour": "Pompadour",
 }
 
 def ensure_face_landmarker_model() -> Path:
@@ -478,7 +506,14 @@ def normalize_style_key(raw: str) -> str:
     return key
 
 
-def resolve_style_key(style_name: str, style_code: str = "") -> str:
+def resolve_style_key(style_name: str, style_code: str = "") -> Optional[str]:
+    """The prompt key for a catalog style, or None when there is none.
+
+    This returned "barbers_cut" for anything it could not match, so a style
+    with no entry rendered as a generic barbers cut and nobody saw an error.
+    Longest label first, because "Curly Low Fade" contains "low fade" and a
+    shorter key would win and drop the curl.
+    """
     if style_code:
         code_key = normalize_style_key(style_code)
         if code_key in STYLE_PROMPTS:
@@ -486,11 +521,13 @@ def resolve_style_key(style_name: str, style_code: str = "") -> str:
     name_key = normalize_style_key(style_name)
     if name_key in STYLE_PROMPTS:
         return name_key
-    name_lower = style_name.lower()
-    for key in STYLE_PROMPTS:
+    name_lower = style_name.strip().lower()
+    if not name_lower:
+        return None
+    for key in sorted(STYLE_PROMPTS, key=len, reverse=True):
         if key.replace("_", " ") in name_lower:
             return key
-    return "barbers_cut"
+    return None
 
 
 def profile_pose_lock_sentence(image_path: Path) -> str:
@@ -2123,7 +2160,20 @@ async def generate_hairstyle(
         resolved_name = (style_name or style).strip()
         resolved_code = (style_code or style).strip()
         style_key = resolve_style_key(resolved_name, resolved_code)
-        style_desc = STYLE_PROMPTS.get(style_key, f"{resolved_name or resolved_code} hairstyle")
+        if style_key is None:
+            # Better a visible error than the wrong haircut rendered silently.
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "error": (
+                        f'No try-on prompt is defined for '
+                        f'"{resolved_name or resolved_code}". Add it to '
+                        "replicate_style_prompts() and run "
+                        "scripts/sync_tryon_prompts.php."
+                    )
+                },
+            )
+        style_desc = STYLE_PROMPTS[style_key]
         length_level, _, _, mask_cov = effective_hair_length_level(
             int(hair_length_level), list(views.values())
         )

@@ -43,6 +43,11 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
     _load();
   }
 
+  /// Paid leave left this year, as reported by listMonth. Null until loaded.
+  Map<String, dynamic>? _leaveBalance;
+
+  int get _leaveRemaining => (_leaveBalance?['remaining'] as num?)?.toInt() ?? -1;
+
   String _formatDate(DateTime date) {
     return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
   }
@@ -124,6 +129,10 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         requestMap[key] = req['status']?.toString() ?? 'Pending';
       }
 
+      final rawBalance = data['leaveBalance'];
+      final leaveBalance =
+          rawBalance is Map ? Map<String, dynamic>.from(rawBalance) : null;
+
       final closures = <String, Map<String, dynamic>>{};
       final rawClosures = data['closures'];
       if (rawClosures is Map) {
@@ -139,6 +148,7 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         _bookedByDate = booked;
         _requestStatusByDate = requestMap;
         _closureByDate = closures;
+        _leaveBalance = leaveBalance ?? _leaveBalance;
         _loading = false;
         _hasLoadedOnce = true;
       });
@@ -150,6 +160,81 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         _hasLoadedOnce = true;
       });
     }
+  }
+
+  /// How much paid leave is left, and how much of it is still unapproved.
+  ///
+  /// A barber could file unlimited days off and had no way of knowing how many
+  /// they had taken. Pending days are shown separately because they already
+  /// count against the allowance -- the receptionist has not agreed to them
+  /// yet, but the day is spoken for.
+  Widget _buildLeaveBalanceCard() {
+    final balance = _leaveBalance!;
+    final allowance = (balance['allowance'] as num?)?.toInt() ?? 0;
+    final used = (balance['used'] as num?)?.toInt() ?? 0;
+    final pending = (balance['pending'] as num?)?.toInt() ?? 0;
+    final remaining = (balance['remaining'] as num?)?.toInt() ?? 0;
+    final year = (balance['year'] as num?)?.toInt();
+    final ratio = allowance > 0 ? (used / allowance).clamp(0.0, 1.0) : 0.0;
+    final accent = remaining == 0
+        ? Colors.orangeAccent
+        : (remaining <= 3 ? const Color(0xFFE0A23C) : _kGold);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF151515),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.beach_access_rounded, size: 16, color: accent),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  'Paid leave${year != null ? ' · $year' : ''}',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Text(
+                '$remaining of $allowance left',
+                style: TextStyle(
+                  color: accent,
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 9),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 7,
+              backgroundColor: const Color(0xFF262626),
+              valueColor: AlwaysStoppedAnimation(accent),
+            ),
+          ),
+          const SizedBox(height: 7),
+          Text(
+            pending > 0
+                ? '$used day${used == 1 ? '' : 's'} used, including $pending awaiting approval.'
+                : '$used day${used == 1 ? '' : 's'} used so far.',
+            style: const TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+        ],
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _appointmentsForSelectedDay() {
@@ -233,9 +318,21 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
         ? Map<String, dynamic>.from(jsonDecode(response.body) as Map)
         : <String, dynamic>{};
 
+    final returnedBalance = data['leaveBalance'];
+    if (returnedBalance is Map) {
+      setState(() => _leaveBalance = Map<String, dynamic>.from(returnedBalance));
+    }
+
     if (response.statusCode == 200) {
+      final left = (data['leaveBalance']?['remaining'] as num?)?.toInt();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Request sent to receptionist for approval.')),
+        SnackBar(
+          content: Text(
+            left == null
+                ? 'Request sent to receptionist for approval.'
+                : 'Request sent for approval. $left paid leave day${left == 1 ? '' : 's'} left.',
+          ),
+        ),
       );
       _load();
     } else {
@@ -292,7 +389,14 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
                 ),
               ],
               const SizedBox(height: 16),
-              if (status != 'Pending')
+              // Refusing here rather than at the server keeps the barber from
+              // filling in a note for a request that cannot be accepted.
+              if (status != 'Pending' && _leaveRemaining == 0)
+                const Text(
+                  'You have used all your paid leave days for this year.',
+                  style: TextStyle(color: Colors.orangeAccent, fontSize: 12),
+                )
+              else if (status != 'Pending')
                 SizedBox(
                   width: double.infinity,
                   child: OutlinedButton(
@@ -360,6 +464,10 @@ class _BarberCalendarPageState extends State<BarberCalendarPage> {
               'Tap a date to view bookings or request time off (receptionist must approve).',
               style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
             ),
+            if (_leaveBalance != null) ...[
+              const SizedBox(height: 14),
+              _buildLeaveBalanceCard(),
+            ],
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(20),

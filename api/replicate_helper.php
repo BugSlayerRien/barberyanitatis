@@ -30,35 +30,133 @@ function replicate_flux_model(): string
     return $model !== '' ? $model : 'black-forest-labs/flux-kontext-pro';
 }
 
-/** @return array<string, string> */
+/**
+ * The haircut itself, described the way a barber would describe it.
+ *
+ * These were six to nine words each ("low fade hairstyle, gradual fade on
+ * sides, natural top"), which is the entire visual specification the model
+ * receives -- no reference image is sent, only the customer's own photo. Vague
+ * input produced vague haircuts. Each entry now names the fade type and where
+ * it starts, guard numbers, the length left on top, the fringe or part, the
+ * texture treatment and the neckline, so the model has a shape to render
+ * rather than a label to interpret.
+ *
+ * Keys are the normalised `hairstyles.style_name`; every catalog style must
+ * have one. scripts/test_tryon_prompts.php fails the build if one is missing.
+ *
+ * @return array<string, string>
+ */
 function replicate_style_prompts(): array
 {
     return [
-        'buzz_cut' => 'buzz cut hairstyle, very short uniform hair, clean fade',
-        'french_crop' => 'french crop hairstyle, short textured top, faded sides',
-        'low_fade' => 'low fade hairstyle, gradual fade on sides, natural top',
-        'blowout_taper' => 'blowout taper hairstyle, voluminous top, tapered sides',
-        'two_block' => 'two block hairstyle, long top short sides korean style',
-        'barbers_cut' => 'classic barbers cut, neat professional hairstyle',
-        'modern_mullet' => 'modern mullet hairstyle, short sides long back',
-        'edgar_cut' => 'edgar cut hairstyle, straight fringe sharp line',
-        'caesar_cut' => 'caesar cut hairstyle, short horizontal fringe',
-        'textured_crop' => 'textured crop wavy hairstyle, messy natural waves',
-        'messy_quiff' => 'messy quiff wavy hairstyle, voluminous front',
-        'modern_curtains' => 'modern curtains hairstyle, middle part wavy',
-        'wavy_mod_cut' => 'wavy mod cut hairstyle, bowl shape with waves',
-        'wavy_fringe' => 'wavy fringe hairstyle, wavy hair with fringe',
-        'wavy_burst_fade' => 'wavy burst fade hairstyle, waves on top fade sides',
-        'wavy_side_sweep' => 'wavy side sweep hairstyle, swept to one side',
-        'wavy_messy_top' => 'wavy messy top hairstyle, natural messy waves',
-        'curly_taper' => 'curly taper hairstyle, curly top tapered sides',
-        'curly_modern_mullet' => 'curly modern mullet, curly long back short sides',
-        'curly_burst_fade' => 'curly burst fade, curly afro burst fade sides',
-        'curly_mid_fade' => 'curly mid fade hairstyle, curls on top mid fade',
-        'curly_drop_fade' => 'curly drop fade hairstyle, curly top drop fade',
-        'curly_short_crop' => 'curly short crop hairstyle, short tight curls',
-        'curly_crew_cut' => 'curly crew cut hairstyle, short curly uniform',
-        'curly_edgar' => 'curly edgar hairstyle, curly hair straight fringe',
+        'buzz_cut' => 'buzz cut: the whole head clipped to one uniform #1 guard length with no '
+            . 'graduation anywhere, scalp visible through the hair, a crisp straight edge line at '
+            . 'the temples and a squared-off neckline, no fringe, the head shape fully revealed',
+        'crew_cut' => 'crew cut: about 1 inch left at the front graduating shorter towards the '
+            . 'crown, back and sides tapered with a #2 to #3 guard, a rounded natural silhouette '
+            . 'with no fringe and a tapered neckline, neat and conservative',
+        'french_crop' => 'french crop: a short blunt fringe cut straight across the forehead, '
+            . 'about 1.5 inches of choppy textured length on top pushed forward, a high skin fade '
+            . 'on the back and sides starting above the ear, a sharp disconnected line at the temple',
+        'caesar_cut' => 'caesar cut: a short horizontal fringe about an inch long combed forward '
+            . 'onto the forehead, a uniform 1.5 inches all over the top cut flat and even, '
+            . 'tapered short sides, a level silhouette with no volume at the front',
+        'edgar_cut' => 'edgar cut: a blunt horizontal fringe cut in a hard straight line across '
+            . 'the forehead with a sharp right-angled corner at each temple, a flat short top, '
+            . 'a high skin fade on the back and sides, no blending between the fringe and the sides',
+        'low_fade' => 'low fade: the clipper fade begins just above the ear and finishes at the '
+            . 'hairline, skin-bare at the bottom blending up to a #3 within two inches, about '
+            . '2 inches left on top combed back naturally, a tapered neckline, the silhouette '
+            . 'staying close to the skull',
+        'mid_fade' => 'mid fade: the clipper fade starts level with the temples halfway up the '
+            . 'side, skin-tight at the bottom blending smoothly to a #2 at the parietal ridge '
+            . 'with no visible steps, about 2 inches left on top styled loosely back, a tapered '
+            . 'neckline',
+        'blowout_taper' => 'blowout taper: the top blown upward and outward into a rounded dome '
+            . 'of volume roughly 3 inches tall, the sides tapered short and tight from the temple '
+            . 'down in a soft gradient with no hard fade line, the front swept up and back off '
+            . 'the forehead',
+        'pompadour' => 'pompadour: the front swept dramatically up and back into a tall rounded '
+            . 'volume about 3 inches high above the forehead, shortening gradually towards the '
+            . 'crown, the sides tapered short and combed back flat, a glossy styled finish with '
+            . 'a clean edge at the temple',
+        'two_block' => 'two block cut: a clear disconnection between a long full top of 3 to 4 '
+            . 'inches and sides clipped short underneath, the top sitting over the short sides '
+            . 'like a separate layer, a straight heavy fringe falling to the eyebrows, korean style',
+        'barbers_cut' => 'classic barbers cut: short back and sides tapered by hand with scissors, '
+            . 'about 1.5 inches on top with a neat side part combed over, a natural tapered '
+            . 'neckline, a traditional finish with no fade line anywhere',
+        'modern_mullet' => 'modern mullet: a short textured top and fringe with tapered sides, '
+            . 'the length deliberately kept long at the back and falling to the nape, a clear '
+            . 'contrast between the cropped crown and the long back section',
+        'modern_curtains' => 'modern curtains: the hair parted down the middle and falling to '
+            . 'either side of the forehead in two soft sweeping sections about 4 inches long '
+            . 'reaching the eyebrows, the sides tapered short behind the ears',
+        'messy_quiff' => 'messy quiff: the front lifted up and back into a loose tousled volume '
+            . 'about 2.5 inches high, deliberately imperfect with separated pieces, the sides '
+            . 'tapered short, no hard parting, a matte undone finish',
+        'textured_crop' => 'textured crop: about 2 inches of choppy point-cut texture on top '
+            . 'pushed forward into a soft irregular fringe, the sides faded short from the temple, '
+            . 'visible separation between the pieces rather than one solid block of hair',
+        'wavy_mod_cut' => 'wavy mod cut: a rounded bowl-shaped silhouette with wavy hair cut to '
+            . 'one even length around the head, a full fringe sitting straight across the '
+            . 'forehead, the sides left long enough to curve naturally over the ears',
+        'wavy_fringe' => 'wavy fringe: natural waves left about 3 inches long on top falling '
+            . 'forward into a soft wavy fringe across the forehead, the sides tapered short, the '
+            . 'wave pattern clearly visible and left undefined by product',
+        'wavy_burst_fade' => 'wavy burst fade: a semicircular fade curving around and behind the '
+            . 'ear like a sunburst with the back length left untouched, wavy textured hair 2 to 3 '
+            . 'inches long on top, the wave pattern clearly visible, no straight fade line anywhere',
+        'wavy_side_sweep' => 'wavy side sweep: wavy hair about 3 inches long combed over to one '
+            . 'side in a single sweeping motion from a soft side parting, shorter tapered sides, '
+            . 'the waves falling diagonally across the forehead',
+        'wavy_messy_top' => 'wavy messy top: natural waves left about 3 inches long on top and '
+            . 'tousled in no fixed direction, the sides tapered short, a matte texture with '
+            . 'clearly separated wavy strands and no product shine',
+        'afro_taper' => 'afro taper: natural afro-textured hair left full and rounded on top '
+            . 'about 3 inches deep, the sides and back tapered gradually shorter towards the '
+            . 'hairline, a dense sponge-textured coil pattern throughout, a clean line-up at the '
+            . 'forehead',
+        'curly_taper' => 'curly taper: tight curls left full on top about 2 inches deep, the '
+            . 'sides and back tapered gradually shorter from the temple down to the neckline, the '
+            . 'curls kept intact on top with a soft blend rather than a hard fade line',
+        'curly_taper_fade' => 'curly taper fade: curls left full on top about 2.5 inches deep '
+            . 'with the coil pattern intact, the sides and back tapered down to skin at the '
+            . 'neckline and around the ear, a smooth gradient with the curls blending into the '
+            . 'taper rather than sitting on a hard line',
+        'curly_low_fade' => 'curly low fade: the fade begins just above the ear and stays low on '
+            . 'the head, the curls left full on top about 2.5 inches with the coil pattern intact, '
+            . 'a soft blend into the curly crown, a clean neckline and temple line-up',
+        'curly_mid_fade' => 'curly mid fade: the clipper fade starts level with the temples and '
+            . 'blends from skin to a #2, the curls left 2 to 3 inches long on top with a defined '
+            . 'coil pattern, a clean line-up along the forehead hairline',
+        'curly_drop_fade' => 'curly drop fade: the fade line drops in a curve behind the ear and '
+            . 'down towards the nape instead of running straight, the curls left full on top at '
+            . 'about 2.5 inches in defined clumps, a sharp temple line-up',
+        'curly_burst_fade' => 'curly burst fade: a semicircular fade arcing around the ear, tight '
+            . 'curls left full and round on top about 3 inches deep with the curl pattern clearly '
+            . 'defined, the back length left uncut behind the burst',
+        'curly_top_fade' => 'curly top fade: the sides and back faded short while a thick round '
+            . 'mass of curls is left standing on top 3 to 4 inches tall, a strong contrast between '
+            . 'the bare sides and the full curly crown, a clean line-up at the forehead',
+        'curly_undercut' => 'curly undercut: the sides and back clipped to one short length with '
+            . 'a hard disconnected line and no blending at all, the full curly top left long at '
+            . '3 to 4 inches and sitting over the shortened sides like a separate layer',
+        'curly_fringe' => 'curly fringe: the curls left long enough at the front to fall forward '
+            . 'onto the forehead as a defined curly fringe about 3 inches long, the sides tapered '
+            . 'short, the curl pattern clearly visible through the fringe',
+        'curly_modern_mullet' => 'curly modern mullet: the curls cropped short at the sides and '
+            . 'crown with the curly length deliberately kept long at the back reaching the nape, '
+            . 'a clear contrast between the tight sides and the full curly back section',
+        'curly_short_crop' => 'curly short crop: tight curls cut short and even to about 1 inch '
+            . 'all over the top, the sides tapered shorter, the curl pattern still visible as '
+            . 'small defined coils, a rounded close-cut silhouette',
+        'curly_crew_cut' => 'curly crew cut: the curls clipped to a short uniform length of about '
+            . '1 inch on top, graduating shorter towards the sides and back, the curl texture '
+            . 'still visible, a rounded even silhouette with a tapered neckline',
+        'curly_edgar' => 'curly edgar: a blunt straight horizontal fringe line cut across the '
+            . 'forehead through curly hair, a flat short curly top, a high skin fade on the back '
+            . 'and sides, a hard contrast between the fringe line and the bare sides',
     ];
 }
 
@@ -79,16 +177,25 @@ function replicate_length_style_hints(): array
     ];
 }
 
-/** @return array<string, int> */
+/**
+ * Shortest hair this style can actually be cut from today. Must cover every
+ * key in replicate_style_prompts().
+ *
+ * @return array<string, int>
+ */
 function replicate_style_min_length(): array
 {
     return [
-        'buzz_cut' => 0, 'french_crop' => 0, 'caesar_cut' => 0, 'low_fade' => 0,
-        'edgar_cut' => 0, 'barbers_cut' => 0, 'curly_crew_cut' => 0, 'curly_short_crop' => 0,
-        'curly_edgar' => 0, 'blowout_taper' => 1, 'textured_crop' => 1, 'messy_quiff' => 1,
+        'buzz_cut' => 0, 'crew_cut' => 0, 'french_crop' => 0, 'caesar_cut' => 0,
+        'edgar_cut' => 0, 'low_fade' => 0, 'mid_fade' => 0, 'barbers_cut' => 0,
+        'curly_crew_cut' => 0, 'curly_short_crop' => 0, 'curly_edgar' => 0,
+        'blowout_taper' => 1, 'textured_crop' => 1, 'messy_quiff' => 1,
         'wavy_fringe' => 1, 'wavy_burst_fade' => 1, 'wavy_side_sweep' => 1, 'wavy_messy_top' => 1,
-        'curly_taper' => 1, 'curly_burst_fade' => 1, 'curly_mid_fade' => 1, 'curly_drop_fade' => 1,
+        'afro_taper' => 1, 'curly_taper' => 1, 'curly_taper_fade' => 1, 'curly_low_fade' => 1,
+        'curly_burst_fade' => 1, 'curly_mid_fade' => 1, 'curly_drop_fade' => 1,
+        'curly_fringe' => 1,
         'two_block' => 2, 'modern_curtains' => 2, 'wavy_mod_cut' => 2, 'modern_mullet' => 2,
+        'pompadour' => 2, 'curly_top_fade' => 2, 'curly_undercut' => 2,
         'curly_modern_mullet' => 3,
     ];
 }
@@ -101,7 +208,19 @@ function replicate_normalize_style_key(string $raw): string
     return $key;
 }
 
-function replicate_resolve_style_key(string $styleName, ?string $styleCode = null): string
+/**
+ * The prompt key for a catalog style, or null when there is none.
+ *
+ * This used to return 'barbers_cut' for anything it could not match, and seven
+ * catalog styles matched nothing -- Afro Taper, Crew Cut, Curly Fringe, Curly
+ * Top Fade, Curly Undercut, Mid Fade and Pompadour all silently rendered as a
+ * generic barbers cut. Nobody saw an error; the customer just got the wrong
+ * haircut. Returning null lets the caller say so out loud.
+ *
+ * The longest-label-first ordering of the fuzzy pass matters: 'Curly Low Fade'
+ * contains 'low fade', so a shorter key would win and the curl would be lost.
+ */
+function replicate_resolve_style_key(string $styleName, ?string $styleCode = null): ?string
 {
     $prompts = replicate_style_prompts();
     if ($styleCode !== null && $styleCode !== '') {
@@ -116,15 +235,87 @@ function replicate_resolve_style_key(string $styleName, ?string $styleCode = nul
         return $nameKey;
     }
 
-    $nameLower = strtolower($styleName);
-    foreach (array_keys($prompts) as $key) {
+    $nameLower = strtolower(trim($styleName));
+    if ($nameLower === '') {
+        return null;
+    }
+
+    $keys = array_keys($prompts);
+    usort($keys, static fn(string $a, string $b): int => strlen($b) <=> strlen($a));
+    foreach ($keys as $key) {
         $label = str_replace('_', ' ', $key);
-        if ($nameLower !== '' && str_contains($nameLower, $label)) {
+        if (str_contains($nameLower, $label)) {
             return $key;
         }
     }
 
-    return 'barbers_cut';
+    return null;
+}
+
+/**
+ * Everything the three providers need to describe one style, resolved once.
+ *
+ * The same twelve lines were copy-pasted into the Replicate, Grok and Gemini
+ * entry points, which is how Gemini ended up without the eyeglasses clause.
+ *
+ * @return array{ok: bool, error: string, styleKey: string, styleDesc: string,
+ *                feasibleToday: bool, lengthNote: ?string, basePrompt: string}
+ */
+function replicate_style_brief(
+    string $styleName,
+    ?string $styleCode,
+    int $hairLengthLevel,
+    string $hairColorLabel
+): array {
+    $blank = [
+        'ok' => false,
+        'error' => '',
+        'styleKey' => '',
+        'styleDesc' => '',
+        'feasibleToday' => true,
+        'lengthNote' => null,
+        'basePrompt' => '',
+    ];
+
+    $styleKey = replicate_resolve_style_key($styleName, $styleCode);
+    if ($styleKey === null) {
+        $blank['error'] = 'No try-on prompt is defined for "' . $styleName . '". '
+            . 'Add it to replicate_style_prompts() before this style can be previewed.';
+
+        return $blank;
+    }
+
+    $prompts = replicate_style_prompts();
+    $styleDesc = $prompts[$styleKey];
+    $minLengths = replicate_style_min_length();
+    $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
+    $lengthNote = $feasibleToday
+        ? null
+        : 'This style usually needs more length than detected today. '
+            . 'Preview shows the target look — ask your barber what is achievable today.';
+
+    $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
+        . "that photo's original head turn and camera angle — do not make every frame face the camera.";
+
+    if ($feasibleToday) {
+        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
+            . $profileNote;
+    } else {
+        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
+            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
+            . replicate_glasses_preservation_clause()
+            . "Identity and background must match the input.{$profileNote}";
+    }
+
+    return [
+        'ok' => true,
+        'error' => '',
+        'styleKey' => $styleKey,
+        'styleDesc' => $styleDesc,
+        'feasibleToday' => $feasibleToday,
+        'lengthNote' => $lengthNote,
+        'basePrompt' => $basePrompt,
+    ];
 }
 
 /**
@@ -602,31 +793,14 @@ function replicate_generate_three_view_previews(
         }
     }
 
-    $styleKey = replicate_resolve_style_key($styleName, $styleCode);
-    $prompts = replicate_style_prompts();
-    $styleDesc = $prompts[$styleKey] ?? ($styleName . ' hairstyle');
-    $minLengths = replicate_style_min_length();
-    $feasibleToday = ($minLengths[$styleKey] ?? 1) <= $hairLengthLevel;
-    $lengthNote = null;
-    if (!$feasibleToday) {
-        $lengthNote = 'This style usually needs more length than detected today. '
-            . 'Preview shows the target look — ask your barber what is achievable today.';
+    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+    if (!$brief['ok']) {
+        return ['ok' => false, 'images' => [], 'feasibleToday' => true,
+                'lengthNote' => null, 'error' => $brief['error']];
     }
-
-    $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
-        . "that photo's original head turn and camera angle — do not make every frame face the camera.";
-
-    if ($feasibleToday) {
-        $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel) . $profileNote;
-    } else {
-        // This branch previously had no eyeglasses instruction at all — the
-        // feasible-today prompt above got one, this one did not, so an
-        // aspirational-length preview had no protection against dropping glasses.
-        $basePrompt = 'HAIR-ONLY ASPIRATIONAL EDIT. Preview longer hair with style: '
-            . "{$styleDesc}. FORBIDDEN: changing face, skin, eyes, clothing, or background. "
-            . replicate_glasses_preservation_clause()
-            . "Identity and background must match the input.{$profileNote}";
-    }
+    $feasibleToday = $brief['feasibleToday'];
+    $lengthNote = $brief['lengthNote'];
+    $basePrompt = $brief['basePrompt'];
 
     $resultImages = [];
     foreach (['front', 'left', 'right'] as $viewKey) {

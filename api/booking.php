@@ -10,6 +10,7 @@ require_once __DIR__ . '/shop_schedule.php';
 require_once __DIR__ . '/group_booking.php';
 require_once __DIR__ . '/booking_codes.php';
 require_once __DIR__ . '/slot_locking.php';
+require_once __DIR__ . '/refund_policy.php';
 require_once __DIR__ . '/appointment_expiry.php';
 require_once __DIR__ . '/paymongo_reconcile.php';
 require_once __DIR__ . '/face_scan_attach.php';
@@ -226,7 +227,7 @@ require_method('POST');
 $input = get_json_input();
 $action = $input['action'] ?? '';
 
-if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule', 'getQuickBookProfile', 'getCustomerHomeInsights'], true)) {
+if (!in_array($action, ['create', 'createGroup', 'listByCustomer', 'listByBarber', 'cancel', 'reschedule', 'refundQuote', 'getQuickBookProfile', 'getCustomerHomeInsights'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -253,7 +254,7 @@ try {
         // have run yet to create the column.
         ensure_cancel_reason_column($pdo);
     });
-    $readOnlyActions = ['listByCustomer', 'listByBarber', 'getQuickBookProfile', 'getCustomerHomeInsights'];
+    $readOnlyActions = ['listByCustomer', 'listByBarber', 'refundQuote', 'getQuickBookProfile', 'getCustomerHomeInsights'];
     if (!in_array($action, $readOnlyActions, true)) {
         schema_ensure_once('booking.write', static function () use ($pdo): void {
             ensure_appointment_detail_image_columns($pdo);
@@ -1014,6 +1015,12 @@ try {
             $rowForPolicy = $row;
             $rowForPolicy['status'] = $appointmentStatus;
             $reschedulePolicy = can_customer_reschedule_appointment($rowForPolicy, $paymentState);
+            // Whether cancelling right now would earn the money back. The
+            // Cancel button had no guard at all, so a customer could cancel
+            // expecting a refund and only find out afterwards.
+            $refundPolicy = $paymentState === 'Paid'
+                ? refund_policy_decision($pdo, $rowForPolicy, (int)$customer['user_id'])
+                : ['refundable' => false, 'reason' => null, 'deadline' => null, 'policy' => 'unpaid'];
             $rescheduleCount = (int)($row['reschedule_count'] ?? 0);
             return [
                 'appointmentID' => $aid,
@@ -1050,6 +1057,9 @@ try {
                 'rescheduleBlockedReason' => $reschedulePolicy['reason'] !== ''
                     ? $reschedulePolicy['reason']
                     : null,
+                'refundEligible' => (bool)$refundPolicy['refundable'],
+                'refundBlockedReason' => $refundPolicy['reason'],
+                'refundDeadline' => $refundPolicy['deadline'],
                 'services' => $serviceMap[$aid] ?? [],
                 'frontViewUrl' => ($imageMap[$aid]['frontViewUrl'] ?? null),
                 'sideViewUrl' => ($imageMap[$aid]['sideViewUrl'] ?? null),
@@ -1213,7 +1223,12 @@ try {
             }
         }
 
-        if ($paidRow && (float)$paidRow['total_amount'] > 0) {
+        // The cancellation itself is never blocked -- a freed slot is worth
+        // more to the shop than a punished customer -- but the money only
+        // comes back when the notice and abuse rules both allow it.
+        $refundDecision = refund_policy_decision($pdo, $appt, $userID);
+
+        if ($paidRow && (float)$paidRow['total_amount'] > 0 && $refundDecision['refundable']) {
             $existing = $pdo->prepare(
                 'SELECT refund_id FROM appointment_refunds WHERE appointment_id = :appointment_id LIMIT 1'
             );
@@ -1329,6 +1344,74 @@ try {
             // tell the customer a refund is on the way, and to ask for a phone
             // number when the account has none on file.
             'refund' => $refundRow,
+            // Present when money was taken but no refund was raised, so the
+            // app can say why instead of leaving the customer waiting for a
+            // payout that is never coming.
+            'refundWithheld' => ($paidRow && !$refundDecision['refundable'])
+                ? ['policy' => $refundDecision['policy'], 'reason' => $refundDecision['reason']]
+                : null,
+        ]);
+    }
+
+    // Asked by the cancel sheet before the customer commits, so the exact
+    // amount and the exact reason are on screen at the moment of the decision
+    // rather than discovered afterwards.
+    if ($action === 'refundQuote') {
+        $appointmentID = (int)($input['appointmentID'] ?? 0);
+        $userID = (int)$customer['user_id'];
+        if ($appointmentID <= 0) {
+            json_response(['error' => 'Invalid appointmentID'], 422);
+        }
+
+        $apptStmt = $pdo->prepare(
+            'SELECT appointment_id, user_id, appointment_date, start_time, status, booking_group_id
+             FROM appointments
+             WHERE appointment_id = :appointment_id
+             LIMIT 1'
+        );
+        $apptStmt->execute([':appointment_id' => $appointmentID]);
+        $appt = $apptStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$appt) {
+            json_response(['error' => 'Appointment not found'], 404);
+        }
+        if ((int)$appt['user_id'] !== $userID) {
+            json_response(['error' => 'You can only view your own appointments'], 403);
+        }
+
+        // A group pays once against the lead row, so look across the group or
+        // the quote reads zero for every member but one.
+        $groupId = (int)($appt['booking_group_id'] ?? 0);
+        $amountStmt = $groupId > 0
+            ? $pdo->prepare(
+                "SELECT COALESCE(SUM(ap.amount), 0)::float
+                 FROM appointment_payments ap
+                 JOIN appointments a ON a.appointment_id = ap.appointment_id
+                 WHERE a.booking_group_id = :key AND ap.status IN ('Captured', 'Paid')"
+            )
+            : $pdo->prepare(
+                "SELECT COALESCE(SUM(amount), 0)::float
+                 FROM appointment_payments
+                 WHERE appointment_id = :key AND status IN ('Captured', 'Paid')"
+            );
+        $amountStmt->execute([':key' => $groupId > 0 ? $groupId : $appointmentID]);
+        $amount = (float)$amountStmt->fetchColumn();
+
+        $decision = refund_policy_decision($pdo, $appt, $userID);
+        $abuse = refund_policy_status($pdo, $userID);
+
+        json_response([
+            'refundable' => $amount > 0 && $decision['refundable'],
+            'amount' => round($amount, 2),
+            'reason' => $amount > 0
+                ? $decision['reason']
+                : 'This booking has no captured payment, so there is nothing to refund.',
+            'policy' => $amount > 0 ? $decision['policy'] : 'unpaid',
+            'deadline' => $decision['deadline'],
+            'hoursRemaining' => $decision['hoursRemaining'],
+            'noticeHours' => shop_refund_notice_hours(),
+            'refundsUsed24h' => $abuse['used24h'],
+            'refundsUsed30d' => $abuse['used30d'],
+            'cooldownUntil' => $abuse['cooldownUntil'],
         ]);
     }
 

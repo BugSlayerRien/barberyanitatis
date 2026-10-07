@@ -315,6 +315,68 @@ function ensure_unavailability_requests_table(PDO $pdo): void
     $ready = true;
 }
 
+/**
+ * Paid leave a barber may take in one calendar year.
+ *
+ * Leave was uncapped: nothing in the codebase counted a barber's days, so one
+ * could file as many paid days off as they liked and the receptionist had no
+ * figure in front of them when approving.
+ */
+function shop_barber_annual_leave_days(): int
+{
+    return 24;
+}
+
+/**
+ * Days this barber has taken or asked for in $year, and what is left.
+ *
+ * Pending counts against the balance. Leave is stored one row per day, so this
+ * is a plain count -- no ranges, no overlap arithmetic. Rejected and Expired
+ * rows are excluded: a day the receptionist refused was never taken.
+ *
+ * $excludeDate lets the submit path ask "what would the balance be without
+ * this date", because re-submitting a day the barber already holds is an
+ * update, not a second day.
+ *
+ * @return array{allowance:int, used:int, remaining:int, pending:int, approved:int, year:int}
+ */
+function barber_leave_balance(PDO $pdo, int $barberId, ?int $year = null, string $excludeDate = ''): array
+{
+    ensure_unavailability_requests_table($pdo);
+    $year = $year ?? (int)shop_now()->format('Y');
+    $allowance = shop_barber_annual_leave_days();
+
+    $stmt = $pdo->prepare(
+        "SELECT
+            COUNT(*) FILTER (WHERE status = 'Pending')::int AS pending,
+            COUNT(*) FILTER (WHERE status = 'Approved')::int AS approved
+         FROM barber_unavailability_requests
+         WHERE barber_id = :barber_id
+           AND EXTRACT(YEAR FROM request_date) = :year
+           AND status IN ('Pending', 'Approved')
+           AND (:exclude = '' OR request_date <> :exclude::date)"
+    );
+    $stmt->execute([
+        ':barber_id' => $barberId,
+        ':year' => $year,
+        ':exclude' => $excludeDate,
+    ]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+    $pending = (int)($row['pending'] ?? 0);
+    $approved = (int)($row['approved'] ?? 0);
+    $used = $pending + $approved;
+
+    return [
+        'allowance' => $allowance,
+        'used' => $used,
+        'remaining' => max(0, $allowance - $used),
+        'pending' => $pending,
+        'approved' => $approved,
+        'year' => $year,
+    ];
+}
+
 function expire_past_pending_leave_requests(PDO $pdo): int
 {
     ensure_unavailability_requests_table($pdo);

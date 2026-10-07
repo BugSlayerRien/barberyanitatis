@@ -105,6 +105,7 @@ navButtons.forEach((button) => {
     applyGlobalSearch();
     if (view === "barbers") {
       loadBarberUnavailabilityRequests();
+      loadLeaveBalances();
       // The leave calendar lives on this page now, so load it here rather than
       // with Live tracking where its markup used to sit.
       loadBarberLeaveCalendar();
@@ -1256,6 +1257,52 @@ async function loadOptions() {
   }
 }
 
+/**
+ * Every barber's paid leave, so the desk can see the year at a glance.
+ *
+ * Approving a day off was a one-click decision with no figure in front of it:
+ * nothing in the system counted a barber's days, and nothing capped them.
+ */
+async function loadLeaveBalances() {
+  const table = document.getElementById("leave-balance-table");
+  if (!table) return;
+
+  try {
+    const data = await postJson(apiUrl("barber_schedule.php"), { action: "leaveBalances" });
+    const rows = data.balances || [];
+    if (!rows.length) {
+      table.innerHTML = '<tbody><tr><td class="meta">No active barbers.</td></tr></tbody>';
+      return;
+    }
+
+    const body = rows
+      .map(function (row) {
+        const used = Number(row.used || 0);
+        const allowance = Number(row.allowance || 0);
+        const remaining = Number(row.remaining || 0);
+        const pending = Number(row.pending || 0);
+        // Nothing left is the case the receptionist must not miss: approving
+        // another day then puts the barber over the allowance.
+        const tone = remaining === 0
+          ? "status--danger"
+          : remaining <= 3
+            ? "status--warning"
+            : "status--info";
+        return "<tr><td><strong>" + escapeLeaveText(row.barberName) + "</strong></td>"
+          + "<td>" + used + " of " + allowance + "</td>"
+          + "<td>" + (pending > 0 ? pending + " awaiting approval" : "—") + "</td>"
+          + '<td><span class="status ' + tone + ' no-dot">' + remaining + " left</span></td></tr>";
+      })
+      .join("");
+
+    table.innerHTML =
+      "<thead><tr><th>Barber</th><th>Days used</th><th>Pending</th><th>Remaining</th></tr></thead>"
+      + "<tbody>" + body + "</tbody>";
+  } catch (error) {
+    table.innerHTML = '<tbody><tr><td class="meta">Could not load leave balances.</td></tr></tbody>';
+  }
+}
+
 async function loadBarberUnavailabilityRequests() {
   const list = document.getElementById("barber-unavailability-list");
   if (!list) return;
@@ -1276,10 +1323,18 @@ async function loadBarberUnavailabilityRequests() {
     rows.forEach((row) => {
       const card = document.createElement("div");
       card.className = "time-off-card";
+      // The note is written by the barber and was being interpolated raw.
+      const balance = row.leaveBalance || {};
+      const remaining = Number(balance.remaining ?? -1);
+      const allowance = Number(balance.allowance ?? 0);
+      const balanceLine = remaining >= 0
+        ? `<p class="meta">${remaining} of ${allowance} paid leave days left after this one.</p>`
+        : "";
       card.innerHTML = `
-        <h4>${row.barber_name ?? "Barber"}</h4>
-        <p><strong>Date</strong> · ${row.request_date}</p>
-        <p>${row.note ? `<strong>Note</strong> · ${row.note}` : "No note provided."}</p>
+        <h4>${escapeLeaveText(row.barber_name ?? "Barber")}</h4>
+        <p><strong>Date</strong> · ${escapeLeaveText(row.request_date)}</p>
+        <p>${row.note ? `<strong>Note</strong> · ${escapeLeaveText(row.note)}` : "No note provided."}</p>
+        ${balanceLine}
         <div class="row-wrap" style="margin-top: 8px;">
           <button class="btn primary" data-approve="${row.request_id}" type="button">Approve</button>
           <button class="btn secondary" data-reject="${row.request_id}" type="button">Reject</button>
@@ -1293,6 +1348,7 @@ async function loadBarberUnavailabilityRequests() {
         const id = Number(btn.getAttribute("data-approve"));
         await postJson(apiUrl("barber_schedule.php"), { action: "reviewRequest", requestID: id, decision: "Approved" });
         await loadBarberUnavailabilityRequests();
+        await loadLeaveBalances();
         if (state.leaveCalendar) {
           await loadBarberLeaveCalendar(state.leaveCalendar.year, state.leaveCalendar.month);
         }
@@ -1303,6 +1359,8 @@ async function loadBarberUnavailabilityRequests() {
         const id = Number(btn.getAttribute("data-reject"));
         await postJson(apiUrl("barber_schedule.php"), { action: "reviewRequest", requestID: id, decision: "Rejected" });
         await loadBarberUnavailabilityRequests();
+        // A rejection hands the day back, so the balance changes too.
+        await loadLeaveBalances();
       });
     });
   } catch (error) {
@@ -2062,9 +2120,15 @@ function renderRefunds(rows) {
       const action = pending
         ? `<button class="btn primary btn-refund-complete" data-id="${row.refundId}" type="button">Mark sent</button>`
         : `<span class="meta">Sent${row.completedBy ? ` by ${escapeRefundText(row.completedBy)}` : ""}</span>`;
+      // Three or more in a month is the threshold the API itself acts on, so
+      // the desk sees the same signal before paying anything out by hand.
+      const repeat = Number(row.recentCount || 0);
+      const repeatBadge = repeat >= 3
+        ? `<span class="status status--warning no-dot">${repeat} refunds in 30 days</span>`
+        : "";
       return `<tr>
         <td>#${Number(row.appointmentId)}</td>
-        <td>${escapeRefundText(row.customerName)}<div class="meta">${escapeRefundText(row.customerEmail)}</div></td>
+        <td>${escapeRefundText(row.customerName)} ${repeatBadge}<div class="meta">${escapeRefundText(row.customerEmail)}</div></td>
         <td>${phone}</td>
         <td>₱${Number(row.amount || 0).toFixed(2)}</td>
         <td>${escapeRefundText(row.reason)}</td>

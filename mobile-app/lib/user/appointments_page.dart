@@ -1238,6 +1238,12 @@ class _AppointmentsPageState extends State<AppointmentsPage>
     final hasPhone = isPaid ? await _resolveHasPhone() : true;
     if (!mounted) return;
 
+    // Ask the server what cancelling right now actually costs. Refunds close
+    // 24 hours out and pause after repeated use, and the customer should read
+    // that before confirming, not discover it when no money arrives.
+    final quote = isPaid ? await _fetchRefundQuote(appointment) : null;
+    if (!mounted) return;
+
     final result = await showModalBottomSheet<Map<String, String>>(
       context: context,
       isScrollControlled: true,
@@ -1245,7 +1251,10 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => _CancelAppointmentSheet(needsPhone: !hasPhone),
+      builder: (ctx) => _CancelAppointmentSheet(
+        needsPhone: !hasPhone,
+        refundQuote: quote,
+      ),
     );
 
     final reason = result?['reason'] ?? '';
@@ -1256,6 +1265,27 @@ class _AppointmentsPageState extends State<AppointmentsPage>
       reason,
       contactPhone: result?['contactPhone'],
     );
+  }
+
+  /// What cancelling this booking right now would refund, if anything.
+  ///
+  /// Returns null when the quote cannot be fetched; the sheet then says
+  /// nothing about refunds rather than guessing, and the server still has the
+  /// final say when the cancellation is submitted.
+  Future<Map<String, dynamic>?> _fetchRefundQuote(
+      Map<String, dynamic> appointment) async {
+    final appointmentId = appointment['appointmentID'] ?? appointment['appointment_id'];
+    if (appointmentId == null) return null;
+
+    try {
+      return await CustomerApi.postDecoded('booking.php', {
+        'action': 'refundQuote',
+        'appointmentID': appointmentId,
+        'userID': UserSession.userId,
+      });
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _cancelAppointment(
@@ -1569,7 +1599,11 @@ class _CancelAppointmentSheet extends StatefulWidget {
   /// than chased afterwards.
   final bool needsPhone;
 
-  const _CancelAppointmentSheet({this.needsPhone = false});
+  /// The server's answer on whether this cancellation is refundable. Null when
+  /// the booking was never paid, or the quote could not be fetched.
+  final Map<String, dynamic>? refundQuote;
+
+  const _CancelAppointmentSheet({this.needsPhone = false, this.refundQuote});
 
   @override
   State<_CancelAppointmentSheet> createState() =>
@@ -1597,6 +1631,74 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
     super.dispose();
   }
 
+  /// Whether the money comes back, said plainly before they confirm.
+  ///
+  /// The slot is always released -- that is worth more to the shop than
+  /// holding a customer to a booking they cannot attend -- so the refusal
+  /// cases make clear the cancellation itself still goes through.
+  Widget _buildRefundNotice(Map<String, dynamic> quote) {
+    final refundable = quote['refundable'] == true;
+    final amount = (quote['amount'] as num?)?.toDouble() ?? 0;
+    final reason = quote['reason']?.toString() ?? '';
+    final accent = refundable ? const Color(0xFF5FC98A) : const Color(0xFFE0A23C);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: accent.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                refundable ? Icons.payments_outlined : Icons.info_outline,
+                size: 16,
+                color: accent,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  refundable
+                      ? 'Refund of ₱${amount.toStringAsFixed(2)}'
+                      : 'No refund for this cancellation',
+                  style: TextStyle(
+                    color: accent,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(
+              reason,
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 11.5,
+                height: 1.4,
+              ),
+            ),
+          ],
+          if (refundable) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Sent by hand once the desk confirms it, to the number on your '
+              'account.',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   void _close(Map<String, String>? result) {
     // Drop focus before popping: tearing the focus tree down in the same frame
     // as the route is what trips the framework assertion.
@@ -1622,6 +1724,10 @@ class _CancelAppointmentSheetState extends State<_CancelAppointmentSheet> {
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: 16)),
+          if (widget.refundQuote != null) ...[
+            const SizedBox(height: 12),
+            _buildRefundNotice(widget.refundQuote!),
+          ],
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
             value: _selected,

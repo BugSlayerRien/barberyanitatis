@@ -419,7 +419,41 @@ class _PaymentPageState extends State<PaymentPage> {
               ),
             ),
 
-            const SizedBox(height: 20),
+            const SizedBox(height: 14),
+
+            // Said before the money is taken, not discovered at cancel time.
+            // Refunds are sent by hand at the counter, so a late cancellation
+            // costing the shop a chair it could not refill is not refunded.
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0x14E0A23C),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: const Color(0x66E0A23C)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Icon(Icons.info_outline, size: 15, color: Color(0xFFE0A23C)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Cancel at least 24 hours before your appointment to be '
+                      'refunded. Cancelling inside 24 hours still frees the '
+                      'slot, but is not refundable.',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 11.5,
+                        height: 1.4,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 18),
 
             Row(
               children: [

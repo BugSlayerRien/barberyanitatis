@@ -301,7 +301,14 @@ try {
             "SELECT r.refund_id, r.appointment_id, r.amount, r.reason, r.status,
                     r.contact_phone, r.created_at, r.completed_at, r.completed_by, r.note,
                     u.full_name, u.email, u.phone AS profile_phone,
-                    a.appointment_date, a.start_time
+                    a.appointment_date, a.start_time,
+                    -- How often this account has been refunded lately. The desk
+                    -- pays these out by hand, so a repeat pattern is worth
+                    -- seeing before handing over the money.
+                    (SELECT COUNT(*) FROM appointment_refunds h
+                      WHERE h.user_id = r.user_id
+                        AND h.status IN ('Pending', 'Completed')
+                        AND h.created_at >= NOW() - INTERVAL '30 days')::int AS recent_count
              FROM appointment_refunds r
              LEFT JOIN users u ON u.user_id = r.user_id
              LEFT JOIN appointments a ON a.appointment_id = r.appointment_id
@@ -331,6 +338,7 @@ try {
                     'completedAt' => (string)($row['completed_at'] ?? ''),
                     'completedBy' => (string)($row['completed_by'] ?? ''),
                     'note' => (string)($row['note'] ?? ''),
+                    'recentCount' => (int)($row['recent_count'] ?? 0),
                 ];
             }, $rows),
         ]);

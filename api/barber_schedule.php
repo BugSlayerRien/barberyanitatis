@@ -12,7 +12,7 @@ require_method('POST');
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? 'listMonth'));
 
-$allowed = ['listMonth', 'submitUnavailability', 'listRequests', 'reviewRequest', 'listApprovedLeaveMonth', 'listApprovedLeaveUpcoming'];
+$allowed = ['listMonth', 'submitUnavailability', 'listRequests', 'reviewRequest', 'listApprovedLeaveMonth', 'listApprovedLeaveUpcoming', 'leaveBalances'];
 if (!in_array($action, $allowed, true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
@@ -144,6 +144,10 @@ try {
             'closures' => $closures,
             'bookingWindowDays' => shop_booking_window_days(),
             'bookingWindowEnd' => shop_window_end_date(),
+            // So the calendar can show the balance without a second call.
+            'leaveBalance' => $barberID > 0
+                ? barber_leave_balance($pdo, $barberID, (int)substr($startDate, 0, 4))
+                : null,
         ]);
     }
 
@@ -158,6 +162,23 @@ try {
 
         if ($requestDate < shop_today()) {
             json_response(['error' => 'Cannot request unavailability for past dates'], 422);
+        }
+
+        // The date being submitted is excluded from the count: the INSERT below
+        // is an upsert, so re-sending a day the barber already holds is an edit
+        // of that row, not a second day off.
+        $balance = barber_leave_balance(
+            $pdo,
+            $barberID,
+            (int)substr($requestDate, 0, 4),
+            $requestDate
+        );
+        if ($balance['remaining'] < 1) {
+            json_response([
+                'error' => 'You have used all ' . $balance['allowance'] . ' paid leave days for '
+                    . $balance['year'] . '.',
+                'leaveBalance' => $balance,
+            ], 409);
         }
 
         $stmt = $pdo->prepare(
@@ -176,6 +197,7 @@ try {
         json_response([
             'message' => 'Unavailability request submitted for receptionist review.',
             'request' => $stmt->fetch(),
+            'leaveBalance' => barber_leave_balance($pdo, $barberID, (int)substr($requestDate, 0, 4)),
         ]);
     }
 
@@ -190,7 +212,42 @@ try {
              ORDER BY r.created_at ASC"
         );
         $stmt->execute([':status' => $status]);
-        json_response(['requests' => $stmt->fetchAll()]);
+        // The receptionist approving a day off could not see how many the
+        // barber had already taken, so the balance rides along with each row.
+        $requests = $stmt->fetchAll();
+        $balances = [];
+        foreach ($requests as $index => $request) {
+            $barberId = (int)($request['barber_id'] ?? 0);
+            $year = (int)substr((string)($request['request_date'] ?? ''), 0, 4);
+            $key = $barberId . '|' . $year;
+            if (!isset($balances[$key])) {
+                $balances[$key] = barber_leave_balance($pdo, $barberId, $year ?: null);
+            }
+            $requests[$index]['leaveBalance'] = $balances[$key];
+        }
+
+        json_response(['requests' => $requests]);
+    }
+
+    /** Every active barber's leave balance, for the receptionist overview. */
+    if ($action === 'leaveBalances') {
+        $year = (int)($input['year'] ?? 0);
+        $year = $year >= 2000 ? $year : (int)shop_now()->format('Y');
+
+        $barbers = $pdo->query(
+            'SELECT barber_id, full_name FROM barbers WHERE is_active = TRUE ORDER BY full_name'
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        $out = [];
+        foreach ($barbers as $barber) {
+            $balance = barber_leave_balance($pdo, (int)$barber['barber_id'], $year);
+            $out[] = [
+                'barberID' => (int)$barber['barber_id'],
+                'barberName' => (string)$barber['full_name'],
+            ] + $balance;
+        }
+
+        json_response(['year' => $year, 'balances' => $out]);
     }
 
     if ($action === 'reviewRequest') {
@@ -213,6 +270,25 @@ try {
         }
         if ((string)$row['request_date'] < shop_today()) {
             json_response(['error' => 'Request date has already passed'], 422);
+        }
+
+        // Pending already counts against the balance, so this can only fire on
+        // requests filed before the cap existed -- but approving those would
+        // put the barber over 24 paid days with nothing to stop it.
+        if ($decision === 'Approved') {
+            $balance = barber_leave_balance(
+                $pdo,
+                (int)$row['barber_id'],
+                (int)substr((string)$row['request_date'], 0, 4),
+                (string)$row['request_date']
+            );
+            if ($balance['remaining'] < 1) {
+                json_response([
+                    'error' => 'This barber has already used all ' . $balance['allowance']
+                        . ' paid leave days for ' . $balance['year'] . '.',
+                    'leaveBalance' => $balance,
+                ], 409);
+            }
         }
 
         $pdo->beginTransaction();
