@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'kiosk_api.dart';
 import 'kiosk_theme.dart';
+import '../user/widgets/barber_avatar.dart';
 import 'widgets/kiosk_scaffold.dart';
 
 /// Lets a walk-in find their own queue number again.
@@ -134,6 +135,7 @@ class _KioskQueueLookupPageState extends State<KioskQueueLookupPage> {
   Widget _matchCard(Map<String, dynamic> match) {
     final style = match['style']?.toString() ?? '';
     final barber = match['barber']?.toString() ?? '';
+    final barberImage = match['barberImage']?.toString() ?? '';
     final waitMinutes = (match['waitMinutes'] as num?)?.toInt() ?? 0;
     final inService = match['status']?.toString() == 'InProgress';
 
@@ -166,13 +168,30 @@ class _KioskQueueLookupPageState extends State<KioskQueueLookupPage> {
             ],
           ),
           const SizedBox(height: 6),
-          Text(
-            match['guestName']?.toString() ?? '',
-            style: const TextStyle(
-              color: KioskColors.textPrimary,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              if (barber.isNotEmpty) ...[
+                // Confirms who they are waiting for by face, not just by a name
+                // they may have read once on a screen.
+                BarberAvatar(
+                  profileImage: barberImage,
+                  barberName: barber,
+                  size: 38,
+                  background: KioskColors.panelAlt,
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  match['guestName']?.toString() ?? '',
+                  style: const TextStyle(
+                    color: KioskColors.textPrimary,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
           ),
           // What they picked is how two people with the same name tell their
           // own row apart — they chose it minutes ago.

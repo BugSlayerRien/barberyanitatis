@@ -252,7 +252,8 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
       final option = _options[i];
       // Splitting the party across barbers is a different shape of choice, so
       // it keeps its own labelled row rather than becoming a time chip.
-      if (option['type']?.toString() == 'split_barbers') {
+      final type = option['type']?.toString();
+      if (type == 'split_barbers' || type == 'split_waves') {
         splitIndexes.add(i);
         continue;
       }
@@ -345,6 +346,34 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
         ? Map<String, dynamic>.from(slots.first as Map)['slotTime']?.toString() ?? ''
         : '';
 
+    // A party bigger than the shop has barbers is seated in waves, so the one
+    // line "All at 10:00" would be wrong for it.
+    final waves = (option['waves'] as List<dynamic>? ?? [])
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final headline = waves.length > 1
+        ? waves
+            .map((w) =>
+                '${(w['count'] as num?)?.toInt() ?? 0} at ${formatTo12Hour(w['time']?.toString() ?? '')}')
+            .join(', ')
+        : 'All at ${formatTo12Hour(first)}, different barbers';
+
+    // Which barbers, not just "different" ones. The server has always sent the
+    // names; the card simply never said them.
+    final names = <String>[];
+    final nameMap = Map<String, dynamic>.from(option['barberNames'] as Map? ?? {});
+    for (final slot in slots) {
+      final id = Map<String, dynamic>.from(slot as Map)['barberID']?.toString() ?? '';
+      final name = nameMap[id]?.toString() ?? '';
+      if (name.isNotEmpty && !names.contains(name)) {
+        names.add(name);
+      }
+    }
+    final subtitle = waves.length > 1
+        ? 'Your group is bigger than the number of barbers, so it runs in '
+            '${waves.length} rounds'
+        : 'nobody waits for one barber';
+
     return InkWell(
       onTap: () => setState(() => _selectedOptionIndex = index),
       borderRadius: BorderRadius.circular(12),
@@ -368,7 +397,7 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'All at ${formatTo12Hour(first)}, different barbers',
+                    headline,
                     style: TextStyle(
                       color: selected ? Colors.black : Colors.white,
                       fontWeight: FontWeight.bold,
@@ -377,12 +406,22 @@ class _GroupBookingPageState extends State<GroupBookingPage> {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${_friendlyDate(option['slotDate']?.toString() ?? '')} · nobody waits for one barber',
+                    '${_friendlyDate(option['slotDate']?.toString() ?? '')} - $subtitle',
                     style: TextStyle(
                       color: selected ? Colors.black87 : Colors.white54,
                       fontSize: 12,
                     ),
                   ),
+                  if (names.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      names.join(', '),
+                      style: TextStyle(
+                        color: selected ? Colors.black87 : Colors.white70,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

@@ -993,6 +993,27 @@ function collapse_receptionist_appointments(PDO $pdo, array $rows): array
             $estimatedMinutes = count($members) * shop_appointment_duration_minutes();
         }
 
+        // A split group is seen by several barbers at the same hour, so the
+        // real duration is the wall-clock span, not the sum of the members'.
+        $spanMinutes = booking_group_span_minutes((string)$primary['time'], $displayEndTime);
+        if ($spanMinutes > 0) {
+            $estimatedMinutes = $spanMinutes;
+        }
+
+        // Every barber in the group, in member order. The card used to print
+        // the sequence-1 barber alone, so a receptionist looking at a four-way
+        // split had no way of knowing three other barbers were involved.
+        $barberNames = [];
+        $barberIds = [];
+        foreach ($members as $m) {
+            $memberBarber = trim((string)($m['barber'] ?? ''));
+            $memberBarberId = (int)($m['barber_id'] ?? 0);
+            if ($memberBarber !== '' && !in_array($memberBarber, $barberNames, true)) {
+                $barberNames[] = $memberBarber;
+                $barberIds[] = $memberBarberId;
+            }
+        }
+
         $out[] = [
             'appointment_id' => (int)$primary['appointment_id'],
             'barber_id' => (int)$primary['barber_id'],
@@ -1007,12 +1028,17 @@ function collapse_receptionist_appointments(PDO $pdo, array $rows): array
             'time' => (string)$primary['time'],
             'end_time' => $displayEndTime,
             'time_range' => format_time_range_12h((string)$primary['time'], $displayEndTime),
-            'duration' => ((int)count($members) * 60) . ' min',
+            'duration' => ($spanMinutes > 0 ? $spanMinutes : (int)count($members) * 60) . ' min',
             'estimated_minutes' => $estimatedMinutes,
             'checkin_time' => $checkinTime,
             'price' => $total,
             'status' => $status,
+            // Scalar barber stays the primary: the Flutter barber dashboard and
+            // the appointments table both read it.
             'barber' => (string)$primary['barber'],
+            'barbers' => $barberNames,
+            'barber_ids' => $barberIds,
+            'is_split' => count($barberNames) > 1,
             'people_count' => $peopleCount,
         ];
     }

@@ -74,7 +74,8 @@ try {
 
             $walkInFilter = barber_channel_filter_sql('walk_in');
             $barbersStmt = $pdo->query(
-                "SELECT barber_id, full_name, specialty, rating, years_experience, is_active, barber_channel
+                "SELECT barber_id, full_name, specialty, rating, years_experience, is_active,
+                        barber_channel, profile_image
                  FROM barbers
                  WHERE is_active = TRUE{$walkInFilter}
                  ORDER BY full_name"
@@ -98,6 +99,9 @@ try {
                     'barber_id' => $barberId,
                     'full_name' => $row['full_name'],
                     'specialty' => $row['specialty'],
+                    // A guest at the kiosk has never met these people. A name
+                    // and a wait time is not enough to choose between them.
+                    'profile_image' => (string)($row['profile_image'] ?? ''),
                     'rating' => $row['rating'],
                     'years_experience' => $row['years_experience'],
                     'waitMinutes' => $waitMinutes,
@@ -159,7 +163,8 @@ try {
                     wq.wait_time_minutes, wq.guest_name,
                     COALESCE(NULLIF(string_agg(DISTINCT s.service_name, ', ' ORDER BY s.service_name), ''), 'Walk-in') AS service,
                     MAX(wsd.special_instructions) AS instructions,
-                    b.full_name AS barber
+                    b.full_name AS barber,
+                    b.profile_image AS barber_image
              FROM walkin_queue wq
              LEFT JOIN walkin_service_details wsd ON wsd.queue_id = wq.queue_id
              LEFT JOIN services s ON s.service_id = wsd.service_id
@@ -168,7 +173,7 @@ try {
                AND wq.status IN ('Waiting', 'Assigned', 'InProgress')
                AND LOWER(TRIM(wq.guest_name)) LIKE LOWER(TRIM(:name)) || '%'
              GROUP BY wq.queue_id, wq.queue_number, wq.claim_code, wq.status,
-                      wq.wait_time_minutes, wq.guest_name, b.full_name
+                      wq.wait_time_minutes, wq.guest_name, b.full_name, b.profile_image
              ORDER BY wq.queue_id ASC"
         );
         $stmt->execute([':name' => $guestName]);
@@ -185,6 +190,7 @@ try {
                     'service' => (string)$row['service'],
                     'style' => kiosk_style_from_instructions((string)($row['instructions'] ?? '')),
                     'barber' => (string)($row['barber'] ?? ''),
+                    'barberImage' => (string)($row['barber_image'] ?? ''),
                     'waitMinutes' => (int)($row['wait_time_minutes'] ?? 0),
                 ];
             }, $rows),

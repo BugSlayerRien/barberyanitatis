@@ -8,6 +8,7 @@ import 'kiosk_payment_mode_page.dart';
 import 'kiosk_session.dart';
 import 'kiosk_theme.dart';
 import '../user/user_session.dart';
+import '../user/widgets/barber_avatar.dart';
 import 'widgets/kiosk_scaffold.dart';
 
 class KioskBarberPage extends StatefulWidget {
@@ -216,6 +217,10 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
                       name: 'First available',
                       subtitle: _firstAvailable?['waitLabel']?.toString() ?? 'Shortest wait',
                       specialty: 'Any barber',
+                      // Not a person, so no face and no initials -- "FA" in a
+                      // circle beside three real photos reads as a fourth
+                      // barber whose picture failed to load.
+                      icon: Icons.shuffle_rounded,
                       selected: _selectedBarberId == 0,
                       onTap: () => setState(() => _selectedBarberId = 0),
                     ),
@@ -233,6 +238,7 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
                           name: barber['full_name']?.toString() ?? 'Barber',
                           subtitle: barber['waitLabel']?.toString() ?? '',
                           specialty: barber['specialty']?.toString() ?? '',
+                          profileImage: BarberAvatar.imageFieldOf(barber),
                           queueCount: int.tryParse('${barber['queueCount']}') ?? 0,
                           selected: _selectedBarberId == id,
                           onTap: () => setState(() => _selectedBarberId = id),
@@ -254,6 +260,8 @@ class _BarberTile extends StatelessWidget {
   final String name;
   final String subtitle;
   final String specialty;
+  final String profileImage;
+  final IconData? icon;
   final int queueCount;
   final bool selected;
   final VoidCallback onTap;
@@ -262,6 +270,8 @@ class _BarberTile extends StatelessWidget {
     required this.name,
     required this.subtitle,
     required this.specialty,
+    this.profileImage = '',
+    this.icon,
     this.queueCount = 0,
     required this.selected,
     required this.onTap,
@@ -280,17 +290,39 @@ class _BarberTile extends StatelessWidget {
           decoration: kioskCardDecoration(selected: selected),
           child: Row(
             children: [
-              CircleAvatar(
-                backgroundColor: selected ? KioskColors.accent : KioskColors.panelAlt,
-                child: Text(
-                  name.isNotEmpty ? name[0].toUpperCase() : 'B',
-                  style: TextStyle(
-                    color: selected ? Colors.black : KioskColors.textPrimary,
-                    fontWeight: FontWeight.bold,
+              // Bigger than a list avatar on purpose: at a kiosk the guest is
+              // standing, at arm's length, choosing a stranger by face.
+              Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: selected ? KioskColors.accent : KioskColors.border,
+                    width: 2,
                   ),
                 ),
+                child: icon != null
+                    ? Container(
+                        width: 54,
+                        height: 54,
+                        decoration: const BoxDecoration(
+                          color: KioskColors.panelAlt,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          icon,
+                          color: selected ? KioskColors.accent : KioskColors.textMuted,
+                          size: 24,
+                        ),
+                      )
+                    : BarberAvatar(
+                        profileImage: profileImage,
+                        barberName: name,
+                        size: 54,
+                        background: KioskColors.panelAlt,
+                      ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

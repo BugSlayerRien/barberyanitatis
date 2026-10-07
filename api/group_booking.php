@@ -106,6 +106,26 @@ function booking_group_display_end_time(array $lastMember): string
 }
 
 /**
+ * Wall-clock minutes a group actually occupies, start of the first member to
+ * the end of the last.
+ *
+ * Summing each member's duration is only right when they run back to back. A
+ * split group is seen by several barbers at once, so the sum reported four
+ * people as 240 minutes of work that was over in 60 -- and that figure drives
+ * the receptionist's progress bar, which then crawled at a quarter speed.
+ */
+function booking_group_span_minutes(string $firstStart, string $lastEnd): int
+{
+    $start = strtotime('1970-01-01 ' . $firstStart . ' UTC');
+    $end = strtotime('1970-01-01 ' . $lastEnd . ' UTC');
+    if ($start === false || $end === false || $end <= $start) {
+        return 0;
+    }
+
+    return (int)round(($end - $start) / 60);
+}
+
+/**
  * @return string[]
  */
 function group_slot_time_order(?string $slotDate = null): array
@@ -246,6 +266,94 @@ function find_split_barber_option(array $barberMaps, string $slotDate, int $coun
                 'description' => 'Same start time (' . substr($time, 0, 5) . ') across ' . $count
                     . ' appointment barbers on ' . $slotDate . '.',
                 'slots' => $assignments,
+                'barberNames' => $barberNames,
+            ];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * A party larger than the barber count, seated in waves.
+ *
+ * find_split_barber_option() puts one person with each free barber at a single
+ * hour, so it can never serve more people than the shop has barbers -- a group
+ * of 5 against 4 barbers returned nothing and fell through to an unrelated
+ * "largest block today" offer. This keeps going into the next hour: four at
+ * 10:00, the fifth at 11:00, rather than refusing the booking outright.
+ *
+ * Returns null when the party still does not fit, which leaves the existing
+ * fallbacks untouched.
+ *
+ * @param array<int, array<string, string>> $barberMaps
+ * @param array<int, string> $barberNames
+ */
+function find_wave_barber_option(array $barberMaps, string $slotDate, int $count, array $barberNames): ?array
+{
+    $barberCount = count($barberMaps);
+    if ($barberCount <= 0 || $count <= $barberCount) {
+        return null;
+    }
+
+    $times = group_slot_time_order($slotDate);
+    // Never spread the party wider than it has to be: with 4 barbers, 5 people
+    // is 2 hours, not 5. A group trailing across the afternoon is not what
+    // anyone meant by "book us in together".
+    $maxWaves = (int)ceil($count / $barberCount);
+
+    foreach (array_keys($times) as $startIndex) {
+        $assignments = [];
+        $waves = [];
+
+        for ($offset = 0; $offset < $maxWaves; $offset++) {
+            if (!isset($times[$startIndex + $offset])) {
+                break;
+            }
+
+            $time = $times[$startIndex + $offset];
+            if (!shop_is_future_slot($slotDate, $time)) {
+                break;
+            }
+
+            $placedThisWave = 0;
+            foreach ($barberMaps as $barberId => $map) {
+                if (count($assignments) >= $count) {
+                    break;
+                }
+                if (is_slot_bookable_for_group($slotDate, $time, $map)) {
+                    $assignments[] = ['slotTime' => $time, 'barberID' => $barberId];
+                    $placedThisWave++;
+                }
+            }
+
+            if ($placedThisWave > 0) {
+                $waves[] = ['time' => $time, 'count' => $placedThisWave];
+            }
+
+            if (count($assignments) >= $count) {
+                break;
+            }
+        }
+
+        if (count($assignments) === $count) {
+            // The write path reads a sequence per slot; without it the member
+            // rows would be numbered by array order alone.
+            foreach ($assignments as $index => $assignment) {
+                $assignments[$index]['sequence'] = $index + 1;
+            }
+
+            $summary = [];
+            foreach ($waves as $wave) {
+                $summary[] = $wave['count'] . ' at ' . substr($wave['time'], 0, 5);
+            }
+
+            return [
+                'type' => 'split_waves',
+                'slotDate' => $slotDate,
+                'description' => implode(', ', $summary) . ' with different barbers on ' . $slotDate . '.',
+                'slots' => $assignments,
+                'waves' => $waves,
                 'barberNames' => $barberNames,
             ];
         }
@@ -437,6 +545,14 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
             $split = find_split_barber_option($maps, $splitDate, $peopleCount, $allNames);
             if ($split !== null) {
                 $options[] = $split;
+            } else {
+                // Too many people for one barber each; seat them in waves
+                // rather than letting the request fall through to an offer for
+                // a different day entirely.
+                $waveOption = find_wave_barber_option($maps, $splitDate, $peopleCount, $allNames);
+                if ($waveOption !== null) {
+                    $options[] = $waveOption;
+                }
             }
         }
     }
@@ -458,12 +574,8 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
         foreach (fetch_appointment_barber_ids($pdo) as $barberId) {
             $maps[$barberId] = fetch_barber_slot_map($pdo, $barberId, $slotDate);
         }
-        $split = find_split_barber_option(
-            $maps,
-            $slotDate,
-            $peopleCount,
-            $barberNames + fetch_barber_names($pdo, array_keys($maps))
-        );
+        $names = $barberNames + fetch_barber_names($pdo, array_keys($maps));
+        $split = find_split_barber_option($maps, $slotDate, $peopleCount, $names);
         if ($split !== null) {
             $options[] = $split;
 
@@ -475,10 +587,27 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
                 'requiresConfirmation' => true,
             ];
         }
+
+        $waveOption = find_wave_barber_option($maps, $slotDate, $peopleCount, $names);
+        if ($waveOption !== null) {
+            $options[] = $waveOption;
+
+            return [
+                'status' => 'split_barbers',
+                'reason' => 'Your group is larger than the number of barbers, so it is '
+                    . 'seated in two start times with different barbers.',
+                'options' => $options,
+                'requiresConfirmation' => true,
+            ];
+        }
     }
 
-    // Priority 4: largest consecutive block today.
-    $today = shop_today();
+    // Priority 4: largest consecutive block on the day in question.
+    //
+    // This used to read shop_today() whatever the customer had picked, so
+    // choosing a date the shop is closed produced an offer for today with no
+    // mention of the date actually asked for.
+    $today = $preferredDate ?? shop_today();
     $bestPartial = null;
     foreach ($barberIds as $barberId) {
         $map = fetch_barber_slot_map($pdo, $barberId, $today);
@@ -501,8 +630,8 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
                         $runs[0],
                         array_keys($runs[0])
                     ),
-                    'description' => 'Only ' . $size . ' consecutive hour(s) available today with '
-                        . ($barberNames[$barberId] ?? 'barber')
+                    'description' => 'Only ' . $size . ' consecutive hour(s) available on '
+                        . $today . ' with ' . ($barberNames[$barberId] ?? 'barber')
                         . ' (requested ' . $peopleCount . ').',
                 ];
                 break 2;
@@ -515,9 +644,11 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
 
         return [
             'status' => 'partial',
-            'reason' => 'Cannot fit all ' . $peopleCount . ' people in one consecutive block in the next '
-                . shop_booking_window_days() . ' days. '
-                . 'Largest block today has ' . $bestPartial['availableCount'] . ' hour(s). '
+            // Name the day actually scanned. With a date pinned only that one
+            // was searched, so claiming the whole window was a plain untruth.
+            'reason' => 'Cannot fit all ' . $peopleCount . ' people in one consecutive block '
+                . ($pinnedDate ? 'on ' . $preferredDate : 'in the next ' . shop_booking_window_days() . ' days')
+                . '. Largest block on ' . $today . ' has ' . $bestPartial['availableCount'] . ' hour(s). '
                 . 'Reduce group size or pick another day — partial groups are not auto-booked.',
             'options' => $options,
             'requiresConfirmation' => true,
@@ -526,8 +657,8 @@ function find_group_booking_options(PDO $pdo, int $preferredBarberId, int $peopl
 
     return [
         'status' => 'unavailable',
-        'reason' => 'No consecutive availability for ' . $peopleCount . ' people in the next '
-            . shop_booking_window_days() . ' days.',
+        'reason' => 'No consecutive availability for ' . $peopleCount . ' people '
+            . ($pinnedDate ? 'on ' . $preferredDate : 'in the next ' . shop_booking_window_days() . ' days') . '.',
         'options' => [],
         'requiresConfirmation' => true,
     ];

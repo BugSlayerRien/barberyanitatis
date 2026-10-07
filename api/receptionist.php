@@ -249,6 +249,11 @@ try {
                     'price' => $row['price'],
                     'status' => (string)$row['status'],
                     'barber' => (string)$row['barber'],
+                    // A split group has a different barber per member; the card
+                    // showed only the first and read as a single-barber booking.
+                    'barbers' => $row['barbers'] ?? [],
+                    'barber_ids' => $row['barber_ids'] ?? [],
+                    'is_split' => (bool)($row['is_split'] ?? false),
                 ];
             }, $appointments),
             'walkins' => array_map(function ($row) {

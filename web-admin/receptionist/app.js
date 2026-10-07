@@ -644,6 +644,8 @@ function buildTracking(appointments, walkins) {
         peopleCount: item.people_count || 1,
         service: item.service,
         barber: item.barber || "",
+        barbers: Array.isArray(item.barbers) ? item.barbers : [],
+        isSplit: item.is_split === true,
         schedule: displaySchedule,
         status: "PENDING PAYMENT",
         rawStatus: status,
@@ -701,6 +703,10 @@ function buildTracking(appointments, walkins) {
       peopleCount: item.people_count || 1,
       service: item.service,
       barber: item.barber || "",
+      // A split group is handled by several barbers at once; naming only the
+      // first read as an ordinary single-barber booking.
+      barbers: Array.isArray(item.barbers) ? item.barbers : [],
+      isSplit: item.is_split === true,
       schedule,
       status: displayStatus,
       rawStatus: status,
@@ -870,7 +876,11 @@ function renderAppointments(appointments) {
               <td>${item.duration}</td>
               <td>${item.price}</td>
               <td>${statusBadge(item.status)}</td>
-              <td>${item.barber}</td>
+              <td>${
+                item.is_split && Array.isArray(item.barbers) && item.barbers.length > 1
+                  ? item.barbers.join(", ")
+                  : item.barber
+              }</td>
             </tr>
           `,
         )
@@ -993,7 +1003,13 @@ function renderTracking(items, listId) {
           <p class="queue-service">${[item.service, item.style].filter(Boolean).join(" · ")}</p>
           ${item.notes ? `<p class="queue-schedule">Asked for: ${item.notes}</p>` : ""}
           ${item.schedule ? `<p class="queue-schedule">${item.schedule}</p>` : ""}
-          ${item.barber ? `<p class="queue-barber">Barber: ${item.barber}</p>` : ""}
+          ${
+            item.isSplit && item.barbers.length > 1
+              ? `<p class="queue-barber">Barbers: ${item.barbers.join(", ")}</p>`
+              : item.barber
+                ? `<p class="queue-barber">Barber: ${item.barber}</p>`
+                : ""
+          }
         </div>
         ${statusBadge(item.status)}
       </div>
