@@ -514,6 +514,10 @@ class FaceScanService {
     String? hairTexture,
     int hairLengthLevel = 1,
     bool forceRegenerate = false,
+    /// Set when the customer accepted the "this needs longer hair" warning.
+    /// The server then renders the cut at the length they actually have
+    /// instead of imagining more, which is what the dialog promised.
+    bool achievableToday = false,
   }) async {
     final response = await http
         .post(
@@ -530,6 +534,7 @@ class FaceScanService {
             if (hairTexture != null) 'hairTexture': hairTexture,
             'hairLengthLevel': hairLengthLevel,
             'forceRegenerate': forceRegenerate,
+            'achievableToday': achievableToday,
           }),
         )
         .timeout(const Duration(minutes: 15));

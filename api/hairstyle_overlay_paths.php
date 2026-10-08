@@ -63,7 +63,8 @@ function overlay_library_style_codes(?PDO $pdo = null): array
                 ORDER BY hv2.confidence_score DESC, hv2.variant_id ASC
                 LIMIT 1
              )
-             WHERE hs.is_active = TRUE"
+             WHERE hs.is_active = TRUE
+               AND COALESCE(hs.review_status, 'Published') = 'Published'"
         );
         $codes = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -415,8 +416,20 @@ function resolve_hairstyle_overlay_key_for_row(array $row): ?string
     return resolve_hairstyle_overlay_key((string)($row['style_name'] ?? ''));
 }
 
+/**
+ * Fill in bundled artwork for styles that ship with it.
+ *
+ * Only for styles with no artwork of their own. This used to overwrite the row
+ * unconditionally, so a style whose photos an admin had uploaded lost them to
+ * whichever bundled key its name happened to fuzzy-match -- the upload appeared
+ * to work and the customer saw someone else's haircut.
+ */
 function apply_hairstyle_overlay_paths(array $row): array
 {
+    if (hairstyle_row_has_uploaded_artwork($row)) {
+        return $row;
+    }
+
     $key = resolve_hairstyle_overlay_key_for_row($row);
     if ($key === null) {
         return $row;
@@ -429,6 +442,24 @@ function apply_hairstyle_overlay_paths(array $row): array
     $row['overlay_folder'] = overlay_folder_from_asset_path($paths['front']);
 
     return $row;
+}
+
+/**
+ * True when the row carries its own images rather than bundled assets.
+ *
+ * Bundled artwork is addressed as an `assets/...` Flutter path; anything else
+ * is an upload that must be served over the network and left alone.
+ */
+function hairstyle_row_has_uploaded_artwork(array $row): bool
+{
+    foreach (['front_view_url', 'side_view_url', 'back_view_url'] as $column) {
+        $value = trim((string)($row[$column] ?? ''));
+        if ($value === '' || str_starts_with($value, 'assets/')) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 function overlay_folder_from_asset_path(string $assetPath): ?string

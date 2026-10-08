@@ -18,6 +18,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../api/db.php';
 require_once __DIR__ . '/../api/replicate_helper.php';
+require_once __DIR__ . '/../api/hairstyle_authoring.php';
 
 $failures = 0;
 $checks = 0;
@@ -41,16 +42,28 @@ $minLengths = replicate_style_min_length();
 
 // --- every catalog style has its own prompt ---------------------------------
 $pdo = get_db_connection();
+ensure_hairstyle_authoring_columns($pdo);
 $catalog = $pdo->query(
-    'SELECT DISTINCT style_code, style_name FROM hairstyles ORDER BY style_name'
+    'SELECT DISTINCT style_code, style_name, ai_prompt FROM hairstyles ORDER BY style_name'
 )->fetchAll(PDO::FETCH_ASSOC);
 
 check('the catalog is readable', count($catalog) > 0);
 
 $unmatched = [];
 $fellBack = [];
+$authoredStyles = [];
 foreach ($catalog as $row) {
     $name = (string)$row['style_name'];
+
+    // A prompt stored with the style is as good as a built-in one -- that is
+    // the whole point of the authoring flow. Without this, every haircut added
+    // through the portal would fail a test that exists to catch styles nobody
+    // can preview, which is precisely the state it is no longer in.
+    if (trim((string)($row['ai_prompt'] ?? '')) !== '') {
+        $authoredStyles[] = $row;
+        continue;
+    }
+
     $key = replicate_resolve_style_key($name, (string)$row['style_code']);
     if ($key === null) {
         $unmatched[] = $name;
@@ -79,6 +92,48 @@ foreach ([
 ] as [$name, $expected]) {
     check("'{$name}' resolves to {$expected}", replicate_resolve_style_key($name) === $expected);
 }
+
+// --- authored prompts are held to the same standard -------------------------
+// Composed from a barber's answers rather than hand-written, so the rules that
+// matter are the ones a composer could get wrong: saying what happens at the
+// back, and not running so long that the detail competes with itself.
+$authoredNoBack = [];
+$authoredTooLong = [];
+$authoredTooShort = [];
+foreach ($authoredStyles as $row) {
+    $text = (string)$row['ai_prompt'];
+    if (preg_match('/\b(back|nape|neckline|collar)\b/i', $text) !== 1) {
+        $authoredNoBack[] = (string)$row['style_name'];
+    }
+    // Looser than the 60 of the built-ins: a composed prompt carries more
+    // fields by construction, and the barber's own wording is worth keeping.
+    if (str_word_count($text) > 80) {
+        $authoredTooLong[] = (string)$row['style_name'];
+    }
+    if (str_word_count($text) < 15) {
+        $authoredTooShort[] = (string)$row['style_name'];
+    }
+}
+
+check('authored prompts say what happens at the back'
+    . ($authoredNoBack ? ' (' . implode(', ', $authoredNoBack) . ')' : ''),
+    $authoredNoBack === []);
+check('authored prompts stay under 80 words'
+    . ($authoredTooLong ? ' (' . implode(', ', $authoredTooLong) . ')' : ''),
+    $authoredTooLong === []);
+check('authored prompts are not stubs'
+    . ($authoredTooShort ? ' (' . implode(', ', $authoredTooShort) . ')' : ''),
+    $authoredTooShort === []);
+
+// --- the composer produces something that passes those rules ----------------
+$composed = compose_hairstyle_prompt('Test Style', [
+    'sides' => 'sides faded short from the temple',
+    'top' => 'two inches left on top',
+]);
+check('the composer always states the back, even when not asked',
+    preg_match('/\b(back|nape|neckline|collar)\b/i', $composed) === 1);
+check('the composer leads with the style name',
+    str_starts_with($composed, 'test style:'));
 
 // --- the resolver admits defeat ---------------------------------------------
 check('an unknown style resolves to null, not a guess',

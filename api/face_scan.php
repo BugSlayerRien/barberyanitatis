@@ -7,6 +7,7 @@ require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/replicate_helper.php';
 require_once __DIR__ . '/ai_gemini_image_helper.php';
 require_once __DIR__ . '/ai_tryon_provider.php';
+require_once __DIR__ . '/hairstyle_authoring.php';
 require_once __DIR__ . '/ai_service_client.php';
 require_once __DIR__ . '/face_scan_attach.php';
 require_once __DIR__ . '/customer_auth.php';
@@ -638,8 +639,13 @@ try {
             }
         }
 
+        // Names ai_prompt/ai_min_length_level, so the lazy migration must
+        // have run before this SELECT.
+        schema_ensure_once('hairstyle_authoring', static function () use ($pdo): void {
+            ensure_hairstyle_authoring_columns($pdo);
+        });
         $variantStmt = $pdo->prepare(
-            'SELECT hs.style_name, hs.style_code
+            'SELECT hs.style_name, hs.style_code, hs.ai_prompt, hs.ai_min_length_level
              FROM hairstyle_variants hv
              JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
              WHERE hv.variant_id = :variant_id
@@ -670,6 +676,10 @@ try {
 
         $hairLengthLevel = (int)($input['hairLengthLevel'] ?? $sessionMeta['hair_length_level'] ?? 1);
         $hairLengthLevel = max(0, min(3, $hairLengthLevel));
+        // Set when the customer saw the "needs more length" warning and chose
+        // to continue: render the cut at the hair they have rather than
+        // imagining more, which is what they were promised in the dialog.
+        $achievableToday = !empty($input['achievableToday']);
 
         $absolute = ai_service_absolute_capture_paths([
             'front' => (string)$captures['front'],
@@ -695,6 +705,10 @@ try {
         $useCloudTryOn = ai_tryon_prefers_cloud_provider() || !ai_service_is_available();
 
         if (!$useCloudTryOn && ai_service_is_available()) {
+            // The sidecar does not take the achievable-today flag: with
+            // AI_TRYON_PROVIDER set to a cloud provider this branch never runs,
+            // and threading it would mean a Python signature change plus a
+            // second redeploy. Revisit if the sidecar is ever made primary.
             $generated = ai_service_generate_style(
                 $absolute,
                 $styleName,
@@ -729,7 +743,15 @@ try {
                 $styleName,
                 $styleCode !== '' ? $styleCode : null,
                 $hairLengthLevel,
-                $hairColorLabel
+                $hairColorLabel,
+                $achievableToday,
+                // A prompt authored with the style, when there is one. This is
+                // what lets a hairstyle added through the portal be previewed
+                // at all -- the built-in table cannot know about it.
+                $variant['ai_prompt'] ?? null,
+                isset($variant['ai_min_length_level'])
+                    ? (int)$variant['ai_min_length_level']
+                    : null
             );
             $provider = $generated['provider'] ?? $provider;
             if (!$generated['ok']) {

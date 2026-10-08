@@ -91,12 +91,28 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
               // handling the return itself -- normally AiCreditPurchasePage's
               // own poll resolves it first; see PaymentReturnGuard.
               if (_params['purpose'] == 'ai_credits') {
+                // Compare against what we held before, so the message states
+                // what actually happened. This used to claim "Previews added"
+                // on gateway status alone -- which is exactly what it said
+                // while the webhook was marking purchases Paid and granting
+                // nothing, leaving the customer to discover the stale count
+                // themselves.
+                final before =
+                    (UserSession.lastQuota?['remaining'] as num?)?.toInt() ?? 0;
                 final quota =
                     await FaceScanService.fetchQuotaStatus(userId: UserSession.userId);
                 if (quota != null) UserSession.lastQuota = quota;
                 if (!mounted) return;
+                final after = (quota?['remaining'] as num?)?.toInt() ?? before;
+                final gained = after - before;
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Previews added to your account.')),
+                  SnackBar(
+                    content: Text(
+                      gained > 0
+                          ? '+$gained previews added to your account.'
+                          : 'Payment received. Your previews will appear shortly.',
+                    ),
+                  ),
                 );
                 // Warm return: the purchase page (and the scan results page
                 // under it) are still on the stack -- pop past the purchase

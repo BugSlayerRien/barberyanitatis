@@ -10,6 +10,8 @@ import 'barber_selection_page.dart';
 import 'booking_guard.dart';
 import 'customer_navigation.dart';
 import 'dashboard_page.dart';
+import 'ai_face_scan_page.dart';
+import 'face_scan_results_page.dart';
 import 'hair_compatibility.dart';
 import 'profile_page.dart';
 import 'saved_haircuts_page.dart';
@@ -341,6 +343,106 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
   }
 
+  /// Try this style on, straight from the library.
+  ///
+  /// The library had no route into generation at all: a customer who found a
+  /// haircut here had to go back, start a scan, and hope the same style came
+  /// up in the recommendations. This reuses the completed scan when there is
+  /// one, so no second scan is needed.
+  ///
+  /// It hands off to FaceScanResultsPage rather than calling the generator
+  /// directly, because that page already owns the parts that matter: the
+  /// quota dialog, the texture confirmation, the length warning, and the
+  /// preview viewer.
+  Future<void> _generatePreviewForStyle() async {
+    final styleName = widget.style['name']?.toString() ??
+        widget.style['styleName']?.toString() ??
+        'this style';
+    final variantId = int.tryParse(widget.style['variantId']?.toString() ?? '') ??
+        int.tryParse(widget.style['variantID']?.toString() ?? '') ??
+        0;
+
+    if (variantId <= 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This haircut cannot be previewed yet.')),
+      );
+      return;
+    }
+
+    // The customer's own texture governs, so warn on a mismatch before a
+    // generation is spent. Same gate the booking path already uses.
+    final proceed = await HairCompatibility.confirmBookingIfNeeded(
+      context,
+      HairCompatibility.evaluateStyleMap(widget.style),
+    );
+    if (!mounted || !proceed) return;
+
+    final hasScan =
+        UserSession.hasCompletedScanResults && UserSession.restoreCompletedScan();
+    final captures = UserSession.capturedFaceImages;
+
+    if (!hasScan || captures == null || captures.isEmpty) {
+      if (!mounted) return;
+      final startScan = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text(
+            'Scan your face first',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: Text(
+            'An AI preview is generated on your own photo, so we need a face '
+            'scan before we can show you "$styleName".',
+            style: const TextStyle(color: Colors.white70, height: 1.45),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Not now', style: TextStyle(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+              ),
+              child: const Text('Start scan'),
+            ),
+          ],
+        ),
+      );
+      if (!mounted || startScan != true) return;
+
+      // Carry the style through the scan so it is pre-selected afterwards.
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => AiFaceScanPage(presetRecommendation: widget.style),
+        ),
+      );
+      return;
+    }
+
+    final scan = UserSession.lastScan ?? const <String, dynamic>{};
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => FaceScanResultsPage(
+          captures: Map<String, String>.from(captures),
+          faceShape: scan['faceShape']?.toString() ?? '',
+          hairTexture: scan['hairTexture']?.toString() ?? '',
+          hairLengthLevel: (scan['hairLengthLevel'] as num?)?.toInt() ?? 1,
+          hairLengthLabel: scan['hairLength']?.toString() ?? '',
+          analysisProvider: scan['analysisProvider']?.toString(),
+          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
+          noHairDetected: scan['noHairDetected'] == true,
+          hairColorLabel: scan['hairColor']?.toString(),
+          presetRecommendation: widget.style,
+        ),
+      ),
+    );
+  }
+
   Future<void> _toggleFavorite() async {
     final userId = UserSession.userId;
     final variantId = _getVariantId();
@@ -557,6 +659,18 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
                               const SizedBox(height: 12),
                               Row(
                                 children: [
+                                  OutlinedButton.icon(
+                                    onPressed: _generatePreviewForStyle,
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                      side: const BorderSide(color: Colors.white, width: 1),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 14, vertical: 10),
+                                    ),
+                                    icon: const Icon(Icons.auto_awesome, size: 18),
+                                    label: const Text('Try on'),
+                                  ),
+                                  const SizedBox(width: 10),
                                   ElevatedButton.icon(
                                     onPressed: _savingFavorite ? null : _toggleFavorite,
                                     style: ElevatedButton.styleFrom(

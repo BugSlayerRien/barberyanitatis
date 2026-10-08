@@ -32,6 +32,7 @@ try {
             'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active
              FROM hairstyles
                WHERE is_active = TRUE
+               AND COALESCE(review_status, \'Published\') = \'Published\'
              ORDER BY style_name'
         );
         $stmt->execute();
@@ -77,6 +78,7 @@ try {
                 LIMIT 1
              )
                  WHERE hs.is_active = TRUE
+                   AND COALESCE(hs.review_status, \'Published\') = \'Published\'
                  ' . $libraryIn . '
              ORDER BY hs.style_name'
         );
@@ -118,6 +120,7 @@ try {
                 LIMIT 1
              )
              WHERE hs.is_active = TRUE
+               AND COALESCE(hs.review_status, \'Published\') = \'Published\'
                AND (
                     LOWER(hs.style_name) LIKE LOWER(:q)
                     OR LOWER(COALESCE(hs.style_code, \'\')) LIKE LOWER(:q)

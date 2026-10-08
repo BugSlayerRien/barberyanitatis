@@ -208,5 +208,76 @@ function reconcile_pending_gateway_payments(PDO $pdo, int $maxChecks = 5): void
         error_log('Gateway reconcile skipped: ' . $e->getMessage());
     }
 
+    reconcile_pending_credit_purchases($pdo, $maxChecks);
+
     schema_cache_done('reconcile_pending_gateway_payments');
+}
+
+/**
+ * The same safety net, for AI credit purchases.
+ *
+ * The sweep above joins appointments, and a credit purchase has no appointment
+ * -- so bookings had a recovery path and purchases had none. A customer who
+ * took longer in GCash than the app's foreground poll lost the credits with
+ * nothing anywhere to notice.
+ */
+function reconcile_pending_credit_purchases(PDO $pdo, int $maxChecks = 5): void
+{
+    try {
+        require_once __DIR__ . '/ai_tryon_provider.php';
+        schema_ensure_once('ai_credit_columns', static function () use ($pdo): void {
+            ensure_ai_credit_columns($pdo);
+        });
+
+        $stmt = $pdo->prepare(
+            "SELECT i.intent_id, i.provider_ref, i.amount, i.method, i.status,
+                    i.user_id, i.credits
+             FROM appointment_payment_intents i
+             WHERE i.purpose = 'ai_credits'
+               AND i.user_id IS NOT NULL
+               AND i.provider_ref IS NOT NULL
+               AND i.provider_ref <> ''
+               AND i.created_at > NOW() - INTERVAL '3 days'
+               -- Not yet settled into a credit row. This is the real test: an
+               -- intent marked Paid with no payment row is exactly the state
+               -- the old webhook left behind, and it still owes credits.
+               AND NOT EXISTS (
+                   SELECT 1 FROM appointment_payments p
+                   WHERE p.transaction_ref = i.provider_ref
+                     AND p.purpose = 'ai_credits'
+               )
+             ORDER BY i.created_at DESC
+             LIMIT :limit"
+        );
+        $stmt->bindValue(':limit', $maxChecks, PDO::PARAM_INT);
+        $stmt->execute();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        foreach ($rows as $row) {
+            $providerRef = (string)$row['provider_ref'];
+            $resource = paymongo_reconcile_fetch_resource($providerRef);
+            if ($resource === null) {
+                continue;
+            }
+
+            $paid = in_array($resource['status'], ['paid', 'succeeded'], true);
+            if (!$paid && $resource['status'] === 'chargeable') {
+                $paid = paymongo_reconcile_capture_source($resource['raw']);
+            }
+
+            if (!$paid) {
+                continue;
+            }
+
+            // Hand it to the one settlement implementation rather than writing
+            // a credit row here, so there is still only one place that grants.
+            require_once __DIR__ . '/paymongo/paymongo_settlement.php';
+            paymongo_finalize_successful_payment($pdo, $providerRef, null);
+
+            error_log('Recovered AI credit purchase ' . $providerRef
+                . ' for user ' . (int)$row['user_id']);
+        }
+    } catch (Throwable $e) {
+        error_log('Credit reconcile skipped: ' . $e->getMessage());
+    }
 }

@@ -153,7 +153,10 @@ function gemini_generate_three_view_previews(
     string $styleName,
     ?string $styleCode = null,
     int $hairLengthLevel = 1,
-    string $hairColorLabel = ''
+    string $hairColorLabel = '',
+    bool $achievableToday = false,
+    ?string $dbPrompt = null,
+    ?int $dbMinLengthLevel = null
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
@@ -161,7 +164,8 @@ function gemini_generate_three_view_previews(
         }
     }
 
-    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel,
+        $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
     if (!$brief['ok']) {
         return ['ok' => false, 'images' => [], 'error' => $brief['error']];
     }

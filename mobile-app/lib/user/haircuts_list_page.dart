@@ -564,13 +564,22 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     );
   }
 
+  /// The image to draw for a style.
+  ///
+  /// The bundled asset was checked first and returned unconditionally, so a
+  /// stored URL could never win -- every library thumbnail was a built-in PNG
+  /// and an admin's upload was silently discarded. The style's own artwork now
+  /// takes precedence, with the bundled set as the fallback it was meant to be.
   String _previewPath(String raw, String fallback) {
-    if (fallback.startsWith('assets/')) return fallback;
     final trimmed = raw.trim();
-    if (trimmed.startsWith('assets/')) return trimmed;
-    final resolved = ApiConfig.resolveImageUrl(trimmed);
-    if (resolved.startsWith('assets/')) return resolved;
-    if (trimmed.isEmpty || trimmed.contains('/database/assets/')) return fallback;
+
+    if (trimmed.isNotEmpty && !trimmed.contains('/database/assets/')) {
+      if (trimmed.startsWith('assets/')) return trimmed;
+
+      final resolved = ApiConfig.resolveImageUrl(trimmed);
+      if (resolved.isNotEmpty) return resolved;
+    }
+
     return fallback;
   }
 
@@ -707,9 +716,20 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     return details.join('\n');
   }
 
+  /// Whether this style has a picture we can actually draw.
+  ///
+  /// This used to require artwork bundled in the app, which meant a haircut
+  /// added through the portal was filtered out of the library no matter how
+  /// complete its database row was -- a new style could only ever appear by
+  /// shipping a new build. An uploaded photo is just as displayable; it simply
+  /// arrives over the network instead of from the bundle.
   bool _hasDisplayableAssets(Map<String, dynamic> style) {
     final name = style['name']?.toString() ?? '';
-    return OverlayRegistry.hasDedicatedAssets(name);
+    if (OverlayRegistry.hasDedicatedAssets(name)) return true;
+
+    final image = style['image']?.toString().trim() ?? '';
+
+    return image.isNotEmpty && !image.startsWith('assets/');
   }
 
   String _normalizeTexture(String value) {

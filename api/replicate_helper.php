@@ -259,22 +259,24 @@ function replicate_resolve_style_key(string $styleName, ?string $styleCode = nul
  * The same twelve lines were copy-pasted into the Replicate, Grok and Gemini
  * entry points, which is how Gemini ended up without the eyeglasses clause.
  *
- * There is no longer a second, weaker "aspirational" prompt for styles the
- * measured hair is deemed too short for. That branch was gated on
- * hairLengthLevel, which defaults to 1 at four separate layers and where 1
- * means both "short hair" and "the measurement failed" -- so a failed scan
- * silently swapped the full identity-locked prompt for a much shorter one that
- * dropped the length hints and most of the identity lock. The full prompt is
- * strictly better, and it is now always what gets sent.
+ * The old "aspirational" branch is gone for good: it swapped the full
+ * identity-locked prompt for a much weaker one whenever the measured length
+ * fell short, and the measurement defaults to 1 on failure, so a failed scan
+ * silently degraded the prompt. $achievableToday is the opposite trade -- the
+ * full prompt is kept and a clause is ADDED telling the model to render the
+ * cut at the length the customer actually has, rather than imagining more.
  *
  * @return array{ok: bool, error: string, styleKey: string, styleDesc: string,
- *                basePrompt: string}
+ *                basePrompt: string, needsMoreLength: bool, minLengthLevel: int}
  */
 function replicate_style_brief(
     string $styleName,
     ?string $styleCode,
     int $hairLengthLevel,
-    string $hairColorLabel
+    string $hairColorLabel,
+    bool $achievableToday = false,
+    ?string $dbPrompt = null,
+    ?int $dbMinLengthLevel = null
 ): array {
     $blank = [
         'ok' => false,
@@ -282,29 +284,54 @@ function replicate_style_brief(
         'styleKey' => '',
         'styleDesc' => '',
         'basePrompt' => '',
+        'needsMoreLength' => false,
+        'minLengthLevel' => 1,
     ];
 
-    $styleKey = replicate_resolve_style_key($styleName, $styleCode);
-    if ($styleKey === null) {
-        $blank['error'] = 'No try-on prompt is defined for "' . $styleName . '". '
-            . 'Add it to replicate_style_prompts() before this style can be previewed.';
+    // A prompt stored with the style wins. This is what makes a hairstyle
+    // added through the portal usable: without it, a style absent from the
+    // built-in table could never be previewed, no matter how complete its
+    // database row was.
+    $authored = $dbPrompt !== null ? trim($dbPrompt) : '';
+    if ($authored !== '') {
+        $styleKey = replicate_resolve_style_key($styleName, $styleCode)
+            ?? replicate_normalize_style_key($styleName);
+        $styleDesc = $authored;
+        $minLevel = $dbMinLengthLevel ?? 1;
+    } else {
+        $styleKey = replicate_resolve_style_key($styleName, $styleCode);
+        if ($styleKey === null) {
+            $blank['error'] = 'No try-on prompt is defined for "' . $styleName . '". '
+                . 'Add one to this style in the admin portal, or to '
+                . 'replicate_style_prompts(), before it can be previewed.';
 
-        return $blank;
+            return $blank;
+        }
+
+        $prompts = replicate_style_prompts();
+        $styleDesc = $prompts[$styleKey];
+        $minLevel = $dbMinLengthLevel ?? (replicate_style_min_length()[$styleKey] ?? 1);
     }
-
-    $prompts = replicate_style_prompts();
-    $styleDesc = $prompts[$styleKey];
+    $needsMoreLength = $minLevel > $hairLengthLevel;
 
     $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
         . "that photo's original head turn and camera angle — do not make every frame face the camera.";
+
+    $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
+        . $profileNote;
+
+    if ($achievableToday && $needsMoreLength) {
+        $basePrompt .= replicate_achievable_today_clause();
+    }
 
     return [
         'ok' => true,
         'error' => '',
         'styleKey' => $styleKey,
         'styleDesc' => $styleDesc,
-        'basePrompt' => replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
-            . $profileNote,
+        'basePrompt' => $basePrompt,
+        'needsMoreLength' => $needsMoreLength,
+        'minLengthLevel' => $minLevel,
     ];
 }
 
@@ -313,6 +340,25 @@ function replicate_style_brief(
  * (Gemini and the Replicate fallback) so results stay consistent regardless of which
  * provider actually renders the image.
  */
+/**
+ * Render the cut at the hair the customer has, not the hair the style wants.
+ *
+ * The customer has already been told this style usually needs more length and
+ * chosen to continue, so the honest result is the closest version their barber
+ * could cut today -- not a picture of longer hair they do not have. The back is
+ * called out specifically because that is where an unconstrained model adds
+ * length first: a mullet or a two block on short hair grew a long back.
+ */
+function replicate_achievable_today_clause(): string
+{
+    return ' IMPORTANT — WORK WITH THE HAIR IN THE PHOTO: this person does not '
+        . 'currently have enough length for the full version of this style. Do NOT '
+        . 'add or extend hair anywhere, and especially not at the back or the nape. '
+        . 'Render the closest achievable version of this cut at their existing '
+        . 'length, keeping the shape and the fade pattern but shortening the style '
+        . 'to fit the hair actually present.';
+}
+
 function replicate_build_hair_only_prompt(
     string $styleDescription,
     int $hairLengthLevel = 1,
@@ -775,7 +821,10 @@ function replicate_generate_three_view_previews(
     string $styleName,
     ?string $styleCode = null,
     int $hairLengthLevel = 1,
-    string $hairColorLabel = ''
+    string $hairColorLabel = '',
+    bool $achievableToday = false,
+    ?string $dbPrompt = null,
+    ?int $dbMinLengthLevel = null
 ): array {
     foreach (['front', 'left', 'right'] as $angle) {
         if (empty($capturePaths[$angle])) {
@@ -783,7 +832,8 @@ function replicate_generate_three_view_previews(
         }
     }
 
-    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+    $brief = replicate_style_brief($styleName, $styleCode, $hairLengthLevel,
+        $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
     if (!$brief['ok']) {
         return ['ok' => false, 'images' => [], 'error' => $brief['error']];
     }

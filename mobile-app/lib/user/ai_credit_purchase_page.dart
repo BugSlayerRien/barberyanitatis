@@ -154,6 +154,17 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
       if (!mounted) return;
 
       if (outcome == null) {
+        // The deep link may already have arrived and been parked while this
+        // poll held the guard. Replaying it is the whole recovery path -- the
+        // booking flow does this (payment_page.dart) and this page did not, so
+        // any customer slower than the poll window lost the purchase with the
+        // screen still promising they would be brought back automatically.
+        final suppressed = PaymentReturnGuard.takeSuppressedLink();
+        if (suppressed != null) {
+          Navigator.of(context).pushNamed('/payment-result', arguments: suppressed);
+          return;
+        }
+
         setState(() => _statusLabel =
             "Still waiting for GCash. If you finish paying, you'll be brought back automatically.");
         return;

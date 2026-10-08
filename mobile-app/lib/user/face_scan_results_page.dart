@@ -13,6 +13,7 @@ import 'dashboard_page.dart';
 import 'profile_page.dart';
 import 'saved_haircuts_page.dart';
 import 'api_config.dart';
+import 'scanner/overlay_preview_image.dart';
 import 'scanner/scanner_layout.dart';
 import 'services/booking_slots_service.dart';
 import 'services/booking_draft_service.dart';
@@ -692,6 +693,60 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     return choice ?? _PreviewPromptChoice.cancel;
   }
 
+  /// True when this style normally needs more hair than the scan measured.
+  ///
+  /// The server attaches `min_length_level` to every ranked row, so this costs
+  /// no extra call -- the warning can be shown before a generation is spent
+  /// rather than after the customer sees a result they did not expect.
+  bool _needsMoreLength(Map<String, dynamic> style) {
+    final min = (style['min_length_level'] as num?)?.toInt();
+    if (min == null) return false;
+
+    return min > widget.hairLengthLevel;
+  }
+
+  /// Warns that a style wants longer hair, and offers to show it anyway.
+  ///
+  /// Deliberately a choice, never a filter. Hair length is the weakest signal
+  /// in the scan -- the lowest hair pixel measured against the chin, maxed
+  /// across three photos, defaulting to "short" whenever the measurement fails
+  /// -- so hiding styles on that basis would hide them wrongly and silently.
+  Future<bool> _confirmLongerHairStyle(String styleName) async {
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'This style usually needs longer hair',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          '"$styleName" is normally cut on longer hair than we measured today.\n\n'
+          'We can still show it — the preview will be the closest version your '
+          'barber could actually cut at your current length, not a picture of '
+          'longer hair.',
+          style: const TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Pick another', style: TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Show me anyway'),
+          ),
+        ],
+      ),
+    );
+
+    return proceed == true;
+  }
+
   Future<void> _onGeneratePreviewPressed(Map<String, dynamic> style) async {
     final variantId = int.tryParse(_variantKey(style)) ?? 0;
     if (variantId <= 0) return;
@@ -701,6 +756,14 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         'this style';
 
     final hasSavedPreview = _previewUrlsForVariant(variantId) != null;
+
+    // Ask before the generation prompt, not after: a customer who backs out
+    // here has spent nothing.
+    final stretches = _needsMoreLength(style);
+    if (stretches && !hasSavedPreview) {
+      final ok = await _confirmLongerHairStyle(styleName);
+      if (!mounted || !ok) return;
+    }
     final choice = await _promptPreviewAction(
       styleName: styleName,
       hasSavedPreview: hasSavedPreview,
@@ -714,7 +777,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     final forceRegenerate =
         choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
-    unawaited(_loadReplicatePreviewsForSelected(forceRegenerate: forceRegenerate));
+    unawaited(_loadReplicatePreviewsForSelected(
+      forceRegenerate: forceRegenerate,
+      achievableToday: stretches,
+    ));
   }
 
   /// Lets a customer who doesn't like the recommendations pick any library
@@ -942,7 +1008,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
-  Future<void> _loadReplicatePreviewsForSelected({bool forceRegenerate = false}) async {
+  Future<void> _loadReplicatePreviewsForSelected({
+    bool forceRegenerate = false,
+    bool achievableToday = false,
+  }) async {
     final variantId = _selectedVariantId;
     if (variantId == null || variantId <= 0) return;
 
@@ -987,6 +1056,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         hairTexture: _hairTexture,
         hairLengthLevel: widget.hairLengthLevel,
         forceRegenerate: forceRegenerate,
+        achievableToday: achievableToday,
       );
       if (!mounted) return;
       final urls = FaceScanService.previewUrlsFromResponse(data);
@@ -2196,6 +2266,57 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  /// The catalog photo for a recommendation.
+  ///
+  /// The URL was already on every row -- variant_ranking.php selects it and the
+  /// insight builders copy the whole row through -- and the tile simply never
+  /// read it, so customers picked a haircut from its name alone. Bundled
+  /// overlay art arrives as an `assets/` path; an admin-uploaded photo arrives
+  /// as a URL, so both branches are needed.
+  Widget _styleThumbnail(Map<String, dynamic> item) {
+    final raw = (item['front_view_url'] ??
+            item['frontViewUrl'] ??
+            item['image'] ??
+            '')
+        .toString()
+        .trim();
+
+    const fallback = Center(
+      child: Icon(Icons.content_cut, color: AppBrand.textMuted, size: 22),
+    );
+
+    Widget inner;
+    if (raw.isEmpty) {
+      inner = fallback;
+    } else if (raw.startsWith('assets/')) {
+      inner = OverlayPreviewImage(
+        assetPath: raw,
+        fit: BoxFit.contain,
+        errorWidget: fallback,
+      );
+    } else {
+      inner = Image.network(
+        ApiConfig.resolveImageUrl(raw),
+        fit: BoxFit.contain,
+        errorBuilder: (_, __, ___) => fallback,
+      );
+    }
+
+    return Container(
+      width: 58,
+      height: 58,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        // The overlay PNGs are transparent cut-outs, so they need a light
+        // backing or the hair disappears into the dark card.
+        color: raw.startsWith('assets/') ? Colors.white : const Color(0xFF1E1E1E),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Padding(padding: const EdgeInsets.all(3), child: inner),
+    );
+  }
+
   Widget _styleTile(Map<String, dynamic> item) {
     final variantId = _variantKey(item);
     final name = item['style_name']?.toString() ?? item['styleName']?.toString() ?? 'Style';
@@ -2234,12 +2355,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-                    Icon(
-                      expanded ? Icons.expand_less : Icons.expand_more,
-                      color: Colors.white54,
-                      size: 22,
-                    ),
-                    const SizedBox(width: 6),
+                    _styleThumbnail(item),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2268,6 +2385,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                           ],
                         ],
                       ),
+                    ),
+                    Icon(
+                      expanded ? Icons.expand_less : Icons.expand_more,
+                      color: Colors.white54,
+                      size: 22,
                     ),
                   ],
                 ),

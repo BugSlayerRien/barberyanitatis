@@ -80,13 +80,16 @@ function ai_tryon_generate_three_view_previews(
     string $styleName,
     ?string $styleCode,
     int $hairLengthLevel,
-    string $hairColorLabel
+    string $hairColorLabel,
+    bool $achievableToday = false,
+    ?string $dbPrompt = null,
+    ?int $dbMinLengthLevel = null
 ): array {
     $provider = ai_tryon_provider_name();
     $allowFallback = ai_tryon_allow_fallback();
 
     if ($provider === 'grok') {
-        $result = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+        $result = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
         if ($result['ok']) {
             $result['provider'] = 'grok';
             return $result;
@@ -95,7 +98,7 @@ function ai_tryon_generate_three_view_previews(
             . ($allowFallback ? ', trying fallbacks.' : ' — fallbacks disabled (AI_TRYON_PROVIDER=grok).'));
 
         if ($allowFallback && gemini_image_is_configured()) {
-            $fallback = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
             if ($fallback['ok']) {
                 $fallback['provider'] = 'gemini';
                 return $fallback;
@@ -104,7 +107,7 @@ function ai_tryon_generate_three_view_previews(
         }
 
         if ($allowFallback && replicate_is_configured()) {
-            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
             $fallback['provider'] = 'replicate';
             return $fallback;
         }
@@ -114,7 +117,7 @@ function ai_tryon_generate_three_view_previews(
     }
 
     if ($provider === 'gemini') {
-        $result = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+        $result = gemini_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
         if ($result['ok']) {
             $result['provider'] = 'gemini';
             return $result;
@@ -124,7 +127,7 @@ function ai_tryon_generate_three_view_previews(
             . ($allowFallback ? ', trying fallbacks.' : ' — fallbacks disabled (AI_TRYON_PROVIDER=gemini).'));
 
         if ($allowFallback && grok_image_is_configured()) {
-            $fallback = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback = grok_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
             if ($fallback['ok']) {
                 $fallback['provider'] = 'grok';
                 return $fallback;
@@ -133,7 +136,7 @@ function ai_tryon_generate_three_view_previews(
         }
 
         if ($allowFallback && replicate_is_configured()) {
-            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+            $fallback = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
             $fallback['provider'] = 'replicate';
             return $fallback;
         }
@@ -143,7 +146,7 @@ function ai_tryon_generate_three_view_previews(
     }
 
     if ($provider === 'replicate') {
-        $result = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel);
+        $result = replicate_generate_three_view_previews($capturePaths, $styleName, $styleCode, $hairLengthLevel, $hairColorLabel, $achievableToday, $dbPrompt, $dbMinLengthLevel);
         $result['provider'] = 'replicate';
         return $result;
     }

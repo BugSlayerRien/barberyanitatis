@@ -5,6 +5,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/admin_auth.php';
+require_once __DIR__ . '/hairstyle_authoring.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
 // ensure_top_pick_eligible_column() lives there because the recommendation
@@ -136,13 +137,19 @@ try {
         }
 
         if ($styleCode === '') {
-            $styleCode = 'HC-' . strtoupper(preg_replace('/[^A-Z0-9]+/', '-', $styleName) ?? 'STYLE');
-            $styleCode = substr($styleCode, 0, 20);
+            // Uppercase FIRST. Substituting before the case fold ran the
+            // negated class [^A-Z0-9] over lowercase input, so it deleted every
+            // lowercase letter: "Mid Fade" became HC-M-F-, and "Taper Fade" and
+            // "Textured Fringe" both became HC-T-F- -- a collision on a UNIQUE
+            // column that surfaced as a bare 500.
+            $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper($styleName)) ?? 'STYLE';
+            $styleCode = substr('HC-' . trim($slug, '-'), 0, 20);
         }
 
+        ensure_hairstyle_authoring_columns($pdo);
         $stmt = $pdo->prepare(
-            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible)
-             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible)
+            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level)
+             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible, :ai_prompt, :ai_min_length_level)
              RETURNING hairstyle_id'
         );
         $stmt->execute([
@@ -155,6 +162,10 @@ try {
             ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
             ':is_active' => (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0'),
             ':top_pick_eligible' => (int)$normalizeTopPickEligible($input['topPickEligible'] ?? null),
+            // Without a prompt the style can be saved but never previewed, so
+            // the field belongs on the same form as the name.
+            ':ai_prompt' => trim((string)($input['aiPrompt'] ?? '')) ?: null,
+            ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
         ]);
 
         json_response([
@@ -205,6 +216,86 @@ try {
     // Deactivation, not deletion: past scans and saved looks point at the
     // hairstyle, and a customer's history should not change shape because the
     // shop stopped offering the style.
+    /**
+     * Publish or reject a barber's submission.
+     *
+     * Publishing is refused while the style would not actually appear, because
+     * the alternative is what the panel found: a row that saves cleanly, looks
+     * fine in the list, and silently never reaches a customer.
+     */
+    if ($action === 'reviewHairstyle') {
+        ensure_hairstyle_authoring_columns($pdo);
+        $hairstyleID = (int)($input['hairstyleID'] ?? 0);
+        $decision = trim((string)($input['decision'] ?? ''));
+        if ($hairstyleID <= 0 || !in_array($decision, ['Published', 'Rejected'], true)) {
+            json_response(['error' => 'Invalid hairstyleID or decision'], 422);
+        }
+
+        $styleStmt = $pdo->prepare('SELECT * FROM hairstyles WHERE hairstyle_id = :id LIMIT 1');
+        $styleStmt->execute([':id' => $hairstyleID]);
+        $style = $styleStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$style) {
+            json_response(['error' => 'Hairstyle not found'], 404);
+        }
+
+        if ($decision === 'Published') {
+            $variantStmt = $pdo->prepare(
+                'SELECT * FROM hairstyle_variants WHERE hairstyle_id = :id'
+            );
+            $variantStmt->execute([':id' => $hairstyleID]);
+            $problems = hairstyle_readiness_problems($style, $variantStmt->fetchAll(PDO::FETCH_ASSOC));
+            if ($problems !== []) {
+                json_response([
+                    'error' => 'This style is not ready to publish.',
+                    'problems' => $problems,
+                ], 422);
+            }
+        }
+
+        $pdo->prepare('UPDATE hairstyles SET review_status = :status WHERE hairstyle_id = :id')
+            ->execute([':status' => $decision, ':id' => $hairstyleID]);
+
+        audit_log($pdo, 'HAIRSTYLE_' . strtoupper($decision), 'hairstyles', (string)$hairstyleID, [
+            'review_status' => $style['review_status'] ?? null,
+        ], [
+            'review_status' => $decision,
+            'style_name' => $style['style_name'] ?? '',
+        ], null);
+
+        json_response([
+            'message' => $decision === 'Published'
+                ? 'Hairstyle published — it is now visible in the app.'
+                : 'Hairstyle rejected.',
+            'reviewStatus' => $decision,
+        ]);
+    }
+
+    /** What still stands between this style and a customer seeing it. */
+    if ($action === 'readiness') {
+        ensure_hairstyle_authoring_columns($pdo);
+        $hairstyleID = (int)($input['hairstyleID'] ?? 0);
+        if ($hairstyleID <= 0) {
+            json_response(['error' => 'Invalid hairstyleID'], 422);
+        }
+
+        $styleStmt = $pdo->prepare('SELECT * FROM hairstyles WHERE hairstyle_id = :id LIMIT 1');
+        $styleStmt->execute([':id' => $hairstyleID]);
+        $style = $styleStmt->fetch(PDO::FETCH_ASSOC);
+        if (!$style) {
+            json_response(['error' => 'Hairstyle not found'], 404);
+        }
+
+        $variantStmt = $pdo->prepare('SELECT * FROM hairstyle_variants WHERE hairstyle_id = :id');
+        $variantStmt->execute([':id' => $hairstyleID]);
+        $problems = hairstyle_readiness_problems($style, $variantStmt->fetchAll(PDO::FETCH_ASSOC));
+
+        json_response([
+            'ready' => $problems === [],
+            'problems' => $problems,
+            'reviewStatus' => $style['review_status'] ?? 'Published',
+        ]);
+    }
+
     if ($action === 'delete' || $action === 'restore') {
         $hairstyleID = (int)($input['hairstyleID'] ?? $input['hairstyle_id'] ?? 0);
         if ($hairstyleID <= 0) {
@@ -243,7 +334,17 @@ try {
             json_response(['error' => 'hairstyleID is required'], 422);
         }
 
+        // Uploaded artwork wins over the bundled map. Without this the NOT
+        // NULL front_view_url was filled with '' for any style that is not one
+        // of the built-ins, which satisfies the constraint and fails every
+        // catalog check -- the style saved cleanly and was never visible.
         $paths = variant_overlay_paths_for_hairstyle($pdo, $hairstyleID);
+        foreach (['front' => 'frontViewUrl', 'side' => 'sideViewUrl', 'back' => 'backViewUrl'] as $slot => $field) {
+            $supplied = trim((string)($input[$field] ?? ''));
+            if ($supplied !== '') {
+                $paths[$slot] = $supplied;
+            }
+        }
         $stmt = $pdo->prepare(
             'INSERT INTO hairstyle_variants (
                 hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url, back_view_url,

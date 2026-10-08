@@ -4,6 +4,12 @@
 declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/ai_gemini_helper.php';
+// storage.php before the overlay paths: hairstyle_overlay_files_exist()
+// calls storage_exists() when a style carries uploaded artwork instead of
+// bundled assets, and without this include that function is undefined here
+// -- so an uploaded image verified on haircuts.php and silently failed on
+// the recommendation path.
+require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
 require_once __DIR__ . '/variant_ranking.php';
 require_once __DIR__ . '/customer_auth.php';

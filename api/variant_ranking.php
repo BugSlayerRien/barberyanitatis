@@ -5,7 +5,29 @@ declare(strict_types=1);
  * Shared hairstyle variant ranking (single source for ai_scan.php and haircuts.php).
  */
 
+/**
+ * The hair-length level this style normally needs, attached to every ranked
+ * row so the client can warn without a second round trip.
+ */
+function attach_style_min_length(array $row): array
+{
+    $key = replicate_resolve_style_key(
+        (string)($row['style_name'] ?? ''),
+        (string)($row['style_code'] ?? '')
+    );
+    $row['min_length_level'] = $key === null
+        ? 1
+        : (replicate_style_min_length()[$key] ?? 1);
+
+    return $row;
+}
+
 require_once __DIR__ . '/hairstyle_overlay_paths.php';
+// For replicate_style_min_length(): the app needs to know, per style, whether
+// it usually needs more length than the customer has -- so it can warn before
+// spending a generation rather than after.
+require_once __DIR__ . '/replicate_helper.php';
+require_once __DIR__ . '/hairstyle_authoring.php';
 
 function variant_matches_customer_texture(array $row, string $hairTexture): bool
 {
@@ -280,6 +302,9 @@ SELECT
 FROM hairstyle_variants hv
 JOIN hairstyles hs ON hv.hairstyle_id = hs.hairstyle_id
 WHERE hs.is_active = TRUE
+  -- A barber's submission is not the shop's catalogue until the owner
+  -- says so. COALESCE keeps pre-workflow rows visible.
+  AND COALESCE(hs.review_status, 'Published') = 'Published'
 {$libraryWhere}
 {$faceWhere}
 ORDER BY match_score DESC, hv.confidence_score DESC, hs.style_name
@@ -290,6 +315,7 @@ SQL;
     $stmt->execute($params);
 
     $rows = array_map('apply_hairstyle_overlay_paths', $stmt->fetchAll());
+    $rows = array_map('attach_style_min_length', $rows);
     if ($libraryOnly) {
         $rows = filter_overlay_library_rows($rows);
     }

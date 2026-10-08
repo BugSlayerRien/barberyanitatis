@@ -1441,6 +1441,9 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required Map<String, dynamic>? recommendation,
   }) {
     final overlayImageSet = _resolveOverlayImageSet(recommendation);
+    // No bundled cut-out for this style: draw nothing rather than another
+    // style's hair.
+    if (overlayImageSet == null) return const SizedBox.shrink();
     final frontImage = overlayImageSet.front;
     final frontAsset = _assetPath(frontImage);
 
@@ -1471,6 +1474,7 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     required double opacity,
   }) {
     final overlayImageSet = _resolveOverlayImageSet(recommendation);
+    if (overlayImageSet == null) return const SizedBox.shrink();
     final isRightTurn = yaw >= 0;
     // Asset filenames were swapped: use opposite file for head turn direction.
     final sideImage = isRightTurn ? overlayImageSet.left : overlayImageSet.right;
@@ -4922,7 +4926,15 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     return _overlayBaseOpacity * t;
   }
 
-  OverlayImageSet _resolveOverlayImageSet(Map<String, dynamic>? recommendation) {
+  /// The bundled cut-out drawn over the live camera, when one exists.
+  ///
+  /// Returns null for a style with no bundled artwork. It used to fall back to
+  /// OverlayRegistry.sample, which is Blowout Taper -- so a hairstyle added
+  /// through the portal would have shown a blowout on the camera while the
+  /// label said something else. Drawing nothing is the honest answer: the
+  /// live overlay needs a hand-cut transparent PNG plus per-style placement,
+  /// which an uploaded photo cannot provide.
+  OverlayImageSet? _resolveOverlayImageSet(Map<String, dynamic>? recommendation) {
     if (recommendation == null) {
       return OverlayRegistry.sample;
     }
@@ -4932,6 +4944,10 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     if (styleName.trim().isEmpty) {
       return OverlayRegistry.sample;
     }
+    if (!OverlayRegistry.hasDedicatedAssets(styleName)) {
+      return null;
+    }
+
     return OverlayRegistry.resolve(styleName);
   }
 
