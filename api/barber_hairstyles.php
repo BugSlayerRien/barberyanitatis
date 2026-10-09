@@ -18,6 +18,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/hairstyle_authoring.php';
 require_once __DIR__ . '/storage.php';
+require_once __DIR__ . '/schema_cache.php';
 
 require_method('POST');
 
@@ -219,6 +220,11 @@ try {
             ], null, audit_actor_system('Barber ' . $barber['name']));
 
             $pdo->commit();
+
+            // A submission arrives unpublished, so it changes nothing a
+            // customer sees yet -- but the catalog cache also keys on artwork
+            // existing, and three photos just landed in storage.
+            schema_cache_invalidate('overlay_library_catalog');
 
             json_response([
                 'message' => 'Submitted for the shop owner to review.',

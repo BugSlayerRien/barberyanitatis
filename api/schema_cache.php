@@ -117,3 +117,22 @@ function schema_cache_put_json(string $key, array $value): void
     $path = schema_cache_marker_path($key) . '.json';
     @file_put_contents($path, json_encode($value), LOCK_EX);
 }
+
+/**
+ * Drop a cached entry so the next read recomputes it.
+ *
+ * The haircut catalog is cached for five minutes, which is right for the
+ * customer's hot path and wrong immediately after an admin publishes a style:
+ * the style was saved, the portal said so, and the app kept showing the old
+ * catalog for up to five minutes. Every write that can change which styles
+ * qualify calls this, so publishing takes effect on the next request.
+ */
+function schema_cache_invalidate(string $key): void
+{
+    $marker = schema_cache_marker_path($key);
+    foreach ([$marker, $marker . '.json'] as $path) {
+        if (is_file($path)) {
+            @unlink($path);
+        }
+    }
+}

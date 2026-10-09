@@ -11,6 +11,7 @@ require_once __DIR__ . '/hairstyle_overlay_paths.php';
 // ensure_top_pick_eligible_column() lives there because the recommendation
 // ranking query needs the column too, not just this screen.
 require_once __DIR__ . '/variant_ranking.php';
+require_once __DIR__ . '/schema_cache.php';
 
 const ADMIN_OVERLAY_MAX_BYTES = 5 * 1024 * 1024;
 
@@ -55,6 +56,13 @@ try {
             SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
                    hs.gender, hs.difficulty, hs.maintenance, hs.category, hs.is_active,
                    hs.top_pick_eligible, hs.created_at,
+                   -- The review workflow was invisible here: a barber could
+                   -- submit a style and the owner had no row to act on.
+                   COALESCE(hs.review_status, 'Published') AS review_status,
+                   hs.ai_min_length_level,
+                   (hs.ai_prompt IS NOT NULL AND hs.ai_prompt <> '') AS has_prompt,
+                   hs.authored_by_barber_id,
+                   b.full_name AS authored_by_name,
                    COUNT(hv.variant_id) AS variant_count,
                    -- Textures live on the variants, not the style. Aggregate them
                    -- so the admin list can filter by texture without a second query.
@@ -64,9 +72,12 @@ try {
                    STRING_AGG(DISTINCT hv.hair_texture, ',') AS hair_textures
               FROM hairstyles hs
               LEFT JOIN hairstyle_variants hv ON hv.hairstyle_id = hs.hairstyle_id
+              LEFT JOIN barbers b ON b.barber_id = hs.authored_by_barber_id
              GROUP BY hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
                       hs.gender, hs.difficulty, hs.maintenance, hs.category, hs.is_active,
-                      hs.top_pick_eligible, hs.created_at
+                      hs.top_pick_eligible, hs.created_at, hs.review_status,
+                      hs.ai_min_length_level, hs.ai_prompt, hs.authored_by_barber_id,
+                      b.full_name
              ORDER BY hs.style_name
             SQL
         );
@@ -100,8 +111,14 @@ try {
         }
 
         $stmt = $pdo->prepare(
-            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, created_at
-             FROM hairstyles WHERE hairstyle_id = :id LIMIT 1'
+            "SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender,
+                    hs.difficulty, hs.maintenance, hs.category, hs.is_active, hs.top_pick_eligible,
+                    hs.created_at, hs.ai_prompt, hs.ai_min_length_level,
+                    COALESCE(hs.review_status, 'Published') AS review_status,
+                    hs.authored_by_barber_id, b.full_name AS authored_by_name
+             FROM hairstyles hs
+             LEFT JOIN barbers b ON b.barber_id = hs.authored_by_barber_id
+             WHERE hs.hairstyle_id = :id LIMIT 1"
         );
         $stmt->execute([':id' => $hairstyleID]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -168,6 +185,12 @@ try {
             ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
         ]);
 
+        // Which styles qualify for the customer catalog is cached for
+        // five minutes. Without this the portal would say "saved" and the
+        // app would keep serving the old catalog -- which at a live demo is
+        // indistinguishable from the save not working.
+        schema_cache_invalidate('overlay_library_catalog');
+
         json_response([
             'message' => 'Hairstyle created',
             'hairstyleID' => (int)$stmt->fetchColumn(),
@@ -210,6 +233,7 @@ try {
         $sql .= ' WHERE hairstyle_id = :id';
 
         $pdo->prepare($sql)->execute($params);
+        schema_cache_invalidate('overlay_library_catalog');
         json_response(['message' => 'Hairstyle updated']);
     }
 
@@ -261,6 +285,8 @@ try {
             'review_status' => $decision,
             'style_name' => $style['style_name'] ?? '',
         ], null);
+
+        schema_cache_invalidate('overlay_library_catalog');
 
         json_response([
             'message' => $decision === 'Published'
@@ -323,6 +349,7 @@ try {
             null
         );
 
+        schema_cache_invalidate('overlay_library_catalog');
         json_response(['message' => $activate ? 'Hairstyle reactivated' : 'Hairstyle deactivated']);
     }
 
@@ -369,6 +396,8 @@ try {
             ':confidence_score' => (float)($input['confidenceScore'] ?? 0.85),
         ]);
 
+        schema_cache_invalidate('overlay_library_catalog');
+
         json_response([
             'message' => 'Variant created',
             'variantID' => (int)$stmt->fetchColumn(),
@@ -402,6 +431,7 @@ try {
             ':variant_id' => $variantID,
         ]);
 
+        schema_cache_invalidate('overlay_library_catalog');
         json_response(['message' => 'Variant updated']);
     }
 
@@ -414,6 +444,7 @@ try {
         $pdo->prepare('DELETE FROM hairstyle_variants WHERE variant_id = :id')
             ->execute([':id' => $variantID]);
 
+        schema_cache_invalidate('overlay_library_catalog');
         json_response(['message' => 'Variant deleted']);
     }
 
@@ -490,10 +521,21 @@ function handle_upload_overlay(PDO $pdo): void
         json_response(['error' => 'File exceeds 5MB limit'], 422);
     }
 
+    // A bundled scanner overlay has to be a transparent PNG cut-out. A
+    // reference photo for a new style does not -- insisting on PNG meant an
+    // admin with three JPEGs of a haircut had no way to add it.
     $mime = mime_content_type($file['tmp_name']) ?: '';
-    if (!in_array($mime, ['image/png', 'image/x-png'], true)) {
-        json_response(['error' => 'Only PNG overlays are supported'], 422);
+    $allowedMimes = [
+        'image/png' => 'png',
+        'image/x-png' => 'png',
+        'image/jpeg' => 'jpg',
+        'image/jpg' => 'jpg',
+        'image/webp' => 'webp',
+    ];
+    if (!isset($allowedMimes[$mime])) {
+        json_response(['error' => 'Upload a PNG, JPEG or WebP image'], 422);
     }
+    $extension = $allowedMimes[$mime];
 
     $stmt = $pdo->prepare(
         'SELECT style_name, style_code FROM hairstyles WHERE hairstyle_id = :id LIMIT 1'
@@ -506,49 +548,61 @@ function handle_upload_overlay(PDO $pdo): void
         json_response(['error' => 'Hairstyle not found'], 404);
     }
 
-    $target = overlay_target_for_view($styleName, $view, $styleCode);
-    if ($target === null && $folderOverride === '') {
-        json_response([
-            'error' => 'No overlay mapping for this style. Set overlayFolder when uploading a new style.',
-        ], 422);
-    }
-
-    $folder = $target['folder'] ?? slugify_overlay_folder($folderOverride !== '' ? $folderOverride : $styleName);
-    $filename = $target['filename'] ?? sprintf(
-        '%s_%s.png',
-        slugify_overlay_folder($styleName),
-        match (strtolower($view)) {
-            'front' => 'front',
-            'left', 'side' => 'left',
-            'right', 'back' => 'right',
-            default => 'front',
-        }
-    );
+    $viewSlot = match (strtolower($view)) {
+        'front' => 'front',
+        'left', 'side' => 'left',
+        'right', 'back' => 'right',
+        default => 'front',
+    };
 
     $bytes = file_get_contents($file['tmp_name']);
     if ($bytes === false || $bytes === '') {
         json_response(['error' => 'Could not read overlay file'], 500);
     }
 
-    $dir = mobile_app_overlay_root() . '/' . $folder;
-    $dest = $dir . '/' . $filename;
-    $assetPath = 'assets/images/overlays/' . $folder . '/' . $filename;
-    $wroteLocal = false;
-    if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
-        if (storage_driver() !== 'supabase') {
-            json_response(['error' => 'Could not create overlay directory'], 500);
-        }
+    $target = overlay_target_for_view($styleName, $view, $styleCode);
+    $folder = null;
+
+    if ($target === null) {
+        // The style is not one of the bundled 24, so there is no overlay slot
+        // to replace. This used to be written to assets/images/overlays/<new
+        // folder>/ and that path stored as the URL -- but anything starting
+        // with `assets/` is a *bundled Flutter asset*, and a folder created on
+        // the server is in neither the APK nor pubspec.yaml. The upload
+        // succeeded and the picture could never load. Uploads for new styles
+        // belong in storage and are served over the network, the same place
+        // barber_hairstyles.php puts them.
+        $assetPath = sprintf(
+            'uploads/hairstyles/style_%d_%s_%d.%s',
+            $hairstyleID,
+            $viewSlot,
+            time(),
+            $extension
+        );
+        storage_put_bytes($assetPath, $bytes, $mime);
     } else {
-        $wroteLocal = file_put_contents($dest, $bytes) !== false;
-        if (!$wroteLocal && storage_driver() !== 'supabase') {
+        $folder = $target['folder'];
+        $filename = $target['filename'];
+        $dir = mobile_app_overlay_root() . '/' . $folder;
+        $dest = $dir . '/' . $filename;
+        $assetPath = 'assets/images/overlays/' . $folder . '/' . $filename;
+        $wroteLocal = false;
+        if (!is_dir($dir) && !mkdir($dir, 0775, true) && !is_dir($dir)) {
+            if (storage_driver() !== 'supabase') {
+                json_response(['error' => 'Could not create overlay directory'], 500);
+            }
+        } else {
+            $wroteLocal = file_put_contents($dest, $bytes) !== false;
+            if (!$wroteLocal && storage_driver() !== 'supabase') {
+                json_response(['error' => 'Could not save overlay file'], 500);
+            }
+        }
+
+        if (storage_driver() === 'supabase') {
+            storage_put_bytes($assetPath, $bytes, $mime);
+        } elseif (!$wroteLocal) {
             json_response(['error' => 'Could not save overlay file'], 500);
         }
-    }
-
-    if (storage_driver() === 'supabase') {
-        storage_put_bytes($assetPath, $bytes, 'image/png');
-    } elseif (!$wroteLocal) {
-        json_response(['error' => 'Could not save overlay file'], 500);
     }
     $column = match (strtolower($view)) {
         'front' => 'front_view_url',
@@ -574,10 +628,13 @@ function handle_upload_overlay(PDO $pdo): void
         }
     }
 
+    // Whether this style qualifies for the catalog may have just changed.
+    schema_cache_invalidate('overlay_library_catalog');
+
     json_response([
         'message' => 'Overlay uploaded',
         'path' => $assetPath,
         'folder' => $folder,
-        'filename' => $filename,
+        'filename' => basename($assetPath),
     ]);
 }

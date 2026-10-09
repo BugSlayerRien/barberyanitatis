@@ -276,6 +276,7 @@ SELECT
     COALESCE(hs.top_pick_eligible, TRUE) AS top_pick_eligible,
     hs.style_code,
     hs.description,
+    hs.ai_prompt,
     (
         hv.confidence_score
         + CASE
@@ -314,7 +315,7 @@ SQL;
     $stmt = $pdo->prepare($query);
     $stmt->execute($params);
 
-    $rows = array_map('apply_hairstyle_overlay_paths', $stmt->fetchAll());
+    $rows = array_map('annotate_variant_artwork', $stmt->fetchAll());
     $rows = array_map('attach_style_min_length', $rows);
     if ($libraryOnly) {
         $rows = filter_overlay_library_rows($rows);
@@ -323,6 +324,25 @@ SQL;
     $rows = apply_variant_ranking_adjustments($rows, $options);
 
     return array_slice($rows, 0, $limit);
+}
+
+/**
+ * Fill in bundled artwork, then say plainly whether there is any.
+ *
+ * A recommendation with no picture used to arrive looking identical to one
+ * with a picture, so the app fell back to a bundled overlay and drew another
+ * style's hair. `has_artwork` lets it draw a placeholder instead, and
+ * `previewable` says a generation would still work.
+ */
+function annotate_variant_artwork(array $row): array
+{
+    $previewable = hairstyle_is_previewable_without_artwork($row);
+    $row = apply_hairstyle_overlay_paths($row);
+    $row['has_artwork'] = trim((string)($row['front_view_url'] ?? '')) !== '';
+    $row['previewable'] = $previewable;
+    unset($row['ai_prompt']);
+
+    return $row;
 }
 
 /** @param array{boostStyleKeys?: list<string>, downrankVariantIds?: list<int>} $options */

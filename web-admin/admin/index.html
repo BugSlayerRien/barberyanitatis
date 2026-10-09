@@ -448,6 +448,15 @@
                   <option value="none">No variants</option>
                 </select>
               </label>
+              <label class="field">
+                <span>Review</span>
+                <select class="input" id="haircuts-review">
+                  <option value="">All</option>
+                  <option value="PendingReview">Pending review</option>
+                  <option value="Published">Published</option>
+                  <option value="Rejected">Rejected</option>
+                </select>
+              </label>
               <label class="field filter-toggle">
                 <span>Deactivated</span>
                 <span class="filter-toggle-row">
@@ -883,6 +892,13 @@
         </div>
         <div class="modal-body">
           <div id="haircut-editor-form" class="form-grid align-top"></div>
+          <!-- Why a style would not reach a customer, in the admin's words. A
+               style used to save cleanly, look fine in this list, and silently
+               never appear in the app. -->
+          <div id="haircut-readiness-section" hidden>
+            <div class="settings-block-label">Usable in the app</div>
+            <div id="haircut-readiness-body"></div>
+          </div>
           <div id="haircut-overlay-section" hidden>
             <div class="settings-block-label">Overlay PNGs (front / left / right)</div>
             <div class="form-grid align-top" id="haircut-overlay-uploads"></div>
@@ -897,6 +913,8 @@
         </div>
         <div class="modal-foot">
           <button class="btn secondary" id="haircut-editor-cancel" type="button">Cancel</button>
+          <button class="btn danger" id="haircut-editor-reject" type="button" hidden>Reject</button>
+          <button class="btn secondary" id="haircut-editor-publish" type="button" hidden>Publish</button>
           <button class="btn primary" id="haircut-editor-save" type="button">Save</button>
         </div>
       </div>

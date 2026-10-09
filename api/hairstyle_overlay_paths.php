@@ -36,25 +36,31 @@ function overlay_library_style_codes(?PDO $pdo = null): array
         return overlay_library_bundled_style_codes();
     }
 
+    require_once __DIR__ . '/schema_cache.php';
+
     static $memo = null;
-    if ($memo !== null) {
+    static $memoStamp = 0;
+    // Keyed on the cache file's timestamp, not just "have we computed this".
+    // Publishing a style deletes that file, and a bare memo would otherwise
+    // keep serving the pre-publish catalog for the life of the worker.
+    $stamp = overlay_library_catalog_stamp();
+    if ($memo !== null && $memoStamp === $stamp) {
         return $memo;
     }
-
-    require_once __DIR__ . '/schema_cache.php';
     // Each style costs up to three existence checks, and under
     // STORAGE_DRIVER=supabase every check is an HTTP request -- far too slow
     // to redo on each catalog read.
     $cached = schema_cache_get_json('overlay_library_catalog', 300);
     if ($cached !== null && isset($cached['codes']) && is_array($cached['codes'])) {
         $memo = array_values(array_filter($cached['codes'], 'is_string'));
+        $memoStamp = $stamp;
 
         return $memo;
     }
 
     try {
         $stmt = $pdo->query(
-            "SELECT hs.style_code, hs.style_name,
+            "SELECT hs.style_code, hs.style_name, hs.ai_prompt,
                     hv.front_view_url, hv.side_view_url, hv.back_view_url
              FROM hairstyles hs
              LEFT JOIN hairstyle_variants hv ON hv.variant_id = (
@@ -69,7 +75,11 @@ function overlay_library_style_codes(?PDO $pdo = null): array
         $codes = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $code = strtoupper(trim((string)($row['style_code'] ?? '')));
-            if ($code === '' || !hairstyle_overlay_files_exist($row)) {
+            if ($code === '') {
+                continue;
+            }
+            if (!hairstyle_overlay_files_exist($row)
+                && !hairstyle_is_previewable_without_artwork($row)) {
                 continue;
             }
             $codes[] = $code;
@@ -92,8 +102,42 @@ function overlay_library_style_codes(?PDO $pdo = null): array
 
     schema_cache_put_json('overlay_library_catalog', ['codes' => $codes]);
     $memo = $codes;
+    $memoStamp = overlay_library_catalog_stamp();
 
     return $memo;
+}
+
+/** Mtime of the cached catalog, or 0 when there is none. */
+function overlay_library_catalog_stamp(): int
+{
+    require_once __DIR__ . '/schema_cache.php';
+
+    return (int)@filemtime(schema_cache_marker_path('overlay_library_catalog') . '.json');
+}
+
+/**
+ * Whether a style can be shown even though it has no photographs.
+ *
+ * The catalog used to require three resolvable images, which is the right gate
+ * for the live camera overlay and the wrong one for the library: a haircut the
+ * barber has described well enough to generate is a haircut the shop can cut.
+ * Demanding artwork meant a style added through the portal stayed invisible
+ * until someone uploaded three files -- and the panel's own addition never
+ * appeared at all. The app draws a placeholder tile for these; see
+ * `has_artwork` on the rows returned by haircuts.php.
+ */
+function hairstyle_is_previewable_without_artwork(array $row): bool
+{
+    // Rows travel through several stages -- ranked, annotated, normalized --
+    // and the prompt is dropped once the flag has been derived, because the
+    // customer has no business reading what the image model is told. Trusting
+    // the flag when it is there keeps every later stage honest; deriving it
+    // from a row whose prompt was already stripped would silently say "no".
+    if (array_key_exists('previewable', $row)) {
+        return (bool)$row['previewable'];
+    }
+
+    return trim((string)($row['ai_prompt'] ?? '')) !== '';
 }
 
 function overlay_library_catalog_size(?PDO $pdo = null): int
@@ -225,8 +269,10 @@ function is_overlay_library_row(array $row, ?array $allowedCodes = null): bool
         return true;
     }
 
-    // Not in the catalog: admit it only if its own artwork is there.
-    if (hairstyle_overlay_files_exist($row)) {
+    // Not in the catalog: admit it if its own artwork is there, or if it can
+    // at least be generated -- a described style with no photos yet shows as a
+    // placeholder rather than not at all.
+    if (hairstyle_overlay_files_exist($row) || hairstyle_is_previewable_without_artwork($row)) {
         return true;
     }
 

@@ -41,6 +41,7 @@ echo "Hairstyle publishing checks\n";
 
 $pdo = get_db_connection();
 ensure_hairstyle_authoring_columns($pdo);
+$codes = overlay_library_style_codes($pdo);
 
 // --- the composer ------------------------------------------------------------
 $prompt = compose_hairstyle_prompt('Pineapple', [
@@ -165,6 +166,71 @@ check('an uploaded photo survives the overlay mapping',
 $bundled = apply_hairstyle_overlay_paths(['style_name' => 'Buzz Cut']);
 check('a style with no artwork still gets the bundled set',
     str_starts_with((string)($bundled['front_view_url'] ?? ''), 'assets/'));
+
+// --- a described style reaches the library without photographs ---------------
+// This is the gate the panel's own addition died on. Its row saved, its prompt
+// was there, and the catalog still rejected it because three images did not
+// resolve -- so it never appeared in the library at all.
+$described = [
+    'style_code' => 'HC-TEST-DESCRIBED',
+    'style_name' => 'Totally Made Up Style',
+    'ai_prompt' => $prompt,
+    'front_view_url' => '',
+    'side_view_url' => '',
+    'back_view_url' => '',
+];
+check('a described style with no artwork is previewable',
+    hairstyle_is_previewable_without_artwork($described));
+check('and the library admits it', is_overlay_library_row($described, $codes ?? []));
+
+$bare = $described;
+$bare['ai_prompt'] = '';
+check('a style with neither prompt nor artwork is still rejected',
+    !is_overlay_library_row($bare, ['HC-SOMETHING-ELSE']));
+
+// Rows are stripped of the prompt once the flag is derived, because the
+// customer has no business reading it. Every later stage reads the flag.
+$annotated = $described;
+unset($annotated['ai_prompt']);
+$annotated['previewable'] = true;
+check('previewability survives the prompt being stripped',
+    hairstyle_is_previewable_without_artwork($annotated));
+$annotatedFalse = $annotated;
+$annotatedFalse['previewable'] = false;
+check('and a false flag is respected rather than re-derived',
+    !hairstyle_is_previewable_without_artwork($annotatedFalse));
+
+// --- the catalog cache must not outlive a publish ----------------------------
+require_once __DIR__ . '/../api/schema_cache.php';
+$cachePath = schema_cache_marker_path('overlay_library_catalog') . '.json';
+schema_cache_put_json('overlay_library_catalog', ['codes' => ['HC-STALE']]);
+check('the catalog can be cached', is_file($cachePath));
+schema_cache_invalidate('overlay_library_catalog');
+check('and invalidating it removes the cache', !is_file($cachePath));
+
+// --- uploads for a new style must not pose as bundled assets -----------------
+// handle_upload_overlay() used to write assets/images/overlays/<new folder>/
+// and store that as the URL. Anything starting with assets/ is a *bundled*
+// Flutter asset: a folder created on the server is in neither the APK nor
+// pubspec.yaml, so the upload succeeded and the picture could never load.
+check('an unmapped style has no bundled overlay slot',
+    overlay_target_for_view('Totally Made Up Style', 'front', 'HC-TEST-DESCRIBED') === null);
+check('a bundled style still has one',
+    overlay_target_for_view('Buzz Cut', 'front', 'HC-BUZZ-CUT') !== null);
+
+$uploadSource = (string)file_get_contents(__DIR__ . '/../api/admin_hairstyles.php');
+check('the upload handler writes unmapped styles to network storage',
+    str_contains($uploadSource, 'uploads/hairstyles/style_%d_%s_%d.%s'));
+check('and it accepts a photograph, not only a cut-out PNG',
+    str_contains($uploadSource, 'image/jpeg'));
+
+// --- the portal can see the review workflow ----------------------------------
+// It could not: the list query selected neither review_status nor the prompt,
+// so a barber could submit a style and the owner had no row to act on.
+check('the admin list exposes review status',
+    str_contains($uploadSource, 'AS review_status'));
+check('and whether a prompt exists', str_contains($uploadSource, 'AS has_prompt'));
+check('and who submitted it', str_contains($uploadSource, 'AS authored_by_name'));
 
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

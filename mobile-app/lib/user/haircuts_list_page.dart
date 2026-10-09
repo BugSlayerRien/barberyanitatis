@@ -6,20 +6,15 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'app_brand.dart';
 import 'package:http/http.dart' as http;
-import 'ai_funnel_service.dart';
-import 'barber_selection_page.dart';
-import 'booking_guard.dart';
 import 'customer_navigation.dart';
 import 'hair_compatibility.dart';
 import 'saved_haircuts_page.dart';
-import 'suggested_appointment_page.dart';
 import 'user_session.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
-import 'services/booking_draft_service.dart';
-import 'services/booking_slots_service.dart';
+import 'services/style_booking_launcher.dart';
 import 'ai_face_scan_page.dart';
 import 'hairstyle_detail_page.dart';
 import 'profile_page.dart';
@@ -36,8 +31,6 @@ class HaircutsListPage extends StatefulWidget {
 class _HaircutsListPageState extends State<HaircutsListPage> {
   final Map<String, Future<Uint8List>> _webImageCache = {};
   final TextEditingController _searchController = TextEditingController();
-  static const String _librarySampleHairFront =
-      'assets/images/overlays/blowout_taper/blowout_taper_front.png';
 
   List<Map<String, dynamic>> _allStyles = [];
   List<Map<String, dynamic>> _searchResults = [];
@@ -433,10 +426,43 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     );
   }
 
+  /// Stands in for a haircut that has no photograph yet.
+  ///
+  /// The alternative was a bundled sample image, which told the customer this
+  /// is what the cut looks like when it was really a different cut entirely.
+  Widget _artworkPlaceholder(String styleName) {
+    return Container(
+      color: const Color(0xFFF2F2F2),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.content_cut, size: 30, color: Color(0xFF9E9E9E)),
+          const SizedBox(height: 8),
+          Text(
+            styleName,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              color: Color(0xFF616161),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Photo coming soon',
+            style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 10),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _hairStyleCard(BuildContext context, Map<String, dynamic> style) {
-    final previewImage = style['image']?.toString().trim().isNotEmpty == true
-        ? style['image']?.toString() ?? ''
-        : _librarySampleHairFront;
+    final styleName = style['name']?.toString() ?? 'Style';
+    final previewImage = style['image']?.toString().trim() ?? '';
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -467,19 +493,20 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
                   fit: StackFit.expand,
                   children: [
                     Container(color: Colors.white),
-                    previewImage.startsWith('assets/')
-                        ? OverlayPreviewImage(assetPath: previewImage, fit: BoxFit.contain)
-                        : Image.network(
-                            previewImage,
-                            fit: BoxFit.contain,
-                            filterQuality: FilterQuality.high,
-                            errorBuilder: (context, error, stackTrace) {
-                              return OverlayPreviewImage(
-                                assetPath: _librarySampleHairFront,
-                                fit: BoxFit.contain,
-                              );
-                            },
-                          ),
+                    if (previewImage.isEmpty)
+                      _artworkPlaceholder(styleName)
+                    else if (previewImage.startsWith('assets/'))
+                      OverlayPreviewImage(assetPath: previewImage, fit: BoxFit.contain)
+                    else
+                      Image.network(
+                        previewImage,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                        // A broken URL used to fall back to the sample hair,
+                        // which is a different haircut. Say nothing instead.
+                        errorBuilder: (context, error, stackTrace) =>
+                            _artworkPlaceholder(styleName),
+                      ),
                     Container(
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
@@ -587,15 +614,24 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     final confidence = double.tryParse(variant['confidence_score']?.toString() ?? '') ?? 0.0;
     final hairTexture = _normalizeTexture((variant['hair_texture'] ?? '').toString());
     final displayName = variant['style_name']?.toString().trim() ?? 'Style';
-    final normalizedStyleName = OverlayRegistry.normalizeStyleName(displayName);
-    final overlay = OverlayRegistry.resolve(displayName);
+    // OverlayRegistry.resolve() answers `sample` -- Blowout Taper -- for a name
+    // it does not know, so using it as a blanket fallback dressed every new
+    // style in another cut's hair. Only styles that really ship with artwork
+    // get the bundled set; the rest fall back to nothing and the card draws a
+    // placeholder, which is honest rather than confidently wrong.
+    final hasBundledArt = OverlayRegistry.hasDedicatedAssets(displayName);
+    final overlay = hasBundledArt ? OverlayRegistry.resolve(displayName) : null;
     final frontRaw = variant['front_view_url']?.toString() ?? variant['frontViewUrl']?.toString() ?? '';
     final sideRaw = variant['side_view_url']?.toString() ?? variant['sideViewUrl']?.toString() ?? '';
     final backRaw = variant['back_view_url']?.toString() ?? variant['backViewUrl']?.toString() ?? '';
-    final front = _previewPath(frontRaw, overlay.front);
-    final side = _previewPath(sideRaw, overlay.left);
-    final back = _previewPath(backRaw, overlay.right);
+    final front = _previewPath(frontRaw, overlay?.front ?? '');
+    final side = _previewPath(sideRaw, overlay?.left ?? '');
+    final back = _previewPath(backRaw, overlay?.right ?? '');
     return {
+      // The server decides both of these: whether there is a real picture, and
+      // whether a preview could still be generated without one.
+      'hasArtwork': front.isNotEmpty,
+      'previewable': variant['previewable'] == true,
       'name': displayName.isNotEmpty ? displayName : 'Style',
       'description': (variant['description']?.toString().trim().isNotEmpty ?? false)
           ? variant['description'].toString().trim()
@@ -728,8 +764,13 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     if (OverlayRegistry.hasDedicatedAssets(name)) return true;
 
     final image = style['image']?.toString().trim() ?? '';
+    if (image.isNotEmpty && !image.startsWith('assets/')) return true;
 
-    return image.isNotEmpty && !image.startsWith('assets/');
+    // No picture of its own and none bundled. A haircut the barber has
+    // described well enough to generate is still a haircut the shop can cut,
+    // so it belongs in the library with a placeholder -- hiding it is how the
+    // panel's own addition came to be invisible.
+    return style['previewable'] == true;
   }
 
   String _normalizeTexture(String value) {
@@ -748,98 +789,8 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     }
   }
 
-  Future<void> _useStyleDirectly(BuildContext context, Map<String, dynamic> style) async {
-    final variantId = int.tryParse(style['variantId']?.toString() ?? '') ??
-        int.tryParse(style['variantID']?.toString() ?? '');
-    if (variantId == null || variantId <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('This haircut cannot be booked yet.')),
-      );
-      return;
-    }
-
-    final compat = HairCompatibility.evaluateStyleMap(style);
-    final mayProceed =
-        await HairCompatibility.confirmBookingIfNeeded(context, compat);
-    if (!mayProceed || !context.mounted) {
-      return;
-    }
-
-    final userId = UserSession.userId;
-    if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please log in again.')),
-      );
-      return;
-    }
-
-    if (await BookingGuard.hasActiveAppointment(userId: userId)) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You already have an active appointment.')),
-      );
-      openCustomerTab(context, CustomerTab.appointments);
-      return;
-    }
-
-    if (!context.mounted) return;
-
-    UserSession.selectedVariantId = variantId;
-    UserSession.selectedStyleName = style['name']?.toString();
-    UserSession.selectedEstimatedMinutes =
-        int.tryParse(style['estimatedMinutes']?.toString() ?? '');
-    UserSession.selectedPreviewImages = {
-      'frontViewUrl': style['frontViewUrl']?.toString() ?? '',
-      'sideViewUrl': style['sideViewUrl']?.toString() ?? '',
-      'backViewUrl': style['backViewUrl']?.toString() ?? '',
-    };
-
-    await AiFunnelService.saveSelection(
-      scanSessionId: UserSession.ensureScanSessionId(),
-      userId: userId,
-      variantId: variantId,
-      styleName: UserSession.selectedStyleName ?? 'Style',
-      faceShape: UserSession.lastScan?['faceShape']?.toString(),
-      hairTexture: UserSession.lastScan?['hairTexture']?.toString(),
-      hairDensity: UserSession.lastScan?['hairDensity']?.toString(),
-      hairLength: UserSession.lastScan?['hairLength']?.toString(),
-      estimatedMinutes: UserSession.selectedEstimatedMinutes,
-      frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
-      sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],
-      backViewUrl: UserSession.selectedPreviewImages?['backViewUrl'],
-    );
-
-    final result = await BookingSlotsService.fetchBestSuggestion();
-    if (!context.mounted) {
-      return;
-    }
-    if (!result.isSuccess || result.suggestion == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No available slots found. Please choose manually.')),
-      );
-      await BookingDraftService.saveFromSession(step: 'barber');
-      if (!context.mounted) {
-        return;
-      }
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const BarberSelectionPage()),
-      );
-      return;
-    }
-
-    await BookingDraftService.saveFromSession(step: 'barber');
-    if (!context.mounted) {
-      return;
-    }
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SuggestedAppointmentPage(
-          suggestion: result.suggestion!,
-          alternatives: result.alternatives,
-        ),
-      ),
-    );
-  }
+  Future<void> _useStyleDirectly(BuildContext context, Map<String, dynamic> style) =>
+      launchBookingForStyle(context, style);
 
   String _scoreToRating(double score) {
     final stars = (score * 5).clamp(1, 5).round();

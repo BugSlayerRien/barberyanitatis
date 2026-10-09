@@ -38,6 +38,7 @@ import 'scanner/attachment_engine.dart';
 import 'scanner/face_detector_service_stub.dart'
     if (dart.library.io) 'scanner/face_detector_service_mobile.dart';
 import 'face_scan_results_page.dart';
+import 'style_try_on_page.dart';
 import 'services/booking_slots_service.dart';
 import 'services/face_scan_service.dart';
 import 'user_session.dart';
@@ -52,6 +53,11 @@ import '../app_orientation.dart';
 
 class AiFaceScanPage extends StatefulWidget {
   final Map<String, dynamic>? presetRecommendation;
+
+  /// Set when the scan was started from one haircut in the library. The scan
+  /// then ends on StyleTryOnPage for that haircut instead of the full
+  /// recommendation list, which is what the customer asked for.
+  final bool tryOnOnly;
   final bool previewOnly;
   final Map<String, dynamic>? captureSummary;
   /// Walk-in kiosk: no bottom nav; routes to kiosk queue after style pick.
@@ -63,6 +69,7 @@ class AiFaceScanPage extends StatefulWidget {
   const AiFaceScanPage({
     super.key,
     this.presetRecommendation,
+    this.tryOnOnly = false,
     this.previewOnly = false,
     this.captureSummary,
     this.kioskMode = false,
@@ -444,13 +451,52 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     await _releaseScannerResources();
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => FaceScanResultsPage(
-          captures: Map.from(_capturedImages),
-          faceShape: _faceShape,
-          hairTexture: _hairTexture,
-          presetRecommendation: widget.presetRecommendation,
+      _resultsRoute(
+        captures: Map.from(_capturedImages),
+        faceShape: _faceShape,
+        hairTexture: _hairTexture,
+      ),
+    );
+  }
+
+  /// Where a finished scan goes.
+  ///
+  /// Normally the recommendation list. But a scan started from one haircut in
+  /// the library goes to that haircut's try-on page instead: the customer had
+  /// already chosen, and dropping them into the full list read as a failure.
+  Route<void> _resultsRoute({
+    required Map<String, String> captures,
+    required String faceShape,
+    required String hairTexture,
+    int hairLengthLevel = 1,
+    String hairLengthLabel = '',
+  }) {
+    final preset = widget.presetRecommendation;
+    if (widget.tryOnOnly && preset != null) {
+      return MaterialPageRoute(
+        builder: (_) => StyleTryOnPage(
+          style: preset,
+          captures: captures,
+          faceShape: faceShape,
+          hairTexture: hairTexture,
+          hairLengthLevel: hairLengthLevel,
         ),
+      );
+    }
+
+    return MaterialPageRoute(
+      builder: (_) => FaceScanResultsPage(
+        captures: captures,
+        faceShape: faceShape,
+        hairTexture: hairTexture,
+        hairLengthLevel: hairLengthLevel,
+        hairLengthLabel: hairLengthLabel,
+        analysisProvider: UserSession.lastScan?['analysisProvider']?.toString(),
+        hairTextureScore: (UserSession.lastScan?['hairTextureScore'] as num?)?.toDouble(),
+        noHairDetected: UserSession.lastScan?['noHairDetected'] == true,
+        hairColorLabel: UserSession.lastScan?['hairColor']?.toString(),
+        presetRecommendation: preset,
+        kioskMode: widget.kioskMode,
       ),
     );
   }
@@ -2146,20 +2192,12 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     await _releaseScannerResources();
     if (!mounted) return;
     await Navigator.of(context).pushReplacement(
-      MaterialPageRoute(
-        builder: (_) => FaceScanResultsPage(
-          captures: Map.from(_capturedImages),
-          faceShape: analyzedFaceShape,
-          hairTexture: analyzedHairTexture,
-          hairLengthLevel: hairLengthLevel,
-          hairLengthLabel: hairLengthLabel,
-          analysisProvider: UserSession.lastScan?['analysisProvider']?.toString(),
-          hairTextureScore: (UserSession.lastScan?['hairTextureScore'] as num?)?.toDouble(),
-          noHairDetected: UserSession.lastScan?['noHairDetected'] == true,
-          hairColorLabel: UserSession.lastScan?['hairColor']?.toString(),
-          presetRecommendation: widget.presetRecommendation,
-          kioskMode: widget.kioskMode,
-        ),
+      _resultsRoute(
+        captures: Map.from(_capturedImages),
+        faceShape: analyzedFaceShape,
+        hairTexture: analyzedHairTexture,
+        hairLengthLevel: hairLengthLevel,
+        hairLengthLabel: hairLengthLabel,
       ),
     );
   }

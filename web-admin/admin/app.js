@@ -611,6 +611,7 @@ const COLUMN_WEIGHTS = {
   actions: 1.5,
   is_active: 0.9,
   overlay_status: 1,
+  review_badge: 1.2,
   created_at: 1,
   queue_label: 0.9,
   channel_label: 1.6,
@@ -1429,6 +1430,29 @@ async function loadHaircuts() {
   renderHaircuts();
 }
 
+// Style names, descriptions and barber instructions used to be the owner's own
+// typing, so renderTable()'s raw innerHTML was merely untidy. Barbers submit
+// these fields now, which makes escaping them a requirement rather than a
+// nicety. Same reason as escapeLeaveText() in the receptionist portal.
+function escapeHaircutText(value) {
+  return String(value ?? "").replace(
+    /[&<>"']/g,
+    (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]),
+  );
+}
+
+const HAIRCUT_REVIEW_BADGES = {
+  Published: '<span class="status status--success">Published</span>',
+  PendingReview: '<span class="status status--warning">Pending review</span>',
+  Rejected: '<span class="status status--danger">Rejected</span>',
+  Draft: '<span class="status status--warning">Draft</span>',
+};
+
+function haircutReviewStatus(row) {
+  const raw = String(row.review_status || "Published").trim();
+  return HAIRCUT_REVIEW_BADGES[raw] ? raw : "Published";
+}
+
 // hair_textures arrives from admin_hairstyles.php as a comma-joined list of the
 // distinct textures across a style's variants (empty when it has no variants).
 function haircutTextures(row) {
@@ -1441,7 +1465,9 @@ function haircutTextures(row) {
 function renderHaircuts() {
   const query = document.getElementById("haircuts-search")?.value || "";
   const texture = document.getElementById("haircuts-texture")?.value || "";
+  const review = document.getElementById("haircuts-review")?.value || "";
   const source = (state.haircuts || []).filter((row) => {
+    if (review && haircutReviewStatus(row) !== review) return false;
     if (!texture) return true;
     const textures = haircutTextures(row);
     // "none" surfaces styles with no variants at all — these never reach the
@@ -1449,15 +1475,29 @@ function renderHaircuts() {
     if (texture === "none") return textures.length === 0;
     return textures.includes(texture);
   });
-  const normalized = source.map((row) => ({
-    ...row,
-    texture_list: haircutTextures(row).join(", ") || '<span class="status status--warning">None</span>',
-    overlay_status: row.has_overlay_assets
-      ? '<span class="status status--success">Ready</span>'
-      : '<span class="status status--warning">Missing PNGs</span>',
-    _inactive: isRowInactive(row),
-    is_active: activeBadge(row.is_active),
-  }));
+  const normalized = source.map((row) => {
+    const status = haircutReviewStatus(row);
+    const author = String(row.authored_by_name || "").trim();
+    return {
+      ...row,
+      texture_list: haircutTextures(row).map(escapeHaircutText).join(", ")
+        || '<span class="status status--warning">None</span>',
+      // A style with no photos is no longer hidden from customers -- it shows
+      // with a placeholder -- so "Missing PNGs" would overstate the problem.
+      overlay_status: row.has_overlay_assets
+        ? '<span class="status status--success">Photos</span>'
+        : (row.has_prompt === true || row.has_prompt === "t"
+          ? '<span class="status status--warning">Placeholder</span>'
+          : '<span class="status status--danger">Not usable</span>'),
+      review_badge: HAIRCUT_REVIEW_BADGES[status]
+        + (author ? `<div class="field-hint">by ${escapeHaircutText(author)}</div>` : ""),
+      _status: status,
+      _inactive: isRowInactive(row),
+      is_active: activeBadge(row.is_active),
+    };
+  });
+  // Search runs on the raw text and escaping happens at render, not before:
+  // escaping first would make a style named O'Brien unfindable by typing it.
   const matches = filterRows(normalized, query, ["style_name", "style_code", "description", "gender"]);
   const includeInactive = inactiveFilterState("haircuts", matches);
   const rows = includeInactive ? matches : matches.filter((row) => !row._inactive);
@@ -1466,18 +1506,27 @@ function renderHaircuts() {
     [
       { key: "style_name", label: "Name" },
       { key: "style_code", label: "Code" },
-      { key: "gender", label: "Gender" },
       { key: "texture_list", label: "Texture" },
       { key: "category", label: "Category" },
       { key: "variant_count", label: "Variants" },
-      { key: "overlay_status", label: "Overlays" },
+      { key: "overlay_status", label: "Artwork" },
+      { key: "review_badge", label: "Review" },
       { key: "is_active", label: "Active" },
       { key: "actions", label: "Actions" },
     ],
     rows.map((row) => ({
       ...row,
+      // renderTable() writes these straight into innerHTML, and barbers supply
+      // them now, so they are escaped here -- the last point before display.
+      style_name: escapeHaircutText(row.style_name),
+      style_code: escapeHaircutText(row.style_code),
+      category: escapeHaircutText(row.category),
       actions: `
         <button class="btn secondary btn-haircut" data-id="${row.hairstyle_id}" type="button">Manage</button>
+        ${row._status === "PendingReview"
+          ? `<button class="btn primary btn-haircut-publish" data-id="${row.hairstyle_id}" type="button">Publish</button>
+             <button class="btn danger btn-haircut-reject" data-id="${row.hairstyle_id}" type="button">Reject</button>`
+          : ""}
         ${row._inactive
           ? `<button class="btn secondary btn-haircut-restore" data-id="${row.hairstyle_id}" type="button">Restore</button>`
           : `<button class="btn danger btn-haircut-delete" data-id="${row.hairstyle_id}" type="button">Deactivate</button>`}
@@ -1647,6 +1696,79 @@ function renderHaircutOverlayUploads(hairstyle) {
   });
 }
 
+async function fetchHaircutReadiness(hairstyleId) {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "readiness", hairstyleID: hairstyleId }),
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) throw new Error(data.error || "Failed to check readiness");
+  return data;
+}
+
+async function reviewHaircut(hairstyleId, decision) {
+  const response = await fetchWithRetry(resolveApiUrl("admin_hairstyles.php"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "reviewHairstyle", hairstyleID: hairstyleId, decision }),
+  });
+  const data = await parseJsonResponse(response);
+  if (!response.ok) {
+    // The server refuses to publish a style that would not actually appear and
+    // says exactly what is missing. Pass that through rather than a bare
+    // "failed", which is what left the panel's own addition a mystery.
+    const problems = Array.isArray(data.problems) && data.problems.length
+      ? " " + data.problems.join(" ")
+      : "";
+    throw new Error((data.error || "Review failed") + problems);
+  }
+  return data;
+}
+
+/**
+ * Renders the blocking reasons for one style and decides whether Publish is
+ * allowed. An empty list is the only state in which a style is publishable.
+ */
+function renderHaircutReadiness(readiness, status) {
+  const section = document.getElementById("haircut-readiness-section");
+  const body = document.getElementById("haircut-readiness-body");
+  const publish = document.getElementById("haircut-editor-publish");
+  const reject = document.getElementById("haircut-editor-reject");
+  if (!section || !body) return;
+
+  section.removeAttribute("hidden");
+  const problems = Array.isArray(readiness && readiness.problems) ? readiness.problems : [];
+  const ready = problems.length === 0;
+
+  if (ready) {
+    body.innerHTML = '<div class="status status--success">Ready — customers can see and generate this style.</div>';
+  } else {
+    const items = problems.map(function (text) {
+      return "<li>" + escapeHaircutText(text) + "</li>";
+    }).join("");
+    body.innerHTML =
+      '<div class="status status--warning">Not usable yet</div>'
+      + '<ul class="field-hint" style="margin: 6px 0 0 16px;">' + items + "</ul>";
+  }
+
+  if (publish) {
+    // Offered for anything not already published, so a rejected style can be
+    // reconsidered without the barber re-submitting it.
+    if (status === "Published") {
+      publish.setAttribute("hidden", "");
+    } else {
+      publish.removeAttribute("hidden");
+      publish.disabled = !ready;
+      publish.title = ready ? "" : "Fix the items above first.";
+    }
+  }
+  if (reject) {
+    if (status === "Rejected") reject.setAttribute("hidden", "");
+    else reject.removeAttribute("hidden");
+  }
+}
+
 function openHaircutEditor(hairstyle, variants = []) {
   const dialog = document.getElementById("haircut-editor-dialog");
   const title = document.getElementById("haircut-editor-title");
@@ -1668,13 +1790,34 @@ function openHaircutEditor(hairstyle, variants = []) {
 
   form.innerHTML = `
     <label>Style name
-      <input class="input" id="hc-name" value="${hairstyle?.style_name ?? ""}" />
+      <input class="input" id="hc-name" value="${escapeHaircutText(hairstyle?.style_name ?? "")}" />
     </label>
     <label>Style code
-      <input class="input" id="hc-code" value="${hairstyle?.style_code ?? ""}" placeholder="HC-WAVY-MOD" />
+      <input class="input" id="hc-code" value="${escapeHaircutText(hairstyle?.style_code ?? "")}" placeholder="HC-WAVY-MOD" />
     </label>
     <label>Description
-      <input class="input" id="hc-description" value="${hairstyle?.description ?? ""}" />
+      <input class="input" id="hc-description" value="${escapeHaircutText(hairstyle?.description ?? "")}" />
+    </label>
+    <label class="field-grow">AI preview prompt
+      <textarea class="input" id="hc-ai-prompt" rows="3"
+        placeholder="sides and back clipped short with a clean taper, three inches left on top, the back tapered to the nape with nothing over the collar">${escapeHaircutText(hairstyle?.ai_prompt ?? "")}</textarea>
+      <span class="field-hint">Required. Without it the style saves but can never be previewed. Say what happens at the back — a prompt that leaves it unsaid lets the model invent length there.</span>
+    </label>
+    <label>Minimum hair length
+      <select class="select" id="hc-ai-min-length">
+        ${[
+          [0, "0 — works on any length"],
+          [1, "1 — short"],
+          [2, "2 — medium"],
+          [3, "3 — long"],
+        ]
+          .map(
+            ([value, text]) =>
+              `<option value="${value}" ${Number(hairstyle?.ai_min_length_level ?? 1) === value ? "selected" : ""}>${text}</option>`,
+          )
+          .join("")}
+      </select>
+      <span class="field-hint">Customers with shorter hair are warned before a preview is spent, never hidden from it.</span>
     </label>
     <!-- Gender is hidden: every style in this shop is offered to anyone, and
          nothing in the recommendation pipeline reads it. Kept as a hidden input
@@ -1728,9 +1871,20 @@ function openHaircutEditor(hairstyle, variants = []) {
     state.haircutDetail = { hairstyle, variants };
     renderHaircutVariantsList();
     renderHaircutOverlayUploads(hairstyle);
+
+    const status = haircutReviewStatus(hairstyle);
+    state.haircutEditor.reviewStatus = status;
+    // Fetched rather than recomputed here, so the portal and the server can
+    // never disagree about whether a style is publishable.
+    fetchHaircutReadiness(hairstyle.hairstyle_id)
+      .then((readiness) => renderHaircutReadiness(readiness, status))
+      .catch(() => renderHaircutReadiness(null, status));
   } else {
     variantsSection?.setAttribute("hidden", "");
     document.getElementById("haircut-overlay-section")?.setAttribute("hidden", "");
+    document.getElementById("haircut-readiness-section")?.setAttribute("hidden", "");
+    document.getElementById("haircut-editor-publish")?.setAttribute("hidden", "");
+    document.getElementById("haircut-editor-reject")?.setAttribute("hidden", "");
   }
 
   dialog.showModal();
@@ -1750,10 +1904,24 @@ async function saveHaircutEditor() {
     difficulty: document.getElementById("hc-difficulty")?.value || "Medium",
     maintenance: document.getElementById("hc-maintenance")?.value || "Medium",
     isActive: Number(document.getElementById("hc-active")?.value ?? 1) !== 0,
+    aiPrompt: document.getElementById("hc-ai-prompt")?.value?.trim() || "",
+    aiMinLengthLevel: Number(document.getElementById("hc-ai-min-length")?.value ?? 1),
   };
 
   if (!payload.styleName) {
     toast("Style name is required.");
+    return;
+  }
+
+  // The panel added a haircut, watched it save, and watched it never appear.
+  // The prompt is what makes a style previewable, so it is required where it
+  // is entered rather than discovered to be missing much later.
+  if (!payload.aiPrompt) {
+    toast("Describe the cut in the AI preview prompt — without it the style can never be previewed.", "error");
+    return;
+  }
+  if (!/\b(back|nape|collar)\b/i.test(payload.aiPrompt)) {
+    toast("Say what happens at the back. Left unsaid, the model invents length there.", "error");
     return;
   }
 
@@ -3007,6 +3175,45 @@ document.addEventListener("click", async (event) => {
     }, { label: "Opening..." });
   }
 
+  if (target.classList.contains("btn-haircut-publish")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction(
+      "Publish this haircut? Customers will see it in the library straight away.",
+      { title: "Publish haircut", confirmLabel: "Publish" },
+    );
+    if (!ok) return;
+    await withButtonLoading(target, async () => {
+      try {
+        await reviewHaircut(Number(id), "Published");
+        toast("Haircut published — it is now visible in the app.");
+        await loadHaircuts();
+      } catch (error) {
+        // Carries the server's readiness reasons, so a refusal explains itself.
+        toast(error.message || "Publish failed", "error");
+      }
+    }, { label: "Publishing..." });
+  }
+
+  if (target.classList.contains("btn-haircut-reject")) {
+    const id = target.dataset.id;
+    if (!id) return;
+    const ok = await confirmAction(
+      "Reject this submission? The barber keeps it in their list and can resubmit.",
+      { title: "Reject haircut", confirmLabel: "Reject", danger: true },
+    );
+    if (!ok) return;
+    await withButtonLoading(target, async () => {
+      try {
+        await reviewHaircut(Number(id), "Rejected");
+        toast("Submission rejected.");
+        await loadHaircuts();
+      } catch (error) {
+        toast(error.message || "Reject failed", "error");
+      }
+    }, { label: "Rejecting..." });
+  }
+
   if (target.classList.contains("btn-haircut-delete")) {
     const id = target.dataset.id;
     if (!id) return;
@@ -3117,6 +3324,40 @@ document.getElementById("haircuts-search")?.addEventListener("input", () => {
 });
 document.getElementById("haircut-editor-save")?.addEventListener("click", (event) => {
   withButtonLoading(event.currentTarget, saveHaircutEditor, { label: "Saving..." });
+});
+async function reviewHaircutFromEditor(decision) {
+  const id = state.haircutEditor?.hairstyleId;
+  if (!id) return;
+  try {
+    await reviewHaircut(Number(id), decision);
+    toast(
+      decision === "Published"
+        ? "Haircut published — it is now visible in the app."
+        : "Submission rejected.",
+    );
+    const dialog = document.getElementById("haircut-editor-dialog");
+    if (dialog instanceof HTMLDialogElement) dialog.close();
+    state.haircutEditor = null;
+    state.haircutDetail = null;
+    await loadHaircuts();
+  } catch (error) {
+    toast(error.message || "Review failed", "error");
+  }
+}
+
+document.getElementById("haircut-editor-publish")?.addEventListener("click", (event) => {
+  withButtonLoading(event.currentTarget, () => reviewHaircutFromEditor("Published"), {
+    label: "Publishing...",
+  });
+});
+document.getElementById("haircut-editor-reject")?.addEventListener("click", (event) => {
+  withButtonLoading(event.currentTarget, () => reviewHaircutFromEditor("Rejected"), {
+    label: "Rejecting...",
+  });
+});
+document.getElementById("haircuts-review")?.addEventListener("change", () => {
+  resetPagination(["haircuts-table"]);
+  renderHaircuts();
 });
 document.getElementById("haircut-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("haircut-editor-dialog");

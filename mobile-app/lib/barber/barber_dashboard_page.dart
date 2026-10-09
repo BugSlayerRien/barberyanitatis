@@ -13,6 +13,7 @@ import '../user/user_session.dart';
 import '../user/widgets/app_bottom_nav.dart';
 import '../user/widgets/pill_tabs.dart';
 import 'barber_analytics_page.dart';
+import 'barber_hairstyle_form_page.dart';
 import 'barber_appointment_detail_page.dart';
 import 'barber_profile_page.dart';
 import 'barber_calendar_page.dart';
@@ -270,6 +271,57 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// The barber's way into the catalogue.
+  ///
+  /// The panel's point: the admin portal is the owner's, and the owner may not
+  /// know haircuts. The barber does. This is where they add one.
+  Widget _buildSuggestHaircutCard() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BarberHairstyleFormPage()),
+        ),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppBrand.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppBrand.border),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.content_cut, color: AppBrand.gold, size: 20),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Suggest a haircut',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Add a cut you know to the shop catalogue',
+                      style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppBrand.textMuted, size: 20),
+            ],
+          ),
         ),
       ),
     );
@@ -681,6 +733,7 @@ class _BarberDashboardPageState extends State<BarberDashboardPage> {
                 ),
               )
             else ...[
+              _buildSuggestHaircutCard(),
               _buildWorkToggle(),
               if (_showingWalkins)
                 ..._buildWalkinSection(context)

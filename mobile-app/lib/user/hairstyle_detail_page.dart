@@ -11,7 +11,7 @@ import 'booking_guard.dart';
 import 'customer_navigation.dart';
 import 'dashboard_page.dart';
 import 'ai_face_scan_page.dart';
-import 'face_scan_results_page.dart';
+import 'style_try_on_page.dart';
 import 'hair_compatibility.dart';
 import 'profile_page.dart';
 import 'saved_haircuts_page.dart';
@@ -350,10 +350,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
   /// up in the recommendations. This reuses the completed scan when there is
   /// one, so no second scan is needed.
   ///
-  /// It hands off to FaceScanResultsPage rather than calling the generator
-  /// directly, because that page already owns the parts that matter: the
-  /// quota dialog, the texture confirmation, the length warning, and the
-  /// preview viewer.
+  /// It hands off to StyleTryOnPage, which exists for exactly this: one
+  /// haircut, generated on the customer's own scan, with a button to book it.
+  /// This used to end at FaceScanResultsPage, and a customer who had already
+  /// chosen a cut landed in the full recommendation list with nothing
+  /// generated -- indistinguishable from the button not working.
   Future<void> _generatePreviewForStyle() async {
     final styleName = widget.style['name']?.toString() ??
         widget.style['styleName']?.toString() ??
@@ -369,14 +370,9 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       return;
     }
 
-    // The customer's own texture governs, so warn on a mismatch before a
-    // generation is spent. Same gate the booking path already uses.
-    final proceed = await HairCompatibility.confirmBookingIfNeeded(
-      context,
-      HairCompatibility.evaluateStyleMap(widget.style),
-    );
-    if (!mounted || !proceed) return;
-
+    // The texture warning belongs on the try-on page, next to the button that
+    // actually spends a generation. Asking here as well meant the same dialog
+    // twice, with a face scan in between.
     final hasScan =
         UserSession.hasCompletedScanResults && UserSession.restoreCompletedScan();
     final captures = UserSession.capturedFaceImages;
@@ -414,10 +410,14 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       );
       if (!mounted || startScan != true) return;
 
-      // Carry the style through the scan so it is pre-selected afterwards.
+      // Carry the style through the scan, and tell the scan page where to
+      // land: on this one haircut, not on the recommendation list.
       await Navigator.of(context).push(
         MaterialPageRoute(
-          builder: (_) => AiFaceScanPage(presetRecommendation: widget.style),
+          builder: (_) => AiFaceScanPage(
+            presetRecommendation: widget.style,
+            tryOnOnly: true,
+          ),
         ),
       );
       return;
@@ -427,17 +427,12 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => FaceScanResultsPage(
+        builder: (_) => StyleTryOnPage(
+          style: widget.style,
           captures: Map<String, String>.from(captures),
           faceShape: scan['faceShape']?.toString() ?? '',
           hairTexture: scan['hairTexture']?.toString() ?? '',
           hairLengthLevel: (scan['hairLengthLevel'] as num?)?.toInt() ?? 1,
-          hairLengthLabel: scan['hairLength']?.toString() ?? '',
-          analysisProvider: scan['analysisProvider']?.toString(),
-          hairTextureScore: (scan['hairTextureScore'] as num?)?.toDouble(),
-          noHairDetected: scan['noHairDetected'] == true,
-          hairColorLabel: scan['hairColor']?.toString(),
-          presetRecommendation: widget.style,
         ),
       ),
     );

@@ -24,12 +24,24 @@ try {
             $row['style_name'] = 'Curly Taper Fade';
         }
 
-        return apply_hairstyle_overlay_paths($row);
+        $previewable = hairstyle_is_previewable_without_artwork($row);
+        $row = apply_hairstyle_overlay_paths($row);
+
+        // The app used to guess, and guessed wrong: with no artwork it fell
+        // back to a bundled overlay and showed another style's hair. These two
+        // flags let it draw a placeholder instead.
+        $row['has_artwork'] = trim((string)($row['front_view_url'] ?? '')) !== '';
+        $row['previewable'] = $previewable;
+        // The prompt is fetched to decide the above; it is not the customer's
+        // business what the image model is told.
+        unset($row['ai_prompt']);
+
+        return $row;
     };
 
     if ($action === 'list') {
         $stmt = $pdo->prepare(
-            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active
+            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active, ai_prompt
              FROM hairstyles
                WHERE is_active = TRUE
                AND COALESCE(review_status, \'Published\') = \'Published\'
@@ -66,7 +78,7 @@ try {
         $libraryIn = $inParts !== [] ? ' AND hs.style_code IN (' . implode(', ', $inParts) . ') ' : '';
 
         $stmt = $pdo->prepare(
-            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active,
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt,
                     hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
                     hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
              FROM hairstyles hs
@@ -108,7 +120,7 @@ try {
 
         $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $query) . '%';
         $stmt = $pdo->prepare(
-            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active,
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt,
                     hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
                     hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
              FROM hairstyles hs
