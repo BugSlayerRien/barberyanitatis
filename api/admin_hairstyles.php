@@ -313,11 +313,13 @@ try {
 
         $variantStmt = $pdo->prepare('SELECT * FROM hairstyle_variants WHERE hairstyle_id = :id');
         $variantStmt->execute([':id' => $hairstyleID]);
-        $problems = hairstyle_readiness_problems($style, $variantStmt->fetchAll(PDO::FETCH_ASSOC));
+        $variants = $variantStmt->fetchAll(PDO::FETCH_ASSOC);
+        $problems = hairstyle_readiness_problems($style, $variants);
 
         json_response([
             'ready' => $problems === [],
             'problems' => $problems,
+            'warnings' => hairstyle_readiness_warnings($style, $variants),
             'reviewStatus' => $style['review_status'] ?? 'Published',
         ]);
     }

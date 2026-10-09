@@ -8,7 +8,7 @@ import 'package:logging/logging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'app_navigator.dart';
 
-export 'app_navigator.dart' show navigatorKey, routeObserver;
+export 'app_navigator.dart' show navigatorKey, routeObserver, rootMessengerKey, showAppMessage;
 import 'user/api_config.dart';
 import 'user/auth_bootstrap.dart';
 import 'user/auth_page.dart';
@@ -195,6 +195,7 @@ class TatisBarbershopApp extends StatelessWidget {
       title: 'Brilliante Barbershop',
       debugShowCheckedModeBanner: false,
       navigatorKey: navigatorKey,
+      scaffoldMessengerKey: rootMessengerKey,
       navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,

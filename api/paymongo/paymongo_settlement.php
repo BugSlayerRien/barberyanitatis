@@ -214,18 +214,29 @@ function paymongo_sync_payment_row(PDO $pdo, string $externalId, string $status,
         // No appointment side effects (no promote_paid_booking_unit-equivalent
         // needed): ai_tryon_purchased_credits() sums this row directly, so
         // landing it here as Captured is the whole job.
+        $credits = (int)($intentContext['credits'] ?? 0);
+        $userId = (int)$intentContext['user_id'];
+
         $insertStmt = $pdo->prepare(
             'INSERT INTO appointment_payments (appointment_id, purpose, user_id, credits, amount, method, status, transaction_ref)
              VALUES (NULL, \'ai_credits\', :user_id, :credits, :amount, :method, :status, :transaction_ref)'
         );
         $insertStmt->execute([
-            'user_id' => (int)$intentContext['user_id'],
-            'credits' => (int)($intentContext['credits'] ?? 0),
+            'user_id' => $userId,
+            'credits' => $credits,
             'amount' => $amount,
             'method' => $method,
             'status' => $paymentStatus,
             'transaction_ref' => $externalId,
         ]);
+
+        // Only once the money actually landed, and only on the insert: a
+        // repeat call takes the $existing branch above and returns before
+        // reaching here, so the webhook and the poll cannot both notify.
+        if ($paymentStatus === 'Captured') {
+            paymongo_notify_credit_purchase($pdo, $userId, $credits, $amount, $externalId);
+        }
+
         return;
     }
 
@@ -240,6 +251,66 @@ function paymongo_sync_payment_row(PDO $pdo, string $externalId, string $status,
         'status' => $paymentStatus,
         'transaction_ref' => $externalId,
     ]);
+}
+
+/**
+ * Tells the customer their previews arrived, and the owner that a sale happened.
+ *
+ * A credit purchase left no trace anywhere a person would look: the customer
+ * had only a count that silently changed, and the shop had no record of the
+ * sale outside the payments table, which the portal does not show. Both sides
+ * now get a notification, and the admin one doubles as the receipt record.
+ *
+ * Notification failures are swallowed on purpose -- the payment is already
+ * settled and the credits already granted, so a notification problem must
+ * never turn a successful purchase into an error.
+ */
+function paymongo_notify_credit_purchase(
+    PDO $pdo,
+    int $userId,
+    int $credits,
+    float $amount,
+    string $reference
+): void {
+    if ($userId <= 0) {
+        return;
+    }
+
+    try {
+        $customerName = '';
+        $nameStmt = $pdo->prepare('SELECT full_name FROM users WHERE user_id = :id LIMIT 1');
+        $nameStmt->execute([':id' => $userId]);
+        $customerName = trim((string)($nameStmt->fetchColumn() ?: ''));
+
+        $peso = '₱' . number_format($amount, 2);
+        $noun = $credits === 1 ? 'preview' : 'previews';
+
+        $insert = $pdo->prepare(
+            "INSERT INTO notifications (recipient_type, recipient_id, notification_type, title, message, is_sent)
+             VALUES (:type, :id, 'Payment', :title, :message, TRUE)"
+        );
+
+        $insert->execute([
+            ':type' => 'User',
+            ':id' => $userId,
+            ':title' => 'Previews added',
+            ':message' => 'Your ' . $peso . ' payment went through. ' . $credits . ' AI '
+                . $noun . ' were added to your account. Reference ' . $reference . '.',
+        ]);
+
+        // recipient_id 0 is the shop-wide admin inbox, matching the System
+        // notifications admin_settings.php already writes.
+        $insert->execute([
+            ':type' => 'Admin',
+            ':id' => 0,
+            ':title' => 'Preview credits sold',
+            ':message' => ($customerName !== '' ? $customerName : 'A customer')
+                . ' bought ' . $credits . ' AI ' . $noun . ' for ' . $peso
+                . '. Reference ' . $reference . '.',
+        ]);
+    } catch (Throwable $e) {
+        error_log('Credit purchase notification failed: ' . $e->getMessage());
+    }
 }
 
 function paymongo_finalize_successful_payment(PDO $pdo, string $externalId, ?string $metadataRef = null): void

@@ -138,12 +138,12 @@ try {
             ], 422);
         }
 
+        // Photos are welcome, not required. Demanding all three turned away
+        // barbers who had the knowledge but not a photo of every angle, and a
+        // described cut is already usable: the app draws a placeholder tile
+        // and the AI preview works from the description alone. Photos can be
+        // added later through the portal and simply replace the placeholder.
         $photos = (array)($input['photos'] ?? []);
-        foreach (['front', 'side', 'back'] as $slot) {
-            if (trim((string)($photos[$slot] ?? '')) === '') {
-                json_response(['error' => 'Three reference photos are required: front, side and back.'], 422);
-            }
-        }
 
         $prompt = compose_hairstyle_prompt($styleName, $fields);
         $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper($styleName)) ?? 'STYLE';
@@ -172,13 +172,13 @@ try {
             ]);
             $hairstyleId = (int)$insert->fetchColumn();
 
-            $stored = [];
+            $stored = ['front' => '', 'side' => '', 'back' => ''];
             foreach (['front', 'side', 'back'] as $slot) {
-                $stored[$slot] = barber_hairstyle_store_photo(
-                    $hairstyleId,
-                    $slot,
-                    (string)$photos[$slot]
-                );
+                $raw = trim((string)($photos[$slot] ?? ''));
+                if ($raw === '') {
+                    continue;
+                }
+                $stored[$slot] = barber_hairstyle_store_photo($hairstyleId, $slot, $raw);
             }
 
             // One variant per face shape per texture: the ranking matches both
@@ -232,6 +232,7 @@ try {
                 'styleCode' => $styleCode,
                 'aiPrompt' => $prompt,
                 'reviewStatus' => 'PendingReview',
+                'hasPhotos' => $stored['front'] !== '',
             ]);
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) {

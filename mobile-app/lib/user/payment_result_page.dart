@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../app_navigator.dart';
 import 'ai_credit_purchase_page.dart';
 import 'appointments_page.dart';
 import 'package:http/http.dart' as http;
@@ -105,14 +106,15 @@ class _PaymentResultPageState extends State<PaymentResultPage> {
                 if (!mounted) return;
                 final after = (quota?['remaining'] as num?)?.toInt() ?? before;
                 final gained = after - before;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      gained > 0
-                          ? '+$gained previews added to your account.'
-                          : 'Payment received. Your previews will appear shortly.',
-                    ),
-                  ),
+                // Sent through the app-wide messenger, not this page's: the
+                // navigation two lines below tears this page down, and a
+                // SnackBar owned by it disappeared with it. The customer paid
+                // and was told nothing.
+                showAppMessage(
+                  gained > 0
+                      ? 'Payment successful — $gained previews added. '
+                          'You now have $after.'
+                      : 'Payment received. Your previews will appear shortly.',
                 );
                 // Warm return: the purchase page (and the scan results page
                 // under it) are still on the stack -- pop past the purchase

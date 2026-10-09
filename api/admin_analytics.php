@@ -439,6 +439,42 @@ try {
         ];
     }
 
+    // Preview-credit sales.
+    //
+    // These live in appointment_payments with a NULL appointment_id, so every
+    // revenue query in this file misses them -- they are not service revenue.
+    // Reported separately rather than folded in, so neither number lies.
+    $creditSales = ['count' => 0, 'credits' => 0, 'revenue' => 0.0, 'recent' => []];
+    try {
+        $row = $pdo->query(
+            "SELECT COUNT(*)::int AS sale_count,
+                    COALESCE(SUM(credits), 0)::int AS credits,
+                    COALESCE(SUM(amount), 0)::float AS revenue
+             FROM appointment_payments
+             WHERE purpose = 'ai_credits' AND status = 'Captured' AND {$payWhere}"
+        )->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $creditSales['count'] = (int)$row['sale_count'];
+            $creditSales['credits'] = (int)$row['credits'];
+            $creditSales['revenue'] = (float)$row['revenue'];
+        }
+
+        $creditSales['recent'] = $pdo->query(
+            "SELECT ap.payment_id, ap.credits, ap.amount::float AS amount, ap.method,
+                    ap.transaction_ref, ap.created_at,
+                    COALESCE(u.full_name, 'Customer #' || ap.user_id) AS customer_name
+             FROM appointment_payments ap
+             LEFT JOIN users u ON u.user_id = ap.user_id
+             WHERE ap.purpose = 'ai_credits' AND ap.status = 'Captured'
+             ORDER BY ap.created_at DESC
+             LIMIT 10"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        // purpose/credits are lazily added columns; a shop that has never sold
+        // a credit may not have them yet. Zero is the honest answer.
+        error_log('Credit sales query skipped: ' . $e->getMessage());
+    }
+
     $aiFunnel = [
         'scanCount' => 0,
         'selectionCount' => 0,
@@ -721,6 +757,7 @@ try {
             'mostBooked' => $mostBookedStyles,
             'faceShapeDistribution' => $faceShapeDistribution,
             'hairTextureDistribution' => $hairTextureDistribution,
+            'creditSales' => $creditSales,
         ],
         'aiFunnel' => $aiFunnel,
         'feedback' => [
@@ -733,7 +770,8 @@ try {
             'recentFeedback' => $recentFeedback,
         ],
         'dataNotes' => [
-            'revenueSource' => 'Completion payments ledger (payments.payment_status = Paid).',
+            'revenueSource' => 'Completion payments ledger (payments.payment_status = Paid). '
+                . 'Preview-credit sales are reported separately under AI and are not included here.',
             'barberFavorites' => 'Barber favorites are not collected; showing most-booked barber instead.',
             'serviceRatings' => 'Service-level ratings are not available in the current schema.',
         ],

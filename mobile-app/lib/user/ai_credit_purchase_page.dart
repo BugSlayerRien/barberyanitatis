@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../app_navigator.dart';
 import 'api_config.dart';
 import 'customer_api.dart';
 import 'payment_return_guard.dart';
@@ -184,10 +185,12 @@ class _AiCreditPurchasePageState extends State<AiCreditPurchasePage> {
       quota ??= await FaceScanService.fetchQuotaStatus(userId: userId);
       quota ??= _syntheticPostPurchaseQuota();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('+${AiCreditPurchasePage.bundleCredits} previews added to your account.'),
-        ),
+      // The app-wide messenger, because the pop on the next line takes this
+      // page's own messenger with it -- the customer paid and saw nothing.
+      final remaining = (quota?['remaining'] as num?)?.toInt();
+      showAppMessage(
+        'Payment successful — ${AiCreditPurchasePage.bundleCredits} previews added.'
+        '${remaining != null ? ' You now have $remaining.' : ''}',
       );
       Navigator.of(context).pop(quota);
     } catch (e) {

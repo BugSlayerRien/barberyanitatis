@@ -293,6 +293,22 @@
                 </div>
                 <div id="analytics-customers" class="analytics-stack"></div>
               </div>
+              <!-- Credit sales sit apart from service revenue because they are
+                   a different kind of money: no appointment, no barber, no
+                   completion. Folding them into revenue would make both
+                   numbers wrong. -->
+              <div class="card">
+                <div class="card-head">
+                  <div class="card-head-text">
+                    <h3 class="card-title">Preview credit sales</h3>
+                    <p class="card-sub">AI preview top-ups bought by customers. Not counted in service revenue.</p>
+                  </div>
+                </div>
+                <div id="analytics-credit-sales" class="analytics-stack"></div>
+                <div class="table-wrap">
+                  <div class="list" id="analytics-credit-receipts"></div>
+                </div>
+              </div>
             </div>
 
             <div class="card">

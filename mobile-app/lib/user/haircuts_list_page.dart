@@ -14,6 +14,8 @@ import 'widgets/app_top_bar.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
+import 'ai_credit_purchase_page.dart';
+import 'services/face_scan_service.dart';
 import 'services/style_booking_launcher.dart';
 import 'ai_face_scan_page.dart';
 import 'hairstyle_detail_page.dart';
@@ -41,12 +43,104 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   bool _searchLoading = false;
   String? _error;
   Timer? _searchDebounce;
+  Map<String, dynamic>? _quota;
 
   @override
   void initState() {
     super.initState();
     _initCategory();
     _loadStyles();
+    _quota = UserSession.lastQuota;
+    unawaited(_refreshQuota());
+  }
+
+  /// How many AI previews are left.
+  ///
+  /// Shown here because the count used to live only on the scan results page:
+  /// a customer browsing the library had to start a whole face scan just to
+  /// find out whether they had any previews left, or whether a purchase had
+  /// actually landed.
+  Future<void> _refreshQuota() async {
+    final quota = await FaceScanService.fetchQuotaStatus(
+      userId: UserSession.userId,
+      scanSessionId: UserSession.ensureScanSessionId(),
+    );
+    if (quota == null || !mounted) return;
+    UserSession.lastQuota = quota;
+    setState(() => _quota = quota);
+  }
+
+  Future<void> _openCreditPurchase() async {
+    final quota = await Navigator.of(context).push<Map<String, dynamic>?>(
+      MaterialPageRoute(
+        settings: const RouteSettings(name: AiCreditPurchasePage.routeName),
+        builder: (_) => const AiCreditPurchasePage(),
+      ),
+    );
+    if (quota != null) {
+      UserSession.lastQuota = quota;
+      if (mounted) setState(() => _quota = quota);
+    }
+    // A late deep-link return pops without a result, so re-read regardless.
+    await _refreshQuota();
+  }
+
+  Widget _buildQuotaPill() {
+    final quota = _quota;
+    if (quota == null || UserSession.userId == null) {
+      return const SizedBox.shrink();
+    }
+
+    final unlimited = quota['unlimited'] == true;
+    final remaining = (quota['remaining'] as num?)?.toInt() ?? 0;
+    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
+    final out = !unlimited && remaining <= 0;
+
+    final label = unlimited
+        ? 'Unlimited AI previews'
+        : (out
+            ? 'No AI previews left'
+            : '$remaining AI ${remaining == 1 ? 'preview' : 'previews'} left'
+                '${purchased > 0 ? ' ($purchased purchased)' : ''}');
+
+    final accent = out ? const Color(0xFFE0B35A) : const Color(0xFF8FD49A);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141414),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: accent.withValues(alpha: 0.35)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.auto_awesome, size: 16, color: accent),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ),
+            if (!unlimited)
+              TextButton(
+                onPressed: () => unawaited(_openCreditPurchase()),
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  minimumSize: const Size(0, 32),
+                ),
+                child: Text(
+                  out ? 'Buy more' : 'Top up',
+                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -245,37 +339,50 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
   /// Explains the corner icons once, so the cards do not each have to repeat
   /// the sentence they replaced.
   Widget _buildFitLegend() {
+    // One row, three equal shares.
+    //
+    // This was a Wrap, which fits what it can and pushes the rest onto a
+    // second line: on a phone the first two labels sat together and "Not
+    // recommended" dropped underneath on its own, reading like a separate
+    // thing rather than the third of three. Equal columns keep the three
+    // meanings side by side at any width.
     Widget item(IconData icon, Color color, String label) {
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 18,
-            height: 18,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: color.withValues(alpha: 0.85), width: 1.2),
+      return Expanded(
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 16,
+              height: 16,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: color.withValues(alpha: 0.85), width: 1.2),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 10, color: color),
             ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 11, color: color),
-          ),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: const TextStyle(color: Colors.white54, fontSize: 11),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Expanded(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: Colors.white54, fontSize: 10.5),
+              ),
+            ),
+          ],
+        ),
       );
     }
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
-      child: Wrap(
-        spacing: 14,
-        runSpacing: 6,
+      child: Row(
         children: [
           item(Icons.check_rounded, const Color(0xFF8FD49A), 'Suits your hair'),
+          const SizedBox(width: 6),
           item(Icons.priority_high_rounded, const Color(0xFFE0B35A), 'May need styling'),
+          const SizedBox(width: 6),
           item(Icons.close_rounded, const Color(0xFFE07A7A), 'Not recommended'),
         ],
       ),
@@ -317,6 +424,7 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
             const SizedBox(height: 12),
             _buildTextureBasisBanner(),
             _buildFitLegend(),
+            _buildQuotaPill(),
             const SizedBox(height: 16),
 
             TextField(

@@ -114,11 +114,16 @@ function compose_hairstyle_prompt(string $styleName, array $fields): string
 }
 
 /**
- * Why a style would not appear in the app, in the words the admin needs.
+ * Why a style could not work at all, in the words the admin needs.
  *
  * The portal already flagged "Missing PNGs" but gave no way to see the rest,
  * so a style could be saved, look fine in the list, and silently never reach a
  * customer. Publishing is blocked on this list being empty.
+ *
+ * Missing photographs are deliberately NOT here -- they are a warning, see
+ * hairstyle_readiness_warnings(). The app draws a placeholder tile for a style
+ * with no artwork and the AI preview works from the description, so blocking
+ * publication on photos would hold back a perfectly usable haircut.
  *
  * @param array<string, mixed> $hairstyle a hairstyles row
  * @param list<array<string, mixed>> $variants its hairstyle_variants rows
@@ -150,13 +155,6 @@ function hairstyle_readiness_problems(array $hairstyle, array $variants): array
             $textures[$texture] = true;
         }
 
-        foreach (['front_view_url', 'side_view_url', 'back_view_url'] as $column) {
-            if (trim((string)($variant[$column] ?? '')) === '') {
-                $problems[] = 'A variant is missing its ' . str_replace('_view_url', '', $column) . ' image.';
-                break;
-            }
-        }
-
         if (trim((string)($variant['barber_instructions'] ?? '')) === '') {
             $problems[] = 'A variant has no barber instructions.';
         }
@@ -169,4 +167,62 @@ function hairstyle_readiness_problems(array $hairstyle, array $variants): array
     }
 
     return array_values(array_unique($problems));
+}
+
+/**
+ * Things worth fixing that do not stop the style working.
+ *
+ * Kept apart from the blockers on purpose. Mixing the two is what made the
+ * portal's old "Missing PNGs" flag useless: it looked like a fault when the
+ * style was perfectly usable, and it sat beside real faults with no way to
+ * tell them apart.
+ *
+ * @param array<string, mixed> $hairstyle a hairstyles row
+ * @param list<array<string, mixed>> $variants its hairstyle_variants rows
+ * @return list<string>
+ */
+function hairstyle_readiness_warnings(array $hairstyle, array $variants): array
+{
+    $warnings = [];
+
+    $missingViews = [];
+    foreach (['front_view_url' => 'front', 'side_view_url' => 'side', 'back_view_url' => 'back'] as $column => $label) {
+        foreach ($variants as $variant) {
+            if (trim((string)($variant[$column] ?? '')) === '') {
+                $missingViews[$label] = true;
+                break;
+            }
+        }
+    }
+    if ($missingViews !== []) {
+        $warnings[] = 'No ' . implode(', ', array_keys($missingViews))
+            . ' photo yet — customers see a placeholder tile until one is uploaded.';
+    }
+
+    $textures = [];
+    $faces = [];
+    foreach ($variants as $variant) {
+        $texture = trim((string)($variant['hair_texture'] ?? ''));
+        if ($texture !== '') {
+            $textures[$texture] = true;
+        }
+        $face = trim((string)($variant['face_shape'] ?? ''));
+        if ($face !== '') {
+            $faces[$face] = true;
+        }
+    }
+
+    // Recommendations match face shape and texture exactly, so thin coverage
+    // does not hide a style from the library but does keep it out of most
+    // customers' recommendations. Worth saying, not worth blocking.
+    if (count($textures) === 1) {
+        $warnings[] = 'Only suits ' . implode('', array_keys($textures))
+            . ' hair, so it is rarely recommended. Add variants for other textures to widen it.';
+    }
+    if (count($faces) > 0 && count($faces) < 3) {
+        $warnings[] = 'Only set up for ' . implode(', ', array_keys($faces))
+            . ' face shapes, so other customers will not be recommended it.';
+    }
+
+    return array_values(array_unique($warnings));
 }

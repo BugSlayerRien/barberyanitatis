@@ -1739,18 +1739,29 @@ function renderHaircutReadiness(readiness, status) {
 
   section.removeAttribute("hidden");
   const problems = Array.isArray(readiness && readiness.problems) ? readiness.problems : [];
+  const warnings = Array.isArray(readiness && readiness.warnings) ? readiness.warnings : [];
   const ready = problems.length === 0;
 
-  if (ready) {
-    body.innerHTML = '<div class="status status--success">Ready — customers can see and generate this style.</div>';
-  } else {
-    const items = problems.map(function (text) {
-      return "<li>" + escapeHaircutText(text) + "</li>";
-    }).join("");
-    body.innerHTML =
-      '<div class="status status--warning">Not usable yet</div>'
-      + '<ul class="field-hint" style="margin: 6px 0 0 16px;">' + items + "</ul>";
+  // Blockers and warnings are rendered apart because mixing them is what made
+  // the old "Missing PNGs" flag useless -- it read as a fault on a style that
+  // worked perfectly well.
+  const list = (items) =>
+    '<ul class="field-hint" style="margin: 6px 0 0 16px;">'
+    + items.map((text) => "<li>" + escapeHaircutText(text) + "</li>").join("")
+    + "</ul>";
+
+  let html = ready
+    ? '<div class="status status--success">Ready — customers can see and generate this style.</div>'
+    : '<div class="status status--warning">Not usable yet</div>' + list(problems);
+
+  if (warnings.length) {
+    html += '<div style="margin-top: 10px;">'
+      + '<div class="field-hint" style="font-weight: 600;">Worth improving — does not block publishing</div>'
+      + list(warnings)
+      + "</div>";
   }
+
+  body.innerHTML = html;
 
   if (publish) {
     // Offered for anything not already published, so a rejected style can be
@@ -2276,6 +2287,62 @@ function renderTrendChart(metrics) {
   });
 }
 
+/**
+ * Preview credit sales, and the receipts behind them.
+ *
+ * A customer could buy previews and the shop had no record of it anywhere a
+ * person would look: these rows carry no appointment, so every revenue query
+ * in admin_analytics.php skips them. This is the receipt list.
+ */
+function renderAnalyticsCreditSales(metrics) {
+  const summary = document.getElementById("analytics-credit-sales");
+  const receipts = document.getElementById("analytics-credit-receipts");
+  if (!summary || !receipts) return;
+
+  const sales = metrics?.ai?.creditSales || {};
+  const count = Number(sales.count || 0);
+  const credits = Number(sales.credits || 0);
+  const revenue = Number(sales.revenue || 0);
+  const rows = Array.isArray(sales.recent) ? sales.recent : [];
+
+  summary.innerHTML = [
+    '<div class="analytics-stack-item"><strong>Purchases this period</strong>' + count + "</div>",
+    '<div class="analytics-stack-item"><strong>Previews sold</strong>' + credits + "</div>",
+    '<div class="analytics-stack-item"><strong>Amount collected</strong>'
+      + formatPeso(revenue) + "</div>",
+  ].join("");
+
+  if (!rows.length) {
+    receipts.innerHTML = emptyStateMarkup(
+      "No credit purchases yet",
+      "When a customer buys AI previews, the receipt appears here.",
+    );
+    return;
+  }
+
+  // The latest ten regardless of the selected period: a receipt is worth
+  // finding even when it falls outside the window being analysed.
+  renderTable(
+    "analytics-credit-receipts",
+    [
+      { key: "customer_name", label: "Customer" },
+      { key: "credits_label", label: "Previews" },
+      { key: "amount_label", label: "Amount" },
+      { key: "method", label: "Method" },
+      { key: "reference", label: "Reference" },
+      { key: "created_at", label: "Date" },
+    ],
+    rows.map((row) => ({
+      customer_name: escapeAnalyticsText(row.customer_name),
+      credits_label: Number(row.credits || 0),
+      amount_label: formatPeso(row.amount),
+      method: escapeAnalyticsText(row.method || "-"),
+      reference: escapeAnalyticsText(row.transaction_ref || "-"),
+      created_at: formatSettingsDate(row.created_at),
+    })),
+  );
+}
+
 function renderAnalyticsCharts(metrics) {
   if (typeof Chart === "undefined") return;
 
@@ -2528,6 +2595,7 @@ function renderAnalyticsDashboard(data) {
 
   renderAnalyticsKpis(metrics);
   renderAnalyticsCharts(metrics);
+  renderAnalyticsCreditSales(metrics);
   renderBarberTable(metrics);
   renderRecentFeedback(data?.recentFeedback);
   renderOperations(metrics);

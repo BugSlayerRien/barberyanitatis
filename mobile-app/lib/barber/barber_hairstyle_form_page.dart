@@ -124,11 +124,10 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
     if (_top.text.trim().isEmpty) {
       return 'Say how much length is left on top.';
     }
-    for (final slot in _slots) {
-      if (!_photos.containsKey(slot)) {
-        return 'All three reference photos are needed: front, side and back.';
-      }
-    }
+    // Photos are optional. A described cut already works: the app shows a
+    // placeholder tile and the AI preview is built from the description, so
+    // turning away a barber who has the knowledge but not three photos would
+    // cost the shop a haircut for no reason.
     return null;
   }
 
@@ -147,7 +146,9 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
     try {
       final photos = <String, String>{};
       for (final slot in _slots) {
-        photos[slot] = base64Encode(await _photos[slot]!.readAsBytes());
+        final picked = _photos[slot];
+        if (picked == null) continue;
+        photos[slot] = base64Encode(await picked.readAsBytes());
       }
 
       final data = await _post({
@@ -486,12 +487,31 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   }
 
   Widget _photoSection() {
-    return _section('Reference photos *', [
+    final missing = _slots.where((slot) => !_photos.containsKey(slot)).length;
+
+    return _section('Reference photos', [
       const Text(
         'One of each angle, from a cut you have done. Customers see these in '
         'the library.',
         style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5, height: 1.4),
       ),
+      if (missing > 0) ...[
+        const SizedBox(height: 8),
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: AppBrand.accentTint,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppBrand.accent.withValues(alpha: 0.3)),
+          ),
+          child: const Text(
+            'Optional — you can send this without photos. The haircut shows a '
+            'placeholder until someone adds them, and the AI preview works '
+            'either way.',
+            style: TextStyle(color: Colors.white70, fontSize: 11.5, height: 1.4),
+          ),
+        ),
+      ],
       const SizedBox(height: 12),
       Row(
         children: [

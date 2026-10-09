@@ -95,10 +95,30 @@ $malformed = hairstyle_readiness_problems(['style_code' => 'HC-M-F-', 'ai_prompt
 // The old generator produced exactly this shape by stripping lowercase letters.
 check('a mangled style code is a blocker', $malformed !== []);
 
+// Missing photographs stopped being a blocker on purpose: the app draws a
+// placeholder tile and the AI preview works from the description, so holding
+// back a described haircut over a photo cost the shop a haircut for nothing.
 $missingImage = $completeVariants;
 $missingImage[0]['back_view_url'] = '';
-check('a missing image is a blocker',
-    hairstyle_readiness_problems($completeStyle, $missingImage) !== []);
+check('a missing image no longer blocks publishing',
+    hairstyle_readiness_problems($completeStyle, $missingImage) === []);
+check('but it is reported as a warning',
+    hairstyle_readiness_warnings($completeStyle, $missingImage) !== []);
+check('and the warning names the missing angle',
+    str_contains(implode(' ', hairstyle_readiness_warnings($completeStyle, $missingImage)), 'back'));
+check('a style with every photo raises no photo warning',
+    !str_contains(
+        implode(' ', hairstyle_readiness_warnings($completeStyle, $completeVariants)),
+        'placeholder'
+    ));
+
+// Thin coverage keeps a style out of most recommendations without hiding it,
+// which is worth saying and not worth blocking.
+check('a single-texture style is flagged as rarely recommended',
+    str_contains(
+        implode(' ', hairstyle_readiness_warnings($completeStyle, $completeVariants)),
+        'rarely recommended'
+    ));
 
 $noInstructions = $completeVariants;
 $noInstructions[0]['barber_instructions'] = '';
