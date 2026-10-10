@@ -55,9 +55,15 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   bool _booking = false;
   String? _error;
 
-  /// True once the length warning was accepted, so the caption under the
-  /// preview can say the result was adapted.
-  bool _achievableToday = false;
+  /// True when the preview shows the style grown out rather than today's cut.
+  bool _growOutGoal = false;
+
+  /// Overrides the scan when the customer says it measured their length wrong
+  /// -- the weakest signal the scan produces, and one that defaults to "short"
+  /// whenever measurement fails.
+  int? _lengthOverride;
+
+  int get _effectiveLengthLevel => _lengthOverride ?? widget.hairLengthLevel;
 
   int get _variantId =>
       int.tryParse(widget.style['variantId']?.toString() ?? '') ??
@@ -159,25 +165,42 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     );
     if (!mounted || !proceed) return;
 
-    // Whether the cut needs more hair is a fact about the scan, not about
-    // which button was pressed. Deciding it inside the "first generation"
-    // branch meant Generate again quietly reverted to the full-length prompt
-    // -- the very thing that drew a long-backed mullet on short hair.
-    final needsLength =
-        styleNeedsMoreLength(widget.style, widget.hairLengthLevel);
+    // A fact about the scan, not about which button was pressed.
+    var growOut = styleNeedsMoreLength(widget.style, _effectiveLengthLevel);
 
-    // The dialog is consent, asked once. The flag above is what actually
-    // decides what gets rendered.
-    if (needsLength && !_achievableToday) {
-      final ok = await confirmLongerHairStyle(context, _styleName);
-      if (!mounted || !ok) return;
+    if (growOut) {
+      // No alternatives offered here: this page knows one haircut, and the
+      // recommendations page is where the ranked list lives.
+      switch (await confirmLongerHairStyle(
+        context,
+        _styleName,
+        canShowAlternatives: false,
+      )) {
+        case LengthChoice.cancel:
+        case LengthChoice.showAlternatives:
+          return;
+        case LengthChoice.correctLength:
+          final needed =
+              (widget.style['min_length_level'] as num?)?.toInt() ??
+                  _effectiveLengthLevel;
+          setState(() => _lengthOverride = needed);
+          UserSession.lastScan = {
+            ...?UserSession.lastScan,
+            'hairLengthLevel': needed,
+            'hairLengthSource': 'customer',
+          };
+          UserSession.commitCompletedScan();
+          growOut = false;
+        case LengthChoice.growOutGoal:
+          break;
+      }
+      if (!mounted) return;
     }
-    final achievable = needsLength;
 
     setState(() {
       _generating = true;
       _error = null;
-      _achievableToday = achievable;
+      _growOutGoal = growOut;
     });
 
     try {
@@ -201,9 +224,8 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
         userId: UserSession.userId,
         faceShape: widget.faceShape,
         hairTexture: widget.hairTexture,
-        hairLengthLevel: widget.hairLengthLevel,
+        hairLengthLevel: _effectiveLengthLevel,
         forceRegenerate: false,
-        achievableToday: achievable,
       );
       if (!mounted) return;
 
@@ -375,7 +397,7 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     final chips = <String>[
       if (widget.faceShape.trim().isNotEmpty) 'Face: ${widget.faceShape.trim()}',
       if (widget.hairTexture.trim().isNotEmpty) 'Hair: ${widget.hairTexture.trim()}',
-      'Length: ${_lengthLabel(widget.hairLengthLevel)}',
+      'Length: ${_lengthLabel(_effectiveLengthLevel)}',
     ];
 
     return Wrap(
@@ -460,21 +482,25 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
                 )
               else
                 _captureFallback(captureB64),
-              if (!_generating) _stageBadge(hasAiPreview: previewUrl.isNotEmpty),
+              if (!_generating) ...[
+                _stageBadge(hasAiPreview: previewUrl.isNotEmpty),
+                if (previewUrl.isNotEmpty && _growOutGoal)
+                  const Positioned(top: 10, left: 112, child: GrowOutGoalBadge()),
+              ],
             ],
           ),
         ),
         const SizedBox(height: 10),
         _viewSwitcher(previews),
-        if (_achievableToday && previewUrl.isNotEmpty) ...[
+        if (_growOutGoal && previewUrl.isNotEmpty) ...[
           const SizedBox(height: 8),
-          // Without this the unchanged back reads as a failed generation
-          // rather than the honest answer it is.
-          const Text(
-            'Cut to your current length. The sides and top are shaped; the back '
-            'is left as it is, because this style needs more length there than '
-            'you have today.',
-            style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5, height: 1.4),
+          Text(
+            growOutCaption(_styleName),
+            style: const TextStyle(
+              color: GrowOutGoalBadge.color,
+              fontSize: 11.5,
+              height: 1.4,
+            ),
           ),
         ],
         if (!hasPreview) ...[

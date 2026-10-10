@@ -1761,19 +1761,6 @@ function renderHaircutReadiness(readiness, status) {
       + "</div>";
   }
 
-  // Read-only, and deliberately not a field. A customer whose hair is shorter
-  // than this cut needs is shown an adapted version, and the owner should be
-  // able to read it -- but writing a second prompt by hand is work nobody
-  // should have to do, and a second thing to keep in step with the first.
-  const shortVariant = String((readiness && readiness.shortVariant) || "").trim();
-  if (shortVariant) {
-    html += '<div style="margin-top: 10px;">'
-      + '<div class="field-hint" style="font-weight: 600;">Shown to customers with shorter hair (written automatically)</div>'
-      + '<div class="field-hint" style="margin-top: 4px;">'
-      + escapeHaircutText(shortVariant)
-      + "</div></div>";
-  }
-
   body.innerHTML = html;
 
   if (publish) {

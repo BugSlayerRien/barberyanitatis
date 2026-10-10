@@ -317,32 +317,27 @@ function replicate_style_brief(
     $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
         . "that photo's original head turn and camera angle — do not make every frame face the camera.";
 
-    // Swap the description before the prompt is built, rather than appending a
-    // contradiction after it. The old order left "the length deliberately kept
-    // long at the back" in the prompt and then asked the model not to add
-    // length -- and the model, reasonably, drew the mullet it had been
-    // described.
-    $renderDesc = ($achievableToday && $needsMoreLength)
-        ? replicate_short_hair_style_desc($styleKey, $styleDesc, $styleName)
-        : $styleDesc;
+    // $achievableToday is accepted and ignored. It used to swap in an adapted
+    // description; that path is gone (see the note above
+    // replicate_build_hair_only_prompt). The flag stays in the signature so an
+    // older APK still posting it does not break, and so callers need not be
+    // changed in lockstep with a deploy.
+    unset($achievableToday);
 
     $basePrompt = replicate_build_hair_only_prompt(
-        $renderDesc,
+        $styleDesc,
         $hairLengthLevel,
-        $hairColorLabel,
-        $achievableToday && $needsMoreLength
+        $hairColorLabel
     ) . $profileNote;
-
-    if ($achievableToday && $needsMoreLength) {
-        $basePrompt .= replicate_achievable_today_clause();
-    }
 
     return [
         'ok' => true,
         'error' => '',
         'styleKey' => $styleKey,
-        'styleDesc' => $renderDesc,
-        'adaptedToCurrentLength' => $achievableToday && $needsMoreLength,
+        'styleDesc' => $styleDesc,
+        // Kept on the response so callers reading it do not break; always
+        // false now that nothing is adapted.
+        'adaptedToCurrentLength' => false,
         'basePrompt' => $basePrompt,
         'needsMoreLength' => $needsMoreLength,
         'minLengthLevel' => $minLevel,
@@ -354,284 +349,32 @@ function replicate_style_brief(
  * (Gemini and the Replicate fallback) so results stay consistent regardless of which
  * provider actually renders the image.
  */
-/**
- * Render the cut at the hair the customer has, not the hair the style wants.
+/*
+ * Removed: the adapted "achievable today" prompt path.
  *
- * The customer has already been told this style usually needs more length and
- * chosen to continue, so the honest result is the closest version their barber
- * could cut today -- not a picture of longer hair they do not have. The back is
- * called out specifically because that is where an unconstrained model adds
- * length first: a mullet or a two block on short hair grew a long back.
+ * Five attempts tried to make the generator render a length-hungry cut on
+ * short hair -- an honest replacement description, the constraint moved to the
+ * front, the clause that was literally ordering weight at the nape taken out,
+ * the whole prompt reframed as removal-only, and finally the style name
+ * stripped so there was no famous haircut to reproduce. Each was verified in
+ * the assembled prompt. Each came back with the same long back.
+ *
+ * The cause is structural rather than verbal: xAI's /v1/images/edits takes a
+ * photo and a string with no mask, so no region can be protected, and an image
+ * model follows a strong learned concept over a negative instruction. "Mullet"
+ * means a long back.
+ *
+ * What the model renders reliably is the full style -- which was never the
+ * wrong picture, only the wrong caption. These customers now see that render
+ * labelled as the grow-out goal, with an achievable alternative beside it, so
+ * ~200 lines of prompt machinery that did not work are gone rather than left
+ * dormant for someone to switch back on.
  */
-/**
- * The cutting to perform, for a style that wants more hair than the customer has.
- *
- * Deliberately nameless. "Modern mullet" is a famous haircut and the model has
- * a strong learned picture of one -- a picture whose whole point is a long
- * back. Four rounds of constraints failed to outvote those two words, because
- * the name was still sitting in the instruction doing its work. These say only
- * what the barber's hands do, so there is no style concept to pull against.
- *
- * Written as imperatives for the same reason: "taper the sides" is an action,
- * where "a cut with tapered sides" is a thing to reproduce.
- *
- *
- * Only the styles replicate_style_min_length() marks as needing more than
- * short hair need an entry; everything else already renders honestly.
- *
- * @return array<string, string>
- */
-function replicate_style_short_variant(): array
-{
-    return [
-        'two_block' => 'clip the sides and the lower back short in a clean disconnected line, '
-            . 'leave the hair on top at exactly its current length and square it off above '
-            . 'the disconnection, nothing reaching the collar',
-        'modern_curtains' => 'part the hair on top down the middle and sweep it to either '
-            . 'side as far as its existing length reaches, falling short of the eyebrows, '
-            . 'taper the sides and back close with nothing over the collar',
-        'wavy_mod_cut' => 'comb the natural wave forward across the forehead at its current '
-            . 'length into a short blunt fringe line, taper the sides and back close to the '
-            . 'nape with nothing over the collar',
-        'modern_mullet' => 'taper the sides from the temple down and tighten them around the '
-            . 'ear, crop and texture the hair on top into a short fringe. The back of the '
-            . 'head and the nape are not part of this cut -- leave that area exactly as it '
-            . 'appears in the photo, untouched and uncut',
-        'pompadour' => 'lift the front up and sweep it back into a modest volume built only '
-            . 'from the length already present, fade the sides short, taper the back clean '
-            . 'to the nape with nothing over the collar',
-        'curly_top_fade' => 'keep the existing curls at exactly their current length on top '
-            . 'with no curl length added, taper the sides into a clean fade and cut the back '
-            . 'short to the nape',
-        'curly_undercut' => 'clip the sides and back short in a disconnected line, leave the '
-            . 'curls on top exactly as long as they already are, no length added, the back '
-            . 'short to the nape',
-        'curly_modern_mullet' => 'crop the curls close at the sides and around the crown, '
-            . 'keeping the curl pattern on top. The back of the head and the nape are not '
-            . 'part of this cut -- leave that area exactly as it appears in the photo, '
-            . 'untouched and uncut',
-    ];
-}
-
-/**
- * The description to render when the customer has less hair than the cut wants.
- *
- * Falls back to hedging the original description when no short variant is
- * authored -- weaker than a written variant, but still better than a prompt
- * that asserts length the customer does not have.
- */
-/**
- * Derive the short-hair version of a prompt that nobody wrote one for.
- *
- * The eight built-in styles that need length have hand-written short variants.
- * Anything added through the barber app or the admin portal does not, and the
- * old fallback simply appended "without adding length anywhere" to a
- * description that had just asked for a long back -- the same self-contradiction
- * that drew a long-backed mullet on short hair. An image model follows the
- * vivid description and ignores the denial that trails it.
- *
- * So the length claims are removed rather than argued with. The work is done
- * clause by clause, because that is how these prompts are actually written: a
- * barber's answers are joined with commas, and so are the built-in ones.
- *
- * Shape is preserved wherever possible. "the top left about 4 inches long and
- * gathered upward into a tall rounded pineapple shape" keeps the pineapple and
- * loses only the four inches -- dropping the whole clause would throw away the
- * part that makes it that haircut.
- */
-function replicate_derive_short_variant(string $styleName, string $prompt): string
-{
-    $prompt = trim($prompt);
-    if ($prompt === '') {
-        return $prompt;
-    }
-
-    // The prompts begin "style name: first clause". Strip the label so it is
-    // not treated as a clause, and so the rewritten text can carry its own.
-    $body = $prompt;
-    if (preg_match('/^([^:]{1,60}):\s*(.+)$/s', $prompt, $m) === 1) {
-        $body = $m[2];
-    }
-
-    $clauses = array_map('trim', explode(',', $body));
-    $kept = [];
-
-    foreach ($clauses as $clause) {
-        if ($clause === '') {
-            continue;
-        }
-
-        $rewritten = replicate_shorten_prompt_clause($clause);
-        if ($rewritten !== '') {
-            $kept[] = $rewritten;
-        }
-    }
-
-    // Say one thing about the back, not two.
-    //
-    // Clauses asking for length at the back were stripped above. Anything
-    // still standing is a cutting instruction -- "lower back clipped short
-    // underneath" -- which is achievable on short hair and should be kept.
-    // Adding the freeze on top of it would contradict it, which is the whole
-    // failure mode being fixed here. The freeze is for the case where nothing
-    // about the back survived: then the region is genuinely out of scope.
-    $mentionsBack = false;
-    foreach ($kept as $clause) {
-        if (preg_match('/\b(?:back|nape|collar)\b/i', $clause) === 1) {
-            $mentionsBack = true;
-            break;
-        }
-    }
-
-    if (!$mentionsBack) {
-        $kept[] = 'the back of the head and the nape are not part of this cut, left exactly '
-            . 'as they appear in the photo, untouched and uncut';
-    }
-
-    // No style name, for the same reason the hand-written variants carry none:
-    // naming the haircut hands the model a picture to reproduce, and that
-    // picture is exactly the one the customer does not have the hair for.
-    // $styleName is still taken so callers need not know that.
-    unset($styleName);
-
-    return implode(', ', $kept);
-}
-
-/**
- * One clause of a prompt, with any claim to length the customer does not have
- * taken out of it.
- *
- * Returns '' when nothing worth keeping is left.
- */
-function replicate_shorten_prompt_clause(string $clause): string
-{
-    // Clauses that already say hair is NOT long are exactly the phrasing we
-    // want ("nothing left over the collar", "tapered short above the collar").
-    // A blunter rule would delete them for containing the word "collar".
-    if (preg_match('/\b(?:nothing|without|no)\b[^.]*\b(?:long|length|collar|nape|shoulder)\b/i', $clause) === 1) {
-        return $clause;
-    }
-
-    $out = $clause;
-
-    // 1. Measurements -> current length, keeping whatever shape follows.
-    $out = (string)preg_replace(
-        '/(?:\b(?:about|around|roughly)\s+)?'
-        . '\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)'
-        . '(?:\s*(?:to|-|–)\s*(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten))?'
-        . '\s*(?:inch|inches|in\.?|cm)\b(?:\s+(?:long|tall|high|in\s+length))?/i',
-        'at its current length',
-        $out
-    );
-
-    // 2. Bare assertions of length.
-    $out = (string)preg_replace(
-        '/\b(?:deliberately\s+)?(?:kept|left|worn|grown)\s+(?:deliberately\s+)?long(?:est|er)?\b/i',
-        'kept at its current length',
-        $out
-    );
-    $out = (string)preg_replace(
-        '/\blong(?:er)?\s+(full\s+)?(top|back|length|layers?|section|hair|fringe)\b/i',
-        '$1$2',
-        $out
-    );
-    $out = (string)preg_replace('/\bfull\s+curly\s+back\s+section\b/i', 'curly back section', $out);
-    // The rules above name the nouns they expect, so an adjective slipped in
-    // between defeated them: "long flowing layers" sailed through. Anything
-    // still calling itself long after this point is a claim to length, and
-    // this clause is not a negated one -- those returned at the top.
-    $out = (string)preg_replace('/\blong(?:er|est)?\b(?!\s+as\b)(?!-)/i', '', $out);
-    $out = (string)preg_replace('/\bthe\s+length\s+(?=kept|at its current)/i', 'the back ', $out);
-
-    // 3. Length measured against a landmark on the body. Dropped outright,
-    //    not softened: "kept clear of the collar" still describes the back,
-    //    and describing the back is what invites the model to re-draw it.
-    $out = (string)preg_replace(
-        '/\b(?:falling|reaching|hanging|extending|coming|flowing)\s+'
-        . '(?:down\s+)?(?:just\s+)?(?:(?:to|past|below|over|onto|beyond|towards?)\s+)?'
-        . '(?:the\s+)?(?:nape|collar|shoulders?|neck)\b(?:\s+(?:and|onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?|neck)\b)*/i',
-        '',
-        $out
-    );
-    $out = (string)preg_replace(
-        '/\b(?:just\s+)?(?:past|below|beyond|over)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b'
-        . '(?:\s+(?:onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b)*/i',
-        '',
-        $out
-    );
-
-    // 4. Whatever the substitutions left behind.
-    //
-    // Several rules can land on the same phrase -- "a long full top of 3 to 4
-    // inches" is rewritten by two of them -- so the repeats and the dangling
-    // prepositions they leave are cleaned up once, here, rather than each rule
-    // trying to predict the others.
-    $out = (string)preg_replace(
-        '/\bat its current length\b(?:\s+(?:of|at|to|in))*(?:\s+at its current length\b)+/i',
-        'at its current length',
-        $out
-    );
-    $out = (string)preg_replace('/\b(?:of|at|to|in)\s+at its current length\b/i',
-        'at its current length', $out);
-    $out = (string)preg_replace('/\bthe back\b(.{0,40}?)\s+at the back\b/i', 'the back$1', $out);
-    $out = (string)preg_replace('/\s+([,.])/', '$1', $out);
-    $out = (string)preg_replace('/\s{2,}/', ' ', $out);
-    $out = trim($out, " \t\n\r-–");
-
-    // A clause reduced to a connective carries nothing.
-    if (preg_match('/^(?:and|with|the|a|an|in|of|to)?$/i', $out) === 1) {
-        return '';
-    }
-
-    // "the back left longest" became "the back kept at its current length",
-    // which says nothing the closing freeze does not say better -- and saying
-    // anything at all about the back invites the model to re-draw it. Drop it.
-    if (preg_match('/^(?:the\s+)?(?:back|nape)\b[^,]{0,40}current length\.?$/i', $out) === 1) {
-        return '';
-    }
-
-    // Dropping the landmark out of "in soft tapered layers just past the nape"
-    // leaves "in soft tapered layers" dangling with nothing to attach to, and
-    // a reader -- or a model -- attaches it to whatever came before.
-    if (preg_match('/^(?:in|at|with|to|onto|over)\s+(?:\S+\s+){0,3}\S+$/i', $out) === 1) {
-        return '';
-    }
-
-    return $out;
-}
-
-function replicate_short_hair_style_desc(
-    ?string $styleKey,
-    string $styleDesc,
-    string $styleName = ''
-): string {
-    // A hand-written variant beats a derived one and there are eight of them,
-    // for the built-in styles that need length. Everything else -- including
-    // every haircut added from the barber app or the portal from now on -- is
-    // derived, so nobody has to write a second description.
-    $variants = replicate_style_short_variant();
-    if ($styleKey !== null && isset($variants[$styleKey])) {
-        return $variants[$styleKey];
-    }
-
-    return replicate_derive_short_variant($styleName, $styleDesc);
-}
-
-function replicate_achievable_today_clause(): string
-{
-    // Deliberately one sentence. It used to be a paragraph at the very end,
-    // competing with everything above it; now that the same rule opens the
-    // prompt, this is here for recency, not explanation.
-    return ' FINAL CHECK BEFORE YOU RENDER: compare the back of the head against the '
-        . 'source photo — it must be identical. If a part of this style needs hair that '
-        . 'is not in the photo, leave that part uncut rather than drawing the hair in.';
-}
 
 function replicate_build_hair_only_prompt(
     string $styleDescription,
     int $hairLengthLevel = 1,
-    string $hairColorLabel = '',
-    bool $achievableToday = false
+    string $hairColorLabel = ''
 ): string {
     $hints = replicate_length_style_hints();
     $labels = replicate_hair_length_labels();
@@ -643,56 +386,15 @@ function replicate_build_hair_only_prompt(
             . ' hair color exactly. Do not lighten, darken, redden, or recolor the hair.';
     }
 
-    // Swapping the description for an honest one was not enough on its own.
-    // This prompt runs to roughly 290 words, and the rule about length used to
-    // be its last sentence -- behind identity lock, glasses, clothing,
-    // background, lighting and output format. The model read "modern mullet",
-    // treated it as the target, and drew one. So the rule now comes first,
-    // before the style is named, and the sentence that names the style asks
-    // for the closest achievable version rather than the haircut itself.
     $opening = 'Photo-realistic HAIR-ONLY edit of the attached photo. ';
-    $target = 'to this exact haircut';
-    if ($achievableToday) {
-        // "Shape and outline may change; length may not" licensed exactly the
-        // wrong thing: reshaping the back of a mullet IS lengthening it, there
-        // being nothing else a mullet's back can be. The rule is subtractive
-        // now -- cutting is allowed, adding never is, and any part of the
-        // style that would need hair the person does not have is left undone
-        // rather than invented.
-        $opening .= 'HARD CONSTRAINT, APPLIES TO EVERYTHING BELOW: this is a CUT. You may '
-            . 'only REMOVE hair. You may never add, extend, lengthen, thicken or draw in '
-            . 'hair that is not already in the photo. This person\'s hair is '
-            . $currentLabel . '. If any part of the style below would need more hair than '
-            . 'they have, DO NOT DO THAT PART — leave that area exactly as photographed, '
-            . 'uncut and unchanged. This applies above all to the back of the head and the '
-            . 'nape, where there is the least hair to work with. ';
-        // Phrased as work to perform, not a result to reproduce. "The closest
-        // version of this haircut" still asks for a haircut; the descriptions
-        // are now imperatives, and the sentence introducing them should be too.
-        $target = 'by performing exactly this cutting and nothing more, using only hair '
-            . 'already present';
-    }
-
-    // The editable region and the "make it look different" push both have to
-    // stand down when the cut is only partly achievable. Listing the back
-    // hairline as fair game, and demanding a clearly different silhouette,
-    // are instructions to redraw the back -- and a redrawn mullet back is a
-    // tail. On the normal path both are correct and stay as they were.
-    $region = $achievableToday
-        ? 'crown, top, sides, temples and sideburns'
-        : 'crown, top, sides, temples, sideburns, and back hairline';
-    $thoroughness = $achievableToday
-        ? 'Recut every area the style actually reaches, not just the tips or one side. Areas '
-            . 'the style cannot reach at this length are left alone — an unchanged back is the '
-            . 'correct result here, not a failure. '
-        : 'Completely remove the old hairstyle everywhere, not just the tips or one side; the '
-            . 'new cut silhouette must look clearly different from the original. ';
+    $region = 'crown, top, sides, temples, sideburns, and back hairline';
 
     return $opening
         . 'Change ONLY the hair on this '
-        . "exact person — {$region} — "
-        . "{$target}: \"{$styleDescription}\". Current length: {$currentLabel}. {$lengthHint} "
-        . $thoroughness
+        . "exact person — {$region} — to this "
+        . "exact haircut: \"{$styleDescription}\". Current length: {$currentLabel}. {$lengthHint} "
+        . 'Completely remove the old hairstyle everywhere, not just the tips or one side; the '
+        . 'new cut silhouette must look clearly different from the original. '
         . 'Do not paste extra hair onto forehead skin, cheeks, or neck. '
         . replicate_glasses_preservation_clause()
         . 'STRICT IDENTITY LOCK — do not change: face shape, facial features, facial expression, '

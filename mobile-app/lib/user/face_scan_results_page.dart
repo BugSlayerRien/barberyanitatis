@@ -86,10 +86,19 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   bool _bookingInFlight = false;
   bool _previewGenerating = false;
 
-  /// True when the preview on screen was rendered at the customer's current
-  /// length rather than the style's full length. Without saying so, the
-  /// unchanged back reads as a failed generation instead of an honest one.
-  bool _previewAdaptedToLength = false;
+  /// True when the preview on screen shows the style grown out rather than
+  /// what the barber could cut today. Drives the amber badge and the caption.
+  bool _previewIsGrowOutGoal = false;
+
+  /// The hair length the page works from.
+  ///
+  /// `widget.hairLengthLevel` is what the scan measured, and that is the
+  /// weakest thing the scan produces -- it defaults to "short" whenever the
+  /// measurement fails. A customer who says the scan got it wrong overrides it
+  /// here, exactly as they can already override hair texture.
+  int? _lengthOverride;
+
+  int get _effectiveLengthLevel => _lengthOverride ?? widget.hairLengthLevel;
 
   /// Variants whose generated preview the customer has explicitly saved, and
   /// the saved-row ids needed to unsave them without re-fetching the list.
@@ -754,10 +763,50 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   }
 
   bool _needsMoreLength(Map<String, dynamic> style) =>
-      styleNeedsMoreLength(style, widget.hairLengthLevel);
+      styleNeedsMoreLength(style, _effectiveLengthLevel);
 
-  Future<bool> _confirmLongerHairStyle(String styleName) =>
-      confirmLongerHairStyle(context, styleName);
+  /// Accepts the customer's word over the scan's, and remembers it.
+  ///
+  /// Mirrors _applyHairTextureOverride: written into UserSession so it
+  /// survives leaving the page, rather than living only in this widget.
+  void _acceptLongerHairClaim(Map<String, dynamic> style) {
+    final needed = (style['min_length_level'] as num?)?.toInt() ??
+        (style['minLengthLevel'] as num?)?.toInt() ??
+        _effectiveLengthLevel;
+
+    setState(() => _lengthOverride = needed);
+    UserSession.lastScan = {
+      ...?UserSession.lastScan,
+      'hairLengthLevel': needed,
+      'hairLengthSource': 'customer',
+    };
+    UserSession.commitCompletedScan();
+  }
+
+  /// The best style on this page the customer could actually have cut today.
+  ///
+  /// Picked from the rankings the server already returned -- every row carries
+  /// min_length_level -- so this needs no extra call and no second idea of
+  /// what suits them.
+  Map<String, dynamic>? get _achievableAlternative {
+    for (final row in [
+      ..._topPicks,
+      ..._categories['formal'] ?? const <Map<String, dynamic>>[],
+      ..._categories['alternative'] ?? const <Map<String, dynamic>>[],
+      ..._libraryPicks,
+    ]) {
+      if (!styleNeedsMoreLength(row, _effectiveLengthLevel)) return row;
+    }
+
+    return null;
+  }
+
+  Future<LengthChoice> _confirmLongerHairStyle(String styleName) =>
+      confirmLongerHairStyle(
+        context,
+        styleName,
+        canShowAlternatives: _achievableAlternative != null,
+      );
 
   Future<void> _onGeneratePreviewPressed(Map<String, dynamic> style) async {
     final variantId = int.tryParse(_variantKey(style)) ?? 0;
@@ -771,10 +820,38 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     // Ask before the generation prompt, not after: a customer who backs out
     // here has spent nothing.
-    final stretches = _needsMoreLength(style);
-    if (stretches && !hasSavedPreview) {
-      final ok = await _confirmLongerHairStyle(styleName);
-      if (!mounted || !ok) return;
+    var growOut = _needsMoreLength(style);
+    if (growOut && !hasSavedPreview) {
+      switch (await _confirmLongerHairStyle(styleName)) {
+        case LengthChoice.cancel:
+          return;
+        case LengthChoice.showAlternatives:
+          if (!mounted) return;
+          final alternative = _achievableAlternative;
+          if (alternative != null) {
+            setState(() {
+              _selected = alternative;
+              _expandedVariantId = _variantKey(alternative);
+            });
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '${alternative['style_name'] ?? 'This style'} suits your '
+                  'length today — generate it instead.',
+                ),
+              ),
+            );
+          }
+          return;
+        case LengthChoice.correctLength:
+          // Their hair is long enough after all, so this is an ordinary
+          // generation with no goal label.
+          _acceptLongerHairClaim(style);
+          growOut = false;
+        case LengthChoice.growOutGoal:
+          break;
+      }
+      if (!mounted) return;
     }
     final choice = await _promptPreviewAction(
       styleName: styleName,
@@ -789,11 +866,10 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     final forceRegenerate =
         choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
-    setState(() => _previewAdaptedToLength = stretches);
+    setState(() => _previewIsGrowOutGoal = growOut);
 
     unawaited(_loadReplicatePreviewsForSelected(
       forceRegenerate: forceRegenerate,
-      achievableToday: stretches,
     ));
   }
 
@@ -994,6 +1070,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ),
             ),
           ),
+          // On the image rather than only beneath it, so a screenshot carries
+          // the label with it.
+          if (hasAiPreview && _previewIsGrowOutGoal) ...[
+            const SizedBox(width: 6),
+            const GrowOutGoalBadge(),
+          ],
           if (saveButton != null) ...[
             const SizedBox(width: 6),
             saveButton,
@@ -1913,17 +1995,23 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 ],
               ),
             ),
-            if (_previewAdaptedToLength &&
+            if (_previewIsGrowOutGoal &&
                 !_previewGenerating &&
                 previewUrl != null &&
                 previewUrl.isNotEmpty) ...[
               const SizedBox(height: 8),
-              const Text(
-                'Cut to your current length. The sides and top are shaped; the '
-                'back is left as it is, because this style needs more length '
-                'there than you have today.',
-                style: TextStyle(color: Colors.white54, fontSize: 11.5, height: 1.4),
+              Text(
+                growOutCaption(_selectedStyleName),
+                style: const TextStyle(
+                  color: GrowOutGoalBadge.color,
+                  fontSize: 11.5,
+                  height: 1.4,
+                ),
               ),
+              if (_achievableAlternative != null) ...[
+                const SizedBox(height: 8),
+                _achievableAlternativeCard(_achievableAlternative!),
+              ],
             ],
             if (_previewError != null) ...[
             const SizedBox(height: 8),
@@ -2299,6 +2387,61 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// read it, so customers picked a haircut from its name alone. Bundled
   /// overlay art arrives as an `assets/` path; an admin-uploaded photo arrives
   /// as a URL, so both branches are needed.
+  /// "What your barber can cut today", under a grow-out preview.
+  ///
+  /// One tap selects it, so the honest option is as easy to act on as the
+  /// aspirational one.
+  Widget _achievableAlternativeCard(Map<String, dynamic> item) {
+    final name = item['style_name']?.toString() ??
+        item['styleName']?.toString() ??
+        'Another style';
+
+    return InkWell(
+      onTap: () {
+        setState(() {
+          _selected = item;
+          _expandedVariantId = _variantKey(item);
+        });
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141414),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white12),
+        ),
+        child: Row(
+          children: [
+            _styleThumbnail(item),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Your barber can cut this today',
+                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _styleThumbnail(Map<String, dynamic> item) {
     return StyleViewThumbnail(style: item, size: 58);
   }
