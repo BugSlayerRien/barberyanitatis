@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
@@ -7,8 +8,10 @@ import 'app_brand.dart';
 import 'api_config.dart';
 import 'hair_compatibility.dart';
 import 'services/face_scan_service.dart';
+import 'scanner/scanner_layout.dart';
 import 'services/style_booking_launcher.dart';
 import 'user_session.dart';
+import 'widgets/scan_progress_panel.dart';
 import 'widgets/style_length_warning.dart';
 import 'widgets/style_view_thumbnail.dart';
 
@@ -52,8 +55,8 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   bool _booking = false;
   String? _error;
 
-  /// Set when the customer accepted the length warning, so a regenerate keeps
-  /// rendering what is achievable rather than quietly reverting.
+  /// True once the length warning was accepted, so the caption under the
+  /// preview can say the result was adapted.
   bool _achievableToday = false;
 
   int get _variantId =>
@@ -141,7 +144,7 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     await _refreshQuota();
   }
 
-  Future<void> _onGeneratePressed({bool regenerate = false}) async {
+  Future<void> _onGeneratePressed() async {
     if (_generating) return;
 
     if (_variantId <= 0) {
@@ -199,7 +202,7 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
         faceShape: widget.faceShape,
         hairTexture: widget.hairTexture,
         hairLengthLevel: widget.hairLengthLevel,
-        forceRegenerate: regenerate,
+        forceRegenerate: false,
         achievableToday: achievable,
       );
       if (!mounted) return;
@@ -333,7 +336,9 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
           children: [
-            if (hasPreview) _buildPreviewPanel(previews) else _buildIntroPanel(),
+            _buildScanChips(),
+            const SizedBox(height: 14),
+            _buildPreviewStage(previews),
             const SizedBox(height: 16),
             if (_error != null) ...[
               Container(
@@ -352,6 +357,8 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
             ],
             _buildActions(hasPreview),
             const SizedBox(height: 16),
+            _buildReferencePanel(),
+            const SizedBox(height: 16),
             _buildDetails(),
           ],
         ),
@@ -359,8 +366,189 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     );
   }
 
-  /// Before any generation: the reference photos and what will happen.
-  Widget _buildIntroPanel() {
+  /// What the scan found, in the same three chips the results page shows.
+  ///
+  /// A try-on session is a real scan -- the page just skips the
+  /// recommendations -- so the customer should see what was measured here too,
+  /// not only on the page they did not visit.
+  Widget _buildScanChips() {
+    final chips = <String>[
+      if (widget.faceShape.trim().isNotEmpty) 'Face: ${widget.faceShape.trim()}',
+      if (widget.hairTexture.trim().isNotEmpty) 'Hair: ${widget.hairTexture.trim()}',
+      'Length: ${_lengthLabel(widget.hairLengthLevel)}',
+    ];
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final chip in chips)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppBrand.surface,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppBrand.border),
+            ),
+            child: Text(
+              chip,
+              style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+            ),
+          ),
+      ],
+    );
+  }
+
+  static String _lengthLabel(int level) => switch (level) {
+        0 => 'very short',
+        2 => 'medium',
+        3 => 'long',
+        _ => 'short',
+      };
+
+  /// The big frame: the customer's own photo until a preview exists.
+  ///
+  /// It used to open on the haircut's reference photos, which read as though
+  /// the try-on had already happened. Showing their own scan first -- exactly
+  /// as the results page does -- makes the before and after obvious.
+  Widget _buildPreviewStage(Map<String, String>? previews) {
+    final hasPreview = previews != null;
+    final view = _shownView(previews);
+    final captureB64 = _captureFor(view);
+
+    String previewUrl = '';
+    if (hasPreview) {
+      previewUrl = (previews[switch (view) {
+            StyleView.front => 'frontViewUrl',
+            StyleView.side => 'sideViewUrl',
+            StyleView.back => 'backViewUrl',
+          }] ??
+          '')
+          .trim();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ScannerLayout.previewFrame(
+          context: context,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (_generating)
+                // Indeterminate on purpose: the server renders all three angles
+                // in one blocking call and reports no partial progress, so a
+                // percentage would be invented.
+                const Center(
+                  child: ScanProgressPanel.indeterminate(
+                    title: 'Generating your AI preview',
+                    stages: [
+                      'Preparing your photos',
+                      'Rendering front, left and right views',
+                      'Finishing up',
+                    ],
+                    currentStep: 1,
+                  ),
+                )
+              else if (previewUrl.isNotEmpty)
+                Image.network(
+                  ApiConfig.resolveImageUrl(previewUrl),
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) => _captureFallback(captureB64),
+                )
+              else
+                _captureFallback(captureB64),
+              if (!_generating) _stageBadge(hasAiPreview: previewUrl.isNotEmpty),
+            ],
+          ),
+        ),
+        const SizedBox(height: 10),
+        _viewSwitcher(previews),
+        if (_achievableToday && previewUrl.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          const Text(
+            'Adapted to your current length — this is the closest version your '
+            'barber could cut today.',
+            style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5, height: 1.4),
+          ),
+        ],
+        if (!hasPreview) ...[
+          const SizedBox(height: 10),
+          const Text(
+            'We generate this cut on your own scan photos — front, side and '
+            'back — so you can see it on you before you book.',
+            style: TextStyle(color: Colors.white70, fontSize: 12.5, height: 1.45),
+          ),
+        ],
+      ],
+    );
+  }
+
+  StyleView _shownView(Map<String, String>? previews) => _shown;
+
+  String? _captureFor(StyleView view) => widget.captures[switch (view) {
+        StyleView.front => 'front',
+        StyleView.side => 'left',
+        StyleView.back => 'right',
+      }];
+
+  Widget _captureFallback(String? captureB64) {
+    if (captureB64 != null && captureB64.isNotEmpty) {
+      return Image.memory(
+        base64Decode(captureB64),
+        fit: BoxFit.cover,
+        width: double.infinity,
+        gaplessPlayback: true,
+      );
+    }
+    return const Center(child: Icon(Icons.face, color: Colors.white38, size: 48));
+  }
+
+  Widget _stageBadge({required bool hasAiPreview}) {
+    return Positioned(
+      top: 10,
+      left: 10,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white38,
+          ),
+        ),
+        child: Text(
+          hasAiPreview ? 'AI try-on' : 'Scanned photos',
+          style: TextStyle(
+            color: hasAiPreview ? const Color(0xFF8BC34A) : Colors.white70,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Front / Side / Back, driving both the scan photo and the generated view.
+  Widget _viewSwitcher(Map<String, String>? previews) {
+    return SegmentedButton<StyleView>(
+      segments: [
+        for (final view in StyleView.values)
+          ButtonSegment(value: view, label: Text(view.label)),
+      ],
+      selected: {_shown},
+      showSelectedIcon: false,
+      onSelectionChanged: (set) => setState(() => _shown = set.first),
+    );
+  }
+
+  /// The haircut's own reference photos — what the barber cuts towards.
+  ///
+  /// Below the stage, not in it: the frame above belongs to the customer's own
+  /// face, so that the before and after are the same picture changing.
+  Widget _buildReferencePanel() {
     final hasReferencePhotos =
         StyleView.values.any((v) => styleViewUrl(widget.style, v).isNotEmpty);
 
@@ -407,82 +595,8 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
                 ),
               ],
             ),
-          const SizedBox(height: 14),
-          const Text(
-            'We generate this cut on your own scan photos — front, side and '
-            'back — so you can see it on you before you book.',
-            style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.45),
-          ),
         ],
       ),
-    );
-  }
-
-  /// After generation: the three generated views, one at a time.
-  Widget _buildPreviewPanel(Map<String, String> previews) {
-    const keyFor = {
-      StyleView.front: 'frontViewUrl',
-      StyleView.side: 'sideViewUrl',
-      StyleView.back: 'backViewUrl',
-    };
-    final available = StyleView.values
-        .where((v) => (previews[keyFor[v]] ?? '').trim().isNotEmpty)
-        .toList();
-    final shown = available.contains(_shown)
-        ? _shown
-        : (available.isNotEmpty ? available.first : StyleView.front);
-    final url = previews[keyFor[shown]] ?? '';
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        ClipRRect(
-          borderRadius: BorderRadius.circular(12),
-          child: AspectRatio(
-            aspectRatio: 3 / 4,
-            child: Container(
-              color: const Color(0xFF121212),
-              child: url.isEmpty
-                  ? const Center(
-                      child: Icon(Icons.image_not_supported_outlined,
-                          color: Colors.white24, size: 40),
-                    )
-                  : Image.network(
-                      ApiConfig.resolveImageUrl(url),
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const Center(
-                        child: Icon(Icons.broken_image_outlined,
-                            color: Colors.white24, size: 40),
-                      ),
-                    ),
-            ),
-          ),
-        ),
-        if (available.length > 1) ...[
-          const SizedBox(height: 10),
-          SegmentedButton<StyleView>(
-            segments: [
-              for (final view in available)
-                ButtonSegment(value: view, label: Text(view.label)),
-            ],
-            selected: {shown},
-            showSelectedIcon: false,
-            onSelectionChanged: (set) => setState(() => _shown = set.first),
-          ),
-        ],
-        if (_achievableToday) ...[
-          const SizedBox(height: 10),
-          Text(
-            'Adapted to your current length — this is the closest version your '
-            'barber could cut today.',
-            style: TextStyle(
-              color: AppBrand.textMuted,
-              fontSize: 11.5,
-              height: 1.4,
-            ),
-          ),
-        ],
-      ],
     );
   }
 
@@ -498,27 +612,20 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
           ),
           const SizedBox(height: 8),
         ],
-        FilledButton.icon(
-          onPressed: _generating
-              ? null
-              : () => unawaited(_onGeneratePressed(regenerate: hasPreview)),
-          icon: _generating
-              ? const SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(hasPreview ? Icons.refresh_rounded : Icons.auto_awesome),
-          label: Text(
-            _generating
-                ? 'Generating…'
-                : (hasPreview ? 'Generate again' : 'Generate preview'),
+        // Offered once. Regenerating was a second route into generation with
+        // its own copy of the rules, and it is where the length adaptation was
+        // found silently reverting; the progress panel above now carries the
+        // "working on it" feedback the button used to.
+        if (!hasPreview)
+          FilledButton.icon(
+            onPressed: _generating ? null : () => unawaited(_onGeneratePressed()),
+            icon: const Icon(Icons.auto_awesome),
+            label: Text(_generating ? 'Generating…' : 'Generate preview'),
+            style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
           ),
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-          ),
-        ),
-        const SizedBox(height: 10),
+        if (!hasPreview) const SizedBox(height: 10),
         OutlinedButton.icon(
           onPressed: _booking ? null : () => unawaited(_onBookPressed()),
           icon: const Icon(Icons.event_available_outlined, size: 18),

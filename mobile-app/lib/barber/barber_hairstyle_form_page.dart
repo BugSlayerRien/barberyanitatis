@@ -37,6 +37,11 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   final _finish = TextEditingController();
   final _instructions = TextEditingController();
   final _minutes = TextEditingController(text: '40');
+  final _freeText = TextEditingController();
+
+  /// True when the barber would rather write the description themselves than
+  /// answer the structured questions. Both end as one prompt on the row.
+  bool _ownWords = false;
 
   final Set<String> _textures = {};
   int _minLengthLevel = 1;
@@ -59,7 +64,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   void dispose() {
     for (final c in [
       _name, _description, _sides, _guards, _top, _fringe,
-      _back, _neckline, _finish, _instructions, _minutes,
+      _back, _neckline, _finish, _instructions, _minutes, _freeText,
     ]) {
       c.dispose();
     }
@@ -102,6 +107,54 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
     }
   }
 
+  Future<void> _withdraw(Map<String, dynamic> row) async {
+    final name = row['style_name']?.toString() ?? 'this haircut';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppBrand.surface,
+        title: const Text(
+          'Withdraw this submission?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          '"$name" will be removed and the owner will no longer see it. '
+          'You can submit it again later.',
+          style: const TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Keep it', style: TextStyle(color: Colors.white70)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: FilledButton.styleFrom(backgroundColor: AppBrand.poleRed),
+            child: const Text('Withdraw'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _post({
+        'action': 'deleteHairstyle',
+        'hairstyleID': row['hairstyle_id'],
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Submission withdrawn.')),
+      );
+      await _loadMine();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+      );
+    }
+  }
+
   Future<void> _pickPhoto(String slot) async {
     final image = await ImagePicker().pickImage(
       source: ImageSource.gallery,
@@ -118,11 +171,23 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   String? _validate() {
     if (_name.text.trim().isEmpty) return 'Give the haircut a name.';
     if (_textures.isEmpty) return 'Pick at least one hair texture this suits.';
-    if (_sides.text.trim().isEmpty) {
-      return 'Describe the sides — the fade or taper decides the cut.';
-    }
-    if (_top.text.trim().isEmpty) {
-      return 'Say how much length is left on top.';
+    if (_ownWords) {
+      final text = _freeText.text.trim();
+      if (text.isEmpty) {
+        return 'Describe the haircut, or switch back to the questions.';
+      }
+      // The composed path always states the back. Free text has to say it
+      // itself -- an unsaid back is where the AI invents length.
+      if (!RegExp(r'\b(back|nape|collar)\b', caseSensitive: false).hasMatch(text)) {
+        return 'Say what happens at the back — left unsaid, the AI invents length there.';
+      }
+    } else {
+      if (_sides.text.trim().isEmpty) {
+        return 'Describe the sides — the fade or taper decides the cut.';
+      }
+      if (_top.text.trim().isEmpty) {
+        return 'Say how much length is left on top.';
+      }
     }
     // Photos are optional. A described cut already works: the app shows a
     // placeholder tile and the AI preview is built from the description, so
@@ -164,6 +229,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
         'neckline': _neckline.text.trim(),
         'finish': _finish.text.trim(),
         'barberInstructions': _instructions.text.trim(),
+        if (_ownWords) 'aiPrompt': _freeText.text.trim(),
         'minLengthLevel': _minLengthLevel,
         'estimatedMinutes': int.tryParse(_minutes.text.trim()) ?? 40,
         'photos': photos,
@@ -188,7 +254,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   void _clearForm() {
     for (final c in [
       _name, _description, _sides, _guards, _top, _fringe,
-      _back, _neckline, _finish, _instructions,
+      _back, _neckline, _finish, _instructions, _freeText,
     ]) {
       c.clear();
     }
@@ -286,7 +352,21 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
                   hint: 'Who it suits and how it wears', lines: 2),
             ]),
             const SizedBox(height: 14),
-            _section('How you cut it', [
+            _describeModeToggle(),
+            const SizedBox(height: 14),
+            if (_ownWords)
+              _section('Describe it in your own words', [
+                _field(_freeText, 'The haircut, as you would explain it',
+                    hint: 'low fade from the temple, two inches on top swept '
+                        'back, the back tapered to the nape with nothing over '
+                        'the collar',
+                    lines: 6,
+                    note: 'Say what happens at the back. Left unsaid, the AI '
+                        'invents length there — that is what gave Two Block a '
+                        'long back.'),
+              ])
+            else
+              _section('How you cut it', [
               _field(_sides, 'Sides and back *',
                   hint: 'low fade from the temple down, clean taper at the ear',
                   lines: 2),
@@ -303,7 +383,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
                       'invents length.'),
               _field(_neckline, 'Neckline', hint: 'blocked / tapered / rounded'),
               _field(_finish, 'Finish and product', hint: 'matte clay, dried forward'),
-            ]),
+              ]),
             const SizedBox(height: 14),
             _section('Who it suits', [
               const Text(
@@ -393,6 +473,24 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Structured questions, or one box.
+  ///
+  /// The questions suit a barber describing a cut the way they would at the
+  /// chair, and the server composes the prompt from them. Someone who would
+  /// rather just write it gets the same single field the owner has -- both
+  /// end as one prompt on the row.
+  Widget _describeModeToggle() {
+    return SegmentedButton<bool>(
+      segments: const [
+        ButtonSegment(value: false, label: Text('Answer questions')),
+        ButtonSegment(value: true, label: Text('Write it myself')),
+      ],
+      selected: {_ownWords},
+      showSelectedIcon: false,
+      onSelectionChanged: (set) => setState(() => _ownWords = set.first),
     );
   }
 
@@ -597,6 +695,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
       _ => ('Pending review', AppBrand.warning),
     };
     final variants = (row['variant_count'] as num?)?.toInt() ?? 0;
+    final canWithdraw = row['can_delete'] == true || row['can_delete'] == 't';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -641,6 +740,19 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
               style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
+          // Published styles are the shop's catalogue and may already be
+          // booked, so only the owner can take those down. The server enforces
+          // the same rule; this just stops the barber tapping into a refusal.
+          if (canWithdraw) ...[
+            const SizedBox(width: 4),
+            IconButton(
+              onPressed: () => _withdraw(row),
+              icon: const Icon(Icons.delete_outline, size: 20),
+              color: AppBrand.textMuted,
+              tooltip: 'Withdraw',
+              visualDensity: VisualDensity.compact,
+            ),
+          ],
         ],
       ),
     );

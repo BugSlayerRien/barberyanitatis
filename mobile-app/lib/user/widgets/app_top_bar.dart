@@ -46,6 +46,21 @@ class _AppTopBarState extends State<AppTopBar> {
     setState(() => _unreadCount = count);
   }
 
+  /// Addresses the request to the right inbox.
+  ///
+  /// This bar is shared by the customer and barber apps and always sent
+  /// `userID`, so notifications.php resolved the recipient as a *customer*
+  /// with the barber's id. Every row written for the barber -- a new booking,
+  /// a cancellation -- was filed under recipient_type 'Barber' and never
+  /// looked at, which is why their bell was permanently empty.
+  Map<String, dynamic> _notificationRecipient() {
+    if (UserSession.roles.contains('barber')) {
+      return {'barberID': UserSession.userId, 'recipientType': 'barber'};
+    }
+
+    return {'userID': UserSession.userId};
+  }
+
   Future<int> _fetchUnreadCount() async {
     if (UserSession.userId == null) {
       return 0;
@@ -53,7 +68,7 @@ class _AppTopBarState extends State<AppTopBar> {
     try {
       final data = await CustomerApi.postDecoded('notifications.php', {
         'action': 'unreadCount',
-        'userID': UserSession.userId,
+        ..._notificationRecipient(),
       });
       return (data['unreadCount'] as num?)?.toInt() ?? 0;
     } catch (_) {
@@ -68,7 +83,7 @@ class _AppTopBarState extends State<AppTopBar> {
     try {
       final data = await CustomerApi.postDecoded('notifications.php', {
         'action': 'list',
-        'userID': UserSession.userId,
+        ..._notificationRecipient(),
       });
       final unread = (data['unreadCount'] as num?)?.toInt() ?? 0;
       if (mounted) {
@@ -97,7 +112,7 @@ class _AppTopBarState extends State<AppTopBar> {
     try {
       await CustomerApi.postDecoded('notifications.php', {
         'action': 'markRead',
-        'userID': UserSession.userId,
+        ..._notificationRecipient(),
         'notificationID': notificationID,
       });
       return true;
@@ -113,7 +128,7 @@ class _AppTopBarState extends State<AppTopBar> {
     try {
       await CustomerApi.postDecoded('notifications.php', {
         'action': 'markAllRead',
-        'userID': UserSession.userId,
+        ..._notificationRecipient(),
       });
       return true;
     } catch (_) {
@@ -128,7 +143,7 @@ class _AppTopBarState extends State<AppTopBar> {
     try {
       await CustomerApi.postDecoded('notifications.php', {
         'action': 'delete',
-        'userID': UserSession.userId,
+        ..._notificationRecipient(),
         'notificationID': notificationID,
       });
       return true;
