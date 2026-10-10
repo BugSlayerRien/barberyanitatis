@@ -316,10 +316,32 @@ try {
         $variants = $variantStmt->fetchAll(PDO::FETCH_ASSOC);
         $problems = hairstyle_readiness_problems($style, $variants);
 
+        // What a customer with shorter hair than this cut wants will actually
+        // be shown. Derived, never typed -- the owner sees it rather than
+        // writing it, so there is no second prompt to keep in step with the
+        // first.
+        $shortVariant = '';
+        $minLevel = (int)($style['ai_min_length_level'] ?? 1);
+        $prompt = trim((string)($style['ai_prompt'] ?? ''));
+        if ($minLevel >= 2 && $prompt !== '') {
+            require_once __DIR__ . '/replicate_helper.php';
+            $styleKey = replicate_resolve_style_key(
+                (string)($style['style_name'] ?? ''),
+                (string)($style['style_code'] ?? '')
+            );
+            $shortVariant = replicate_short_hair_style_desc(
+                $styleKey,
+                $prompt,
+                (string)($style['style_name'] ?? '')
+            );
+        }
+
         json_response([
             'ready' => $problems === [],
             'problems' => $problems,
             'warnings' => hairstyle_readiness_warnings($style, $variants),
+            'shortVariant' => $shortVariant,
+            'minLengthLevel' => $minLevel,
             'reviewStatus' => $style['review_status'] ?? 'Published',
         ]);
     }

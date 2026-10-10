@@ -156,13 +156,20 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     );
     if (!mounted || !proceed) return;
 
-    var achievable = _achievableToday;
-    if (!regenerate &&
-        styleNeedsMoreLength(widget.style, widget.hairLengthLevel)) {
+    // Whether the cut needs more hair is a fact about the scan, not about
+    // which button was pressed. Deciding it inside the "first generation"
+    // branch meant Generate again quietly reverted to the full-length prompt
+    // -- the very thing that drew a long-backed mullet on short hair.
+    final needsLength =
+        styleNeedsMoreLength(widget.style, widget.hairLengthLevel);
+
+    // The dialog is consent, asked once. The flag above is what actually
+    // decides what gets rendered.
+    if (needsLength && !_achievableToday) {
       final ok = await confirmLongerHairStyle(context, _styleName);
       if (!mounted || !ok) return;
-      achievable = true;
     }
+    final achievable = needsLength;
 
     setState(() {
       _generating = true;

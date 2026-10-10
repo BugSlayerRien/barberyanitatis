@@ -323,7 +323,7 @@ function replicate_style_brief(
     // length -- and the model, reasonably, drew the mullet it had been
     // described.
     $renderDesc = ($achievableToday && $needsMoreLength)
-        ? replicate_short_hair_style_desc($styleKey, $styleDesc)
+        ? replicate_short_hair_style_desc($styleKey, $styleDesc, $styleName)
         : $styleDesc;
 
     $basePrompt = replicate_build_hair_only_prompt($renderDesc, $hairLengthLevel, $hairColorLabel)
@@ -415,15 +415,168 @@ function replicate_style_short_variant(): array
  * authored -- weaker than a written variant, but still better than a prompt
  * that asserts length the customer does not have.
  */
-function replicate_short_hair_style_desc(?string $styleKey, string $styleDesc): string
+/**
+ * Derive the short-hair version of a prompt that nobody wrote one for.
+ *
+ * The eight built-in styles that need length have hand-written short variants.
+ * Anything added through the barber app or the admin portal does not, and the
+ * old fallback simply appended "without adding length anywhere" to a
+ * description that had just asked for a long back -- the same self-contradiction
+ * that drew a long-backed mullet on short hair. An image model follows the
+ * vivid description and ignores the denial that trails it.
+ *
+ * So the length claims are removed rather than argued with. The work is done
+ * clause by clause, because that is how these prompts are actually written: a
+ * barber's answers are joined with commas, and so are the built-in ones.
+ *
+ * Shape is preserved wherever possible. "the top left about 4 inches long and
+ * gathered upward into a tall rounded pineapple shape" keeps the pineapple and
+ * loses only the four inches -- dropping the whole clause would throw away the
+ * part that makes it that haircut.
+ */
+function replicate_derive_short_variant(string $styleName, string $prompt): string
 {
+    $prompt = trim($prompt);
+    if ($prompt === '') {
+        return $prompt;
+    }
+
+    // The prompts begin "style name: first clause". Strip the label so it is
+    // not treated as a clause, and so the rewritten text can carry its own.
+    $body = $prompt;
+    if (preg_match('/^([^:]{1,60}):\s*(.+)$/s', $prompt, $m) === 1) {
+        $body = $m[2];
+    }
+
+    $clauses = array_map('trim', explode(',', $body));
+    $kept = [];
+
+    foreach ($clauses as $clause) {
+        if ($clause === '') {
+            continue;
+        }
+
+        $rewritten = replicate_shorten_prompt_clause($clause);
+        if ($rewritten !== '') {
+            $kept[] = $rewritten;
+        }
+    }
+
+    // Stated outright and last, because it is the one instruction that must
+    // survive however the rest was phrased.
+    $kept[] = 'the back kept at exactly its current length with no length added '
+        . 'anywhere and nothing over the collar';
+
+    $label = strtolower(trim($styleName));
+    if ($label === '') {
+        $label = 'this cut';
+    }
+
+    return $label . ' adapted to shorter hair: ' . implode(', ', $kept);
+}
+
+/**
+ * One clause of a prompt, with any claim to length the customer does not have
+ * taken out of it.
+ *
+ * Returns '' when nothing worth keeping is left.
+ */
+function replicate_shorten_prompt_clause(string $clause): string
+{
+    // Clauses that already say hair is NOT long are exactly the phrasing we
+    // want ("nothing left over the collar", "tapered short above the collar").
+    // A blunter rule would delete them for containing the word "collar".
+    if (preg_match('/\b(?:nothing|without|no)\b[^.]*\b(?:long|length|collar|nape|shoulder)\b/i', $clause) === 1) {
+        return $clause;
+    }
+
+    $out = $clause;
+
+    // 1. Measurements -> current length, keeping whatever shape follows.
+    $out = (string)preg_replace(
+        '/(?:\b(?:about|around|roughly)\s+)?'
+        . '\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten)'
+        . '(?:\s*(?:to|-|–)\s*(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven|eight|nine|ten))?'
+        . '\s*(?:inch|inches|in\.?|cm)\b(?:\s+(?:long|tall|high|in\s+length))?/i',
+        'at its current length',
+        $out
+    );
+
+    // 2. Bare assertions of length.
+    $out = (string)preg_replace(
+        '/\b(?:deliberately\s+)?(?:kept|left|worn|grown)\s+(?:deliberately\s+)?long(?:est|er)?\b/i',
+        'kept at its current length',
+        $out
+    );
+    $out = (string)preg_replace(
+        '/\blong(?:er)?\s+(full\s+)?(top|back|length|layers?|section|hair|fringe)\b/i',
+        '$1$2',
+        $out
+    );
+    $out = (string)preg_replace('/\bfull\s+curly\s+back\s+section\b/i', 'curly back section', $out);
+    // The rules above name the nouns they expect, so an adjective slipped in
+    // between defeated them: "long flowing layers" sailed through. Anything
+    // still calling itself long after this point is a claim to length, and
+    // this clause is not a negated one -- those returned at the top.
+    $out = (string)preg_replace('/\blong(?:er|est)?\b(?!\s+as\b)(?!-)/i', '', $out);
+    $out = (string)preg_replace('/\bthe\s+length\s+(?=kept|at its current)/i', 'the back ', $out);
+
+    // 3. Length measured against a landmark on the body.
+    $out = (string)preg_replace(
+        '/\b(?:falling|reaching|hanging|extending|coming|flowing)\s+'
+        . '(?:down\s+)?(?:just\s+)?(?:(?:to|past|below|over|onto|beyond|towards?)\s+)?'
+        . '(?:the\s+)?(?:nape|collar|shoulders?|neck)\b(?:\s+(?:and|onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?|neck)\b)*/i',
+        'kept clear of the collar',
+        $out
+    );
+    $out = (string)preg_replace(
+        '/\b(?:just\s+)?(?:past|below|beyond|over)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b'
+        . '(?:\s+(?:onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b)*/i',
+        'kept clear of the collar',
+        $out
+    );
+
+    // 4. Whatever the substitutions left behind.
+    //
+    // Several rules can land on the same phrase -- "a long full top of 3 to 4
+    // inches" is rewritten by two of them -- so the repeats and the dangling
+    // prepositions they leave are cleaned up once, here, rather than each rule
+    // trying to predict the others.
+    $out = (string)preg_replace(
+        '/\bat its current length\b(?:\s+(?:of|at|to|in))*(?:\s+at its current length\b)+/i',
+        'at its current length',
+        $out
+    );
+    $out = (string)preg_replace('/\b(?:of|at|to|in)\s+at its current length\b/i',
+        'at its current length', $out);
+    $out = (string)preg_replace('/\bthe back\b(.{0,40}?)\s+at the back\b/i', 'the back$1', $out);
+    $out = (string)preg_replace('/\s+([,.])/', '$1', $out);
+    $out = (string)preg_replace('/\s{2,}/', ' ', $out);
+    $out = trim($out, " \t\n\r-–");
+
+    // A clause reduced to a connective carries nothing.
+    if (preg_match('/^(?:and|with|the|a|an|in|of|to)?$/i', $out) === 1) {
+        return '';
+    }
+
+    return $out;
+}
+
+function replicate_short_hair_style_desc(
+    ?string $styleKey,
+    string $styleDesc,
+    string $styleName = ''
+): string {
+    // A hand-written variant beats a derived one and there are eight of them,
+    // for the built-in styles that need length. Everything else -- including
+    // every haircut added from the barber app or the portal from now on -- is
+    // derived, so nobody has to write a second description.
     $variants = replicate_style_short_variant();
     if ($styleKey !== null && isset($variants[$styleKey])) {
         return $variants[$styleKey];
     }
 
-    return $styleDesc . '. Render this shape only as far as the hair already present allows, '
-        . 'without adding length anywhere';
+    return replicate_derive_short_variant($styleName, $styleDesc);
 }
 
 function replicate_achievable_today_clause(): string

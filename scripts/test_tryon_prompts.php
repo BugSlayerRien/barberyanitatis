@@ -279,10 +279,124 @@ $declined = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 1, '', fa
 check('without accepting the warning nothing is adapted',
     $declined['adaptedToCurrentLength'] === false);
 
-// A style with no authored variant still gets hedged rather than left asserting.
-$fallback = replicate_short_hair_style_desc('no_such_style', 'some cut: long flowing layers');
-check('an unauthored style is hedged rather than left as-is',
-    str_contains($fallback, 'without adding length anywhere'));
+// A style with no authored variant is rewritten, not merely hedged. Appending
+// a denial after "long flowing layers" was the original bug -- the model reads
+// the description and ignores the disclaimer trailing it.
+$fallback = replicate_short_hair_style_desc(
+    'no_such_style',
+    'some cut: long flowing layers reaching the collar',
+    'Some Cut'
+);
+check('an unauthored style is rewritten rather than left asserting',
+    !str_contains($fallback, 'long flowing layers'));
+check('and the rewrite is what the model receives',
+    str_contains($fallback, 'adapted to shorter hair'));
+
+// --- the automatic short-hair rewriter ---------------------------------------
+// Only eight styles have a hand-written short version. Everything added through
+// the barber app or the admin portal has one free-text prompt and nothing else,
+// and the old fallback simply appended "without adding length anywhere" after a
+// description that had just asked for a long back -- the same contradiction
+// that drew a long-backed mullet. These assert the derived text makes no claim
+// to length the customer does not have.
+//
+// The two stored prompts are inlined rather than read from the database, so the
+// test says the same thing on any machine and keeps saying it after someone
+// edits a row.
+$authoredSamples = [
+    'Wolf Cut' => 'wolf cut: sides left long and scissor-cut into soft wispy layers, '
+        . 'two to three inches on top in short choppy layers, heavily point-cut, '
+        . 'a wispy curtain fringe parted in the middle, the back left longest, '
+        . 'in soft tapered layers just past the nape onto the collar, '
+        . 'natural neckline, left untrimmed, texture spray, finger-dried for movement',
+    'Pineapple' => 'pineapple: sides and back clipped short with a clean taper from the '
+        . 'temple down to the skin, clipper guards a #1 at the bottom blending to a #3, '
+        . 'the top left about 4 inches long and gathered upward into a tall rounded '
+        . 'pineapple shape above the crown, no fringe, the front swept up and back off '
+        . 'the forehead, the back tapered short to the nape with nothing left over the '
+        . 'collar, a rounded neckline',
+];
+
+$derivable = $authoredSamples;
+foreach (replicate_style_prompts() as $key => $text) {
+    if ((replicate_style_min_length()[$key] ?? 1) >= 2) {
+        $derivable[ucwords(str_replace('_', ' ', $key))] = $text;
+    }
+}
+
+foreach ($derivable as $name => $prompt) {
+    $derived = replicate_derive_short_variant($name, $prompt);
+
+    check("{$name}: derived variant states the back",
+        preg_match('/\b(back|nape|collar)\b/i', $derived) === 1);
+
+    // Same rule the hand-written variants are held to: strip the negated
+    // phrasings first, so "nothing over the collar" is not mistaken for a claim.
+    $positive = preg_replace(
+        '/\b(?:nothing|no|without)\b[^,.]*?\b(?:collar|nape|length|longer|long)\b/i',
+        '',
+        $derived
+    ) ?? $derived;
+    check("{$name}: derived variant claims no length",
+        preg_match('/\b(kept long|left long|longest|long back|long full|deliberately kept|'
+            . 'falling to the nape|reaching the nape|past the collar|inches)\b/i', $positive) !== 1);
+
+    // Several rules can land on one phrase; the output must still read as
+    // English rather than "the top at at its current length".
+    check("{$name}: derived variant has no doubled substitution",
+        preg_match('/\b(?:at|of|in|to)\s+at its current length\b/i', $derived) !== 1
+            && !str_contains($derived, 'lengthat')
+            && preg_match('/\s{2,}/', $derived) !== 1);
+
+    check("{$name}: derived variant is labelled as adapted",
+        str_contains(strtolower($derived), 'adapted to shorter hair'));
+}
+
+// The two cases that motivated this, named explicitly.
+$wolf = replicate_derive_short_variant('Wolf Cut', $authoredSamples['Wolf Cut']);
+check('Wolf Cut no longer asks for the longest back',
+    !str_contains($wolf, 'the back left longest'));
+check('Wolf Cut no longer reaches past the nape onto the collar',
+    !str_contains($wolf, 'past the nape onto the collar'));
+
+// Shape must survive the length being removed -- dropping the whole clause
+// would throw away the part that makes it that haircut.
+$pine = replicate_derive_short_variant('Pineapple', $authoredSamples['Pineapple']);
+check('Pineapple keeps the shape that names it',
+    str_contains($pine, 'tall rounded pineapple shape'));
+check('Pineapple loses the four inches',
+    !str_contains($pine, '4 inches'));
+
+// A prompt with nothing to strip must come back intact.
+$neutral = 'buzz cut: clipped to one even short length all over with a #2 guard, '
+    . 'the back and sides tapered to the nape';
+$neutralOut = replicate_derive_short_variant('Buzz Cut', $neutral);
+check('a prompt with no length claims is not mangled',
+    str_contains($neutralOut, 'clipped to one even short length all over with a #2 guard'));
+check('and it still gains the closing clause',
+    str_contains($neutralOut, 'no length added anywhere'));
+
+check('an empty prompt derives nothing rather than a bare label',
+    replicate_derive_short_variant('Anything', '') === '');
+
+// A hand-written variant is better than a derived one, so it must win.
+$handWritten = replicate_style_short_variant()['modern_mullet'];
+check('a hand-written variant takes precedence over the derived one',
+    replicate_short_hair_style_desc('modern_mullet', 'ignored', 'Modern Mullet') === $handWritten);
+check('and a style without one falls through to the rewriter',
+    str_contains(
+        replicate_short_hair_style_desc('wolf_cut', $authoredSamples['Wolf Cut'], 'Wolf Cut'),
+        'adapted to shorter hair'
+    ));
+
+// End to end: the stored prompt, a short-haired customer, warning accepted.
+$dbBrief = replicate_style_brief(
+    'Wolf Cut', 'HC-WOLF-CUT', 1, '', true, $authoredSamples['Wolf Cut'], 3
+);
+check('a database style adapts for a short-haired customer',
+    ($dbBrief['adaptedToCurrentLength'] ?? false) === true);
+check('and its long-back wording never reaches the model',
+    !str_contains($dbBrief['basePrompt'], 'the back left longest'));
 
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);
