@@ -326,8 +326,12 @@ function replicate_style_brief(
         ? replicate_short_hair_style_desc($styleKey, $styleDesc, $styleName)
         : $styleDesc;
 
-    $basePrompt = replicate_build_hair_only_prompt($renderDesc, $hairLengthLevel, $hairColorLabel)
-        . $profileNote;
+    $basePrompt = replicate_build_hair_only_prompt(
+        $renderDesc,
+        $hairLengthLevel,
+        $hairColorLabel,
+        $achievableToday && $needsMoreLength
+    ) . $profileNote;
 
     if ($achievableToday && $needsMoreLength) {
         $basePrompt .= replicate_achievable_today_clause();
@@ -388,10 +392,16 @@ function replicate_style_short_variant(): array
         'wavy_mod_cut' => 'wavy mod cut adapted to shorter hair: the natural wave combed '
             . 'forward across the forehead at its current length into a short blunt fringe '
             . 'line, the sides and back tapered close to the nape with nothing over the collar',
-        'modern_mullet' => 'modern mullet adapted to shorter hair: a cropped textured top and '
-            . 'fringe with tapered sides and only a slight extra weight left at the nape, the '
-            . 'back kept as short as it already is and nothing reaching the collar -- the '
-            . 'mullet shape suggested by the outline, not by added length',
+        // "only a slight extra weight left at the nape" was an instruction to
+        // put hair at the nape, and the model obeyed it -- that clause is the
+        // tail customers kept seeing. A mullet's back cannot be approximated
+        // by cutting, only by growing, so the back is declared out of scope
+        // rather than described at all.
+        'modern_mullet' => 'modern mullet, early stage on hair that is still short: taper the '
+            . 'sides from the temple down and tighten them around the ear, crop and texture '
+            . 'the top into a short fringe. The back of the head and the nape are not part of '
+            . 'this cut -- leave that area exactly as it appears in the photo, untouched and '
+            . 'uncut',
         'pompadour' => 'pompadour adapted to shorter hair: the front lifted up and swept back '
             . 'into a modest volume built only from the length already present, the sides '
             . 'faded short, the back tapered clean to the nape with nothing over the collar',
@@ -401,10 +411,11 @@ function replicate_style_short_variant(): array
         'curly_undercut' => 'curly undercut adapted to shorter hair: the sides and back clipped '
             . 'short in a disconnected line with the curls on top left exactly as long as they '
             . 'already are, no length added, the back short to the nape',
-        'curly_modern_mullet' => 'curly modern mullet adapted to shorter hair: the curls cropped '
-            . 'at the sides and crown with only a hint of extra weight left at the nape, the '
-            . 'back kept at exactly its current length with no length added anywhere and '
-            . 'nothing falling over the collar',
+        'curly_modern_mullet' => 'curly modern mullet, early stage on hair that is still '
+            . 'short: crop the curls close at the sides and around the crown, keeping the '
+            . 'curl pattern on top. The back of the head and the nape are not part of this '
+            . 'cut -- leave that area exactly as it appears in the photo, untouched and '
+            . 'uncut',
     ];
 }
 
@@ -462,10 +473,26 @@ function replicate_derive_short_variant(string $styleName, string $prompt): stri
         }
     }
 
-    // Stated outright and last, because it is the one instruction that must
-    // survive however the rest was phrased.
-    $kept[] = 'the back kept at exactly its current length with no length added '
-        . 'anywhere and nothing over the collar';
+    // Say one thing about the back, not two.
+    //
+    // Clauses asking for length at the back were stripped above. Anything
+    // still standing is a cutting instruction -- "lower back clipped short
+    // underneath" -- which is achievable on short hair and should be kept.
+    // Adding the freeze on top of it would contradict it, which is the whole
+    // failure mode being fixed here. The freeze is for the case where nothing
+    // about the back survived: then the region is genuinely out of scope.
+    $mentionsBack = false;
+    foreach ($kept as $clause) {
+        if (preg_match('/\b(?:back|nape|collar)\b/i', $clause) === 1) {
+            $mentionsBack = true;
+            break;
+        }
+    }
+
+    if (!$mentionsBack) {
+        $kept[] = 'the back of the head and the nape are not part of this cut, left exactly '
+            . 'as they appear in the photo, untouched and uncut';
+    }
 
     $label = strtolower(trim($styleName));
     if ($label === '') {
@@ -521,18 +548,20 @@ function replicate_shorten_prompt_clause(string $clause): string
     $out = (string)preg_replace('/\blong(?:er|est)?\b(?!\s+as\b)(?!-)/i', '', $out);
     $out = (string)preg_replace('/\bthe\s+length\s+(?=kept|at its current)/i', 'the back ', $out);
 
-    // 3. Length measured against a landmark on the body.
+    // 3. Length measured against a landmark on the body. Dropped outright,
+    //    not softened: "kept clear of the collar" still describes the back,
+    //    and describing the back is what invites the model to re-draw it.
     $out = (string)preg_replace(
         '/\b(?:falling|reaching|hanging|extending|coming|flowing)\s+'
         . '(?:down\s+)?(?:just\s+)?(?:(?:to|past|below|over|onto|beyond|towards?)\s+)?'
         . '(?:the\s+)?(?:nape|collar|shoulders?|neck)\b(?:\s+(?:and|onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?|neck)\b)*/i',
-        'kept clear of the collar',
+        '',
         $out
     );
     $out = (string)preg_replace(
         '/\b(?:just\s+)?(?:past|below|beyond|over)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b'
         . '(?:\s+(?:onto|over|to)\s+(?:the\s+)?(?:nape|collar|shoulders?)\b)*/i',
-        'kept clear of the collar',
+        '',
         $out
     );
 
@@ -559,6 +588,20 @@ function replicate_shorten_prompt_clause(string $clause): string
         return '';
     }
 
+    // "the back left longest" became "the back kept at its current length",
+    // which says nothing the closing freeze does not say better -- and saying
+    // anything at all about the back invites the model to re-draw it. Drop it.
+    if (preg_match('/^(?:the\s+)?(?:back|nape)\b[^,]{0,40}current length\.?$/i', $out) === 1) {
+        return '';
+    }
+
+    // Dropping the landmark out of "in soft tapered layers just past the nape"
+    // leaves "in soft tapered layers" dangling with nothing to attach to, and
+    // a reader -- or a model -- attaches it to whatever came before.
+    if (preg_match('/^(?:in|at|with|to|onto|over)\s+(?:\S+\s+){0,3}\S+$/i', $out) === 1) {
+        return '';
+    }
+
     return $out;
 }
 
@@ -581,18 +624,19 @@ function replicate_short_hair_style_desc(
 
 function replicate_achievable_today_clause(): string
 {
-    return ' IMPORTANT — WORK WITH THE HAIR IN THE PHOTO: this person does not '
-        . 'currently have enough length for the full version of this style, and the '
-        . 'description above has already been adapted to the hair they do have. Do '
-        . 'NOT add or extend hair anywhere, and especially not at the back or the '
-        . 'nape — the back must stay as short as it is in the photo. Keep the shape '
-        . 'and the fade pattern, but never lengthen to reach them.';
+    // Deliberately one sentence. It used to be a paragraph at the very end,
+    // competing with everything above it; now that the same rule opens the
+    // prompt, this is here for recency, not explanation.
+    return ' FINAL CHECK BEFORE YOU RENDER: compare the back of the head against the '
+        . 'source photo — it must be identical. If a part of this style needs hair that '
+        . 'is not in the photo, leave that part uncut rather than drawing the hair in.';
 }
 
 function replicate_build_hair_only_prompt(
     string $styleDescription,
     int $hairLengthLevel = 1,
-    string $hairColorLabel = ''
+    string $hairColorLabel = '',
+    bool $achievableToday = false
 ): string {
     $hints = replicate_length_style_hints();
     $labels = replicate_hair_length_labels();
@@ -604,12 +648,54 @@ function replicate_build_hair_only_prompt(
             . ' hair color exactly. Do not lighten, darken, redden, or recolor the hair.';
     }
 
-    return 'Photo-realistic HAIR-ONLY edit of the attached photo. Change ONLY the hair on this '
-        . 'exact person — crown, top, sides, temples, sideburns, and back hairline — to this '
-        . "exact haircut: \"{$styleDescription}\". Current length: {$currentLabel}. {$lengthHint} "
-        . 'Completely remove the old hairstyle everywhere, not just the tips or one side; the new '
-        . 'cut silhouette must look clearly different from the original. Do not paste extra hair '
-        . 'onto forehead skin, cheeks, or neck. '
+    // Swapping the description for an honest one was not enough on its own.
+    // This prompt runs to roughly 290 words, and the rule about length used to
+    // be its last sentence -- behind identity lock, glasses, clothing,
+    // background, lighting and output format. The model read "modern mullet",
+    // treated it as the target, and drew one. So the rule now comes first,
+    // before the style is named, and the sentence that names the style asks
+    // for the closest achievable version rather than the haircut itself.
+    $opening = 'Photo-realistic HAIR-ONLY edit of the attached photo. ';
+    $target = 'to this exact haircut';
+    if ($achievableToday) {
+        // "Shape and outline may change; length may not" licensed exactly the
+        // wrong thing: reshaping the back of a mullet IS lengthening it, there
+        // being nothing else a mullet's back can be. The rule is subtractive
+        // now -- cutting is allowed, adding never is, and any part of the
+        // style that would need hair the person does not have is left undone
+        // rather than invented.
+        $opening .= 'HARD CONSTRAINT, APPLIES TO EVERYTHING BELOW: this is a CUT. You may '
+            . 'only REMOVE hair. You may never add, extend, lengthen, thicken or draw in '
+            . 'hair that is not already in the photo. This person\'s hair is '
+            . $currentLabel . '. If any part of the style below would need more hair than '
+            . 'they have, DO NOT DO THAT PART — leave that area exactly as photographed, '
+            . 'uncut and unchanged. This applies above all to the back of the head and the '
+            . 'nape, where there is the least hair to work with. ';
+        $target = 'to the closest version of this haircut that is possible on their CURRENT '
+            . 'hair length, cutting only what is already there';
+    }
+
+    // The editable region and the "make it look different" push both have to
+    // stand down when the cut is only partly achievable. Listing the back
+    // hairline as fair game, and demanding a clearly different silhouette,
+    // are instructions to redraw the back -- and a redrawn mullet back is a
+    // tail. On the normal path both are correct and stay as they were.
+    $region = $achievableToday
+        ? 'crown, top, sides, temples and sideburns'
+        : 'crown, top, sides, temples, sideburns, and back hairline';
+    $thoroughness = $achievableToday
+        ? 'Recut every area the style actually reaches, not just the tips or one side. Areas '
+            . 'the style cannot reach at this length are left alone — an unchanged back is the '
+            . 'correct result here, not a failure. '
+        : 'Completely remove the old hairstyle everywhere, not just the tips or one side; the '
+            . 'new cut silhouette must look clearly different from the original. ';
+
+    return $opening
+        . 'Change ONLY the hair on this '
+        . "exact person — {$region} — "
+        . "{$target}: \"{$styleDescription}\". Current length: {$currentLabel}. {$lengthHint} "
+        . $thoroughness
+        . 'Do not paste extra hair onto forehead skin, cheeks, or neck. '
         . replicate_glasses_preservation_clause()
         . 'STRICT IDENTITY LOCK — do not change: face shape, facial features, facial expression, '
         . 'skin tone and texture, blemishes or marks, eyebrows, eyes, eyeglasses if present, ears, '

@@ -468,9 +468,12 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
         _viewSwitcher(previews),
         if (_achievableToday && previewUrl.isNotEmpty) ...[
           const SizedBox(height: 8),
+          // Without this the unchanged back reads as a failed generation
+          // rather than the honest answer it is.
           const Text(
-            'Adapted to your current length — this is the closest version your '
-            'barber could cut today.',
+            'Cut to your current length. The sides and top are shaped; the back '
+            'is left as it is, because this style needs more length there than '
+            'you have today.',
             style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5, height: 1.4),
           ),
         ],

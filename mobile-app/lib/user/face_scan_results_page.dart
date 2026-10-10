@@ -86,6 +86,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   bool _bookingInFlight = false;
   bool _previewGenerating = false;
 
+  /// True when the preview on screen was rendered at the customer's current
+  /// length rather than the style's full length. Without saying so, the
+  /// unchanged back reads as a failed generation instead of an honest one.
+  bool _previewAdaptedToLength = false;
+
   /// Variants whose generated preview the customer has explicitly saved, and
   /// the saved-row ids needed to unsave them without re-fetching the list.
   final Set<int> _savedVariantIds = <int>{};
@@ -784,6 +789,8 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
 
     final forceRegenerate =
         choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
+    setState(() => _previewAdaptedToLength = stretches);
+
     unawaited(_loadReplicatePreviewsForSelected(
       forceRegenerate: forceRegenerate,
       achievableToday: stretches,
@@ -1906,6 +1913,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                 ],
               ),
             ),
+            if (_previewAdaptedToLength &&
+                !_previewGenerating &&
+                previewUrl != null &&
+                previewUrl.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Cut to your current length. The sides and top are shaped; the '
+                'back is left as it is, because this style needs more length '
+                'there than you have today.',
+                style: TextStyle(color: Colors.white54, fontSize: 11.5, height: 1.4),
+              ),
+            ],
             if (_previewError != null) ...[
             const SizedBox(height: 8),
               Container(

@@ -247,8 +247,8 @@ foreach ($shortVariants as $key => $text) {
 
     // And it must say so outright: this is the clause that replaced the
     // contradiction, so its absence means the variant is merely vague.
-    check("{$key} short variant states the hair is not lengthened",
-        preg_match('/\b(no length added|not by added length|as short as it already is|exactly (?:as long as|their current length)|current length|already present|existing length|already are)\b/i', $text) === 1);
+    check("{$key} short variant says the hair is not lengthened",
+        preg_match('/\b(no length added|not by added length|as short as it already is|exactly (?:as long as|their current length)|current length|already present|existing length|already are|not part of this cut)\b/i', $text) === 1);
 
     $words = str_word_count($text);
     check("{$key} short variant sits in the word budget ({$words})",
@@ -263,8 +263,12 @@ check('the long-back description is gone from the prompt',
     !str_contains($adapted['basePrompt'], 'deliberately kept long'));
 check('and so is the other long-back phrase',
     !str_contains($adapted['basePrompt'], 'long back section'));
+// The rule moved to the front of the prompt and is worded for the model
+// rather than for a reader, so this asserts the new phrasing in both places.
 check('the prompt insists the back stays short',
-    str_contains($adapted['basePrompt'], 'back must stay as short'));
+    str_contains($adapted['basePrompt'], 'leave that area exactly as photographed'));
+check('and says so again as the last thing it reads',
+    str_contains($adapted['basePrompt'], 'compare the back of the head against the source photo'));
 
 // A customer who actually has the length must still get the real cut.
 $full = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 3, '', false);
@@ -373,8 +377,9 @@ $neutral = 'buzz cut: clipped to one even short length all over with a #2 guard,
 $neutralOut = replicate_derive_short_variant('Buzz Cut', $neutral);
 check('a prompt with no length claims is not mangled',
     str_contains($neutralOut, 'clipped to one even short length all over with a #2 guard'));
-check('and it still gains the closing clause',
-    str_contains($neutralOut, 'no length added anywhere'));
+check('a prompt that already states its back keeps that and gains no freeze',
+    str_contains($neutralOut, 'the back and sides tapered to the nape')
+        && !str_contains($neutralOut, 'not part of this cut'));
 
 check('an empty prompt derives nothing rather than a bare label',
     replicate_derive_short_variant('Anything', '') === '');
@@ -397,6 +402,160 @@ check('a database style adapts for a short-haired customer',
     ($dbBrief['adaptedToCurrentLength'] ?? false) === true);
 check('and its long-back wording never reaches the model',
     !str_contains($dbBrief['basePrompt'], 'the back left longest'));
+
+// --- where the length rule sits, not merely that it exists ------------------
+// Swapping the description for an honest one was not enough on the device. The
+// prompt runs to ~290 words and the rule about length was its last sentence,
+// behind identity lock, glasses, clothing, background and output format. Grok
+// read "modern mullet", took it as the target, and drew one. These assert
+// position, because position was the bug.
+foreach (replicate_style_min_length() as $key => $level) {
+    if ($level < 2) {
+        continue;
+    }
+    $name = ucwords(str_replace('_', ' ', $key));
+    $adaptedPrompt = replicate_style_brief($name, null, 1, '', true)['basePrompt'];
+
+    $head = substr($adaptedPrompt, 0, 250);
+    check("{$key}: the length rule is stated before the style is named",
+        stripos($head, 'You may only REMOVE hair') !== false);
+    check("{$key}: and the opening forbids adding length",
+        stripos($head, 'never add, extend, lengthen, thicken') !== false);
+
+    $tail = substr($adaptedPrompt, -200);
+    check("{$key}: and it is repeated at the very end",
+        stripos($tail, 'leave that part uncut rather than drawing the hair in') !== false);
+
+    // The old sentence ordered the model to produce the haircut, which left
+    // the adaptation reading as a footnote to the instruction.
+    check("{$key}: the prompt never demands the haircut outright",
+        !str_contains($adaptedPrompt, 'to this exact haircut'));
+    check("{$key}: it asks for the closest achievable version instead",
+        str_contains($adaptedPrompt, 'possible on their CURRENT hair length'));
+
+    // The constraint must come before the style description, not after it.
+    $rulePos = stripos($adaptedPrompt, 'You may only REMOVE hair');
+    $descPos = strpos($adaptedPrompt, ': "');
+    check("{$key}: the rule precedes the description",
+        $rulePos !== false && $descPos !== false && $rulePos < $descPos);
+}
+
+// Nothing may change for a customer who actually has the length.
+$normal = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 3, 'black', false);
+check('a long-haired customer is still asked for the exact haircut',
+    str_contains($normal['basePrompt'], 'to this exact haircut'));
+check('and gets no length constraint bolted on',
+    !str_contains($normal['basePrompt'], 'HARD CONSTRAINT')
+        && !str_contains($normal['basePrompt'], 'FINAL CHECK'));
+check('and still receives the full-length description',
+    str_contains($normal['basePrompt'], 'deliberately kept long'));
+
+// The builder's own flag, exercised directly: the same description must come
+// out framed two different ways.
+$plain = replicate_build_hair_only_prompt('test cut: something', 1, '', false);
+$guarded = replicate_build_hair_only_prompt('test cut: something', 1, '', true);
+check('the builder only front-loads when asked',
+    !str_contains($plain, 'HARD CONSTRAINT') && str_contains($guarded, 'HARD CONSTRAINT'));
+check('and the guarded build names the measured length',
+    str_contains($guarded, "This person's hair is short"));
+
+// --- never ask for hair the person does not have -----------------------------
+// Three rounds of fixes assumed the rule was being outvoted by a longer
+// instruction. It wasn't: the description itself ordered the hair. The mullet
+// variant said "only a slight extra weight left at the nape" and the model,
+// reasonably, left weight at the nape -- that clause was the tail customers
+// kept seeing. These checks fail on any phrasing that asks for hair rather
+// than for a cut.
+$orderingPhrases = [
+    'extra weight',
+    'weight left at',
+    'hint of',
+    'suggested by the outline',
+    'slight weight',
+];
+
+foreach (replicate_style_short_variant() as $key => $text) {
+    foreach ($orderingPhrases as $phrase) {
+        check("{$key} short variant does not order hair ({$phrase})",
+            stripos($text, $phrase) === false);
+    }
+}
+
+// A mullet's back cannot be approximated by cutting -- only by growing -- so
+// for these two the back must be declared out of scope, not described.
+foreach (['modern_mullet', 'curly_modern_mullet'] as $key) {
+    $text = replicate_style_short_variant()[$key] ?? '';
+    check("{$key}: the back is declared out of scope",
+        stripos($text, 'not part of this cut') !== false);
+    check("{$key}: and nothing is asked for at the nape",
+        preg_match('/(?:weight|volume|length|section|tail)[^.]{0,30}\bnape\b/i', $text) !== 1);
+}
+
+// The other six cut the back shorter, which is achievable, so they must still
+// say what happens there.
+foreach (['two_block', 'modern_curtains', 'wavy_mod_cut', 'pompadour',
+          'curly_top_fade', 'curly_undercut'] as $key) {
+    $text = replicate_style_short_variant()[$key] ?? '';
+    check("{$key}: still states what happens at the back",
+        preg_match('/\b(back|nape|collar)\b/i', $text) === 1);
+}
+
+// "Shape and outline may change; length may not" licensed the reshape that
+// drew the tail: reshaping a mullet's back IS lengthening it.
+$adaptedMullet = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 1, '', true)['basePrompt'];
+check('the reshape licence is gone from adapted prompts',
+    !str_contains($adaptedMullet, 'Shape and outline may change'));
+check('the adapted prompt frames the edit as removal only',
+    str_contains($adaptedMullet, 'You may only REMOVE hair'));
+check('and says unreachable parts are left undone',
+    str_contains($adaptedMullet, 'DO NOT DO THAT PART'));
+check('the back is not listed as an editable region',
+    !str_contains($adaptedMullet, 'back hairline'));
+check('and the "make it look different" push is withheld',
+    !str_contains($adaptedMullet, 'clearly different from the original'));
+check('an unchanged back is named as the correct outcome',
+    str_contains($adaptedMullet, 'an unchanged back is the correct result'));
+
+// None of that may leak into a normal generation.
+$fullMullet = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 3, '', false)['basePrompt'];
+check('a customer with the length still gets the full instruction',
+    str_contains($fullMullet, 'back hairline')
+        && str_contains($fullMullet, 'clearly different from the original'));
+check('and no removal-only constraint',
+    !str_contains($fullMullet, 'You may only REMOVE hair'));
+
+// --- the derived path says one thing about the back, not two -----------------
+$backStripped = replicate_derive_short_variant(
+    'Wolf Cut',
+    'wolf cut: sides left long and scissor-cut into soft wispy layers, the back left longest, '
+    . 'in soft tapered layers just past the nape onto the collar, natural neckline'
+);
+check('a derived variant whose back clauses were stripped gets the freeze',
+    str_contains($backStripped, 'not part of this cut'));
+check('and keeps no orphaned fragment from the dropped clause',
+    !str_contains($backStripped, 'in soft tapered layers'));
+check('and does not restate the back as "current length"',
+    preg_match('/\bthe back kept at its current length\b/i', $backStripped) !== 1);
+
+$backCut = replicate_derive_short_variant(
+    'Two Block',
+    'two block cut: a long full top of 3 to 4 inches and the sides AND lower back clipped '
+    . 'short underneath, nothing left long at the nape or over the collar'
+);
+// Clipping the back shorter is achievable, so that instruction survives -- and
+// the freeze must NOT be bolted on top of it, which would contradict it.
+check('a derived variant that cuts the back keeps that instruction',
+    str_contains($backCut, 'lower back clipped short underneath'));
+check('and is not given a contradicting freeze',
+    !str_contains($backCut, 'not part of this cut'));
+
+// --- the file itself ---------------------------------------------------------
+// A patch once wrote a literal backspace byte where a regex word boundary was
+// meant, which silently disabled the check it was guarding. Cheap to assert,
+// and the failure mode is invisible by eye.
+$helperSource = (string)file_get_contents(__DIR__ . '/../api/replicate_helper.php');
+check('the prompt helper contains no stray control characters',
+    preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $helperSource) !== 1);
 
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

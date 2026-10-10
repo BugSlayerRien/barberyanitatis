@@ -25,7 +25,7 @@ require_method('POST');
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? ''));
 
-if (!in_array($action, ['submitHairstyle', 'listMyHairstyles'], true)) {
+if (!in_array($action, ['submitHairstyle', 'listMyHairstyles', 'deleteHairstyle'], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -94,6 +94,9 @@ try {
             $stmt = $pdo->prepare(
                 "SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
                         hs.review_status, hs.created_at,
+                        -- Published means it is the shop's catalogue now and may
+                        -- already be booked, so only the owner may remove it.
+                        (COALESCE(hs.review_status, 'Published') <> 'Published') AS can_delete,
                         COUNT(hv.variant_id)::int AS variant_count
                  FROM hairstyles hs
                  LEFT JOIN hairstyle_variants hv ON hv.hairstyle_id = hs.hairstyle_id
@@ -104,6 +107,60 @@ try {
             $stmt->execute([':barber_id' => $barber['id']]);
 
             json_response(['hairstyles' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        }
+
+        if ($action === 'deleteHairstyle') {
+            $hairstyleId = (int)($input['hairstyleID'] ?? $input['hairstyleId'] ?? 0);
+            if ($hairstyleId <= 0) {
+                json_response(['error' => 'Invalid hairstyleID'], 422);
+            }
+
+            // Scoped to this barber's own rows: the id comes from the client,
+            // so ownership is a WHERE clause, not an assumption.
+            $own = $pdo->prepare(
+                "SELECT hairstyle_id, style_name, style_code,
+                        COALESCE(review_status, 'Published') AS review_status
+                 FROM hairstyles
+                 WHERE hairstyle_id = :id AND authored_by_barber_id = :barber_id
+                 LIMIT 1"
+            );
+            $own->execute([':id' => $hairstyleId, ':barber_id' => $barber['id']]);
+            $row = $own->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                json_response(['error' => 'That haircut is not one of your submissions.'], 404);
+            }
+
+            if ((string)$row['review_status'] === 'Published') {
+                json_response([
+                    'error' => 'This haircut is already published and customers can book it. '
+                        . 'Ask the shop owner to remove it.',
+                ], 409);
+            }
+
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare('DELETE FROM hairstyle_variants WHERE hairstyle_id = :id')
+                    ->execute([':id' => $hairstyleId]);
+                $pdo->prepare('DELETE FROM hairstyles WHERE hairstyle_id = :id')
+                    ->execute([':id' => $hairstyleId]);
+
+                audit_log($pdo, 'HAIRSTYLE_WITHDRAWN', 'hairstyles', (string)$hairstyleId, [
+                    'style_name' => $row['style_name'],
+                    'style_code' => $row['style_code'],
+                    'review_status' => $row['review_status'],
+                ], null, null, audit_actor_system('Barber ' . $barber['name']));
+
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
+
+            schema_cache_invalidate('overlay_library_catalog');
+
+            json_response(['message' => 'Submission withdrawn.']);
         }
 
         // ---- submitHairstyle ------------------------------------------------
@@ -120,6 +177,12 @@ try {
             json_response(['error' => 'Pick at least one hair texture this suits.'], 422);
         }
 
+        // A barber who would rather describe the cut in their own words gets
+        // the admin's single box instead of the structured questions. Same
+        // destination -- one prompt on the row -- so nothing downstream cares
+        // which door it came through.
+        $freeText = trim((string)($input['aiPrompt'] ?? ''));
+
         $fields = [
             'sides' => (string)($input['sides'] ?? ''),
             'guards' => (string)($input['guards'] ?? ''),
@@ -129,12 +192,20 @@ try {
             'neckline' => (string)($input['neckline'] ?? ''),
             'finish' => (string)($input['finish'] ?? ''),
         ];
-        // The two that carry the shape. Without them the composed prompt is a
-        // style name and little else, which is the vagueness that produced
-        // wrong haircuts before.
-        if (trim($fields['sides']) === '' || trim($fields['top']) === '') {
+        if ($freeText === '') {
+            // The two that carry the shape. Without them the composed prompt is
+            // a style name and little else, which is the vagueness that
+            // produced wrong haircuts before.
+            if (trim($fields['sides']) === '' || trim($fields['top']) === '') {
+                json_response([
+                    'error' => 'Describe the sides and the length on top — those two decide the cut.',
+                ], 422);
+            }
+        } elseif (preg_match('/\b(back|nape|collar)\b/i', $freeText) !== 1) {
+            // The composer always states the back; free text has to say it
+            // itself. An unsaid back is where the model invents length.
             json_response([
-                'error' => 'Describe the sides and the length on top — those two decide the cut.',
+                'error' => 'Say what happens at the back — left unsaid, the AI invents length there.',
             ], 422);
         }
 
@@ -145,7 +216,9 @@ try {
         // added later through the portal and simply replace the placeholder.
         $photos = (array)($input['photos'] ?? []);
 
-        $prompt = compose_hairstyle_prompt($styleName, $fields);
+        $prompt = $freeText !== ''
+            ? $freeText
+            : compose_hairstyle_prompt($styleName, $fields);
         $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper($styleName)) ?? 'STYLE';
         $styleCode = substr('HC-' . trim($slug, '-'), 0, 20);
 
