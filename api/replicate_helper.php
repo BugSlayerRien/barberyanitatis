@@ -317,7 +317,16 @@ function replicate_style_brief(
     $profileNote = ' Use the same haircut design on all three photos, but each output must keep '
         . "that photo's original head turn and camera angle — do not make every frame face the camera.";
 
-    $basePrompt = replicate_build_hair_only_prompt($styleDesc, $hairLengthLevel, $hairColorLabel)
+    // Swap the description before the prompt is built, rather than appending a
+    // contradiction after it. The old order left "the length deliberately kept
+    // long at the back" in the prompt and then asked the model not to add
+    // length -- and the model, reasonably, drew the mullet it had been
+    // described.
+    $renderDesc = ($achievableToday && $needsMoreLength)
+        ? replicate_short_hair_style_desc($styleKey, $styleDesc)
+        : $styleDesc;
+
+    $basePrompt = replicate_build_hair_only_prompt($renderDesc, $hairLengthLevel, $hairColorLabel)
         . $profileNote;
 
     if ($achievableToday && $needsMoreLength) {
@@ -328,7 +337,8 @@ function replicate_style_brief(
         'ok' => true,
         'error' => '',
         'styleKey' => $styleKey,
-        'styleDesc' => $styleDesc,
+        'styleDesc' => $renderDesc,
+        'adaptedToCurrentLength' => $achievableToday && $needsMoreLength,
         'basePrompt' => $basePrompt,
         'needsMoreLength' => $needsMoreLength,
         'minLengthLevel' => $minLevel,
@@ -349,14 +359,81 @@ function replicate_style_brief(
  * called out specifically because that is where an unconstrained model adds
  * length first: a mullet or a two block on short hair grew a long back.
  */
+/**
+ * What a length-hungry cut honestly looks like on hair that is still short.
+ *
+ * Appending "do not add length" to a description that says the back is
+ * "deliberately kept long" does not work: an image model weighs a vivid,
+ * specific description far above a generic negative that follows it, so the
+ * customer who accepted the warning still got a picture of hair they do not
+ * have. The contradiction has to be removed, not argued with -- so the
+ * description itself is swapped for one that is true at short length.
+ *
+ * Only the styles replicate_style_min_length() marks as needing more than
+ * short hair need an entry; everything else already renders honestly.
+ *
+ * @return array<string, string>
+ */
+function replicate_style_short_variant(): array
+{
+    return [
+        'two_block' => 'two block adapted to shorter hair: the sides and back clipped short '
+            . 'in a clean disconnected line, the top left at exactly its current length and '
+            . 'squared off above the disconnection, no length added at the back and nothing '
+            . 'reaching the collar',
+        'modern_curtains' => 'modern curtains adapted to shorter hair: the hair on top parted '
+            . 'down the middle and swept to either side as far as its existing length reaches, '
+            . 'falling short of the eyebrows, the sides and back tapered close with nothing '
+            . 'over the collar',
+        'wavy_mod_cut' => 'wavy mod cut adapted to shorter hair: the natural wave combed '
+            . 'forward across the forehead at its current length into a short blunt fringe '
+            . 'line, the sides and back tapered close to the nape with nothing over the collar',
+        'modern_mullet' => 'modern mullet adapted to shorter hair: a cropped textured top and '
+            . 'fringe with tapered sides and only a slight extra weight left at the nape, the '
+            . 'back kept as short as it already is and nothing reaching the collar -- the '
+            . 'mullet shape suggested by the outline, not by added length',
+        'pompadour' => 'pompadour adapted to shorter hair: the front lifted up and swept back '
+            . 'into a modest volume built only from the length already present, the sides '
+            . 'faded short, the back tapered clean to the nape with nothing over the collar',
+        'curly_top_fade' => 'curly taper fade adapted to shorter hair: the existing curls kept '
+            . 'at exactly their current length on top with no curl length added, the sides '
+            . 'tapered into a clean fade and the back cut short to the nape',
+        'curly_undercut' => 'curly undercut adapted to shorter hair: the sides and back clipped '
+            . 'short in a disconnected line with the curls on top left exactly as long as they '
+            . 'already are, no length added, the back short to the nape',
+        'curly_modern_mullet' => 'curly modern mullet adapted to shorter hair: the curls cropped '
+            . 'at the sides and crown with only a hint of extra weight left at the nape, the '
+            . 'back kept at exactly its current length with no length added anywhere and '
+            . 'nothing falling over the collar',
+    ];
+}
+
+/**
+ * The description to render when the customer has less hair than the cut wants.
+ *
+ * Falls back to hedging the original description when no short variant is
+ * authored -- weaker than a written variant, but still better than a prompt
+ * that asserts length the customer does not have.
+ */
+function replicate_short_hair_style_desc(?string $styleKey, string $styleDesc): string
+{
+    $variants = replicate_style_short_variant();
+    if ($styleKey !== null && isset($variants[$styleKey])) {
+        return $variants[$styleKey];
+    }
+
+    return $styleDesc . '. Render this shape only as far as the hair already present allows, '
+        . 'without adding length anywhere';
+}
+
 function replicate_achievable_today_clause(): string
 {
     return ' IMPORTANT — WORK WITH THE HAIR IN THE PHOTO: this person does not '
-        . 'currently have enough length for the full version of this style. Do NOT '
-        . 'add or extend hair anywhere, and especially not at the back or the nape. '
-        . 'Render the closest achievable version of this cut at their existing '
-        . 'length, keeping the shape and the fade pattern but shortening the style '
-        . 'to fit the hair actually present.';
+        . 'currently have enough length for the full version of this style, and the '
+        . 'description above has already been adapted to the hair they do have. Do '
+        . 'NOT add or extend hair anywhere, and especially not at the back or the '
+        . 'nape — the back must stay as short as it is in the photo. Keep the shape '
+        . 'and the fade pattern, but never lengthen to reach them.';
 }
 
 function replicate_build_hair_only_prompt(

@@ -410,6 +410,11 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
       );
       if (!mounted || startScan != true) return;
 
+      // Remember which haircut this scan is for, so the dashboard can send
+      // the customer back here instead of to a recommendation list they never
+      // asked for.
+      UserSession.tryOnStyle = Map<String, dynamic>.from(widget.style);
+
       // Carry the style through the scan, and tell the scan page where to
       // land: on this one haircut, not on the recommendation list.
       await Navigator.of(context).push(
@@ -424,6 +429,7 @@ class _HairstyleDetailPageState extends State<HairstyleDetailPage>
     }
 
     final scan = UserSession.lastScan ?? const <String, dynamic>{};
+    UserSession.tryOnStyle = Map<String, dynamic>.from(widget.style);
     if (!mounted) return;
     await Navigator.of(context).push(
       MaterialPageRoute(

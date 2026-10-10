@@ -246,7 +246,61 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     await _loadRecommendations(preserveSelection: true);
   }
 
+  /// Changing the detected hair type is not a filter tweak.
+  ///
+  /// Texture is the strongest signal in the ranking -- a match adds 0.55 and a
+  /// mismatch subtracts 0.15 -- so overriding it rebuilds the whole list and
+  /// changes which cuts the AI will render well. A customer who tapped a chip
+  /// to see what it did had no way to know that, and no way back except
+  /// remembering what the scan originally said.
+  Future<bool> _confirmTextureOverride(String texture) async {
+    final detected = widget.hairTexture.trim();
+    final isReverting = detected.isNotEmpty &&
+        UserSession.normalizeHairTextureLabel(detected) ==
+            UserSession.normalizeHairTextureLabel(texture);
+    if (isReverting) return true;
+
+    final scanned = detected.isEmpty ? 'the scan result' : detected;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1A1A1A),
+        title: const Text(
+          'Change your hair type?',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+        ),
+        content: Text(
+          'The scan read your hair as $scanned. Setting it to $texture '
+          'rebuilds your recommendations and changes how an AI preview is '
+          'generated.\n\nOnly change this if the scan got it wrong.',
+          style: const TextStyle(color: Colors.white70, height: 1.45),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Keep $scanned',
+                style: const TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            child: Text('Set to $texture'),
+          ),
+        ],
+      ),
+    );
+
+    return confirmed == true;
+  }
+
   Future<void> _applyHairTextureOverride(String texture) async {
+    if (_hairTexture == UserSession.normalizeHairTextureLabel(texture)) return;
+    if (!await _confirmTextureOverride(texture)) return;
+    if (!mounted) return;
+
     final normalized = UserSession.normalizeHairTextureLabel(texture);
     setState(() {
       _hairTexture = normalized;

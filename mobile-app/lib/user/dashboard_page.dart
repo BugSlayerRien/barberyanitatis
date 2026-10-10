@@ -15,6 +15,7 @@ import 'ai_face_scan_page.dart';
 import 'appointments_page.dart';
 import 'customer_navigation.dart';
 import 'face_scan_results_page.dart';
+import 'style_try_on_page.dart';
 import 'hair_texture_onboarding.dart';
 import 'user_session.dart';
 import 'widgets/accent_sheen.dart';
@@ -448,6 +449,8 @@ class _DashboardPageState extends State<DashboardPage>
     if (startFresh) {
       UserSession.beginNewScanWorkingState();
     }
+    // A scan started from here is a normal scan, whatever the last one was.
+    UserSession.tryOnStyle = null;
     Navigator.of(context)
         .push(
           MaterialPageRoute(
@@ -458,6 +461,11 @@ class _DashboardPageState extends State<DashboardPage>
       if (mounted) setState(() {});
     });
   }
+
+  /// True when the saved session came from trying one haircut on in the
+  /// library rather than from a full scan.
+  bool get _lastSessionIsTryOn =>
+      UserSession.completedScanIsTryOn || UserSession.tryOnStyle != null;
 
   void _openLastScanResults() {
     if (!UserSession.restoreCompletedScan()) {
@@ -482,6 +490,31 @@ class _DashboardPageState extends State<DashboardPage>
           content: Text('Scan photos are unavailable. Please run a new scan.'),
         ),
       );
+      return;
+    }
+
+    // Back to the haircut they picked, not to a list they never asked for.
+    final tryOnStyle =
+        UserSession.completedTryOnStyle ?? UserSession.tryOnStyle;
+    if (tryOnStyle != null) {
+      Navigator.of(context)
+          .push(
+            MaterialPageRoute(
+              builder: (_) => StyleTryOnPage(
+                style: tryOnStyle,
+                captures: Map<String, String>.from(captures),
+                faceShape: scan['faceShape']?.toString() ?? '',
+                hairTexture: UserSession.normalizeHairTextureLabel(
+                  scan['hairTexture']?.toString() ??
+                      UserSession.preferredHairTexture,
+                ),
+                hairLengthLevel: int.tryParse('${scan['hairLengthLevel']}') ?? 1,
+              ),
+            ),
+          )
+          .then((_) {
+        if (mounted) setState(() {});
+      });
       return;
     }
 
@@ -1046,9 +1079,13 @@ class _DashboardPageState extends State<DashboardPage>
                     foregroundColor: Colors.white,
                     side: const BorderSide(color: AppBrand.borderStrong),
                   ),
-                  child: const Text(
-                    'View results',
-                    style: TextStyle(fontFamily: _fontFamily),
+                  // A try-on session has no recommendations behind it -- it is
+                  // one haircut the customer chose from the library -- so
+                  // offering to "view results" promised a page that does not
+                  // exist for it.
+                  child: Text(
+                    _lastSessionIsTryOn ? 'View' : 'View results',
+                    style: const TextStyle(fontFamily: _fontFamily),
                   ),
                 ),
               ),

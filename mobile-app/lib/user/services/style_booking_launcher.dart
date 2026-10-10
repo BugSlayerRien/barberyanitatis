@@ -7,6 +7,7 @@ import '../customer_navigation.dart';
 import '../hair_compatibility.dart';
 import '../suggested_appointment_page.dart';
 import '../user_session.dart';
+import '../widgets/style_length_warning.dart';
 import 'booking_draft_service.dart';
 import 'booking_slots_service.dart';
 
@@ -42,6 +43,26 @@ Future<void> launchBookingForStyle(
       await HairCompatibility.confirmBookingIfNeeded(context, compat);
   if (!mayProceed || !context.mounted) {
     return;
+  }
+
+  // The length warning belongs on the booking path too, not only on the
+  // generate path. A customer could be told a cut needs longer hair, decline
+  // the preview, and book it anyway without ever being asked again -- and
+  // turn up at the chair expecting something the barber cannot cut today.
+  //
+  // Warned, not blocked: the measurement is the weakest signal in the scan,
+  // and a customer who knows their own hair may simply be right. The barber
+  // also sees the booking and can talk it through.
+  final measuredLevel =
+      (UserSession.lastScan?['hairLengthLevel'] as num?)?.toInt() ?? 1;
+  if (styleNeedsMoreLength(style, measuredLevel)) {
+    final styleName = style['name']?.toString() ??
+        style['style_name']?.toString() ??
+        'This haircut';
+    final acceptLength = await confirmLongerHairBooking(context, styleName);
+    if (!acceptLength || !context.mounted) {
+      return;
+    }
   }
 
   final userId = UserSession.userId;

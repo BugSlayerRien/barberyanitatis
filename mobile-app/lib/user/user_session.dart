@@ -81,6 +81,15 @@ class UserSession {
   /// Survives leaving results and opening AI Scan entry without "New scan".
   static Map<String, dynamic>? _completedScanSnapshot;
 
+  /// The haircut a library try-on was started for, when the scan came from
+  /// there rather than from the normal "AI Scan" button.
+  ///
+  /// The two sessions look identical otherwise -- same photos, same analysis --
+  /// but they end somewhere different, and the customer expects to go back to
+  /// the haircut they picked, not to a list of recommendations they never
+  /// asked for.
+  static Map<String, dynamic>? tryOnStyle;
+
   static UserCalibration? get userCalibration => _cachedUserCalibration;
 
   static Map<String, dynamic>? get completedScanSummary {
@@ -98,6 +107,17 @@ class UserSession {
   static bool get hasCompletedScanResults {
     final caps = _completedScanSnapshot?['captures'];
     return caps is Map && caps.isNotEmpty;
+  }
+
+  /// Whether the saved session belongs to a library try-on.
+  static bool get completedScanIsTryOn =>
+      _completedScanSnapshot?['tryOnStyle'] is Map;
+
+  /// The haircut that try-on session was for, if any.
+  static Map<String, dynamic>? get completedTryOnStyle {
+    final raw = _completedScanSnapshot?['tryOnStyle'];
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return null;
   }
 
   /// Analysis map used for Library compatibility + Home chips.
@@ -135,6 +155,8 @@ class UserSession {
       'selectedServiceId': selectedServiceId,
       'selectedEstimatedMinutes': selectedEstimatedMinutes,
       'hasRecentRecommendations': hasRecentRecommendations,
+      'tryOnStyle':
+          tryOnStyle == null ? null : Map<String, dynamic>.from(tryOnStyle!),
     };
   }
 
@@ -176,6 +198,8 @@ class UserSession {
     selectedEstimatedMinutes = snap['selectedEstimatedMinutes'] is int
         ? snap['selectedEstimatedMinutes'] as int
         : int.tryParse('${snap['selectedEstimatedMinutes'] ?? ''}');
+    final tryOn = snap['tryOnStyle'];
+    tryOnStyle = tryOn is Map ? Map<String, dynamic>.from(tryOn) : null;
     return true;
   }
 

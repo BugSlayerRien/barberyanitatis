@@ -65,3 +65,49 @@ Future<bool> confirmLongerHairStyle(
 
   return proceed == true;
 }
+
+/// The same warning, worded for the chair rather than the preview.
+///
+/// Kept separate because the consequence differs: an unexpected preview costs
+/// a generation, an unexpected haircut costs the appointment. The customer is
+/// still allowed to proceed -- the length measurement is the weakest signal in
+/// the scan, and the barber can talk it through on the day.
+Future<bool> confirmLongerHairBooking(
+  BuildContext context,
+  String styleName,
+) async {
+  final proceed = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      backgroundColor: const Color(0xFF1A1A1A),
+      title: const Text(
+        'This cut usually needs longer hair',
+        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+      ),
+      content: Text(
+        'Your scan measured less length than "$styleName" normally needs.\n\n'
+        'You can still book it. Your barber will cut the closest version they '
+        'can on the day, and can tell you how long it would take to grow out '
+        'for the full look.',
+        style: const TextStyle(color: Colors.white70, height: 1.45),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(ctx).pop(false),
+          child: const Text('Pick another',
+              style: TextStyle(color: Colors.white70)),
+        ),
+        ElevatedButton(
+          onPressed: () => Navigator.of(ctx).pop(true),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: Colors.black,
+          ),
+          child: const Text('Book it anyway'),
+        ),
+      ],
+    ),
+  );
+
+  return proceed == true;
+}

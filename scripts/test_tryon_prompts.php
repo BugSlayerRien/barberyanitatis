@@ -209,5 +209,80 @@ $exitCode = 0;
 exec('php ' . escapeshellarg($syncScript) . ' --check 2>&1', $output, $exitCode);
 check('ai-service/api.py is in sync (run sync_tryon_prompts.php if this fails)', $exitCode === 0);
 
+// --- the short-hair variants -------------------------------------------------
+// A customer with short hair who accepted the "this needs longer hair" warning
+// was still shown a full long-backed mullet. The cause was not a weak warning
+// but a self-contradicting prompt: the description said the back was
+// "deliberately kept long" and a generic "do not add length" was appended
+// after it. An image model follows the vivid description, not the disclaimer.
+// These checks assert the contradiction can no longer be built.
+$shortVariants = replicate_style_short_variant();
+$minLengths = replicate_style_min_length();
+
+foreach ($minLengths as $key => $level) {
+    if ($level < 2) {
+        continue;
+    }
+    check("{$key} needs length, so it has a short-hair variant",
+        isset($shortVariants[$key]) && trim($shortVariants[$key]) !== '');
+}
+
+foreach ($shortVariants as $key => $text) {
+    check("{$key} short variant states the back",
+        preg_match('/\b(back|nape|collar)\b/i', $text) === 1);
+
+    // Only *positive* length claims are a problem. "nothing over the collar"
+    // is the negation we want, so the negated forms are removed before the
+    // check rather than matched by a blunter pattern.
+    $positive = preg_replace(
+        '/\b(?:nothing|no|without)\b[^,.]*?\b(?:collar|nape|length|longer)\b/i',
+        '',
+        $text
+    ) ?? $text;
+    $assertsLength = preg_match(
+        '/\b(kept long|long back|deliberately kept|grown out|past the collar|falling to the nape)\b/i',
+        $positive
+    ) === 1;
+    check("{$key} short variant never promises length it cannot deliver", !$assertsLength);
+
+    // And it must say so outright: this is the clause that replaced the
+    // contradiction, so its absence means the variant is merely vague.
+    check("{$key} short variant states the hair is not lengthened",
+        preg_match('/\b(no length added|not by added length|as short as it already is|exactly (?:as long as|their current length)|current length|already present|existing length|already are)\b/i', $text) === 1);
+
+    $words = str_word_count($text);
+    check("{$key} short variant sits in the word budget ({$words})",
+        $words >= 20 && $words <= 70);
+}
+
+// The real case from the device: short hair, Modern Mullet, warning accepted.
+$adapted = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 1, '', true);
+check('an adapted brief builds', $adapted['ok'] === true);
+check('and is marked as adapted', $adapted['adaptedToCurrentLength'] === true);
+check('the long-back description is gone from the prompt',
+    !str_contains($adapted['basePrompt'], 'deliberately kept long'));
+check('and so is the other long-back phrase',
+    !str_contains($adapted['basePrompt'], 'long back section'));
+check('the prompt insists the back stays short',
+    str_contains($adapted['basePrompt'], 'back must stay as short'));
+
+// A customer who actually has the length must still get the real cut.
+$full = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 3, '', false);
+check('a long-haired customer still gets the full cut',
+    str_contains($full['styleDesc'], 'deliberately kept long'));
+check('and their brief is not marked adapted',
+    $full['adaptedToCurrentLength'] === false);
+
+// Accepting the warning is what triggers adaptation -- not short hair alone,
+// since a customer may decline and simply pick something else.
+$declined = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 1, '', false);
+check('without accepting the warning nothing is adapted',
+    $declined['adaptedToCurrentLength'] === false);
+
+// A style with no authored variant still gets hedged rather than left asserting.
+$fallback = replicate_short_hair_style_desc('no_such_style', 'some cut: long flowing layers');
+check('an unauthored style is hedged rather than left as-is',
+    str_contains($fallback, 'without adding length anywhere'));
+
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

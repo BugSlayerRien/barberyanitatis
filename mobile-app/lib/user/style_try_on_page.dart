@@ -71,6 +71,18 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   @override
   void initState() {
     super.initState();
+
+    // Save the session on arrival, not only after a generation. A customer who
+    // scanned, looked at the haircut and went home to the dashboard had a
+    // session the app could see -- the chips were right there -- and a View
+    // button that insisted no scan existed.
+    UserSession.tryOnStyle = Map<String, dynamic>.from(widget.style);
+    if (UserSession.capturedFaceImages == null ||
+        UserSession.capturedFaceImages!.isEmpty) {
+      UserSession.capturedFaceImages = Map<String, String>.from(widget.captures);
+    }
+    UserSession.commitCompletedScan();
+
     _quota = UserSession.lastQuota;
     // A preview generated earlier in this session costs nothing to show again.
     final saved = UserSession.selectedVariantId == _variantId
