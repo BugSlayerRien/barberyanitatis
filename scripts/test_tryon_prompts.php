@@ -294,7 +294,8 @@ $fallback = replicate_short_hair_style_desc(
 check('an unauthored style is rewritten rather than left asserting',
     !str_contains($fallback, 'long flowing layers'));
 check('and the rewrite is what the model receives',
-    str_contains($fallback, 'adapted to shorter hair'));
+    str_contains($fallback, 'without adding length anywhere')
+        || str_contains($fallback, 'not part of this cut'));
 
 // --- the automatic short-hair rewriter ---------------------------------------
 // Only eight styles have a hand-written short version. Everything added through
@@ -352,8 +353,9 @@ foreach ($derivable as $name => $prompt) {
             && !str_contains($derived, 'lengthat')
             && preg_match('/\s{2,}/', $derived) !== 1);
 
-    check("{$name}: derived variant is labelled as adapted",
-        str_contains(strtolower($derived), 'adapted to shorter hair'));
+    check("{$name}: derived variant does not open by naming the haircut",
+        stripos($derived, strtolower($name) . ':') !== 0
+            && stripos($derived, strtolower($name) . ' adapted') !== 0);
 }
 
 // The two cases that motivated this, named explicitly.
@@ -391,7 +393,7 @@ check('a hand-written variant takes precedence over the derived one',
 check('and a style without one falls through to the rewriter',
     str_contains(
         replicate_short_hair_style_desc('wolf_cut', $authoredSamples['Wolf Cut'], 'Wolf Cut'),
-        'adapted to shorter hair'
+        'not part of this cut'
     ));
 
 // End to end: the stored prompt, a short-haired customer, warning accepted.
@@ -430,8 +432,8 @@ foreach (replicate_style_min_length() as $key => $level) {
     // the adaptation reading as a footnote to the instruction.
     check("{$key}: the prompt never demands the haircut outright",
         !str_contains($adaptedPrompt, 'to this exact haircut'));
-    check("{$key}: it asks for the closest achievable version instead",
-        str_contains($adaptedPrompt, 'possible on their CURRENT hair length'));
+    check("{$key}: it asks for cutting, not for a haircut to reproduce",
+        str_contains($adaptedPrompt, 'performing exactly this cutting and nothing more'));
 
     // The constraint must come before the style description, not after it.
     $rulePos = stripos($adaptedPrompt, 'You may only REMOVE hair');
@@ -530,6 +532,8 @@ $backStripped = replicate_derive_short_variant(
     'wolf cut: sides left long and scissor-cut into soft wispy layers, the back left longest, '
     . 'in soft tapered layers just past the nape onto the collar, natural neckline'
 );
+check('a derived variant carries no style name',
+    stripos(replicate_derive_short_variant('Wolf Cut', 'wolf cut: sides left long'), 'wolf') === false);
 check('a derived variant whose back clauses were stripped gets the freeze',
     str_contains($backStripped, 'not part of this cut'));
 check('and keeps no orphaned fragment from the dropped clause',
@@ -556,6 +560,47 @@ check('and is not given a contradicting freeze',
 $helperSource = (string)file_get_contents(__DIR__ . '/../api/replicate_helper.php');
 check('the prompt helper contains no stray control characters',
     preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', $helperSource) !== 1);
+
+// --- the haircut's name never reaches the model when adapting ---------------
+// Reason the previous four rounds lost: "modern mullet" is a famous cut and the
+// model has a strong learned picture of one, whose whole point is a long back.
+// No amount of surrounding constraint outvoted those two words while they sat
+// in the instruction. The descriptions are now nameless imperatives -- what the
+// barber's hands do, with no style concept to pull against.
+$loadedTerms = [
+    'modern_mullet' => 'mullet',
+    'curly_modern_mullet' => 'mullet',
+    'two_block' => 'two block',
+    'modern_curtains' => 'curtains',
+    'pompadour' => 'pompadour',
+    'curly_undercut' => 'undercut',
+    'wavy_mod_cut' => 'mod cut',
+    'curly_top_fade' => 'taper fade',
+];
+
+foreach ($loadedTerms as $key => $term) {
+    $variant = replicate_style_short_variant()[$key] ?? '';
+    check("{$key}: the short variant never says \"{$term}\"",
+        stripos($variant, $term) === false);
+
+    $name = ucwords(str_replace('_', ' ', $key));
+    $prompt = replicate_style_brief($name, null, 1, '', true)['basePrompt'];
+    check("{$key}: and neither does the assembled prompt",
+        stripos($prompt, $term) === false);
+}
+
+// Imperatives, not noun phrases: "taper the sides" is work to do, where "a cut
+// with tapered sides" is a picture to reproduce.
+foreach (replicate_style_short_variant() as $key => $text) {
+    check("{$key}: the variant opens with an instruction",
+        preg_match('/^(?:taper|clip|crop|cut|part|comb|lift|keep|leave|fade|shorten|trim)\b/i', $text) === 1);
+}
+
+// The full-length path must still name the style -- that is what makes the
+// model render the real haircut for someone who has the hair for it.
+$named = replicate_style_brief('Modern Mullet', 'HC-MODERN-MULLET', 3, '', false)['basePrompt'];
+check('a customer with the length still gets the style by name',
+    stripos($named, 'modern mullet') !== false);
 
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

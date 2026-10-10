@@ -364,14 +364,17 @@ function replicate_style_brief(
  * length first: a mullet or a two block on short hair grew a long back.
  */
 /**
- * What a length-hungry cut honestly looks like on hair that is still short.
+ * The cutting to perform, for a style that wants more hair than the customer has.
  *
- * Appending "do not add length" to a description that says the back is
- * "deliberately kept long" does not work: an image model weighs a vivid,
- * specific description far above a generic negative that follows it, so the
- * customer who accepted the warning still got a picture of hair they do not
- * have. The contradiction has to be removed, not argued with -- so the
- * description itself is swapped for one that is true at short length.
+ * Deliberately nameless. "Modern mullet" is a famous haircut and the model has
+ * a strong learned picture of one -- a picture whose whole point is a long
+ * back. Four rounds of constraints failed to outvote those two words, because
+ * the name was still sitting in the instruction doing its work. These say only
+ * what the barber's hands do, so there is no style concept to pull against.
+ *
+ * Written as imperatives for the same reason: "taper the sides" is an action,
+ * where "a cut with tapered sides" is a thing to reproduce.
+ *
  *
  * Only the styles replicate_style_min_length() marks as needing more than
  * short hair need an entry; everything else already renders honestly.
@@ -381,41 +384,32 @@ function replicate_style_brief(
 function replicate_style_short_variant(): array
 {
     return [
-        'two_block' => 'two block adapted to shorter hair: the sides and back clipped short '
-            . 'in a clean disconnected line, the top left at exactly its current length and '
-            . 'squared off above the disconnection, no length added at the back and nothing '
-            . 'reaching the collar',
-        'modern_curtains' => 'modern curtains adapted to shorter hair: the hair on top parted '
-            . 'down the middle and swept to either side as far as its existing length reaches, '
-            . 'falling short of the eyebrows, the sides and back tapered close with nothing '
-            . 'over the collar',
-        'wavy_mod_cut' => 'wavy mod cut adapted to shorter hair: the natural wave combed '
-            . 'forward across the forehead at its current length into a short blunt fringe '
-            . 'line, the sides and back tapered close to the nape with nothing over the collar',
-        // "only a slight extra weight left at the nape" was an instruction to
-        // put hair at the nape, and the model obeyed it -- that clause is the
-        // tail customers kept seeing. A mullet's back cannot be approximated
-        // by cutting, only by growing, so the back is declared out of scope
-        // rather than described at all.
-        'modern_mullet' => 'modern mullet, early stage on hair that is still short: taper the '
-            . 'sides from the temple down and tighten them around the ear, crop and texture '
-            . 'the top into a short fringe. The back of the head and the nape are not part of '
-            . 'this cut -- leave that area exactly as it appears in the photo, untouched and '
-            . 'uncut',
-        'pompadour' => 'pompadour adapted to shorter hair: the front lifted up and swept back '
-            . 'into a modest volume built only from the length already present, the sides '
-            . 'faded short, the back tapered clean to the nape with nothing over the collar',
-        'curly_top_fade' => 'curly taper fade adapted to shorter hair: the existing curls kept '
-            . 'at exactly their current length on top with no curl length added, the sides '
-            . 'tapered into a clean fade and the back cut short to the nape',
-        'curly_undercut' => 'curly undercut adapted to shorter hair: the sides and back clipped '
-            . 'short in a disconnected line with the curls on top left exactly as long as they '
-            . 'already are, no length added, the back short to the nape',
-        'curly_modern_mullet' => 'curly modern mullet, early stage on hair that is still '
-            . 'short: crop the curls close at the sides and around the crown, keeping the '
-            . 'curl pattern on top. The back of the head and the nape are not part of this '
-            . 'cut -- leave that area exactly as it appears in the photo, untouched and '
-            . 'uncut',
+        'two_block' => 'clip the sides and the lower back short in a clean disconnected line, '
+            . 'leave the hair on top at exactly its current length and square it off above '
+            . 'the disconnection, nothing reaching the collar',
+        'modern_curtains' => 'part the hair on top down the middle and sweep it to either '
+            . 'side as far as its existing length reaches, falling short of the eyebrows, '
+            . 'taper the sides and back close with nothing over the collar',
+        'wavy_mod_cut' => 'comb the natural wave forward across the forehead at its current '
+            . 'length into a short blunt fringe line, taper the sides and back close to the '
+            . 'nape with nothing over the collar',
+        'modern_mullet' => 'taper the sides from the temple down and tighten them around the '
+            . 'ear, crop and texture the hair on top into a short fringe. The back of the '
+            . 'head and the nape are not part of this cut -- leave that area exactly as it '
+            . 'appears in the photo, untouched and uncut',
+        'pompadour' => 'lift the front up and sweep it back into a modest volume built only '
+            . 'from the length already present, fade the sides short, taper the back clean '
+            . 'to the nape with nothing over the collar',
+        'curly_top_fade' => 'keep the existing curls at exactly their current length on top '
+            . 'with no curl length added, taper the sides into a clean fade and cut the back '
+            . 'short to the nape',
+        'curly_undercut' => 'clip the sides and back short in a disconnected line, leave the '
+            . 'curls on top exactly as long as they already are, no length added, the back '
+            . 'short to the nape',
+        'curly_modern_mullet' => 'crop the curls close at the sides and around the crown, '
+            . 'keeping the curl pattern on top. The back of the head and the nape are not '
+            . 'part of this cut -- leave that area exactly as it appears in the photo, '
+            . 'untouched and uncut',
     ];
 }
 
@@ -494,12 +488,13 @@ function replicate_derive_short_variant(string $styleName, string $prompt): stri
             . 'as they appear in the photo, untouched and uncut';
     }
 
-    $label = strtolower(trim($styleName));
-    if ($label === '') {
-        $label = 'this cut';
-    }
+    // No style name, for the same reason the hand-written variants carry none:
+    // naming the haircut hands the model a picture to reproduce, and that
+    // picture is exactly the one the customer does not have the hair for.
+    // $styleName is still taken so callers need not know that.
+    unset($styleName);
 
-    return $label . ' adapted to shorter hair: ' . implode(', ', $kept);
+    return implode(', ', $kept);
 }
 
 /**
@@ -671,8 +666,11 @@ function replicate_build_hair_only_prompt(
             . 'they have, DO NOT DO THAT PART — leave that area exactly as photographed, '
             . 'uncut and unchanged. This applies above all to the back of the head and the '
             . 'nape, where there is the least hair to work with. ';
-        $target = 'to the closest version of this haircut that is possible on their CURRENT '
-            . 'hair length, cutting only what is already there';
+        // Phrased as work to perform, not a result to reproduce. "The closest
+        // version of this haircut" still asks for a haircut; the descriptions
+        // are now imperatives, and the sentence introducing them should be too.
+        $target = 'by performing exactly this cutting and nothing more, using only hair '
+            . 'already present';
     }
 
     // The editable region and the "make it look different" push both have to
