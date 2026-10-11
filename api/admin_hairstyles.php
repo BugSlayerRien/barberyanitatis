@@ -59,7 +59,7 @@ try {
                    -- The review workflow was invisible here: a barber could
                    -- submit a style and the owner had no row to act on.
                    COALESCE(hs.review_status, 'Published') AS review_status,
-                   hs.ai_min_length_level,
+                   hs.ai_min_length_level, hs.transition_style_code,
                    (hs.ai_prompt IS NOT NULL AND hs.ai_prompt <> '') AS has_prompt,
                    hs.authored_by_barber_id,
                    b.full_name AS authored_by_name,
@@ -76,7 +76,8 @@ try {
              GROUP BY hs.hairstyle_id, hs.style_code, hs.style_name, hs.description,
                       hs.gender, hs.difficulty, hs.maintenance, hs.category, hs.is_active,
                       hs.top_pick_eligible, hs.created_at, hs.review_status,
-                      hs.ai_min_length_level, hs.ai_prompt, hs.authored_by_barber_id,
+                      hs.ai_min_length_level, hs.transition_style_code, hs.ai_prompt,
+                      hs.authored_by_barber_id,
                       b.full_name
              ORDER BY hs.style_name
             SQL
@@ -114,6 +115,7 @@ try {
             "SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender,
                     hs.difficulty, hs.maintenance, hs.category, hs.is_active, hs.top_pick_eligible,
                     hs.created_at, hs.ai_prompt, hs.ai_min_length_level,
+                    hs.transition_style_code,
                     COALESCE(hs.review_status, 'Published') AS review_status,
                     hs.authored_by_barber_id, b.full_name AS authored_by_name
              FROM hairstyles hs
@@ -165,8 +167,8 @@ try {
 
         ensure_hairstyle_authoring_columns($pdo);
         $stmt = $pdo->prepare(
-            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level)
-             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible, :ai_prompt, :ai_min_length_level)
+            'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level, transition_style_code)
+             VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible, :ai_prompt, :ai_min_length_level, :transition_style_code)
              RETURNING hairstyle_id'
         );
         $stmt->execute([
@@ -183,6 +185,11 @@ try {
             // the field belongs on the same form as the name.
             ':ai_prompt' => trim((string)($input['aiPrompt'] ?? '')) ?: null,
             ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
+            // Only meaningful for a style needing more than short hair; the
+            // portal hides the field otherwise. Empty stores as NULL so the
+            // built-in defaults still apply.
+            ':transition_style_code' =>
+                strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null,
         ]);
 
         // Which styles qualify for the customer catalog is cached for
@@ -213,7 +220,10 @@ try {
                     maintenance = :maintenance,
                     category = :category,
                     is_active = :is_active,
-                    top_pick_eligible = :top_pick_eligible';
+                    top_pick_eligible = :top_pick_eligible,
+                    ai_prompt = :ai_prompt,
+                    ai_min_length_level = :ai_min_length_level,
+                    transition_style_code = :transition_style_code';
         $params = [
             ':style_name' => $styleName,
             ':description' => trim((string)($input['description'] ?? '')) ?: null,
@@ -223,6 +233,10 @@ try {
             ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
             ':is_active' => (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0'),
             ':top_pick_eligible' => (int)$normalizeTopPickEligible($input['topPickEligible'] ?? null),
+            ':ai_prompt' => trim((string)($input['aiPrompt'] ?? '')) ?: null,
+            ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
+            ':transition_style_code' =>
+                strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null,
             ':id' => $hairstyleID,
         ];
 

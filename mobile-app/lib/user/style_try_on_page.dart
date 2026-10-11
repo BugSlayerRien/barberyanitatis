@@ -11,6 +11,7 @@ import 'services/face_scan_service.dart';
 import 'scanner/scanner_layout.dart';
 import 'services/style_booking_launcher.dart';
 import 'user_session.dart';
+import 'widgets/preview_quota_pill.dart';
 import 'widgets/scan_progress_panel.dart';
 import 'widgets/style_length_warning.dart';
 import 'widgets/style_view_thumbnail.dart';
@@ -111,25 +112,6 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     if (quota == null || !mounted) return;
     UserSession.lastQuota = quota;
     setState(() => _quota = quota);
-  }
-
-  String get _quotaLabel {
-    final quota = _quota;
-    if (quota == null) return '';
-    if (quota['unlimited'] == true) return 'Unlimited previews';
-
-    final used = (quota['used'] as num?)?.toInt() ?? 0;
-    final limit = (quota['limit'] as num?)?.toInt() ?? 0;
-    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
-    final remaining = (quota['remaining'] as num?)?.toInt() ?? (limit - used);
-
-    // Says "free" only when it is free. Once purchased credits are mixed into
-    // the limit, calling the whole allowance free is simply untrue.
-    final of = purchased > 0
-        ? '$used of $limit used ($purchased purchased)'
-        : '$used of $limit free previews used';
-
-    return '$remaining left — $of';
   }
 
   bool get _canPurchaseCredits => UserSession.userId != null;
@@ -409,6 +391,7 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         for (final chip in chips)
           Container(
@@ -423,6 +406,15 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
               style: const TextStyle(color: Colors.white70, fontSize: 12.5),
             ),
           ),
+        // Scanning from the library lands here without passing the
+        // recommendations page, so the count has to be visible here too --
+        // otherwise a customer only ever sees it after a full scan.
+        PreviewQuotaPill(
+          quota: _quota,
+          loading: _quota == null,
+          canPurchase: _canPurchaseCredits,
+          onPurchase: _openCreditPurchase,
+        ),
       ],
     );
   }
@@ -639,14 +631,6 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_quotaLabel.isNotEmpty) ...[
-          Text(
-            _quotaLabel,
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: AppBrand.textMuted, fontSize: 11.5),
-          ),
-          const SizedBox(height: 8),
-        ],
         // Offered once. Regenerating was a second route into generation with
         // its own copy of the rules, and it is where the length adaptation was
         // found silently reverting; the progress panel above now carries the

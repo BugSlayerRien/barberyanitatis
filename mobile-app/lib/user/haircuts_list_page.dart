@@ -16,6 +16,7 @@ import 'widgets/menu_sheet.dart';
 import 'api_config.dart';
 import 'ai_credit_purchase_page.dart';
 import 'services/face_scan_service.dart';
+import 'widgets/preview_quota_pill.dart';
 import 'services/style_booking_launcher.dart';
 import 'ai_face_scan_page.dart';
 import 'hairstyle_detail_page.dart';
@@ -85,59 +86,23 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
     await _refreshQuota();
   }
 
+  /// Previews left, as the identical pill the recommendations page shows.
+  ///
+  /// This was a full-width bar with a sentence and a "Top up" button, which
+  /// read as a different feature from the pill beside Top picks. Same number,
+  /// same control, same shape.
   Widget _buildQuotaPill() {
-    final quota = _quota;
-    if (quota == null || UserSession.userId == null) {
-      return const SizedBox.shrink();
-    }
-
-    final unlimited = quota['unlimited'] == true;
-    final remaining = (quota['remaining'] as num?)?.toInt() ?? 0;
-    final purchased = (quota['purchased'] as num?)?.toInt() ?? 0;
-    final out = !unlimited && remaining <= 0;
-
-    final label = unlimited
-        ? 'Unlimited AI previews'
-        : (out
-            ? 'No AI previews left'
-            : '$remaining AI ${remaining == 1 ? 'preview' : 'previews'} left'
-                '${purchased > 0 ? ' ($purchased purchased)' : ''}');
-
-    final accent = out ? const Color(0xFFE0B35A) : const Color(0xFF8FD49A);
+    if (UserSession.userId == null) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
-        decoration: BoxDecoration(
-          color: const Color(0xFF141414),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: accent.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.auto_awesome, size: 16, color: accent),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(color: accent, fontSize: 12, fontWeight: FontWeight.w600),
-              ),
-            ),
-            if (!unlimited)
-              TextButton(
-                onPressed: () => unawaited(_openCreditPurchase()),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  minimumSize: const Size(0, 32),
-                ),
-                child: Text(
-                  out ? 'Buy more' : 'Top up',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-              ),
-          ],
+      padding: const EdgeInsets.only(top: 10),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: PreviewQuotaPill(
+          quota: _quota,
+          loading: _quota == null,
+          canPurchase: true,
+          onPurchase: _openCreditPurchase,
         ),
       ),
     );

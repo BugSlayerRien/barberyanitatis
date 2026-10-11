@@ -1780,6 +1780,18 @@ function renderHaircutReadiness(readiness, status) {
   }
 }
 
+/// Shown only for styles that need medium or long hair.
+///
+/// A cut anyone can already wear has nobody to suggest an alternative to, so
+/// the question would be noise on most of the catalogue.
+function syncTransitionFieldVisibility() {
+  const field = document.getElementById("hc-transition-field");
+  const level = Number(document.getElementById("hc-ai-min-length")?.value ?? 1);
+  if (!field) return;
+  if (level >= 2) field.removeAttribute("hidden");
+  else field.setAttribute("hidden", "");
+}
+
 function openHaircutEditor(hairstyle, variants = []) {
   const dialog = document.getElementById("haircut-editor-dialog");
   const title = document.getElementById("haircut-editor-title");
@@ -1794,6 +1806,18 @@ function openHaircutEditor(hairstyle, variants = []) {
   };
   title.textContent = isEdit ? "Manage haircut" : "Add haircut";
   const active = hairstyle?.is_active === false || hairstyle?.is_active === "f" ? "0" : "1";
+  // Built from the list already in memory, so the editor needs no extra call.
+  // A style cannot pair with itself -- that would make the lookup loop.
+  const transitionOptions = (state.haircuts || [])
+    .filter((row) => String(row.style_code || "") !== String(hairstyle?.style_code || ""))
+    .map((row) => {
+      const code = escapeHaircutText(row.style_code || "");
+      const selected = code && code === (hairstyle?.transition_style_code || "")
+        ? " selected"
+        : "";
+      return `<option value="${code}"${selected}>${escapeHaircutText(row.style_name)}</option>`;
+    })
+    .join("");
   // Absent means eligible, matching the column default, so an existing style
   // is never silently dropped out of Top picks.
   const topPickEligible =
@@ -1829,6 +1853,13 @@ function openHaircutEditor(hairstyle, variants = []) {
           .join("")}
       </select>
       <span class="field-hint">Customers with shorter hair are warned before a preview is spent, never hidden from it.</span>
+    </label>
+    <label id="hc-transition-field">Which cut grows into this?
+      <select class="select" id="hc-transition">
+        <option value="">No suggestion</option>
+        ${transitionOptions}
+      </select>
+      <span class="field-hint">Offered to customers whose hair is too short for this cut, as the one to get now and grow out. Only asked for styles needing medium or long hair.</span>
     </label>
     <!-- Gender is hidden: every style in this shop is offered to anyone, and
          nothing in the recommendation pipeline reads it. Kept as a hidden input
@@ -1883,6 +1914,7 @@ function openHaircutEditor(hairstyle, variants = []) {
     renderHaircutVariantsList();
     renderHaircutOverlayUploads(hairstyle);
 
+    syncTransitionFieldVisibility();
     const status = haircutReviewStatus(hairstyle);
     state.haircutEditor.reviewStatus = status;
     // Fetched rather than recomputed here, so the portal and the server can
@@ -1891,6 +1923,7 @@ function openHaircutEditor(hairstyle, variants = []) {
       .then((readiness) => renderHaircutReadiness(readiness, status))
       .catch(() => renderHaircutReadiness(null, status));
   } else {
+    syncTransitionFieldVisibility();
     variantsSection?.setAttribute("hidden", "");
     document.getElementById("haircut-overlay-section")?.setAttribute("hidden", "");
     document.getElementById("haircut-readiness-section")?.setAttribute("hidden", "");
@@ -1917,6 +1950,7 @@ async function saveHaircutEditor() {
     isActive: Number(document.getElementById("hc-active")?.value ?? 1) !== 0,
     aiPrompt: document.getElementById("hc-ai-prompt")?.value?.trim() || "",
     aiMinLengthLevel: Number(document.getElementById("hc-ai-min-length")?.value ?? 1),
+    transitionStyleCode: document.getElementById("hc-transition")?.value || "",
   };
 
   if (!payload.styleName) {
@@ -3426,6 +3460,11 @@ document.getElementById("haircut-editor-reject")?.addEventListener("click", (eve
 document.getElementById("haircuts-review")?.addEventListener("change", () => {
   resetPagination(["haircuts-table"]);
   renderHaircuts();
+});
+document.getElementById("haircut-editor-form")?.addEventListener("change", (event) => {
+  if (event.target && event.target.id === "hc-ai-min-length") {
+    syncTransitionFieldVisibility();
+  }
 });
 document.getElementById("haircut-editor-cancel")?.addEventListener("click", () => {
   const dialog = document.getElementById("haircut-editor-dialog");

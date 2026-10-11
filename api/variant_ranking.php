@@ -11,13 +11,10 @@ declare(strict_types=1);
  */
 function attach_style_min_length(array $row): array
 {
-    $key = replicate_resolve_style_key(
-        (string)($row['style_name'] ?? ''),
-        (string)($row['style_code'] ?? '')
-    );
-    $row['min_length_level'] = $key === null
-        ? 1
-        : (replicate_style_min_length()[$key] ?? 1);
+    // Was the built-in table alone, which meant a length set in the portal or
+    // the barber app never reached the customer: Wolf Cut, submitted as Long,
+    // was served as Short and warned nobody.
+    $row['min_length_level'] = hairstyle_min_length_level($row);
 
     return $row;
 }
@@ -277,6 +274,8 @@ SELECT
     hs.style_code,
     hs.description,
     hs.ai_prompt,
+    hs.ai_min_length_level,
+    hs.transition_style_code,
     (
         hv.confidence_score
         + CASE
@@ -337,9 +336,13 @@ SQL;
 function annotate_variant_artwork(array $row): array
 {
     $previewable = hairstyle_is_previewable_without_artwork($row);
+    $transition = hairstyle_transition_code($row);
     $row = apply_hairstyle_overlay_paths($row);
     $row['has_artwork'] = trim((string)($row['front_view_url'] ?? '')) !== '';
     $row['previewable'] = $previewable;
+    // Resolved server-side so the app never has to know about the built-in
+    // defaults, and so the column and the defaults are reconciled in one place.
+    $row['transition_style_code'] = $transition;
     unset($row['ai_prompt']);
 
     return $row;

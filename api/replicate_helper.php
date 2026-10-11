@@ -184,6 +184,46 @@ function replicate_length_style_hints(): array
  *
  * @return array<string, int>
  */
+/**
+ * The cut to offer someone who wants a style their hair is too short for.
+ *
+ * Curated rather than inferred. Picking "the longest thing they can wear" was
+ * never wrong but was never *related* either -- a customer turned away from a
+ * mullet was offered whatever happened to rank highest, with nothing linking
+ * the two. These pairings are a growth path: get this now, and as it grows it
+ * becomes the one you wanted.
+ *
+ * Values are style_codes, so a pairing survives a style being renamed.
+ *
+ * Only styles replicate_style_min_length() marks as needing more than short
+ * hair need an entry. A style added through the portal sets its own in
+ * hairstyles.transition_style_code, which overrides anything here.
+ *
+ * @return array<string, string>
+ */
+function hairstyle_transition_defaults(): array
+{
+    return [
+        // The top and back grow into the mullet silhouette.
+        'modern_mullet' => 'HC-TEXTURED-CROP',
+        // The top grows into the disconnected layer that defines a two block.
+        'two_block' => 'HC-TEXTURED-CROP',
+        // The fringe grows forward, then parts.
+        'modern_curtains' => 'HC-TEXTURED-CROP',
+        // Volume at the front, on sides that are already tapered.
+        'pompadour' => 'HC-BLOWOUT-TAPER',
+        // The fringe grows down into the bowl line.
+        'wavy_mod_cut' => 'HC-WAVY-FRINGE',
+        // The same shape with shorter curls on top.
+        'curly_top_fade' => 'HC-CURLY-TAPER',
+        // Curls grow over sides that are already short.
+        'curly_undercut' => 'HC-CURLY-TAPER',
+        // One step only: this still needs medium hair, so the lookup follows
+        // the chain on to Curly Taper Fade for a customer shorter than that.
+        'curly_modern_mullet' => 'STYLE-CURLY-TOP-FADE',
+    ];
+}
+
 function replicate_style_min_length(): array
 {
     return [

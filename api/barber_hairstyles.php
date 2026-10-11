@@ -25,7 +25,9 @@ require_method('POST');
 $input = get_json_input();
 $action = trim((string)($input['action'] ?? ''));
 
-if (!in_array($action, ['submitHairstyle', 'listMyHairstyles', 'deleteHairstyle'], true)) {
+if (!in_array($action, [
+    'submitHairstyle', 'listMyHairstyles', 'deleteHairstyle', 'listTransitionChoices',
+], true)) {
     json_response(['error' => 'Invalid action'], 400);
 }
 
@@ -107,6 +109,21 @@ try {
             $stmt->execute([':barber_id' => $barber['id']]);
 
             json_response(['hairstyles' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
+        }
+
+        // The cuts a barber can pick as "grows into this". Published only --
+        // suggesting a customer get a style that is not in the catalogue yet
+        // would be worse than suggesting nothing.
+        if ($action === 'listTransitionChoices') {
+            $stmt = $pdo->query(
+                "SELECT style_code, style_name
+                 FROM hairstyles
+                 WHERE is_active = TRUE
+                   AND COALESCE(review_status, 'Published') = 'Published'
+                 ORDER BY style_name"
+            );
+
+            json_response(['styles' => $stmt->fetchAll(PDO::FETCH_ASSOC)]);
         }
 
         if ($action === 'deleteHairstyle') {
@@ -228,11 +245,11 @@ try {
                 "INSERT INTO hairstyles
                     (style_code, style_name, description, gender, difficulty, maintenance,
                      category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level,
-                     authored_by_barber_id, review_status)
+                     authored_by_barber_id, review_status, transition_style_code)
                  VALUES
                     (:style_code, :style_name, :description, 'Unisex', 'Medium', 'Medium',
                      'alternative', TRUE, TRUE, :ai_prompt, :min_level,
-                     :barber_id, 'PendingReview')
+                     :barber_id, 'PendingReview', :transition_style_code)
                  RETURNING hairstyle_id"
             );
             $insert->execute([
@@ -242,6 +259,10 @@ try {
                 ':ai_prompt' => $prompt,
                 ':min_level' => max(0, min(3, (int)($input['minLengthLevel'] ?? 1))),
                 ':barber_id' => $barber['id'],
+                // Only asked for when the style needs medium or long hair, so
+                // it is empty for most submissions and stored as NULL.
+                ':transition_style_code' =>
+                    strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null,
             ]);
             $hairstyleId = (int)$insert->fetchColumn();
 

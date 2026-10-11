@@ -45,6 +45,10 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
 
   final Set<String> _textures = {};
   int _minLengthLevel = 1;
+
+  /// The published cuts a submission can point at as "grows into this".
+  List<Map<String, dynamic>> _transitionChoices = [];
+  String? _transitionStyleCode;
   final Map<String, XFile> _photos = {};
 
   bool _submitting = false;
@@ -58,6 +62,22 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
   void initState() {
     super.initState();
     _loadMine();
+    _loadTransitionChoices();
+  }
+
+  Future<void> _loadTransitionChoices() async {
+    try {
+      final data = await _post({'action': 'listTransitionChoices'});
+      if (!mounted) return;
+      setState(() {
+        _transitionChoices = (data['styles'] as List<dynamic>? ?? [])
+            .map((row) => Map<String, dynamic>.from(row as Map))
+            .toList();
+      });
+    } catch (_) {
+      // Optional field: without the list the barber simply is not offered a
+      // pairing, and the app falls back to suggesting the closest fit.
+    }
   }
 
   @override
@@ -70,6 +90,10 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
     }
     super.dispose();
   }
+
+  /// True when this cut needs medium or long hair, and so has customers it
+  /// must turn away.
+  bool get _needsTransition => _minLengthLevel >= 2;
 
   Map<String, dynamic> _identity() => {
         'barberID': UserSession.userId ?? 0,
@@ -231,6 +255,8 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
         'barberInstructions': _instructions.text.trim(),
         if (_ownWords) 'aiPrompt': _freeText.text.trim(),
         'minLengthLevel': _minLengthLevel,
+        if (_needsTransition && _transitionStyleCode != null)
+          'transitionStyleCode': _transitionStyleCode,
         'estimatedMinutes': int.tryParse(_minutes.text.trim()) ?? 40,
         'photos': photos,
       });
@@ -262,6 +288,7 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
       _textures.clear();
       _photos.clear();
       _minLengthLevel = 1;
+      _transitionStyleCode = null;
       _minutes.text = '40';
     });
   }
@@ -432,6 +459,62 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
                 'Customers with shorter hair are warned, never blocked.',
                 style: TextStyle(color: AppBrand.textMuted, fontSize: 11.5),
               ),
+              // Only for cuts needing real length. A style anyone can already
+              // wear has nobody to suggest an alternative to, so the question
+              // would be noise on most submissions.
+              if (_needsTransition) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'Which cut grows into this?',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String?>(
+                  initialValue: _transitionStyleCode,
+                  isExpanded: true,
+                  dropdownColor: AppBrand.panel,
+                  style: const TextStyle(color: Colors.white, fontSize: 13.5),
+                  decoration: InputDecoration(
+                    filled: true,
+                    fillColor: AppBrand.panel,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: AppBrand.border),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: AppBrand.border),
+                    ),
+                  ),
+                  items: [
+                    const DropdownMenuItem<String?>(
+                      value: null,
+                      child: Text('No suggestion'),
+                    ),
+                    for (final row in _transitionChoices)
+                      DropdownMenuItem<String?>(
+                        value: row['style_code']?.toString(),
+                        child: Text(row['style_name']?.toString() ?? 'Style'),
+                      ),
+                  ],
+                  onChanged: (value) =>
+                      setState(() => _transitionStyleCode = value),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Someone whose hair is too short for this gets offered that '
+                  'cut instead — the one to get now and grow out.',
+                  style: TextStyle(
+                    color: AppBrand.textMuted,
+                    fontSize: 11.5,
+                    height: 1.4,
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               _field(_minutes, 'Chair time in minutes', keyboard: TextInputType.number),
               _field(_instructions, 'Notes for whoever cuts it',

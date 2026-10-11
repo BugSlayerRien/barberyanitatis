@@ -26,15 +26,34 @@ function ensure_hairstyle_authoring_columns(PDO $pdo): void
 {
     $pdo->exec('ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS ai_prompt TEXT');
     $pdo->exec(
-        'ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS ai_min_length_level INT NOT NULL DEFAULT 1'
+        'ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS ai_min_length_level INT'
     );
+    // NULL has to mean "nobody chose", or the column cannot override anything.
+    // Created NOT NULL DEFAULT 1, it made "unset" and "deliberately Short"
+    // identical -- so the code table had to win, and a length set in the
+    // portal or the barber app was quietly ignored. Wolf Cut was submitted as
+    // Long and the app was told Short.
+    $pdo->exec('ALTER TABLE hairstyles ALTER COLUMN ai_min_length_level DROP NOT NULL');
+    $pdo->exec('ALTER TABLE hairstyles ALTER COLUMN ai_min_length_level DROP DEFAULT');
     $pdo->exec('ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS authored_by_barber_id BIGINT');
+    // Which cut to offer a customer whose hair is too short for this one.
+    // Nullable: a style with no pairing falls back to a heuristic rather than
+    // refusing to suggest anything.
+    $pdo->exec(
+        'ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS transition_style_code VARCHAR(20)'
+    );
     // Defaults to Published so every existing row stays visible: this column is
     // new, and the styles already in the catalog were never reviewed through a
     // workflow that did not exist.
     $pdo->exec(
         "ALTER TABLE hairstyles ADD COLUMN IF NOT EXISTS review_status VARCHAR(20) NOT NULL DEFAULT 'Published'"
     );
+    // Once per deploy, not per request: it rewrites rows, and the guard keys
+    // on the code stamp so a later change to the built-in table re-runs it.
+    schema_ensure_once('hairstyles.min_length_backfill', static function () use ($pdo): void {
+        backfill_hairstyle_min_length_defaults($pdo);
+    });
+
     $pdo->exec('ALTER TABLE hairstyles DROP CONSTRAINT IF EXISTS hairstyles_review_status_check');
     try {
         $pdo->exec(
@@ -44,6 +63,114 @@ function ensure_hairstyle_authoring_columns(PDO $pdo): void
     } catch (Throwable $e) {
         // Already present after a concurrent request.
     }
+}
+
+/**
+ * Clears the leftover default so the built-in table governs built-in styles.
+ *
+ * Every row was created with 1 whether or not anyone chose it. Now that NULL
+ * means "unset", those 1s would override the code table and tell the app that
+ * a Pompadour needs only short hair. They are cleared, but only for styles the
+ * code already describes and only where the code disagrees -- a deliberate
+ * Short on a style with no built-in entry is left exactly as it is.
+ *
+ * Runs once per deploy via schema_ensure_once. Rows written after this point
+ * carry a value only when someone actually picked one.
+ */
+function backfill_hairstyle_min_length_defaults(PDO $pdo): void
+{
+    require_once __DIR__ . '/replicate_helper.php';
+
+    $rows = $pdo->query(
+        'SELECT hairstyle_id, style_code, style_name
+         FROM hairstyles WHERE ai_min_length_level = 1'
+    )->fetchAll(PDO::FETCH_ASSOC);
+    if ($rows === []) {
+        return;
+    }
+
+    $builtIn = replicate_style_min_length();
+    $clear = $pdo->prepare(
+        'UPDATE hairstyles SET ai_min_length_level = NULL WHERE hairstyle_id = :id'
+    );
+
+    foreach ($rows as $row) {
+        $key = replicate_resolve_style_key(
+            (string)$row['style_name'],
+            (string)$row['style_code']
+        );
+        if ($key === null || ($builtIn[$key] ?? 1) === 1) {
+            continue;
+        }
+        $clear->execute([':id' => (int)$row['hairstyle_id']]);
+    }
+}
+
+/**
+ * The shortest hair this style can be cut from.
+ *
+ * The stored value wins when someone set one; otherwise the built-in table
+ * describes it; otherwise short. One resolver, because the ranking, the
+ * library and the generator each used to answer this differently -- and the
+ * ranking ignored the column entirely, which is why a style submitted as Long
+ * produced no warning at all.
+ *
+ * @param array<string, mixed> $row a hairstyles row
+ */
+function hairstyle_min_length_level(array $row): int
+{
+    require_once __DIR__ . '/replicate_helper.php';
+
+    $stored = $row['ai_min_length_level'] ?? null;
+    if ($stored !== null && $stored !== '') {
+        return max(0, min(3, (int)$stored));
+    }
+
+    $key = replicate_resolve_style_key(
+        (string)($row['style_name'] ?? ''),
+        (string)($row['style_code'] ?? '')
+    );
+    if ($key === null) {
+        return 1;
+    }
+
+    return (int)(replicate_style_min_length()[$key] ?? 1);
+}
+
+/**
+ * The style_code to suggest instead of this one, or '' when there is none.
+ *
+ * One resolver for three callers -- the ranking, the library and the portal --
+ * so they cannot disagree about what a style pairs with. The stored column
+ * wins over the built-in default, which is what lets the portal override a
+ * pairing without a code change.
+ *
+ * A style pointing at itself is treated as unset: it would make the lookup
+ * loop, and it is never what anyone meant.
+ *
+ * @param array<string, mixed> $row a hairstyles row
+ */
+function hairstyle_transition_code(array $row): string
+{
+    $own = strtoupper(trim((string)($row['style_code'] ?? '')));
+
+    $stored = strtoupper(trim((string)($row['transition_style_code'] ?? '')));
+    if ($stored !== '' && $stored !== $own) {
+        return $stored;
+    }
+
+    require_once __DIR__ . '/replicate_helper.php';
+    $key = replicate_resolve_style_key(
+        (string)($row['style_name'] ?? ''),
+        (string)($row['style_code'] ?? '')
+    );
+    if ($key === null) {
+        return '';
+    }
+
+    $fallback = strtoupper(trim(hairstyle_transition_defaults()[$key] ?? ''));
+
+    return $fallback !== '' && $fallback !== $own ? $fallback : '';
 }
 
 /** SQL fragment restricting a query to styles customers may see. */

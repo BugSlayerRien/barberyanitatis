@@ -25,6 +25,7 @@ try {
         }
 
         $previewable = hairstyle_is_previewable_without_artwork($row);
+        $transition = hairstyle_transition_code($row);
         $row = apply_hairstyle_overlay_paths($row);
 
         // The app used to guess, and guessed wrong: with no artwork it fell
@@ -32,6 +33,10 @@ try {
         // flags let it draw a placeholder instead.
         $row['has_artwork'] = trim((string)($row['front_view_url'] ?? '')) !== '';
         $row['previewable'] = $previewable;
+        $row['transition_style_code'] = $transition;
+        // The library's own detail page gates on this as well, so it must
+        // agree with the recommendations rather than defaulting to short.
+        $row['min_length_level'] = hairstyle_min_length_level($row);
         // The prompt is fetched to decide the above; it is not the customer's
         // business what the image model is told.
         unset($row['ai_prompt']);
@@ -41,7 +46,7 @@ try {
 
     if ($action === 'list') {
         $stmt = $pdo->prepare(
-            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active, ai_prompt
+            'SELECT hairstyle_id, style_code, style_name, description, gender, difficulty, maintenance, is_active, ai_prompt, ai_min_length_level, transition_style_code
              FROM hairstyles
                WHERE is_active = TRUE
                AND COALESCE(review_status, \'Published\') = \'Published\'
@@ -78,7 +83,7 @@ try {
         $libraryIn = $inParts !== [] ? ' AND hs.style_code IN (' . implode(', ', $inParts) . ') ' : '';
 
         $stmt = $pdo->prepare(
-            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt,
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt, hs.ai_min_length_level, hs.transition_style_code,
                     hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
                     hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
              FROM hairstyles hs
@@ -120,7 +125,7 @@ try {
 
         $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $query) . '%';
         $stmt = $pdo->prepare(
-            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt,
+            'SELECT hs.hairstyle_id, hs.style_code, hs.style_name, hs.description, hs.gender, hs.difficulty, hs.maintenance, hs.is_active, hs.ai_prompt, hs.ai_min_length_level, hs.transition_style_code,
                     hv.variant_id, hv.face_shape, hv.hair_texture, hv.front_view_url, hv.side_view_url, hv.back_view_url,
                     hv.confidence_score, hv.barber_instructions, hv.clipper_sizes, hv.styling_products, hv.estimated_minutes
              FROM hairstyles hs

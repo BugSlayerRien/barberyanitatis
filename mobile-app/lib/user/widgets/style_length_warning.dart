@@ -144,8 +144,8 @@ Future<LengthChoice> confirmLongerHairStyle(
             if (canShowAlternatives)
               option(
                 icon: Icons.content_cut,
-                title: 'Show what suits me now',
-                detail: 'A cut your barber can give you today.',
+                title: 'Show the cut that grows into this',
+                detail: 'A cut you can have today that grows into this one.',
                 value: LengthChoice.showAlternatives,
               ),
             option(

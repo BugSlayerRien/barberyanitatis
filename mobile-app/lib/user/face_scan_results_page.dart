@@ -26,6 +26,7 @@ import 'recommendation_match_display.dart';
 import 'widgets/app_bottom_nav.dart';
 import 'widgets/app_top_bar.dart';
 import 'widgets/menu_sheet.dart';
+import 'widgets/preview_quota_pill.dart';
 import 'widgets/scan_progress_panel.dart';
 import 'widgets/style_length_warning.dart';
 import 'widgets/style_view_thumbnail.dart';
@@ -796,7 +797,68 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// Everything it reads -- min_length_level and style_category -- is already
   /// on the rows the server returned, so this costs no extra call and invents
   /// no second opinion about what suits them.
+  /// Every style currently on the page, indexed by style_code.
+  ///
+  /// The curated pairing names a style_code, so following it means finding
+  /// that style among the rows already loaded. One pass, built per lookup
+  /// rather than cached, because the lists change as categories load.
+  Map<String, Map<String, dynamic>> get _loadedStylesByCode {
+    final byCode = <String, Map<String, dynamic>>{};
+    for (final row in [
+      ..._topPicks,
+      ..._categories['formal'] ?? const <Map<String, dynamic>>[],
+      ..._categories['alternative'] ?? const <Map<String, dynamic>>[],
+      ..._libraryPicks,
+    ]) {
+      final code = row['style_code']?.toString().trim().toUpperCase() ?? '';
+      if (code.isNotEmpty) byCode.putIfAbsent(code, () => row);
+    }
+
+    return byCode;
+  }
+
+  /// The curated cut that grows into the one they wanted, if it is reachable.
+  ///
+  /// Walks the pairing chain rather than taking the first hop: Curly Modern
+  /// Mullet pairs with Curly Top Fade, which still needs medium hair, which
+  /// in turn pairs with Curly Taper Fade. Stopping at the first link would
+  /// offer a cut they also cannot have.
+  ///
+  /// Returns null when the chain runs out, loops, or names a style that is not
+  /// on this page -- the texture filter can legitimately exclude the target.
+  /// The caller then falls back to the heuristic.
+  Map<String, dynamic>? _curatedTransitionFor(Map<String, dynamic> wanted) {
+    final byCode = _loadedStylesByCode;
+    final seen = <String>{
+      wanted['style_code']?.toString().trim().toUpperCase() ?? '',
+    };
+
+    var cursor = wanted;
+    // Six is far beyond any real chain; it exists so a bad pairing cannot
+    // hang the page.
+    for (var hop = 0; hop < 6; hop++) {
+      final next =
+          cursor['transition_style_code']?.toString().trim().toUpperCase() ?? '';
+      if (next.isEmpty || !seen.add(next)) return null;
+
+      final candidate = byCode[next];
+      if (candidate == null) return null;
+      if (!styleNeedsMoreLength(candidate, _effectiveLengthLevel)) {
+        return candidate;
+      }
+      cursor = candidate;
+    }
+
+    return null;
+  }
+
   Map<String, dynamic>? _alternativeFor(Map<String, dynamic> wanted) {
+    // The curated pairing first: it is a growth path towards the style they
+    // actually wanted, where the heuristic below is only "something that
+    // fits".
+    final curated = _curatedTransitionFor(wanted);
+    if (curated != null) return curated;
+
     final wantedKey = _variantKey(wanted);
     final wantedCategory =
         wanted['style_category']?.toString().trim().toLowerCase() ?? '';
@@ -1508,179 +1570,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   /// Placeholder shown only while the very first quota fetch of this process
   /// is still in flight (no cached value to seed from) -- so the pill's slot
   /// is occupied instead of the row silently having no trailing widget.
-  Widget _quotaPillSkeleton() {
-    return Container(
-      width: 54,
-      height: 26,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white12),
-      ),
-      alignment: Alignment.center,
-      child: const SizedBox(
-        width: 12,
-        height: 12,
-        child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white38),
-      ),
-    );
-  }
-
-  Widget? _quotaPill() {
-    final quota = _lastQuota;
-    if (quota == null) {
-      // Nothing cached yet and the first fetch (plus its retry) hasn't
-      // settled -- a bare skeleton beats the pill silently never appearing.
-      return _quotaLoading ? _quotaPillSkeleton() : null;
-    }
-    if (quota['unlimited'] == true) return null;
-    final limit = (quota['limit'] as num?)?.toInt();
-    final used = (quota['used'] as num?)?.toInt();
-    if (limit == null || used == null || limit <= 0) return null;
-
-    // Clamped: `used` can legitimately exceed `limit` (previews generated while
-    // AI_TRYON_UNLIMITED was on, or before a limit was lowered), and a negative
-    // "left" count would be nonsense.
-    final remaining = (limit - used).clamp(0, limit);
-    final isEmpty = remaining <= 0;
-    final canBuy = _canPurchaseCredits;
-
-    final accentColor = isEmpty ? Colors.orange.shade200 : Colors.white70;
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Material(
-          color: isEmpty ? const Color(0xFF3A1A10) : const Color(0xFF1A1A1A),
-          shape: StadiumBorder(
-            side: BorderSide(color: isEmpty ? Colors.orange.shade300 : Colors.white24),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: canBuy ? () => unawaited(_openCreditPurchase()) : null,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 5, 7, 5),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.auto_awesome, size: 14, color: accentColor),
-                  const SizedBox(width: 5),
-                  Text(
-                    '$remaining',
-                    style: TextStyle(
-                      color: isEmpty ? Colors.orange.shade200 : Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  if (canBuy) ...[
-                    const SizedBox(width: 4),
-                    Icon(Icons.add_circle, size: 15, color: accentColor),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 4),
-        IconButton(
-          onPressed: _showQuotaHelp,
-          icon: const Icon(Icons.help_outline, size: 16, color: Colors.white38),
-          tooltip: 'What is this number?',
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
-          constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _showQuotaHelp() async {
-    final quota = _lastQuota;
-    final limit = (quota?['limit'] as num?)?.toInt() ?? 0;
-    final used = (quota?['used'] as num?)?.toInt() ?? 0;
-    final purchased = (quota?['purchased'] as num?)?.toInt() ?? 0;
-    final free = (limit - purchased).clamp(0, limit);
-    final remaining = (limit - used).clamp(0, limit);
-
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppBrand.panel,
-        shape: RoundedRectangleBorder(
-          borderRadius: AppBrand.radiusMd,
-          side: const BorderSide(color: AppBrand.border),
-        ),
-        title: const Row(
-          children: [
-            Icon(Icons.auto_awesome, size: 18, color: AppBrand.accent),
-            SizedBox(width: 8),
-            Text(
-              'AI previews',
-              style: TextStyle(color: AppBrand.text, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'This number is how many AI hairstyle previews you have left. '
-              'Generating a new style uses one.',
-              style: const TextStyle(color: AppBrand.textMuted, height: 1.45).copyWith(fontSize: 13.5),
-            ),
-            const SizedBox(height: 12),
-            _quotaHelpRow('Previews left', '$remaining'),
-            _quotaHelpRow('Free allowance', '$free'),
-            if (purchased > 0) _quotaHelpRow('Purchased', '$purchased'),
-            _quotaHelpRow('Used so far', '$used'),
-            const SizedBox(height: 12),
-            const Text(
-              'Reopening a style you already generated is free — it does not use another preview.',
-              style: TextStyle(color: Colors.white38, fontSize: 12, height: 1.4),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            style: TextButton.styleFrom(foregroundColor: AppBrand.accent),
-            child: const Text('Got it'),
-          ),
-          if (_canPurchaseCredits)
-            FilledButton(
-              onPressed: () {
-                Navigator.of(ctx).pop();
-                unawaited(_openCreditPurchase());
-              },
-              child: Text(
-                'Get ${AiCreditPurchasePage.bundleCredits} more — '
-                '₱${AiCreditPurchasePage.bundleAmountPhp.toStringAsFixed(0)}',
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _quotaHelpRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12.5)),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ],
-      ),
+  /// Previews left, as the pill beside "Top picks".
+  ///
+  /// The markup moved to PreviewQuotaPill so the library and the try-on page
+  /// show the identical control rather than each page inventing its own.
+  Widget _quotaPill() {
+    return PreviewQuotaPill(
+      quota: _lastQuota,
+      loading: _quotaLoading,
+      canPurchase: _canPurchaseCredits,
+      onPurchase: _openCreditPurchase,
     );
   }
 
@@ -2477,17 +2376,34 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Closest to $_selectedStyleName your barber can cut today',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  const Text(
+                    'GET THIS NOW',
+                    style: TextStyle(
+                      color: Color(0xFF8FD49A),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.6,
+                    ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 3),
                   Text(
                     name,
                     style: const TextStyle(
                       color: Colors.white,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  // The reason is the whole point of a curated pairing: it is
+                  // a step towards the cut they asked for, not a consolation
+                  // prize that merely fits.
+                  Text(
+                    'As it grows out it becomes the $_selectedStyleName you wanted.',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 11.5,
+                      height: 1.35,
                     ),
                   ),
                 ],
