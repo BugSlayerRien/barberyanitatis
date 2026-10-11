@@ -155,17 +155,24 @@ try {
             json_response(['error' => 'styleName is required'], 422);
         }
 
-        if ($styleCode === '') {
-            // Uppercase FIRST. Substituting before the case fold ran the
-            // negated class [^A-Z0-9] over lowercase input, so it deleted every
-            // lowercase letter: "Mid Fade" became HC-M-F-, and "Taper Fade" and
-            // "Textured Fringe" both became HC-T-F- -- a collision on a UNIQUE
-            // column that surfaced as a bare 500.
-            $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper($styleName)) ?? 'STYLE';
-            $styleCode = substr('HC-' . trim($slug, '-'), 0, 20);
+        ensure_hairstyle_authoring_columns($pdo);
+
+        // Checked before the insert rather than left to the UNIQUE constraint,
+        // which answered with a raw Postgres message and an HTTP 500.
+        $nameProblem = hairstyle_name_problem($pdo, $styleName);
+        if ($nameProblem !== '') {
+            json_response(['error' => $nameProblem], 422);
         }
 
-        ensure_hairstyle_authoring_columns($pdo);
+        if ($styleCode === '') {
+            $styleCode = hairstyle_unique_code($pdo, hairstyle_code_from_name($styleName));
+        } else {
+            $codeProblem = hairstyle_code_problem($pdo, $styleCode);
+            if ($codeProblem !== '') {
+                json_response(['error' => $codeProblem], 422);
+            }
+            $styleCode = strtoupper(trim($styleCode));
+        }
         $stmt = $pdo->prepare(
             'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level, transition_style_code)
              VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible, :ai_prompt, :ai_min_length_level, :transition_style_code)
@@ -211,7 +218,22 @@ try {
             json_response(['error' => 'Invalid hairstyle payload'], 422);
         }
 
+        // Same checks on edit, excluding this row so a style can keep its own
+        // name and code.
+        $nameProblem = hairstyle_name_problem($pdo, $styleName, $hairstyleID);
+        if ($nameProblem !== '') {
+            json_response(['error' => $nameProblem], 422);
+        }
+
         $styleCode = trim((string)($input['styleCode'] ?? ''));
+        if ($styleCode !== '') {
+            $codeProblem = hairstyle_code_problem($pdo, $styleCode, $hairstyleID);
+            if ($codeProblem !== '') {
+                json_response(['error' => $codeProblem], 422);
+            }
+            $styleCode = strtoupper($styleCode);
+        }
+
         $sql = 'UPDATE hairstyles
                 SET style_name = :style_name,
                     description = :description,
@@ -466,9 +488,13 @@ try {
 
     json_response(['error' => 'Invalid action'], 400);
 } catch (PDOException $e) {
-    json_response(['error' => 'Database error', 'details' => $e->getMessage()], 500);
+    // The message carries table and constraint names, which the browser has no
+    // business seeing. Logged in full, summarised to the client.
+    error_log('admin_hairstyles: ' . $e->getMessage());
+    json_response(['error' => hairstyle_friendly_db_error($e)], 500);
 } catch (Throwable $e) {
-    json_response(['error' => 'Server error', 'details' => $e->getMessage()], 500);
+    error_log('admin_hairstyles: ' . $e->getMessage());
+    json_response(['error' => 'Something went wrong saving that haircut.'], 500);
 }
 
 function normalize_hairstyle_gender(string $value): string

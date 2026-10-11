@@ -236,8 +236,15 @@ try {
         $prompt = $freeText !== ''
             ? $freeText
             : compose_hairstyle_prompt($styleName, $fields);
-        $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper($styleName)) ?? 'STYLE';
-        $styleCode = substr('HC-' . trim($slug, '-'), 0, 20);
+        // Two barbers submitting "Wolf Cut" generated the same code, and the
+        // second saw a raw uniqueness error. The name is checked outright; the
+        // code, which they never chose, is suffixed instead of refused.
+        $nameProblem = hairstyle_name_problem($pdo, $styleName);
+        if ($nameProblem !== '') {
+            json_response(['error' => $nameProblem], 422);
+        }
+
+        $styleCode = hairstyle_unique_code($pdo, hairstyle_code_from_name($styleName));
 
         $pdo->beginTransaction();
         try {
@@ -336,7 +343,8 @@ try {
         }
     });
 } catch (PDOException $e) {
-    json_response(db_error_response_payload($e), 503);
+    error_log('barber_hairstyles: ' . $e->getMessage());
+    json_response(['error' => hairstyle_friendly_db_error($e)], 503);
 } catch (InvalidArgumentException $e) {
     json_response(['error' => $e->getMessage()], 422);
 } catch (Throwable $e) {

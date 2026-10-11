@@ -173,6 +173,169 @@ function hairstyle_transition_code(array $row): string
     return $fallback !== '' && $fallback !== $own ? $fallback : '';
 }
 
+/**
+ * Turns a style name into a code, in the one shape the catalogue uses.
+ *
+ * Both the portal and the barber app generated this independently with the
+ * same expression copied twice. Uppercase has to happen before the
+ * substitution: run the other way round, the negated class [^A-Z0-9] eats
+ * every lowercase letter, so "Mid Fade" became HC-M-F- and "Taper Fade" and
+ * "Textured Fringe" both became HC-T-F- -- a collision on a UNIQUE column
+ * that surfaced as a bare 500.
+ */
+function hairstyle_code_from_name(string $styleName): string
+{
+    $slug = preg_replace('/[^A-Z0-9]+/', '-', strtoupper(trim($styleName))) ?? '';
+    $code = 'HC-' . trim($slug, '-');
+
+    return substr($code, 0, 20) === 'HC-' ? 'HC-STYLE' : substr($code, 0, 20);
+}
+
+/**
+ * The same code with a number appended until nothing else is using it.
+ *
+ * Codes are generated from the name, so two barbers submitting "Wolf Cut"
+ * produced the same code and the second one saw a raw Postgres uniqueness
+ * error. Suffixing is friendlier than refusing: the barber did nothing wrong,
+ * and the name is still theirs to tell apart.
+ */
+function hairstyle_unique_code(PDO $pdo, string $base, ?int $ignoreId = null): string
+{
+    $base = strtoupper(trim($base));
+    if ($base === '') {
+        $base = 'HC-STYLE';
+    }
+
+    $sql = 'SELECT 1 FROM hairstyles WHERE UPPER(style_code) = :code';
+    if ($ignoreId !== null) {
+        $sql .= ' AND hairstyle_id <> :id';
+    }
+    $stmt = $pdo->prepare($sql . ' LIMIT 1');
+
+    $candidate = $base;
+    for ($suffix = 2; $suffix < 100; $suffix++) {
+        $params = [':code' => $candidate];
+        if ($ignoreId !== null) {
+            $params[':id'] = $ignoreId;
+        }
+        $stmt->execute($params);
+        if ($stmt->fetchColumn() === false) {
+            return $candidate;
+        }
+        // Room for the suffix, so the result still fits the column.
+        $candidate = substr($base, 0, 20 - strlen((string)$suffix) - 1) . '-' . $suffix;
+    }
+
+    return substr($base, 0, 13) . '-' . substr((string)time(), -6);
+}
+
+/**
+ * Why this style code cannot be used, or '' when it can.
+ *
+ * Only for codes a person typed. Generated ones are already well formed and
+ * made unique above.
+ */
+function hairstyle_code_problem(PDO $pdo, string $styleCode, ?int $ignoreId = null): string
+{
+    $code = strtoupper(trim($styleCode));
+    if ($code === '') {
+        return '';
+    }
+
+    if (strlen($code) > 20) {
+        return 'Style code is too long — 20 characters at most.';
+    }
+    // Spaces and punctuation silently produced codes that no lookup matched.
+    if (preg_match('/^[A-Z0-9][A-Z0-9-]*$/', $code) !== 1) {
+        return 'Style code can only use letters, numbers and hyphens, '
+            . 'for example HC-TWO-BLOCK.';
+    }
+
+    $sql = 'SELECT style_name FROM hairstyles WHERE UPPER(style_code) = :code';
+    if ($ignoreId !== null) {
+        $sql .= ' AND hairstyle_id <> :id';
+    }
+    $stmt = $pdo->prepare($sql . ' LIMIT 1');
+    $params = [':code' => $code];
+    if ($ignoreId !== null) {
+        $params[':id'] = $ignoreId;
+    }
+    $stmt->execute($params);
+
+    $taken = $stmt->fetchColumn();
+    if ($taken !== false) {
+        return 'Style code ' . $code . ' is already used by "' . $taken . '".';
+    }
+
+    return '';
+}
+
+/**
+ * Why this style name cannot be used, or '' when it can.
+ *
+ * Two haircuts with the same name are indistinguishable to a customer
+ * browsing the library, however different their codes are.
+ */
+function hairstyle_name_problem(PDO $pdo, string $styleName, ?int $ignoreId = null): string
+{
+    $name = trim($styleName);
+    if ($name === '') {
+        return 'A style name is required.';
+    }
+    if (mb_strlen($name) > 80) {
+        return 'Style name is too long — 80 characters at most.';
+    }
+
+    // Active styles only. Two deactivated rows already share names with live
+    // ones (old STYLE-* seeds), and blocking on a row that is not in the
+    // catalogue would be baffling to whoever hit it.
+    $sql = 'SELECT style_code FROM hairstyles
+            WHERE LOWER(TRIM(style_name)) = LOWER(:name) AND is_active = TRUE';
+    if ($ignoreId !== null) {
+        $sql .= ' AND hairstyle_id <> :id';
+    }
+    $stmt = $pdo->prepare($sql . ' LIMIT 1');
+    $params = [':name' => $name];
+    if ($ignoreId !== null) {
+        $params[':id'] = $ignoreId;
+    }
+    $stmt->execute($params);
+
+    $taken = $stmt->fetchColumn();
+    if ($taken !== false) {
+        return 'A haircut called "' . $name . '" already exists (' . $taken . ').';
+    }
+
+    return '';
+}
+
+/**
+ * A database failure in words the person who hit it can act on.
+ *
+ * Postgres messages name tables, columns and constraints. Those belong in the
+ * log, not in a browser -- and "duplicate key value violates unique constraint
+ * hairstyles_style_code_key" tells an admin nothing about what to change.
+ */
+function hairstyle_friendly_db_error(Throwable $e): string
+{
+    $message = $e->getMessage();
+
+    if (stripos($message, 'hairstyles_style_code_key') !== false
+        || stripos($message, 'duplicate key') !== false) {
+        return 'That style code is already in use. Pick a different one, or '
+            . 'leave the code blank and one will be made for you.';
+    }
+    if (stripos($message, 'violates foreign key') !== false) {
+        return 'That haircut is still linked to other records and cannot be '
+            . 'changed this way.';
+    }
+    if (stripos($message, 'violates check constraint') !== false) {
+        return 'One of the values is outside what this field accepts.';
+    }
+
+    return 'The database rejected that change. Please try again.';
+}
+
 /** SQL fragment restricting a query to styles customers may see. */
 function hairstyle_published_sql(string $alias = 'hs'): string
 {
