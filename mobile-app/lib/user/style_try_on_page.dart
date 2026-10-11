@@ -335,8 +335,14 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     setState(() => _booking = true);
     try {
       // Book with the generated preview when there is one, so the barber sees
-      // the picture the customer actually agreed to.
-      await launchBookingForStyle(context, widget.style, previewImages: _previews);
+      // the picture the customer actually agreed to -- unless it is a grow-out
+      // render, which shows hair they do not have. That one stays a preview;
+      // the booking falls back to the haircut's own reference photos.
+      await launchBookingForStyle(
+        context,
+        widget.style,
+        previewImages: _growOutGoal ? null : _previews,
+      );
     } finally {
       if (mounted) setState(() => _booking = false);
     }

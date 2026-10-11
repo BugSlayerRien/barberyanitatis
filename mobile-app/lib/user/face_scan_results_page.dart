@@ -783,22 +783,73 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     UserSession.commitCompletedScan();
   }
 
-  /// The best style on this page the customer could actually have cut today.
+  /// The closest step towards the style they wanted that their barber could
+  /// actually cut today.
   ///
-  /// Picked from the rankings the server already returned -- every row carries
-  /// min_length_level -- so this needs no extra call and no second idea of
-  /// what suits them.
-  Map<String, dynamic>? get _achievableAlternative {
+  /// Not simply the best-ranked style that fits: that answered the wrong
+  /// question. Someone turned away from a mullet does not want a buzz cut
+  /// offered as consolation -- they want the longest thing in that direction
+  /// they can have now, which for a mullet is a taper. So candidates are
+  /// ordered by how close their own length requirement sits to the target,
+  /// then by matching category, and only then by the server's ranking.
+  ///
+  /// Everything it reads -- min_length_level and style_category -- is already
+  /// on the rows the server returned, so this costs no extra call and invents
+  /// no second opinion about what suits them.
+  Map<String, dynamic>? _alternativeFor(Map<String, dynamic> wanted) {
+    final wantedKey = _variantKey(wanted);
+    final wantedCategory =
+        wanted['style_category']?.toString().trim().toLowerCase() ?? '';
+
+    final seen = <String>{};
+    final candidates = <({Map<String, dynamic> row, int rank})>[];
+    var rank = 0;
+
     for (final row in [
       ..._topPicks,
       ..._categories['formal'] ?? const <Map<String, dynamic>>[],
       ..._categories['alternative'] ?? const <Map<String, dynamic>>[],
       ..._libraryPicks,
     ]) {
-      if (!styleNeedsMoreLength(row, _effectiveLengthLevel)) return row;
+      final key = _variantKey(row);
+      if (key.isEmpty || key == wantedKey || !seen.add(key)) continue;
+      if (styleNeedsMoreLength(row, _effectiveLengthLevel)) continue;
+      candidates.add((row: row, rank: rank++));
     }
+    if (candidates.isEmpty) return null;
 
-    return null;
+    int minLengthOf(Map<String, dynamic> row) =>
+        (row['min_length_level'] as num?)?.toInt() ??
+        (row['minLengthLevel'] as num?)?.toInt() ??
+        0;
+
+    bool sameCategory(Map<String, dynamic> row) =>
+        wantedCategory.isNotEmpty &&
+        row['style_category']?.toString().trim().toLowerCase() == wantedCategory;
+
+    candidates.sort((a, b) {
+      // Longest they can wear first -- the conversation is about length, so
+      // length proximity outranks the formal/alternative label.
+      final byLength = minLengthOf(b.row).compareTo(minLengthOf(a.row));
+      if (byLength != 0) return byLength;
+
+      final byCategory = (sameCategory(b.row) ? 1 : 0)
+          .compareTo(sameCategory(a.row) ? 1 : 0);
+      if (byCategory != 0) return byCategory;
+
+      // Dart's sort is not stable, so the server's ranking is carried
+      // explicitly rather than relied on.
+      return a.rank.compareTo(b.rank);
+    });
+
+    return candidates.first.row;
+  }
+
+  Map<String, dynamic>? get _achievableAlternative {
+    final wanted = _selected;
+    if (wanted == null) return null;
+
+    return _alternativeFor(wanted);
   }
 
   Future<LengthChoice> _confirmLongerHairStyle(String styleName) =>
@@ -1708,7 +1759,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       UserSession.selectedVariantId = variantId;
       UserSession.selectedStyleName = _selectedStyleName;
 
-      var previewUrls = _previewUrlsForVariant(variantId);
+      // A grow-out preview shows hair the customer does not have, so it is a
+      // preview and never a work order. Booking one sends the haircut's real
+      // reference photos instead -- the barber must not open an appointment
+      // and find a picture of a cut nobody can give today.
+      var previewUrls =
+          _previewIsGrowOutGoal ? null : _previewUrlsForVariant(variantId);
       if (previewUrls == null || (previewUrls['frontViewUrl'] ?? '').isEmpty) {
         final catalog = _catalogPreviewUrls(selected);
         if ((catalog['frontViewUrl'] ?? '').isEmpty) {
@@ -1720,7 +1776,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           return;
         }
         if (!mounted) return;
-        final proceed = await _confirmBookWithoutAiPreview(_selectedStyleName);
+        final proceed = _previewIsGrowOutGoal
+            ? true
+            : await _confirmBookWithoutAiPreview(_selectedStyleName);
         if (!mounted) return;
         if (!proceed) {
           setState(() => _bookingInFlight = false);
@@ -2419,9 +2477,9 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Your barber can cut this today',
-                    style: TextStyle(color: Colors.white38, fontSize: 11),
+                  Text(
+                    'Closest to $_selectedStyleName your barber can cut today',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
                   ),
                   const SizedBox(height: 2),
                   Text(

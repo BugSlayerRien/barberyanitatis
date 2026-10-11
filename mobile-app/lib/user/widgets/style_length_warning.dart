@@ -53,66 +53,122 @@ Future<LengthChoice> confirmLongerHairStyle(
   String styleName, {
   bool canShowAlternatives = true,
 }) async {
+  // Full-width rows rather than dialog actions. Four choices in an
+  // AlertDialog's footer wrap into an unreadable stack on a phone, and these
+  // need a line of explanation each -- the difference between "grow-out look"
+  // and "my hair is longer" is not obvious from a button label alone.
+  Widget option({
+    required IconData icon,
+    required String title,
+    required String detail,
+    required LengthChoice value,
+    bool primary = false,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => Navigator.of(context).pop(value),
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: primary ? Colors.white10 : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: primary ? Colors.white54 : Colors.white24,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 18, color: primary ? Colors.white : Colors.white60),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: primary ? Colors.white : Colors.white70,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      detail,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11.5,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   final choice = await showDialog<LengthChoice>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: const Color(0xFF1A1A1A),
-      title: const Text(
-        'This style needs longer hair',
-        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
+      contentPadding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      title: Text(
+        '"$styleName" needs longer hair',
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w700,
+          fontSize: 17,
+        ),
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '"$styleName" is cut on longer hair than your scan measured.',
-            style: const TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.w600,
-              height: 1.4,
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(4, 0, 4, 14),
+              child: Text(
+                'This cut is done on longer hair than your scan measured, so '
+                'your barber cannot give you this look today.',
+                style: TextStyle(color: Colors.white70, height: 1.45, fontSize: 13),
+              ),
             ),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'We can still show it, but the preview will have hair you do not '
-            'have yet — it is what the cut looks like once it has grown out, '
-            'not what your barber could do today.',
-            style: TextStyle(color: Colors.white70, height: 1.45),
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'If the scan got your length wrong, tell us and we will show the '
-            'real thing.',
-            style: TextStyle(color: Colors.white54, fontSize: 12.5, height: 1.4),
-          ),
-        ],
+            if (canShowAlternatives)
+              option(
+                icon: Icons.content_cut,
+                title: 'Show what suits me now',
+                detail: 'A cut your barber can give you today.',
+                value: LengthChoice.showAlternatives,
+              ),
+            option(
+              icon: Icons.straighten_rounded,
+              title: 'My hair is longer than that',
+              detail: 'The scan got it wrong. Generate the real thing.',
+              value: LengthChoice.correctLength,
+            ),
+            option(
+              icon: Icons.schedule_rounded,
+              title: 'Show the grow-out look',
+              detail: 'Uses one preview. The picture will have hair you do '
+                  'not have yet — it is the goal, not today.',
+              value: LengthChoice.growOutGoal,
+              primary: true,
+            ),
+          ],
+        ),
       ),
-      actionsOverflowDirection: VerticalDirection.down,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(LengthChoice.cancel),
           child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
-        ),
-        if (canShowAlternatives)
-          TextButton(
-            onPressed: () =>
-                Navigator.of(ctx).pop(LengthChoice.showAlternatives),
-            child: const Text('What suits me now',
-                style: TextStyle(color: Colors.white70)),
-          ),
-        TextButton(
-          onPressed: () => Navigator.of(ctx).pop(LengthChoice.correctLength),
-          child: const Text('My hair is longer',
-              style: TextStyle(color: Colors.white70)),
-        ),
-        ElevatedButton(
-          onPressed: () => Navigator.of(ctx).pop(LengthChoice.growOutGoal),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
-          ),
-          child: const Text('Show grow-out look'),
         ),
       ],
     ),
