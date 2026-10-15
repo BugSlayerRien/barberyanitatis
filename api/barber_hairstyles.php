@@ -246,6 +246,23 @@ try {
 
         $styleCode = hairstyle_unique_code($pdo, hairstyle_code_from_name($styleName));
 
+        $minLevel = max(0, min(3, (int)($input['minLengthLevel'] ?? 1)));
+        $transition =
+            strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null;
+
+        // A cut needing medium or long hair has to name the one that grows
+        // into it. Without a pairing the app offers "the longest cut you can
+        // wear today", which is related to what the customer asked for by
+        // nothing but length. A submission is new, so there is no built-in
+        // default to fall back on -- the barber is the only one who can say.
+        if ($minLevel >= 2 && $transition === null) {
+            json_response([
+                'error' => 'This cut needs medium or long hair, so pick the cut that '
+                    . 'grows into it. Customers with shorter hair are offered that '
+                    . 'one as the step towards this.',
+            ], 422);
+        }
+
         $pdo->beginTransaction();
         try {
             $insert = $pdo->prepare(
@@ -264,12 +281,11 @@ try {
                 ':style_name' => $styleName,
                 ':description' => trim((string)($input['description'] ?? '')) ?: null,
                 ':ai_prompt' => $prompt,
-                ':min_level' => max(0, min(3, (int)($input['minLengthLevel'] ?? 1))),
+                ':min_level' => $minLevel,
                 ':barber_id' => $barber['id'],
                 // Only asked for when the style needs medium or long hair, so
                 // it is empty for most submissions and stored as NULL.
-                ':transition_style_code' =>
-                    strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null,
+                ':transition_style_code' => $transition,
             ]);
             $hairstyleId = (int)$insert->fetchColumn();
 

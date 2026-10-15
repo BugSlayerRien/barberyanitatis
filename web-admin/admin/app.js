@@ -1807,14 +1807,35 @@ function openHaircutEditor(hairstyle, variants = []) {
   title.textContent = isEdit ? "Manage haircut" : "Add haircut";
   const active = hairstyle?.is_active === false || hairstyle?.is_active === "f" ? "0" : "1";
   // Built from the list already in memory, so the editor needs no extra call.
+  // What the generator will really use, not what the column holds.
+  //
+  // The 32 styles that shipped with the app keep their prompt and their
+  // minimum length in the app's own tables, with a NULL column. Reading the
+  // column meant an empty prompt box -- so the required-prompt check below
+  // refused every edit to those styles, including just flipping Top picks --
+  // and a minimum length reading "short" for all of them, which the save then
+  // wrote back, silently downgrading cuts like Modern Mullet.
+  const effectivePrompt =
+    hairstyle?.ai_prompt_effective ?? hairstyle?.ai_prompt ?? "";
+  const promptFromBuiltIn = hairstyle?.ai_prompt_source === "builtin";
+  const promptHint = promptFromBuiltIn
+    ? "This is the description the app ships with for this cut. Edit it to replace it for this style only; clear it to go back to this one."
+    : "Required. Without it the style saves but can never be previewed. Say what happens at the back \u2014 a prompt that leaves it unsaid lets the model invent length there.";
+  const effectiveMinLength = Number(
+    hairstyle?.min_length_level ?? hairstyle?.ai_min_length_level ?? 1,
+  );
+  const minLengthFromBuiltIn = hairstyle?.min_length_source === "builtin";
+  const effectiveTransition =
+    hairstyle?.transition_style_code_effective
+    || hairstyle?.transition_style_code
+    || "";
+
   // A style cannot pair with itself -- that would make the lookup loop.
   const transitionOptions = (state.haircuts || [])
     .filter((row) => String(row.style_code || "") !== String(hairstyle?.style_code || ""))
     .map((row) => {
       const code = escapeHaircutText(row.style_code || "");
-      const selected = code && code === (hairstyle?.transition_style_code || "")
-        ? " selected"
-        : "";
+      const selected = code && code === effectiveTransition ? " selected" : "";
       return `<option value="${code}"${selected}>${escapeHaircutText(row.style_name)}</option>`;
     })
     .join("");
@@ -1822,6 +1843,7 @@ function openHaircutEditor(hairstyle, variants = []) {
   // is never silently dropped out of Top picks.
   const topPickEligible =
     hairstyle?.top_pick_eligible === false || hairstyle?.top_pick_eligible === "f" ? "0" : "1";
+
 
   form.innerHTML = `
     <label>Style name
@@ -1835,8 +1857,8 @@ function openHaircutEditor(hairstyle, variants = []) {
     </label>
     <label class="field-grow">AI preview prompt
       <textarea class="input" id="hc-ai-prompt" rows="3"
-        placeholder="sides and back clipped short with a clean taper, three inches left on top, the back tapered to the nape with nothing over the collar">${escapeHaircutText(hairstyle?.ai_prompt ?? "")}</textarea>
-      <span class="field-hint">Required. Without it the style saves but can never be previewed. Say what happens at the back — a prompt that leaves it unsaid lets the model invent length there.</span>
+        placeholder="sides and back clipped short with a clean taper, three inches left on top, the back tapered to the nape with nothing over the collar">${escapeHaircutText(effectivePrompt)}</textarea>
+      <span class="field-hint">${promptHint}</span>
     </label>
     <label>Minimum hair length
       <select class="select" id="hc-ai-min-length">
@@ -1848,11 +1870,11 @@ function openHaircutEditor(hairstyle, variants = []) {
         ]
           .map(
             ([value, text]) =>
-              `<option value="${value}" ${Number(hairstyle?.ai_min_length_level ?? 1) === value ? "selected" : ""}>${text}</option>`,
+              `<option value="${value}" ${effectiveMinLength === value ? "selected" : ""}>${text}</option>`,
           )
           .join("")}
       </select>
-      <span class="field-hint">Customers with shorter hair are warned before a preview is spent, never hidden from it.</span>
+      <span class="field-hint">Customers with shorter hair are warned before a preview is spent, never hidden from it.${minLengthFromBuiltIn ? " This style's own value, carried in the app." : ""}</span>
     </label>
     <label id="hc-transition-field">Which cut grows into this?
       <select class="select" id="hc-transition">
@@ -1967,6 +1989,15 @@ async function saveHaircutEditor() {
   }
   if (!/\b(back|nape|collar)\b/i.test(payload.aiPrompt)) {
     toast("Say what happens at the back. Left unsaid, the model invents length there.", "error");
+    return;
+  }
+
+  // A cut needing medium or long hair has to name the one that grows into it.
+  // Left blank, the app falls back to "the longest cut you can wear today",
+  // which is related to what the customer asked for by nothing but length --
+  // the thing the curated pairings exist to replace.
+  if (payload.aiMinLengthLevel >= 2 && !payload.transitionStyleCode) {
+    toast("Pick the cut that grows into this one. Customers with shorter hair are offered it as the step towards this.", "error");
     return;
   }
 

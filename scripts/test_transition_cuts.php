@@ -21,6 +21,7 @@ require_once __DIR__ . '/../api/storage.php';
 require_once __DIR__ . '/../api/hairstyle_authoring.php';
 require_once __DIR__ . '/../api/replicate_helper.php';
 require_once __DIR__ . '/../api/variant_ranking.php';
+require_once __DIR__ . '/../api/hairstyle_overlay_paths.php';
 
 $failures = 0;
 $checks = 0;
@@ -291,6 +292,190 @@ check('and carries no default', ($column['column_default'] ?? null) === null);
 // on the row but is never consulted, because nobody is turned away any more.
 check('a style nobody is turned away from needs no pairing consulted',
     hairstyle_min_length_level(['style_name' => 'Pompadour', 'ai_min_length_level' => 0]) === 0);
+
+// --- the prompt a style will actually be generated with ----------------------
+// Prompts live in two places: `ai_prompt` for anything added through the portal
+// or the barber app, and replicate_style_prompts() for the styles that shipped
+// with the app, whose column is NULL. replicate_style_brief() always resolved
+// between the two, so generation worked and nothing noticed that every other
+// caller read the column raw -- the portal refused to save any edit to those
+// 32 styles, and the readiness panel called each one broken.
+$catalogue = $pdo->query(
+    'SELECT hairstyle_id, style_code, style_name, ai_prompt, ai_min_length_level,
+            transition_style_code
+     FROM hairstyles WHERE is_active = TRUE ORDER BY style_name'
+)->fetchAll(PDO::FETCH_ASSOC);
+
+check('the catalogue is not empty', $catalogue !== []);
+
+$promptless = [];
+foreach ($catalogue as $row) {
+    if (hairstyle_ai_prompt($row) === '') {
+        $promptless[] = (string)$row['style_code'];
+    }
+}
+// This is the assertion that would have caught it: before the resolver, 32 of
+// 35 rows failed here.
+check('every published style resolves a prompt' . ($promptless === []
+        ? '' : ' (missing: ' . implode(', ', $promptless) . ')'),
+    $promptless === []);
+
+check('a stored prompt wins over the built-in one',
+    hairstyle_ai_prompt([
+        'style_name' => 'Modern Mullet',
+        'style_code' => 'HC-MODERN-MULLET',
+        'ai_prompt' => 'the barber wrote this one',
+    ]) === 'the barber wrote this one');
+
+check('and the source says so',
+    hairstyle_ai_prompt_source([
+        'style_name' => 'Modern Mullet',
+        'ai_prompt' => 'the barber wrote this one',
+    ]) === 'stored');
+
+check('a built-in style with a NULL column still resolves',
+    hairstyle_ai_prompt([
+        'style_name' => 'Modern Mullet',
+        'style_code' => 'HC-MODERN-MULLET',
+        'ai_prompt' => null,
+    ]) !== '');
+
+check('and is reported as built-in, not missing',
+    hairstyle_ai_prompt_source([
+        'style_name' => 'Modern Mullet',
+        'style_code' => 'HC-MODERN-MULLET',
+        'ai_prompt' => null,
+    ]) === 'builtin');
+
+check('a style nothing describes reports none',
+    hairstyle_ai_prompt_source([
+        'style_name' => 'Nothing Like This Exists',
+        'style_code' => 'HC-NOPE',
+        'ai_prompt' => null,
+    ]) === 'none');
+
+check('whitespace is not a prompt',
+    hairstyle_ai_prompt_source([
+        'style_name' => 'Nothing Like This Exists',
+        'ai_prompt' => '   ',
+    ]) === 'none');
+
+// The readiness panel read the column raw and declared all 32 unusable.
+$mullet = null;
+foreach ($catalogue as $row) {
+    if ((string)$row['style_code'] === 'HC-MODERN-MULLET') {
+        $mullet = $row;
+    }
+}
+check('Modern Mullet is in the catalogue to test against', $mullet !== null);
+
+if ($mullet !== null) {
+    $problems = hairstyle_readiness_problems($mullet, [
+        ['hair_texture' => 'Straight', 'barber_instructions' => 'x',
+         'face_shape' => 'Oval'],
+    ]);
+    $promptComplaint = array_filter(
+        $problems,
+        static fn(string $p): bool => str_contains($p, 'No AI prompt')
+    );
+    check('readiness no longer claims a built-in style has no prompt',
+        $promptComplaint === []);
+
+    // Previewability was the third raw read.
+    check('a built-in style is previewable without artwork',
+        hairstyle_is_previewable_without_artwork([
+            'style_name' => $mullet['style_name'],
+            'style_code' => $mullet['style_code'],
+            'ai_prompt' => null,
+        ]));
+    check('and a style nothing describes is not',
+        !hairstyle_is_previewable_without_artwork([
+            'style_name' => 'Nothing Like This Exists',
+            'style_code' => 'HC-NOPE',
+            'ai_prompt' => null,
+        ]));
+    // The flag, once derived, still wins -- rows travel with the prompt
+    // stripped and deriving again would silently answer "no".
+    check('an explicit previewable flag is still trusted',
+        hairstyle_is_previewable_without_artwork(
+            ['previewable' => true, 'style_name' => 'Nothing', 'ai_prompt' => null]
+        ));
+}
+
+// --- the built-in default, used to decide what is worth storing --------------
+check('a built-in style reports its own minimum length',
+    hairstyle_builtin_min_length_level([
+        'style_name' => 'Modern Mullet', 'style_code' => 'HC-MODERN-MULLET',
+    ]) === 2);
+check('and a style outside the table reports none',
+    hairstyle_builtin_min_length_level([
+        'style_name' => 'Nothing Like This Exists', 'style_code' => 'HC-NOPE',
+    ]) === null);
+
+// The silent downgrade: the portal showed "short" for every NULL column and
+// wrote it back, so saving Modern Mullet to change its category dropped it to
+// short and switched off its warning, badge and transition cut.
+check('storing the built-in value back is a no-op, not a downgrade',
+    hairstyle_min_length_level([
+        'style_name' => 'Modern Mullet',
+        'style_code' => 'HC-MODERN-MULLET',
+        'ai_min_length_level' => null,
+    ]) === 2);
+
+// --- lowering a style and raising it again -----------------------------------
+// The pairing must survive the round trip. The portal hides the field below
+// medium rather than removing it, so the select stays in the DOM and its value
+// is still submitted -- this pins that down from the database side.
+if ($mullet !== null) {
+    $pairing = hairstyle_transition_code($mullet);
+    check('Modern Mullet names a cut that grows into it', $pairing !== null);
+
+    $set = $pdo->prepare(
+        'UPDATE hairstyles SET ai_min_length_level = :v WHERE hairstyle_id = :id'
+    );
+    $reload = $pdo->prepare(
+        'SELECT style_code, style_name, ai_min_length_level, transition_style_code
+         FROM hairstyles WHERE hairstyle_id = :id'
+    );
+
+    $pdo->beginTransaction();
+    try {
+        $set->execute([':v' => 0, ':id' => (int)$mullet['hairstyle_id']]);
+        $reload->execute([':id' => (int)$mullet['hairstyle_id']]);
+        $lowered = $reload->fetch(PDO::FETCH_ASSOC);
+
+        check('lowered to any length, nobody is turned away',
+            hairstyle_min_length_level($lowered) === 0);
+        check('and the pairing is kept, just never consulted',
+            hairstyle_transition_code($lowered) === $pairing);
+
+        $set->execute([':v' => null, ':id' => (int)$mullet['hairstyle_id']]);
+        $reload->execute([':id' => (int)$mullet['hairstyle_id']]);
+        $restored = $reload->fetch(PDO::FETCH_ASSOC);
+
+        check('raised again, the warning comes back',
+            hairstyle_min_length_level($restored) === 2);
+        check('and the same cut is offered as before',
+            hairstyle_transition_code($restored) === $pairing);
+    } finally {
+        $pdo->rollBack();
+    }
+}
+
+// --- the new rule cannot block an existing save ------------------------------
+// Every built-in style needing length is already paired in
+// hairstyle_transition_defaults(), so requiring a pairing must not make the
+// catalogue unsaveable.
+$unpaired = [];
+foreach ($catalogue as $row) {
+    if (hairstyle_min_length_level($row) >= 2
+        && hairstyle_transition_code($row) === null) {
+        $unpaired[] = (string)$row['style_code'];
+    }
+}
+check('every published style needing length already names a pairing'
+    . ($unpaired === [] ? '' : ' (missing: ' . implode(', ', $unpaired) . ')'),
+    $unpaired === []);
 
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

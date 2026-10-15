@@ -107,6 +107,84 @@ function backfill_hairstyle_min_length_defaults(PDO $pdo): void
 }
 
 /**
+ * The try-on prompt that will actually be used for this style.
+ *
+ * Prompts live in two places. A style added through the portal or the barber
+ * app stores its own in `ai_prompt`. The styles that shipped with the app have
+ * theirs in replicate_style_prompts(), and their column is NULL --
+ * 32 of the 35 rows in the live catalogue.
+ *
+ * replicate_style_brief() has always resolved between the two, which is why
+ * generation worked. Nothing else did: the portal read the column raw, found
+ * nothing, and refused to save any edit to those 32 styles at all. The
+ * readiness panel reported "No AI prompt" on every one of them.
+ *
+ * @param array<string, mixed> $row a hairstyles row
+ */
+function hairstyle_ai_prompt(array $row): string
+{
+    require_once __DIR__ . '/replicate_helper.php';
+
+    $stored = trim((string)($row['ai_prompt'] ?? ''));
+    if ($stored !== '') {
+        return $stored;
+    }
+
+    $key = replicate_resolve_style_key(
+        (string)($row['style_name'] ?? ''),
+        (string)($row['style_code'] ?? '')
+    );
+    if ($key === null) {
+        return '';
+    }
+
+    return (string)(replicate_style_prompts()[$key] ?? '');
+}
+
+/**
+ * Where [hairstyle_ai_prompt] got its answer: 'stored', 'builtin' or 'none'.
+ *
+ * The portal needs the distinction to say whose words are in the box, and the
+ * save needs it to leave the column NULL when nothing was actually edited.
+ *
+ * @param array<string, mixed> $row a hairstyles row
+ */
+function hairstyle_ai_prompt_source(array $row): string
+{
+    if (trim((string)($row['ai_prompt'] ?? '')) !== '') {
+        return 'stored';
+    }
+
+    return hairstyle_ai_prompt($row) !== '' ? 'builtin' : 'none';
+}
+
+/**
+ * The built-in minimum length for this style, or null when it has none.
+ *
+ * Separate from [hairstyle_min_length_level] because the save needs to know
+ * whether a submitted value matches the default -- storing it would fork the
+ * style from the code table for no reason.
+ *
+ * @param array<string, mixed> $row a hairstyles row
+ */
+function hairstyle_builtin_min_length_level(array $row): ?int
+{
+    require_once __DIR__ . '/replicate_helper.php';
+
+    $key = replicate_resolve_style_key(
+        (string)($row['style_name'] ?? ''),
+        (string)($row['style_code'] ?? '')
+    );
+    if ($key === null) {
+        return null;
+    }
+
+    $table = replicate_style_min_length();
+
+    return isset($table[$key]) ? (int)$table[$key] : null;
+}
+
+/**
  * The shortest hair this style can be cut from.
  *
  * The stored value wins when someone set one; otherwise the built-in table
@@ -428,7 +506,10 @@ function hairstyle_readiness_problems(array $hairstyle, array $variants): array
         $problems[] = 'Style code is missing or malformed.';
     }
 
-    if (trim((string)($hairstyle['ai_prompt'] ?? '')) === '') {
+    // Resolved, not read raw: the 32 built-in styles carry their prompt in
+    // replicate_style_prompts() and this panel declared every one of them
+    // broken.
+    if (hairstyle_ai_prompt($hairstyle) === '') {
         $problems[] = 'No AI prompt, so a preview cannot be generated.';
     }
 

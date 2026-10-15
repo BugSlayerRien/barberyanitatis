@@ -213,6 +213,14 @@ class _BarberHairstyleFormPageState extends State<BarberHairstyleFormPage> {
         return 'Say how much length is left on top.';
       }
     }
+    // A cut needing medium or long hair has to name the one that grows into
+    // it. Left blank, a customer with shorter hair is offered whatever the
+    // longest cut they can wear happens to be -- related to the style they
+    // asked for by nothing but length.
+    if (_needsTransition && _transitionStyleCode == null) {
+      return 'Pick the cut that grows into this one — customers with shorter '
+          'hair are offered it as the step towards this.';
+    }
     // Photos are optional. A described cut already works: the app shows a
     // placeholder tile and the AI preview is built from the description, so
     // turning away a barber who has the knowledge but not three photos would

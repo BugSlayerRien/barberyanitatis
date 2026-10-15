@@ -137,7 +137,12 @@ function hairstyle_is_previewable_without_artwork(array $row): bool
         return (bool)$row['previewable'];
     }
 
-    return trim((string)($row['ai_prompt'] ?? '')) !== '';
+    // Resolved rather than read raw. A built-in style keeps its prompt in
+    // replicate_style_prompts() with a NULL column, and testing the column
+    // alone called it unpreviewable.
+    require_once __DIR__ . '/hairstyle_authoring.php';
+
+    return hairstyle_ai_prompt($row) !== '';
 }
 
 function overlay_library_catalog_size(?PDO $pdo = null): int

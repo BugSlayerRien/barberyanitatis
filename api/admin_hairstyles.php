@@ -17,6 +17,33 @@ const ADMIN_OVERLAY_MAX_BYTES = 5 * 1024 * 1024;
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
+/**
+ * A style needing medium or long hair must say which cut grows into it.
+ *
+ * Without one the app falls back to "the longest cut you can wear today",
+ * which is related to the style the customer actually wanted by nothing but
+ * length. The curated pairings exist to replace exactly that.
+ *
+ * Resolved, not read raw: the built-in styles are paired in
+ * hairstyle_transition_defaults(), so testing the column alone would refuse
+ * every one of their saves.
+ *
+ * @param array<string, mixed> $row the row as it will be stored
+ */
+function admin_hairstyle_transition_problem(array $row): string
+{
+    if (hairstyle_min_length_level($row) < 2) {
+        return '';
+    }
+    if (hairstyle_transition_code($row) !== null) {
+        return '';
+    }
+
+    return 'A haircut needing medium or long hair must name the cut that grows '
+        . 'into it, so customers with shorter hair are offered a real step '
+        . 'towards it.';
+}
+
 try {
     $pdo = get_db_connection();
     // Server-side admin gate. The portal UI checks sessionStorage, which is
@@ -60,7 +87,7 @@ try {
                    -- submit a style and the owner had no row to act on.
                    COALESCE(hs.review_status, 'Published') AS review_status,
                    hs.ai_min_length_level, hs.transition_style_code,
-                   (hs.ai_prompt IS NOT NULL AND hs.ai_prompt <> '') AS has_prompt,
+                   hs.ai_prompt,
                    hs.authored_by_barber_id,
                    b.full_name AS authored_by_name,
                    COUNT(hv.variant_id) AS variant_count,
@@ -88,6 +115,15 @@ try {
             $overlayInfo = overlay_paths_for_hairstyle($row);
             $normalized['overlay_folder'] = $overlayInfo['folder'] ?? ($normalized['overlay_folder'] ?? null);
             $normalized['has_overlay_assets'] = hairstyle_overlay_files_exist($normalized);
+            // Derived, not asked of SQL. The column is NULL on the styles that
+            // shipped with the app, whose prompt lives in
+            // replicate_style_prompts(), so the old `ai_prompt <> ''` test
+            // badged all 32 of them "Not usable".
+            $normalized['has_prompt'] = hairstyle_ai_prompt($normalized) !== '';
+            $normalized['min_length_level'] = hairstyle_min_length_level($normalized);
+            // The prompt is the image model's instructions, not the admin
+            // list's business; the editor fetches it per style.
+            unset($normalized['ai_prompt']);
             $rows[] = $normalized;
         }
 
@@ -142,6 +178,22 @@ try {
         );
         $variantStmt->execute([':id' => $hairstyleID]);
 
+        // What the generator will really use, so the editor shows it rather
+        // than an empty box. The column is NULL on the 32 styles that shipped
+        // with the app -- their prompt and minimum length live in
+        // replicate_helper.php -- and the portal refused to save any edit to
+        // them because the box looked blank.
+        $hairstyle['ai_prompt_effective'] = hairstyle_ai_prompt($row);
+        $hairstyle['ai_prompt_source'] = hairstyle_ai_prompt_source($row);
+        $hairstyle['min_length_level'] = hairstyle_min_length_level($row);
+        $hairstyle['min_length_source'] =
+            ($row['ai_min_length_level'] ?? null) !== null
+            && (string)$row['ai_min_length_level'] !== ''
+                ? 'stored'
+                : 'builtin';
+        $hairstyle['transition_style_code_effective'] =
+            hairstyle_transition_code($row);
+
         json_response([
             'hairstyle' => $hairstyle,
             'variants' => $variantStmt->fetchAll(PDO::FETCH_ASSOC),
@@ -173,6 +225,20 @@ try {
             }
             $styleCode = strtoupper(trim($styleCode));
         }
+        $minLevel = max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1)));
+        $transition =
+            strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null;
+
+        $transitionProblem = admin_hairstyle_transition_problem([
+            'style_name' => $styleName,
+            'style_code' => $styleCode,
+            'ai_min_length_level' => $minLevel,
+            'transition_style_code' => $transition,
+        ]);
+        if ($transitionProblem !== '') {
+            json_response(['error' => $transitionProblem], 422);
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO hairstyles (style_code, style_name, description, gender, difficulty, maintenance, category, is_active, top_pick_eligible, ai_prompt, ai_min_length_level, transition_style_code)
              VALUES (:style_code, :style_name, :description, :gender, :difficulty, :maintenance, :category, :is_active, :top_pick_eligible, :ai_prompt, :ai_min_length_level, :transition_style_code)
@@ -191,7 +257,7 @@ try {
             // Without a prompt the style can be saved but never previewed, so
             // the field belongs on the same form as the name.
             ':ai_prompt' => trim((string)($input['aiPrompt'] ?? '')) ?: null,
-            ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
+            ':ai_min_length_level' => $minLevel,
             // Only meaningful for a style needing more than short hair; the
             // portal hides the field otherwise. Empty stores as NULL so the
             // built-in defaults still apply.
@@ -234,6 +300,51 @@ try {
             $styleCode = strtoupper($styleCode);
         }
 
+        // The name and code the row will carry, which is what the built-in
+        // tables are keyed on. An edit that renames a style must resolve
+        // against the new name, not the one on disk.
+        $identity = [
+            'style_name' => $styleName,
+            'style_code' => $styleCode !== ''
+                ? $styleCode
+                : (string)$pdo->query(
+                    'SELECT style_code FROM hairstyles WHERE hairstyle_id = '
+                    . $hairstyleID
+                )->fetchColumn(),
+        ];
+
+        // Stored only when it differs from the built-in description. Opening a
+        // style and pressing Save must not fork it from
+        // replicate_style_prompts(), which is version-controlled, tested and
+        // improved from time to time; only a real edit should.
+        $submittedPrompt = trim((string)($input['aiPrompt'] ?? ''));
+        $builtinPrompt = hairstyle_ai_prompt(
+            $identity + ['ai_prompt' => null]
+        );
+        $storedPrompt = ($submittedPrompt === '' || $submittedPrompt === $builtinPrompt)
+            ? null
+            : $submittedPrompt;
+
+        // Same rule, and here it also repairs a silent downgrade: the portal
+        // showed "1 - short" for every style whose column was NULL and wrote
+        // that number back, so saving Modern Mullet to change its category
+        // dropped it from medium to short and switched off its length
+        // warning, its grow-out badge and its transition cut.
+        $submittedLevel = max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1)));
+        $builtinLevel = hairstyle_builtin_min_length_level($identity);
+        $storedLevel = $submittedLevel === $builtinLevel ? null : $submittedLevel;
+
+        $transition =
+            strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null;
+
+        $transitionProblem = admin_hairstyle_transition_problem($identity + [
+            'ai_min_length_level' => $storedLevel,
+            'transition_style_code' => $transition,
+        ]);
+        if ($transitionProblem !== '') {
+            json_response(['error' => $transitionProblem], 422);
+        }
+
         $sql = 'UPDATE hairstyles
                 SET style_name = :style_name,
                     description = :description,
@@ -255,10 +366,9 @@ try {
             ':category' => $normalizeCategory($input['category'] ?? 'alternative'),
             ':is_active' => (int)(!empty($input['isActive']) && (string)$input['isActive'] !== '0'),
             ':top_pick_eligible' => (int)$normalizeTopPickEligible($input['topPickEligible'] ?? null),
-            ':ai_prompt' => trim((string)($input['aiPrompt'] ?? '')) ?: null,
-            ':ai_min_length_level' => max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1))),
-            ':transition_style_code' =>
-                strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null,
+            ':ai_prompt' => $storedPrompt,
+            ':ai_min_length_level' => $storedLevel,
+            ':transition_style_code' => $transition,
             ':id' => $hairstyleID,
         ];
 

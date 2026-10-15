@@ -249,7 +249,20 @@ check('and it accepts a photograph, not only a cut-out PNG',
 // so a barber could submit a style and the owner had no row to act on.
 check('the admin list exposes review status',
     str_contains($uploadSource, 'AS review_status'));
-check('and whether a prompt exists', str_contains($uploadSource, 'AS has_prompt'));
+// has_prompt used to be `ai_prompt <> ''` in SQL, which is false for the 32
+// styles that shipped with the app -- their prompt is in
+// replicate_style_prompts() and their column is NULL -- so the catalogue
+// badged every one of them "Not usable". It is derived in PHP now, through the
+// resolver, so the flag means what it says.
+check('and whether a prompt exists',
+    str_contains($uploadSource, "\$normalized['has_prompt'] = hairstyle_ai_prompt(\$normalized)"));
+check('and the flag is no longer a raw column test',
+    !str_contains($uploadSource, 'AS has_prompt'));
+check('the editor is served the prompt actually in force',
+    str_contains($uploadSource, "'ai_prompt_effective'")
+        && str_contains($uploadSource, "'ai_prompt_source'"));
+check('and the minimum length actually in force',
+    str_contains($uploadSource, "\$hairstyle['min_length_level'] = hairstyle_min_length_level"));
 check('and who submitted it', str_contains($uploadSource, 'AS authored_by_name'));
 
 echo "\n{$checks} checks, {$failures} failures\n";
