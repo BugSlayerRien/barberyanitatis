@@ -199,6 +199,21 @@ class TatisBarbershopApp extends StatelessWidget {
       navigatorObservers: [routeObserver],
       theme: ThemeData(
         brightness: Brightness.dark,
+        // Without this, Material 3 falls back to its baseline purple scheme.
+        // Most of the app sets its colours by hand and so looked right, but
+        // anything left on the defaults -- FilledButton, SegmentedButton, the
+        // selection handles -- rendered purple on a blue-and-red brand. The
+        // kiosk app has always set one; the customer app never did.
+        colorScheme: const ColorScheme.dark(
+          primary: AppBrand.accentFill,
+          onPrimary: Colors.white,
+          secondary: AppBrand.accentFill,
+          onSecondary: Colors.white,
+          surface: AppBrand.surface,
+          onSurface: AppBrand.text,
+          error: AppBrand.poleRed,
+          onError: Colors.white,
+        ),
         fontFamily: 'CenturyGothic',
         textTheme: baseTextTheme,
       ),

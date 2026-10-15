@@ -165,6 +165,64 @@ class StyleViewStrip extends StatelessWidget {
   }
 }
 
+/// Front / Side / Back, as a segmented control.
+///
+/// Two screens had their own: the try-on page a SegmentedButton, the
+/// recommendation page a hand-rolled row of ChoiceChips. They looked different
+/// and they disagreed about what to call the third angle.
+///
+/// [labels] exists because the enum means two things. For a haircut's
+/// reference photographs, Front / Side / Back is right. For the customer's own
+/// scan it is not: the three captures are front, left profile and right
+/// profile, so a tab reading "Back" promises a view of the back of their head
+/// that was never photographed. Those screens pass [customerScanLabels].
+class StyleViewSelector extends StatelessWidget {
+  final StyleView selected;
+  final ValueChanged<StyleView> onChanged;
+
+  /// Overrides [StyleViewLabel.label] per view. Unset views keep the enum's.
+  final Map<StyleView, String>? labels;
+
+  /// Views to offer. Defaults to all three.
+  final List<StyleView> views;
+
+  const StyleViewSelector({
+    super.key,
+    required this.selected,
+    required this.onChanged,
+    this.labels,
+    this.views = StyleView.values,
+  });
+
+  /// What the customer's own three scan photos actually are.
+  static const Map<StyleView, String> customerScanLabels = {
+    StyleView.front: 'Front',
+    StyleView.side: 'Left',
+    StyleView.back: 'Right',
+  };
+
+  String labelFor(StyleView view) => labels?[view] ?? view.label;
+
+  @override
+  Widget build(BuildContext context) {
+    // Colours come from the app's ColorScheme, set in main.dart. Hard-coding
+    // them here is what left this control Material-default purple on a
+    // blue-and-red brand.
+    return SegmentedButton<StyleView>(
+      segments: [
+        for (final view in views)
+          ButtonSegment(value: view, label: Text(labelFor(view))),
+      ],
+      selected: {selected},
+      showSelectedIcon: false,
+      onSelectionChanged: (set) {
+        if (set.isEmpty) return;
+        onChanged(set.first);
+      },
+    );
+  }
+}
+
 /// Opens one view full-screen, so a customer can actually look at the haircut
 /// rather than squint at a 92-pixel tile.
 Future<void> showStyleViewViewer(

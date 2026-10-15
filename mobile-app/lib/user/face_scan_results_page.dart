@@ -33,7 +33,11 @@ import 'widgets/style_view_thumbnail.dart';
 import '../kiosk/kiosk_barber_page.dart';
 import '../kiosk/kiosk_session.dart';
 
-enum _PreviewPromptChoice { cancel, loadSaved, generateNew }
+// loadSaved is gone. It was offered beside "Generate new" as the free
+// alternative, but it did nothing: tapping a haircut card already selects it,
+// and the stage above renders whatever the selected variant has saved. A free
+// button that is a no-op, one tap from a paid one, is worse than no button.
+enum _PreviewPromptChoice { cancel, generateNew }
 
 class FaceScanResultsPage extends StatefulWidget {
   final Map<String, String> captures;
@@ -130,8 +134,16 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   final Map<String, Map<String, String>> _replicatePreviewsByVariant = {};
   Map<String, Map<String, dynamic>> _previewDiagnostics = {};
   int _previewImageCacheBuster = 0;
+  // Front, left profile, right profile -- the three photos the scan takes,
+  // in StyleView order so an index maps straight onto the shared selector.
   static const _angleKeys = ['front', 'left', 'right'];
-  static const _angleLabels = ['Front', 'Left', 'Right'];
+
+  /// So "View preview" can bring the stage back on screen. A customer deep in
+  /// the style list is scrolled well past it.
+  final GlobalKey _stageKey = GlobalKey();
+
+  /// Drives the swipeable stage; page index lines up with StyleView.values.
+  final PageController _stagePages = PageController();
   static const _textureOptions = ['Straight', 'Wavy', 'Curly'];
 
   Map<String, Rect> get _faceRects =>
@@ -180,6 +192,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     // anywhere else -- the Saved tab most obviously. One list call sets both
     // maps from the truth.
     unawaited(_hydrateSavedLooks());
+  }
+
+  @override
+  void dispose() {
+    _stagePages.dispose();
+    super.dispose();
   }
 
   Future<void> _hydrateSavedLooks() async {
@@ -668,80 +686,26 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     });
   }
 
+  /// Confirms spending a generation.
+  ///
+  /// One dialog now, not three. A haircut is generated once: the "Try another
+  /// cut?" branch that offered to re-render an existing preview is gone, which
+  /// matches the library try-on page, where the Generate button disappears
+  /// once a preview exists.
   Future<_PreviewPromptChoice> _promptPreviewAction({
     required String styleName,
-    required bool hasSavedPreview,
-    bool regenerate = false,
   }) async {
-    if (regenerate) {
-      final choice = await showDialog<_PreviewPromptChoice>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text(
-            'Generate a new preview?',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          ),
-          content: Text(
-            'Create a fresh AI try-on for "$styleName"? '
-            'This uses one of your free style generations again and can take several minutes.',
-            style: const TextStyle(color: Colors.white70, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.cancel),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
-              child: const Text('Generate new'),
-            ),
-          ],
-        ),
-      );
-      return choice ?? _PreviewPromptChoice.cancel;
-    }
-
-    if (!hasSavedPreview) {
-      final choice = await showDialog<_PreviewPromptChoice>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF1A1A1A),
-          title: const Text(
-            'Generate AI preview?',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          ),
-          content: Text(
-            'Generate a preview for "$styleName"? '
-            'This uses one of your free style generations and can take several minutes.',
-            style: const TextStyle(color: Colors.white70, height: 1.4),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.cancel),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
-              child: const Text('Generate'),
-            ),
-          ],
-        ),
-      );
-      return choice ?? _PreviewPromptChoice.cancel;
-    }
-
     final choice = await showDialog<_PreviewPromptChoice>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: const Color(0xFF1A1A1A),
         title: const Text(
-          'Try another cut?',
+          'Generate AI preview?',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
         ),
         content: Text(
-          'You already have a saved preview for "$styleName". '
-          'Load it for free, or generate a new one.',
+          'Generate a preview for "$styleName"? '
+          'This uses one of your free style generations and can take several minutes.',
           style: const TextStyle(color: Colors.white70, height: 1.4),
         ),
         actions: [
@@ -750,16 +714,13 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             child: const Text('Cancel'),
           ),
           TextButton(
-            onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.loadSaved),
-            child: const Text('View saved'),
-          ),
-          TextButton(
             onPressed: () => Navigator.of(ctx).pop(_PreviewPromptChoice.generateNew),
-            child: const Text('Generate new'),
+            child: const Text('Generate'),
           ),
         ],
       ),
     );
+
     return choice ?? _PreviewPromptChoice.cancel;
   }
 
@@ -966,24 +927,45 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       }
       if (!mounted) return;
     }
-    final choice = await _promptPreviewAction(
-      styleName: styleName,
-      hasSavedPreview: hasSavedPreview,
-    );
+    final choice = await _promptPreviewAction(styleName: styleName);
     if (!mounted || choice == _PreviewPromptChoice.cancel) return;
 
     setState(() {
       _selected = style;
       _previewError = null;
+      _previewIsGrowOutGoal = growOut;
     });
 
-    final forceRegenerate =
-        choice == _PreviewPromptChoice.generateNew && hasSavedPreview;
-    setState(() => _previewIsGrowOutGoal = growOut);
+    unawaited(_loadReplicatePreviewsForSelected());
+  }
 
-    unawaited(_loadReplicatePreviewsForSelected(
-      forceRegenerate: forceRegenerate,
-    ));
+  /// Brings a preview that already exists back on screen, free.
+  ///
+  /// The images are rendered by the stage for whichever style is selected, so
+  /// this mostly scrolls: a customer several haircuts down the list had no
+  /// idea the preview had already loaded above them.
+  Future<void> _onViewPreviewPressed(Map<String, dynamic> style) async {
+    setState(() {
+      _selected = style;
+      _previewError = null;
+      _previewAngleIndex = 0;
+    });
+    if (_stagePages.hasClients) _stagePages.jumpToPage(0);
+
+    final context = _stageKey.currentContext;
+    if (context != null) {
+      unawaited(Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0.1,
+      ));
+    }
+
+    // Re-points the session at this style so the dashboard's "View" chip and
+    // the Saved tab follow what is on screen. Takes the cached branch, so it
+    // costs nothing.
+    unawaited(_loadReplicatePreviewsForSelected());
   }
 
   /// Lets a customer who doesn't like the recommendations pick any library
@@ -1018,20 +1000,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       _previewError = null;
     });
     await _onGeneratePreviewPressed(picked);
-  }
-
-  Future<void> _onRegeneratePreviewPressed() async {
-    final variantId = _selectedVariantId;
-    if (variantId == null || variantId <= 0) return;
-
-    final choice = await _promptPreviewAction(
-      styleName: _selectedStyleName,
-      hasSavedPreview: true,
-      regenerate: true,
-    );
-    if (!mounted || choice != _PreviewPromptChoice.generateNew) return;
-
-    unawaited(_loadReplicatePreviewsForSelected(forceRegenerate: true));
   }
 
   int? get _selectedVariantId {
@@ -1217,14 +1185,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  /// Generates a preview for the selected style, or shows the saved one.
+  ///
+  /// There is no regenerate path: a haircut is rendered once and the images
+  /// are kept. The flag this used to take could only ever be set by the
+  /// "Generate new" option, which is gone.
   Future<void> _loadReplicatePreviewsForSelected({
-    bool forceRegenerate = false,
     bool achievableToday = false,
   }) async {
     final variantId = _selectedVariantId;
     if (variantId == null || variantId <= 0) return;
 
-    if (!forceRegenerate && _replicatePreviewsByVariant.containsKey('$variantId')) {
+    if (_replicatePreviewsByVariant.containsKey('$variantId')) {
       final urls = _previewUrlsForVariant(variantId);
       if (urls != null) {
         setState(() {
@@ -1248,9 +1220,6 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     setState(() {
       _previewGenerating = true;
       _previewError = null;
-      if (forceRegenerate) {
-        _replicatePreviewsByVariant.remove('$variantId');
-      }
     });
 
     try {
@@ -1264,7 +1233,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         faceShape: _faceShape,
         hairTexture: _hairTexture,
         hairLengthLevel: widget.hairLengthLevel,
-        forceRegenerate: forceRegenerate,
+        forceRegenerate: false,
         achievableToday: achievableToday,
       );
       if (!mounted) return;
@@ -1285,7 +1254,11 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         _previewImageCacheBuster = DateTime.now().millisecondsSinceEpoch;
         _previewGenerating = false;
         _previewError = null;
+        _previewAngleIndex = 0;
       });
+      // The stage keeps whichever angle they had swiped to, so a fresh preview
+      // would otherwise open on the right profile.
+      if (_stagePages.hasClients) _stagePages.jumpToPage(0);
       UserSession.selectedVariantId = variantId;
       UserSession.selectedStyleName = _selectedStyleName;
       UserSession.selectedPreviewImages = urls;
@@ -1846,9 +1819,41 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  /// One page of the stage: the generated view for that angle if there is
+  /// one, otherwise the customer's own scan photo.
+  Widget _stageImage(int variantId, int angleIndex) {
+    final angleKey = _angleKeys[angleIndex];
+    final captureB64 = widget.captures[angleKey];
+    final previewUrl =
+        variantId > 0 ? _previewUrlForAngle(variantId, angleKey) : null;
+    if (previewUrl == null || previewUrl.isEmpty) {
+      return _captureFallback(captureB64);
+    }
+
+    return Image.network(
+      _resolvedPreviewNetworkUrl(previewUrl),
+      key: ValueKey(
+        'replicate-$variantId-$angleKey-$_previewImageCacheBuster',
+      ),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      gaplessPlayback: true,
+      errorBuilder: (_, error, ___) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          const msg =
+              'Preview image failed to load. Check that Apache can serve uploads/face_scans.';
+          if (_previewError != msg) {
+            setState(() => _previewError = msg);
+          }
+        });
+        return _captureFallback(captureB64);
+      },
+    );
+  }
+
   Widget _content() {
     final angleKey = _angleKeys[_previewAngleIndex];
-    final captureB64 = widget.captures[angleKey];
     final variantId = _selectedVariantId ?? 0;
     final previewUrl = variantId > 0 ? _previewUrlForAngle(variantId, angleKey) : null;
 
@@ -1904,47 +1909,42 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
             ScannerLayout.previewFrame(
               context: context,
               child: Stack(
+                key: _stageKey,
                 fit: StackFit.expand,
                 children: [
-                  _previewGenerating
-                      // Indeterminate on purpose: the server generates all three
-                      // angles in one blocking call and reports no partial
-                      // progress, so a percentage here would be invented. The
-                      // stage list plus an elapsed timer is what is actually
-                      // true. See ScanProgressPanel.
-                      ? const Center(
-                          child: ScanProgressPanel.indeterminate(
-                            title: 'Generating your AI preview',
-                            stages: [
-                              'Preparing your photos',
-                              'Rendering front, left and right views',
-                              'Finishing up',
-                            ],
-                            currentStep: 1,
-                          ),
-                        )
-                      : previewUrl != null && previewUrl.isNotEmpty
-                          ? Image.network(
-                              _resolvedPreviewNetworkUrl(previewUrl),
-                              key: ValueKey(
-                                'replicate-$variantId-$angleKey-$_previewImageCacheBuster',
-                              ),
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          gaplessPlayback: true,
-                              errorBuilder: (_, error, ___) {
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  if (!mounted) return;
-                                  final msg =
-                                      'Preview image failed to load. Check that Apache can serve uploads/face_scans.';
-                                  if (_previewError != msg) {
-                                    setState(() => _previewError = msg);
-                                  }
-                                });
-                                return _captureFallback(captureB64);
-                              },
-                            )
-                          : _captureFallback(captureB64),
+                  if (_previewGenerating)
+                    // Indeterminate on purpose: the server generates all three
+                    // angles in one blocking call and reports no partial
+                    // progress, so a percentage here would be invented. The
+                    // stage list plus an elapsed timer is what is actually
+                    // true. See ScanProgressPanel.
+                    //
+                    // Outside the PageView: it is one thing, not three.
+                    const Center(
+                      child: ScanProgressPanel.indeterminate(
+                        title: 'Generating your AI preview',
+                        stages: [
+                          'Preparing your photos',
+                          'Rendering front, left and right views',
+                          'Finishing up',
+                        ],
+                        currentStep: 1,
+                      ),
+                    )
+                  else
+                    // Swipeable: three tabs above a photo is the one gesture
+                    // everyone tries and nothing answered.
+                    PageView(
+                      controller: _stagePages,
+                      onPageChanged: (i) =>
+                          setState(() => _previewAngleIndex = i),
+                      children: [
+                        for (var i = 0; i < _angleKeys.length; i++)
+                          _stageImage(variantId, i),
+                      ],
+                    ),
+                  // Outside the PageView so it stays put while the photo
+                  // slides under it.
                   if (!_previewGenerating)
                     _previewStatusBadge(
                       hasAiPreview: previewUrl != null && previewUrl.isNotEmpty,
@@ -2002,23 +2002,23 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
               ),
             ],
             const SizedBox(height: 8),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: List.generate(_angleLabels.length, (i) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ChoiceChip(
-                    label: Text(_angleLabels[i]),
-                    selected: _previewAngleIndex == i,
-                    onSelected: (_) => setState(() => _previewAngleIndex = i),
-                    selectedColor: Colors.white,
-                    labelStyle: TextStyle(
-                      color: _previewAngleIndex == i ? Colors.black : Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                );
-              }),
+            // The same control as the library try-on page, which had a
+            // SegmentedButton while this had a hand-rolled chip row: two
+            // designs for one job, disagreeing about the third angle's name.
+            Center(
+              child: StyleViewSelector(
+                selected: StyleView.values[_previewAngleIndex],
+                labels: StyleViewSelector.customerScanLabels,
+                onChanged: (view) {
+                  final index = StyleView.values.indexOf(view);
+                  setState(() => _previewAngleIndex = index);
+                  _stagePages.animateToPage(
+                    index,
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOut,
+                  );
+                },
+              ),
             ),
             const SizedBox(height: 8),
             if (_selected == null)
@@ -2538,19 +2538,26 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
                       ),
                     ],
                     const SizedBox(height: 12),
+                    // Two states, two jobs. It used to read "View /
+                    // regenerate preview" and open a three-way dialog whose
+                    // free option -- "View saved" -- did nothing at all, since
+                    // tapping the card already loads the saved preview above.
+                    // A no-op button one tap from a paid one.
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         onPressed: _previewGenerating
                             ? null
-                            : () => _onGeneratePreviewPressed(item),
+                            : () => previewReady
+                                ? unawaited(_onViewPreviewPressed(item))
+                                : _onGeneratePreviewPressed(item),
                         icon: Icon(
                           previewReady ? Icons.check_circle_outline : Icons.auto_awesome,
                           size: 18,
                           color: previewReady ? const Color(0xFF8BC34A) : Colors.white,
                         ),
                         label: Text(
-                          previewReady ? 'View / regenerate preview' : 'Generate preview',
+                          previewReady ? 'View preview' : 'Generate preview',
                           style: TextStyle(
                             color: previewReady ? const Color(0xFF8BC34A) : Colors.white,
                             fontWeight: FontWeight.w600,

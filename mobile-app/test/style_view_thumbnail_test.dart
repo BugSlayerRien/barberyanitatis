@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tatis_barbershop/user/widgets/style_view_thumbnail.dart';
 
@@ -64,4 +65,70 @@ void main() {
     expect(StyleView.side.label, 'Side');
     expect(StyleView.back.label, 'Back');
   });
+
+  group('StyleViewSelector', () {
+    // The enum means two things. For a haircut's reference photographs the
+    // three views really are front, side and back. For the customer's own
+    // scan they are front, left profile and right profile -- the try-on page
+    // showed the right profile under a tab reading "Back", promising a view of
+    // the back of their head that was never photographed.
+    test('the customer scan labels name the photos that were actually taken',
+        () {
+      expect(StyleViewSelector.customerScanLabels[StyleView.front], 'Front');
+      expect(StyleViewSelector.customerScanLabels[StyleView.side], 'Left');
+      expect(StyleViewSelector.customerScanLabels[StyleView.back], 'Right');
+    });
+
+    test('an unset label falls back to the enum', () {
+      const selector = StyleViewSelector(
+        selected: StyleView.front,
+        onChanged: _ignore,
+        labels: {StyleView.back: 'Right'},
+      );
+
+      expect(selector.labelFor(StyleView.back), 'Right');
+      expect(selector.labelFor(StyleView.side), 'Side');
+    });
+
+    testWidgets('reports the view that was tapped', (tester) async {
+      StyleView? picked;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: StyleViewSelector(
+            selected: StyleView.front,
+            labels: StyleViewSelector.customerScanLabels,
+            onChanged: (view) => picked = view,
+          ),
+        ),
+      ));
+
+      expect(find.text('Right'), findsOneWidget);
+      expect(find.text('Back'), findsNothing);
+
+      await tester.tap(find.text('Right'));
+      await tester.pumpAndSettle();
+      expect(picked, StyleView.back);
+    });
+
+    testWidgets('tapping the view already shown does not clear the selection',
+        (tester) async {
+      // SegmentedButton hands back an empty set when the selected segment is
+      // tapped again. Passing set.first on that throws.
+      var calls = 0;
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: StyleViewSelector(
+            selected: StyleView.front,
+            onChanged: (_) => calls++,
+          ),
+        ),
+      ));
+
+      await tester.tap(find.text('Front'));
+      await tester.pumpAndSettle();
+      expect(calls, 0);
+    });
+  });
 }
+
+void _ignore(StyleView _) {}

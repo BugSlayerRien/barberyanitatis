@@ -52,6 +52,10 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   Map<String, String>? _previews;
   Map<String, dynamic>? _quota;
   StyleView _shown = StyleView.front;
+
+  /// Drives the swipeable stage. Front, left, right -- in that order, so the
+  /// page index and StyleView.values line up and neither needs a lookup.
+  final PageController _stagePages = PageController();
   bool _generating = false;
   bool _booking = false;
   String? _error;
@@ -228,6 +232,9 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
         _generating = false;
         if (quota != null) _quota = quota;
       });
+      // The stage was left on whichever angle they had swiped to before
+      // generating, so a fresh preview opened on the side view.
+      if (_stagePages.hasClients) _stagePages.jumpToPage(0);
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -419,6 +426,12 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     );
   }
 
+  @override
+  void dispose() {
+    _stagePages.dispose();
+    super.dispose();
+  }
+
   static String _lengthLabel(int level) => switch (level) {
         0 => 'very short',
         2 => 'medium',
@@ -432,20 +445,8 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   /// the try-on had already happened. Showing their own scan first -- exactly
   /// as the results page does -- makes the before and after obvious.
   Widget _buildPreviewStage(Map<String, String>? previews) {
-    final hasPreview = previews != null;
     final view = _shownView(previews);
-    final captureB64 = _captureFor(view);
-
-    String previewUrl = '';
-    if (hasPreview) {
-      previewUrl = (previews[switch (view) {
-            StyleView.front => 'frontViewUrl',
-            StyleView.side => 'sideViewUrl',
-            StyleView.back => 'backViewUrl',
-          }] ??
-          '')
-          .trim();
-    }
+    final previewUrl = _previewUrlFor(previews, view);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -459,6 +460,9 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
                 // Indeterminate on purpose: the server renders all three angles
                 // in one blocking call and reports no partial progress, so a
                 // percentage would be invented.
+                //
+                // Not inside the PageView: it is one thing, not three, and
+                // swiping it sideways would suggest there is more to see.
                 const Center(
                   child: ScanProgressPanel.indeterminate(
                     title: 'Generating your AI preview',
@@ -470,16 +474,19 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
                     currentStep: 1,
                   ),
                 )
-              else if (previewUrl.isNotEmpty)
-                Image.network(
-                  ApiConfig.resolveImageUrl(previewUrl),
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) => _captureFallback(captureB64),
-                )
               else
-                _captureFallback(captureB64),
+                // Swipeable, because three tabs above a static image is the
+                // one gesture everyone tries on a photo and nothing answered.
+                PageView(
+                  controller: _stagePages,
+                  onPageChanged: (i) =>
+                      setState(() => _shown = StyleView.values[i]),
+                  children: [
+                    for (final v in StyleView.values) _stageImage(previews, v),
+                  ],
+                ),
+              // Outside the PageView so the badges stay put while the photo
+              // slides under them.
               if (!_generating) ...[
                 _stageBadge(hasAiPreview: previewUrl.isNotEmpty),
                 if (previewUrl.isNotEmpty && _growOutGoal)
@@ -501,11 +508,11 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
             ),
           ),
         ],
-        if (!hasPreview) ...[
+        if (previews == null) ...[
           const SizedBox(height: 10),
           const Text(
-            'We generate this cut on your own scan photos — front, side and '
-            'back — so you can see it on you before you book.',
+            'We generate this cut on your own scan photos — front, left and '
+            'right — so you can see it on you before you book.',
             style: TextStyle(color: Colors.white70, fontSize: 12.5, height: 1.45),
           ),
         ],
@@ -514,6 +521,34 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
   }
 
   StyleView _shownView(Map<String, String>? previews) => _shown;
+
+  String _previewUrlFor(Map<String, String>? previews, StyleView view) {
+    if (previews == null) return '';
+
+    return (previews[switch (view) {
+              StyleView.front => 'frontViewUrl',
+              StyleView.side => 'sideViewUrl',
+              StyleView.back => 'backViewUrl',
+            }] ??
+            '')
+        .trim();
+  }
+
+  /// One page of the stage: the generated view if there is one, otherwise the
+  /// customer's own scan photo for that angle.
+  Widget _stageImage(Map<String, String>? previews, StyleView view) {
+    final captureB64 = _captureFor(view);
+    final previewUrl = _previewUrlFor(previews, view);
+    if (previewUrl.isEmpty) return _captureFallback(captureB64);
+
+    return Image.network(
+      ApiConfig.resolveImageUrl(previewUrl),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      gaplessPlayback: true,
+      errorBuilder: (_, __, ___) => _captureFallback(captureB64),
+    );
+  }
 
   String? _captureFor(StyleView view) => widget.captures[switch (view) {
         StyleView.front => 'front',
@@ -558,16 +593,23 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
     );
   }
 
-  /// Front / Side / Back, driving both the scan photo and the generated view.
+  /// Front / Left / Right, driving both the scan photo and the generated view.
+  ///
+  /// Labelled for the customer's own photos, not the haircut's: the third
+  /// capture is their right profile, so the tab that used to read "Back"
+  /// promised a view of the back of their head that was never taken.
   Widget _viewSwitcher(Map<String, String>? previews) {
-    return SegmentedButton<StyleView>(
-      segments: [
-        for (final view in StyleView.values)
-          ButtonSegment(value: view, label: Text(view.label)),
-      ],
-      selected: {_shown},
-      showSelectedIcon: false,
-      onSelectionChanged: (set) => setState(() => _shown = set.first),
+    return StyleViewSelector(
+      selected: _shown,
+      labels: StyleViewSelector.customerScanLabels,
+      onChanged: (view) {
+        setState(() => _shown = view);
+        _stagePages.animateToPage(
+          StyleView.values.indexOf(view),
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+        );
+      },
     );
   }
 
