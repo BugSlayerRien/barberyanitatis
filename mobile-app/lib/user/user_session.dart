@@ -29,6 +29,17 @@ class UserSession {
   static int? selectedServiceId;
   static int? selectedEstimatedMinutes;
   static Map<String, String>? selectedPreviewImages;
+
+  /// Set when the customer booked a cut their hair is too short for.
+  ///
+  /// The warning used to end at the customer: they confirmed, and the barber
+  /// received an ordinary booking with no sign that the hair could not carry
+  /// the cut. "The barber will talk it through" assumed a conversation the
+  /// system never started -- the gap the app exists to close. Carried into
+  /// specialInstructions on booking.php 'create', so it reaches the barber's
+  /// appointment and the customer's own confirmation.
+  static String? growOutBookingNote;
+
   /// Customer-specific composited previews (face + chosen haircut overlay).
   static Map<String, String>? customerPreviewImages;
   static Map<String, String>? capturedFaceImages;
@@ -151,6 +162,7 @@ class UserSession {
           ? null
           : Map<String, String>.from(customerPreviewImages!),
       'selectedVariantId': selectedVariantId,
+      'growOutBookingNote': growOutBookingNote,
       'selectedStyleName': selectedStyleName,
       'selectedServiceId': selectedServiceId,
       'selectedEstimatedMinutes': selectedEstimatedMinutes,
@@ -191,6 +203,7 @@ class UserSession {
     selectedVariantId = snap['selectedVariantId'] is int
         ? snap['selectedVariantId'] as int
         : int.tryParse('${snap['selectedVariantId'] ?? ''}');
+    growOutBookingNote = snap['growOutBookingNote']?.toString();
     selectedStyleName = snap['selectedStyleName']?.toString();
     selectedServiceId = snap['selectedServiceId'] is int
         ? snap['selectedServiceId'] as int
@@ -210,6 +223,7 @@ class UserSession {
     selectedServiceId = null;
     selectedEstimatedMinutes = null;
     selectedPreviewImages = null;
+    growOutBookingNote = null;
     customerPreviewImages = null;
     capturedFaceImages = null;
     captureFaceRects = null;
@@ -461,6 +475,7 @@ class UserSession {
     selectedServiceId = null;
     selectedEstimatedMinutes = null;
     selectedPreviewImages = null;
+    growOutBookingNote = null;
     customerPreviewImages = null;
     capturedFaceImages = null;
     captureFaceRects = null;
@@ -481,6 +496,7 @@ class UserSession {
     selectedServiceId = null;
     selectedEstimatedMinutes = null;
     selectedPreviewImages = null;
+    growOutBookingNote = null;
     customerPreviewImages = null;
     capturedFaceImages = null;
     captureFaceRects = null;

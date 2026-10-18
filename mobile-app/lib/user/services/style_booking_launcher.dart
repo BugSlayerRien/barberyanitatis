@@ -63,6 +63,10 @@ Future<void> launchBookingForStyle(
     if (!acceptLength || !context.mounted) {
       return;
     }
+    // The barber is told, rather than left to discover it at the chair.
+    UserSession.growOutBookingNote = growOutBookingNote(styleName);
+  } else {
+    UserSession.growOutBookingNote = null;
   }
 
   final userId = UserSession.userId;

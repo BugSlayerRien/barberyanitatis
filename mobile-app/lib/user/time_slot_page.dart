@@ -16,6 +16,7 @@ import 'user_session.dart';
 import 'services/face_scan_service.dart';
 import 'services/booking_draft_service.dart';
 import 'widgets/shimmer_skeleton.dart';
+import 'widgets/style_length_warning.dart';
 
 class TimeSlotPage extends StatefulWidget {
   final int barberId;
@@ -64,6 +65,22 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   /// specialInstructions on booking.php 'create' and shown to the barber on the
   /// appointment detail screen.
   final TextEditingController _noteController = TextEditingController();
+
+  /// What the barber is told when the customer booked a cut their hair is too
+  /// short for. Set when the grow-out warning was accepted; '' otherwise.
+  String get _growOutNote => UserSession.growOutBookingNote?.trim() ?? '';
+
+  /// The customer's own note with the grow-out line in front of it.
+  ///
+  /// Prepended rather than merged into the text field: the field is theirs to
+  /// write and clear, and this has to reach the barber whether they write
+  /// anything or not.
+  String _instructionsForBooking() {
+    final own = _noteController.text.trim();
+    if (_growOutNote.isEmpty) return own;
+
+    return own.isEmpty ? _growOutNote : '$_growOutNote\n\n$own';
+  }
 
   @override
   void dispose() {
@@ -640,6 +657,50 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                 child: const Text('Try Haircut'),
               ),
             ],
+            if (!_isRescheduleMode && _growOutNote.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              // Shown, not hidden: the customer dismissed a warning to get
+              // here, and they should see exactly what their barber will read
+              // rather than find out at the chair.
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0x1FE0A23C),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: GrowOutGoalBadge.color),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.schedule_rounded,
+                            size: 14, color: GrowOutGoalBadge.color),
+                        SizedBox(width: 6),
+                        Text(
+                          'Your barber will be told',
+                          style: TextStyle(
+                            color: GrowOutGoalBadge.color,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _growOutNote,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             if (!_isRescheduleMode) ...[
               const SizedBox(height: 24),
               const Text(
@@ -784,7 +845,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           'endTime': endTime,
                           'serviceIDs': [serviceId],
                           'variantID': UserSession.selectedVariantId,
-                          'specialInstructions': _noteController.text.trim(),
+                          'specialInstructions': _instructionsForBooking(),
                           ...FaceScanService.bookingPreviewPayload(),
                         }, okStatusCodes: {201});
                       } on CustomerApiException catch (e) {

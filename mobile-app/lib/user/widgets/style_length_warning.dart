@@ -267,3 +267,16 @@ class GrowOutGoalBadge extends StatelessWidget {
 String growOutCaption(String styleName) =>
     'This is $styleName once your hair has grown out. Your barber cannot cut '
     'it at your current length — ask them how long it would take.';
+
+/// What the barber is told when a customer books a cut their hair is too short
+/// for, and what the customer is shown so they know it was said.
+///
+/// The warning used to stop at the customer: they confirmed, and the barber
+/// received an ordinary booking with no sign the hair could not carry the cut.
+/// Defending that with "the barber will talk it through" assumed a
+/// conversation the system never started -- which is the gap the app exists to
+/// close. Carried on the appointment instead, so neither side has to remember.
+String growOutBookingNote(String styleName) =>
+    'Booked as a grow-out goal: the customer wants $styleName, but their scan '
+    'measured less length than it needs. Cut the closest version you can today '
+    'and tell them roughly how long the full look takes to grow.';

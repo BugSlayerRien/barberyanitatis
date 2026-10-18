@@ -249,6 +249,11 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
             'endTime': endTime,
             'serviceIDs': [serviceId],
             'variantID': UserSession.selectedVariantId,
+            // This screen has no note field, but a grow-out booking still has
+            // to reach the barber: it is the fastest route from the warning to
+            // a confirmed appointment.
+            if ((UserSession.growOutBookingNote ?? '').trim().isNotEmpty)
+              'specialInstructions': UserSession.growOutBookingNote!.trim(),
             if (!widget.skipPreviews) ...FaceScanService.bookingPreviewPayload(),
           },
           okStatusCodes: {201},

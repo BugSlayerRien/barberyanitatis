@@ -1639,27 +1639,38 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
           _previewIsGrowOutGoal ? null : _previewUrlsForVariant(variantId);
       if (previewUrls == null || (previewUrls['frontViewUrl'] ?? '').isEmpty) {
         final catalog = _catalogPreviewUrls(selected);
-        if ((catalog['frontViewUrl'] ?? '').isEmpty) {
+        final hasCatalog = (catalog['frontViewUrl'] ?? '').isNotEmpty;
+        if (hasCatalog) {
           if (!mounted) return;
-          setState(() => _bookingInFlight = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('This style has no bookable images yet.')),
-          );
-          return;
+          final proceed = _previewIsGrowOutGoal
+              ? true
+              : await _confirmBookWithoutAiPreview(_selectedStyleName);
+          if (!mounted) return;
+          if (!proceed) {
+            setState(() => _bookingInFlight = false);
+            return;
+          }
+          previewUrls = catalog;
+        } else {
+          // No photographs anywhere: a haircut added through the portal or the
+          // barber app may have none, which is allowed -- the library draws a
+          // placeholder and the AI preview works from the description alone.
+          //
+          // This used to refuse the booking outright, and the grow-out rule
+          // above made it worse by discarding the one preview that did exist.
+          // So Pineapple, Wolf Cut and Bowl Cut could not be booked as a
+          // grow-out goal at all. The barber instructions describe the cut;
+          // that is what they work from anyway.
+          previewUrls = null;
         }
-        if (!mounted) return;
-        final proceed = _previewIsGrowOutGoal
-            ? true
-            : await _confirmBookWithoutAiPreview(_selectedStyleName);
-        if (!mounted) return;
-        if (!proceed) {
-          setState(() => _bookingInFlight = false);
-          return;
-        }
-        previewUrls = catalog;
       }
       UserSession.selectedPreviewImages = previewUrls;
       UserSession.customerPreviewImages = previewUrls;
+      // Carried to the barber on the appointment, so the warning does not stop
+      // at the customer who dismissed it.
+      UserSession.growOutBookingNote = _previewIsGrowOutGoal
+          ? growOutBookingNote(_selectedStyleName)
+          : null;
 
       unawaited(
         AiFunnelService.saveSelection(
