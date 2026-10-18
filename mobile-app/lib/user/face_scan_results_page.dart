@@ -1581,19 +1581,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       return;
     }
 
-    if (widget.kioskMode) {
-      KioskSession.selectedVariantId = variantId;
-      KioskSession.selectedStyleName = _selectedStyleName;
-      UserSession.selectedVariantId = variantId;
-      UserSession.selectedStyleName = _selectedStyleName;
-      if (!mounted) return;
-      Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const KioskBarberPage()),
-      );
-      return;
-    }
-
-    // Refused, not warned.
+    // Refused, not warned -- and checked before the kiosk branch below.
+    //
+    // A walk-in customer is standing in the shop: letting them carry a
+    // grow-out preview to the chair is the same promise broken, only sooner.
+    // The check used to sit under the kiosk return, so the kiosk was the one
+    // door it did not guard.
     //
     // The preview on screen is the cut once the hair has grown; booking it
     // would hand the barber an appointment for a haircut they cannot perform
@@ -1626,6 +1619,18 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         );
       }
 
+      return;
+    }
+
+    if (widget.kioskMode) {
+      KioskSession.selectedVariantId = variantId;
+      KioskSession.selectedStyleName = _selectedStyleName;
+      UserSession.selectedVariantId = variantId;
+      UserSession.selectedStyleName = _selectedStyleName;
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const KioskBarberPage()),
+      );
       return;
     }
 
