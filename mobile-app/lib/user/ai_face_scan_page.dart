@@ -3042,7 +3042,8 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
     final tips = <(IconData, String)>[
       (Icons.straighten, 'Hold your phone at arm\'s length'),
       (Icons.center_focus_strong, 'Look straight at the camera'),
-      (Icons.wb_sunny_outlined, 'Use good, even lighting'),
+      (Icons.wb_sunny_outlined, 'Use good, even lighting — face a window or a lamp'),
+      (Icons.visibility_outlined, 'Uncover your hair: no cap, hood or tied-back hair'),
       (Icons.crop_rotate, 'We\'ll capture front, left, and right angles'),
     ];
 
@@ -3106,6 +3107,61 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                   const SizedBox(height: 18),
                 ],
                 const Spacer(),
+                // What the scan cannot do, said before it is spent rather
+                // than guessed at afterwards.
+                //
+                // The reading is taken from three phone photos: a dim room or
+                // a soft camera lowers the contrast between hair and
+                // background, and the length measure -- the lowest hair pixel
+                // against the chin -- is the first thing to suffer. A
+                // customer who is told this up front reads a wrong answer as
+                // a bad photo, which it is, instead of a broken app. Naming
+                // the remedy in the same breath matters more than the
+                // warning: Adjust hair is two taps away on the results.
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: AppBrand.warningTint,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppBrand.warning),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 15, color: AppBrand.warning),
+                          SizedBox(width: 6),
+                          Text(
+                            'Worth knowing',
+                            style: TextStyle(
+                              color: AppBrand.warning,
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: 7),
+                      Text(
+                        'The scan reads your face and hair from three phone '
+                        'photos, so a dim room or a lower-quality camera can '
+                        'make it guess your hair length or type wrongly.\n\n'
+                        'If it gets either one wrong, you can correct it '
+                        'yourself on the results screen under "Adjust hair" — '
+                        'your recommendations update straight away.',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12.5,
+                          height: 1.45,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
