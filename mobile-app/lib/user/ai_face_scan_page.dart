@@ -3045,6 +3045,17 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
       (Icons.wb_sunny_outlined, 'Use good, even lighting — face a window or a lamp'),
       (Icons.visibility_outlined, 'Uncover your hair: no cap, hood or tied-back hair'),
       (Icons.crop_rotate, 'We\'ll capture front, left, and right angles'),
+      // The limitation sits with the tips rather than in a coloured panel of
+      // its own. Boxed and amber it read as a warning about the app; as the
+      // last line of the same list it reads as one more thing to know, which
+      // is what it is. The remedy is named in the same breath -- a limitation
+      // without a way out is just an excuse.
+      (
+        Icons.info_outline,
+        'A dim room or an older camera can make the scan read your hair '
+            'length or type wrongly — you can correct it afterwards under '
+            '"Adjust hair"',
+      ),
     ];
 
     return PopScope(
@@ -3068,6 +3079,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                 const Text(
                   'How to get the best results',
                   style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
@@ -3106,62 +3122,11 @@ class _AiFaceScanPageState extends State<AiFaceScanPage>
                   ),
                   const SizedBox(height: 18),
                 ],
-                const Spacer(),
-                // What the scan cannot do, said before it is spent rather
-                // than guessed at afterwards.
-                //
-                // The reading is taken from three phone photos: a dim room or
-                // a soft camera lowers the contrast between hair and
-                // background, and the length measure -- the lowest hair pixel
-                // against the chin -- is the first thing to suffer. A
-                // customer who is told this up front reads a wrong answer as
-                // a bad photo, which it is, instead of a broken app. Naming
-                // the remedy in the same breath matters more than the
-                // warning: Adjust hair is two taps away on the results.
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppBrand.warningTint,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppBrand.warning),
-                  ),
-                  child: const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline,
-                              size: 15, color: AppBrand.warning),
-                          SizedBox(width: 6),
-                          Text(
-                            'Worth knowing',
-                            style: TextStyle(
-                              color: AppBrand.warning,
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 7),
-                      Text(
-                        'The scan reads your face and hair from three phone '
-                        'photos, so a dim room or a lower-quality camera can '
-                        'make it guess your hair length or type wrongly.\n\n'
-                        'If it gets either one wrong, you can correct it '
-                        'yourself on the results screen under "Adjust hair" — '
-                        'your recommendations update straight away.',
-                        style: TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12.5,
-                          height: 1.45,
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(

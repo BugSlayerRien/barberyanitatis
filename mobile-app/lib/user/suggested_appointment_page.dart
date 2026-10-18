@@ -122,7 +122,9 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         .post(
           Uri.parse('${ApiConfig.baseUrl}/services.php'),
           headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'action': 'list'}),
+          // Appointments only; see time_slot_page. Unfiltered, the
+          // walk-in tier appeared here too.
+          body: jsonEncode({'action': 'list', 'channel': 'appointment'}),
         )
         .timeout(const Duration(seconds: 30));
     if (response.statusCode != 200 || response.body.isEmpty) {

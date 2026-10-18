@@ -348,7 +348,11 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       final response = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/services.php'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'action': 'list'}),
+        // Appointments only. Without the channel the endpoint returns
+        // every active service, so "Regular Haircut" -- the walk-in tier
+        // priced for the kiosk queue -- was offered inside the app as if a
+        // customer could book it. Group booking already asked this way.
+        body: jsonEncode({'action': 'list', 'channel': 'appointment'}),
       );
 
       final data = response.body.isNotEmpty ? jsonDecode(response.body) as Map<String, dynamic> : {};
@@ -424,6 +428,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       _defaultService?['service_id']?.toString() ?? '',
     );
 
+    // One service is not a choice.
+    //
+    // The shop's standard cut is the default -- Exclusive Haircut here,
+    // Regular Haircut on the kiosk -- and a radio list of exactly one item
+    // asks the customer to decide something already decided. The picker earns
+    // its place only when the shop offers something else as well, such as a
+    // perm.
     if (_services.length == 1) {
       return _serviceSummary(_services.first);
     }
