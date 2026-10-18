@@ -127,6 +127,80 @@ void main() {
     });
   });
 
+  group('a group booking', () {
+    // The schedule collapses a group into one tile titled "Rien + 2 others"
+    // and chips it "Group of 3". Tapping through used to show only the lead's
+    // name, so the barber lost the fact that three people were coming.
+    Map<String, dynamic> groupAppointment() => {
+          ..._appointment(),
+          'isGroup': true,
+          'peopleCount': 3,
+          'displayTitle': 'Rien Gappi + 2 others',
+          'groupMembers': [
+            {
+              'name': 'Rien Gappi',
+              'startTime': '19:00:00',
+              'endTime': '19:40:00',
+              'isPrimary': true,
+            },
+            {
+              'name': 'Additional guest',
+              'startTime': '19:40:00',
+              'endTime': '20:20:00',
+            },
+            {
+              'name': 'Additional guest',
+              'startTime': '20:20:00',
+              'endTime': '21:00:00',
+            },
+          ],
+        };
+
+    testWidgets('is titled as the group, not just the lead', (tester) async {
+      await _pump(tester, groupAppointment());
+      expect(find.text('Rien Gappi + 2 others'), findsOneWidget);
+    });
+
+    testWidgets('says how many people are coming', (tester) async {
+      await _pump(tester, groupAppointment());
+      expect(find.text('Group of 3'), findsOneWidget);
+    });
+
+    testWidgets('lists every chair in order', (tester) async {
+      await _pump(tester, groupAppointment());
+      expect(find.text('IN THIS GROUP'), findsOneWidget);
+      expect(find.text('1'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      expect(find.text('Additional guest'), findsNWidgets(2));
+    });
+
+    testWidgets('with each one\'s own slot, since they run back to back',
+        (tester) async {
+      await _pump(tester, groupAppointment());
+      expect(find.text('7:00 PM – 7:40 PM'), findsOneWidget);
+      expect(find.text('8:20 PM – 9:00 PM'), findsOneWidget);
+    });
+
+    testWidgets('a single booking shows no group furniture', (tester) async {
+      await _pump(tester, _appointment());
+      expect(find.text('IN THIS GROUP'), findsNothing);
+      expect(find.textContaining('Group of'), findsNothing);
+    });
+
+    testWidgets('a group of one is not called a group', (tester) async {
+      await _pump(tester, {
+        ..._appointment(),
+        'isGroup': true,
+        'peopleCount': 1,
+        'groupMembers': [
+          {'name': 'Rien Gappi', 'startTime': '19:00:00', 'endTime': '20:00:00'},
+        ],
+      });
+      expect(find.text('IN THIS GROUP'), findsNothing);
+      expect(find.textContaining('Group of'), findsNothing);
+    });
+  });
+
   testWidgets('it fits a phone without overflowing', (tester) async {
     tester.view.physicalSize = const Size(360, 640);
     tester.view.devicePixelRatio = 1.0;

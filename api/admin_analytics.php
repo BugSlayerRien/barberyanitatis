@@ -495,6 +495,80 @@ try {
         error_log('Credit sales query skipped: ' . $e->getMessage());
     }
 
+    // --- booking payments, and the receipts behind them ----------------------
+    // Credit sales had a receipt list and booking payments did not, although
+    // they are the great majority of the money taken: 93 of the 104 captured
+    // payments at the time this was written. Nobody could look one up by
+    // reference -- not when a customer rang about a charge, not when a figure
+    // on the dashboard needed explaining.
+    $bookingPayments = [
+        'count' => 0,
+        'revenue' => 0.0,
+        'refunded' => 0.0,
+        'recent' => [],
+        'byMethod' => [],
+    ];
+    try {
+        $row = $pdo->query(
+            "SELECT COUNT(*)::int AS pay_count,
+                    COALESCE(SUM(amount), 0)::float AS revenue
+             FROM appointment_payments
+             WHERE COALESCE(purpose, 'booking') = 'booking'
+               AND status IN ('Captured', 'PartiallyRefunded') AND {$payWhere}"
+        )->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $bookingPayments['count'] = (int)$row['pay_count'];
+            $bookingPayments['revenue'] = (float)$row['revenue'];
+        }
+
+        // What went back out, so "collected" is not mistaken for "kept".
+        $bookingPayments['refunded'] = (float)$pdo->query(
+            "SELECT COALESCE(SUM(r.amount), 0)::float
+             FROM appointment_refunds r
+             WHERE r.status = 'Completed'
+               AND r.created_at >= (CURRENT_DATE - INTERVAL '365 days')"
+        )->fetchColumn();
+
+        $bookingPayments['byMethod'] = $pdo->query(
+            "SELECT COALESCE(NULLIF(TRIM(method), ''), 'Unknown') AS method,
+                    COUNT(*)::int AS pay_count,
+                    COALESCE(SUM(amount), 0)::float AS revenue
+             FROM appointment_payments
+             WHERE COALESCE(purpose, 'booking') = 'booking'
+               AND status IN ('Captured', 'PartiallyRefunded') AND {$payWhere}
+             GROUP BY 1
+             ORDER BY revenue DESC"
+        )->fetchAll(PDO::FETCH_ASSOC);
+
+        // The latest twenty regardless of the selected period, like the credit
+        // receipts above: a receipt is worth finding even when it falls
+        // outside the window being analysed. The booking code is the number
+        // the customer will quote.
+        $bookingPayments['recent'] = $pdo->query(
+            "SELECT ap.payment_id, ap.amount::float AS amount, ap.method, ap.status,
+                    ap.transaction_ref, ap.created_at,
+                    a.booking_code, a.appointment_date,
+                    COALESCE(u.full_name, 'Customer #' || ap.user_id) AS customer_name,
+                    COALESCE(b.full_name, '-') AS barber_name,
+                    (SELECT COALESCE(SUM(r.amount), 0)::float
+                       FROM appointment_refunds r
+                      WHERE r.payment_id = ap.payment_id
+                        AND r.status = 'Completed') AS refunded
+             FROM appointment_payments ap
+             LEFT JOIN appointments a ON a.appointment_id = ap.appointment_id
+             LEFT JOIN users u ON u.user_id = COALESCE(ap.user_id, a.user_id)
+             LEFT JOIN barbers b ON b.barber_id = a.barber_id
+             WHERE COALESCE(ap.purpose, 'booking') = 'booking'
+               AND ap.status IN ('Captured', 'PartiallyRefunded')
+             ORDER BY ap.created_at DESC
+             LIMIT 20"
+        )->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        // purpose is a lazily added column, and a fresh shop may have no
+        // refunds table yet. Zero is the honest answer.
+        error_log('Booking payments query skipped: ' . $e->getMessage());
+    }
+
     $aiFunnel = [
         'scanCount' => 0,
         'selectionCount' => 0,
@@ -763,6 +837,7 @@ try {
             'cancellationRate' => $cancellationRate,
             'noShowRate' => $noShowRate,
         ],
+        'bookingPayments' => $bookingPayments,
         'customers' => [
             'totalCustomers' => $totalCustomers,
             'newCustomers' => $newCustomers,

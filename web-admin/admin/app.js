@@ -607,6 +607,13 @@ const COLUMN_WEIGHTS = {
   style: 1.6,
   count: 1.4,
   share: 0.6,
+  // Booking receipts: the reference is long and the amount is short.
+  booking_code: 1.3,
+  customer_name: 1.3,
+  barber_name: 1.1,
+  amount_label: 1.1,
+  method: 0.8,
+  reference: 1.6,
   full_name: 1.6,
   style_name: 1.4,
   service_name: 1.5,
@@ -2516,6 +2523,102 @@ function renderAnalyticsCreditSales(metrics) {
   );
 }
 
+/**
+ * Booking payments, and the receipt behind each one.
+ *
+ * Credit sales had a receipt list and booking payments did not, although they
+ * are the great majority of the money taken. A customer who rings about a
+ * charge quotes their booking code, so that is the first column; the gateway
+ * reference is there for reconciling against PayMongo.
+ */
+function renderAnalyticsBookingPayments(metrics) {
+  const kpis = document.getElementById("analytics-booking-kpis");
+  const methodsEl = document.getElementById("analytics-booking-methods");
+  const receiptsEl = document.getElementById("analytics-booking-receipts");
+  if (!kpis || !methodsEl || !receiptsEl) return;
+
+  const payments = metrics?.bookingPayments || {};
+  const count = Number(payments.count || 0);
+  const revenue = Number(payments.revenue || 0);
+  const refunded = Number(payments.refunded || 0);
+  const average = count > 0 ? revenue / count : 0;
+
+  kpis.innerHTML = `
+    <div class="ops-pill"><div class="label">Payments</div><div class="value">${count}</div></div>
+    <div class="ops-pill"><div class="label">Collected</div><div class="value">${formatPeso(revenue)}</div></div>
+    <div class="ops-pill"><div class="label">Average</div><div class="value">${formatPeso(average)}</div></div>
+    <div class="ops-pill"><div class="label">Refunded</div><div class="value">${formatPeso(refunded)}</div></div>
+  `;
+
+  // --- by method ------------------------------------------------------------
+  const methods = Array.isArray(payments.byMethod) ? payments.byMethod : [];
+  if (!methods.length) {
+    methodsEl.innerHTML = emptyStateMarkup(
+      "No payments in this period",
+      "Payments taken for appointments will be broken down by method here.",
+    );
+  } else {
+    const maxRevenue = methods.reduce(
+      (top, row) => Math.max(top, Number(row.revenue || 0)),
+      0,
+    );
+    renderTable(
+      "analytics-booking-methods",
+      [
+        { key: "method", label: "Method" },
+        { key: "count", label: "Payments" },
+        { key: "amount", label: "Collected" },
+      ],
+      methods.map((row) => ({
+        method: escapeAnalyticsText(row.method || "Unknown"),
+        count: String(Number(row.pay_count || 0)),
+        amount: countBarCell(Number(row.revenue || 0), maxRevenue, formatPeso),
+      })),
+    );
+  }
+
+  // --- the receipts themselves ---------------------------------------------
+  const rows = Array.isArray(payments.recent) ? payments.recent : [];
+  if (!rows.length) {
+    receiptsEl.innerHTML = emptyStateMarkup(
+      "No receipts yet",
+      "When a customer pays for an appointment, the receipt appears here.",
+    );
+    return;
+  }
+
+  renderTable(
+    "analytics-booking-receipts",
+    [
+      { key: "booking_code", label: "Booking" },
+      { key: "customer_name", label: "Customer" },
+      { key: "barber_name", label: "Barber" },
+      { key: "amount_label", label: "Amount" },
+      { key: "method", label: "Method" },
+      { key: "reference", label: "Reference" },
+      { key: "created_at", label: "Paid" },
+    ],
+    rows.map((row) => {
+      const refundedAmount = Number(row.refunded || 0);
+      const amount = formatPeso(row.amount);
+
+      return {
+        booking_code: escapeAnalyticsText(row.booking_code || "-"),
+        customer_name: escapeAnalyticsText(row.customer_name),
+        barber_name: escapeAnalyticsText(row.barber_name || "-"),
+        // A refunded payment that still reads as collected is the one line on
+        // this table that could mislead someone reconciling the till.
+        amount_label: refundedAmount > 0
+          ? `${amount} <span class="status status--warning">−${formatPeso(refundedAmount)}</span>`
+          : amount,
+        method: escapeAnalyticsText(row.method || "-"),
+        reference: escapeAnalyticsText(row.transaction_ref || "-"),
+        created_at: formatSettingsDate(row.created_at),
+      };
+    }),
+  );
+}
+
 function renderAnalyticsCharts(metrics) {
   if (typeof Chart === "undefined") return;
 
@@ -2712,14 +2815,16 @@ function renderOperations(metrics) {
  * (12), Curly Burst Fade (9)" -- which is data in the shape of prose: nothing
  * lines up, nothing compares, and every count has to be read separately.
  */
-function countBarCell(count, max) {
+function countBarCell(count, max, format) {
   const value = Number(count || 0);
   const width = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+  // Pesos need their symbol; a count of bookings does not.
+  const label = typeof format === "function" ? format(value) : String(value);
 
   return `
     <div class="count-bar">
       <div class="count-bar-track"><span style="width:${width}%;"></span></div>
-      <strong>${value}</strong>
+      <strong>${label}</strong>
     </div>
   `;
 }
@@ -2838,6 +2943,7 @@ function renderAnalyticsDashboard(data) {
   renderAnalyticsKpis(metrics);
   renderAnalyticsCharts(metrics);
   renderAnalyticsCreditSales(metrics);
+  renderAnalyticsBookingPayments(metrics);
   renderBarberTable(metrics);
   renderRecentFeedback(data?.recentFeedback);
   renderOperations(metrics);

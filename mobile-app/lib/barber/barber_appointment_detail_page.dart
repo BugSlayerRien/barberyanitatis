@@ -26,7 +26,21 @@ class BarberAppointmentDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final customerName = appointment['customerName']?.toString() ?? 'Customer';
+    // A group arrives as one tile on the schedule and must open as one
+    // appointment here: the list already titles it "Rien + 2 others" and
+    // chips it "Group of 3", and this page showed only the lead's name, so
+    // tapping through lost the fact that three people were coming.
+    final isGroup = appointment['isGroup'] == true;
+    final peopleCount = (appointment['peopleCount'] as num?)?.toInt() ?? 1;
+    final groupMembers = (appointment['groupMembers'] as List<dynamic>? ?? [])
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+    final customerName = isGroup
+        ? (appointment['displayTitle']?.toString() ??
+            appointment['customerName']?.toString() ??
+            'Group booking')
+        : (appointment['customerName']?.toString() ?? 'Customer');
 
     // The haircut first, the service second.
     //
@@ -77,7 +91,12 @@ class BarberAppointmentDetailPage extends StatelessWidget {
                 customerName: customerName,
                 status: status,
                 bookingCode: bookingCode,
+                peopleCount: isGroup ? peopleCount : null,
               ),
+              if (groupMembers.length > 1) ...[
+                const _Rule(),
+                _members(groupMembers),
+              ],
               const _Rule(),
               _cut(
                 headline: headlineCut,
@@ -145,6 +164,7 @@ class BarberAppointmentDetailPage extends StatelessWidget {
     required String customerName,
     required String status,
     required String bookingCode,
+    int? peopleCount,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -168,13 +188,36 @@ class BarberAppointmentDetailPage extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 6),
-        Text(
-          bookingCode,
-          style: const TextStyle(
-            color: AppBrand.textSubtle,
-            fontSize: 12.5,
-            letterSpacing: 0.4,
-          ),
+        Row(
+          children: [
+            Text(
+              bookingCode,
+              style: const TextStyle(
+                color: AppBrand.textSubtle,
+                fontSize: 12.5,
+                letterSpacing: 0.4,
+              ),
+            ),
+            if (peopleCount != null && peopleCount > 1) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppBrand.accentTint,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppBrand.accentLine),
+                ),
+                child: Text(
+                  'Group of $peopleCount',
+                  style: const TextStyle(
+                    color: AppBrand.accent,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
         ),
       ],
     );
@@ -242,6 +285,81 @@ class BarberAppointmentDetailPage extends StatelessWidget {
         ],
       ],
     );
+  }
+
+  /// Who sits down and when, for a group.
+  ///
+  /// The times are the useful part: the members run back to back in one slot
+  /// block, so the barber needs the order, not just the count.
+  Widget _members(List<Map<String, dynamic>> members) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'IN THIS GROUP',
+          style: TextStyle(
+            color: AppBrand.textSubtle,
+            fontSize: 10.5,
+            letterSpacing: 1.1,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 8),
+        for (var i = 0; i < members.length; i++) ...[
+          if (i > 0) const SizedBox(height: 7),
+          Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppBrand.surfaceLift,
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Text(
+                  '${i + 1}',
+                  style: const TextStyle(
+                    color: AppBrand.textMuted,
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  members[i]['name']?.toString() ?? 'Guest',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                _memberTime(members[i]),
+                style: const TextStyle(
+                  color: AppBrand.textMuted,
+                  fontSize: 12.5,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  String _memberTime(Map<String, dynamic> member) {
+    final start = member['startTime']?.toString() ?? '';
+    final end = member['endTime']?.toString() ?? '';
+    if (start.isEmpty) return '';
+
+    return end.isEmpty
+        ? formatTo12Hour(start)
+        : '${formatTo12Hour(start)} – ${formatTo12Hour(end)}';
   }
 
   /// Two fields side by side, or one full width when only one is present.
