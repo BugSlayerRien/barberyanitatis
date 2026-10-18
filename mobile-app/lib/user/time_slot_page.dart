@@ -911,7 +911,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
             ],
             // Rescheduling keeps the service the appointment already has;
             // offering to change it here would be a different booking.
-            if (!_isRescheduleMode) ...[
+            // Gated on there being something to show. A shop that
+            // deactivates its services would otherwise get a "Service"
+            // heading with nothing underneath it -- a label for an absence.
+            if (!_isRescheduleMode && (_servicesLoading || _services.isNotEmpty)) ...[
               const SizedBox(height: 24),
               Text(
                 _services.length > 1 ? 'Choose a service' : 'Service',
@@ -1038,8 +1041,16 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                       }
 
                       if (_defaultService == null) {
+                        // Not the customer's fault and not theirs to fix:
+                        // every appointment row needs a service, so with none
+                        // active there is nothing to book against.
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('No haircut service configured.')),
+                          const SnackBar(
+                            content: Text(
+                              'The shop has no bookable service right now. '
+                              'Please try again later.',
+                            ),
+                          ),
                         );
                         return;
                       }
