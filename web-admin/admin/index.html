@@ -291,7 +291,26 @@
                     <p class="card-sub">Retention and repeat behaviour.</p>
                   </div>
                 </div>
-                <div id="analytics-customers" class="analytics-stack"></div>
+                <div id="analytics-customer-kpis" class="analytics-ops-kpis"></div>
+                <div id="analytics-customer-barber" class="analytics-stack"></div>
+                <!-- "Blowout Taper (12), French Crop (12), Curly Burst Fade
+                     (9)" was a sentence pretending to be data: nothing lined
+                     up, nothing could be compared at a glance, and the counts
+                     had to be read one by one. -->
+                <div class="analytics-subhead">
+                  <h4>Most booked haircuts</h4>
+                  <span class="meta">Excludes cancelled and no-show bookings.</span>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="analytics-customer-booked"></div>
+                </div>
+                <div class="analytics-subhead">
+                  <h4>Most favourited haircuts</h4>
+                  <span class="meta">Saved by customers in this period.</span>
+                </div>
+                <div class="table-wrap">
+                  <div class="list" id="analytics-customer-favourites"></div>
+                </div>
               </div>
               <!-- Credit sales sit apart from service revenue because they are
                    a different kind of money: no appointment, no barber, no
@@ -304,7 +323,17 @@
                     <p class="card-sub">AI preview top-ups bought by customers. Not counted in service revenue.</p>
                   </div>
                 </div>
-                <div id="analytics-credit-sales" class="analytics-stack"></div>
+                <div id="analytics-credit-kpis" class="analytics-ops-kpis"></div>
+                <div class="analytics-chart-wrap">
+                  <canvas id="analytics-credit-chart" height="150"></canvas>
+                </div>
+                <div id="analytics-credit-chart-empty" class="analytics-chart-empty" hidden>
+                  No credit purchases in this period.
+                </div>
+                <div class="analytics-subhead">
+                  <h4>Latest receipts</h4>
+                  <span class="meta">The last ten, whatever period is selected.</span>
+                </div>
                 <div class="table-wrap">
                   <div class="list" id="analytics-credit-receipts"></div>
                 </div>

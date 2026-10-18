@@ -2939,6 +2939,55 @@ table.table {
   margin-top: 4px;
 }
 
+/* A heading inside a card, so one card can hold several tables without them
+   running together as one undifferentiated list. */
+.analytics-subhead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+  margin: var(--s-4) 0 var(--s-2);
+}
+
+.analytics-subhead h4 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* The count and its share of the top five, side by side. Printing the figures
+   as prose -- "Blowout Taper (12), French Crop (12)" -- meant nothing lined up
+   and every number had to be read on its own. */
+.count-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+
+.count-bar-track {
+  flex: 1;
+  min-width: 32px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.count-bar-track span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+.count-bar strong {
+  min-width: 2ch;
+  text-align: right;
+  color: var(--text);
+}
+
 canvas {
   width: 100% !important;
   max-height: 260px;

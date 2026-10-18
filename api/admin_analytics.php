@@ -444,7 +444,16 @@ try {
     // These live in appointment_payments with a NULL appointment_id, so every
     // revenue query in this file misses them -- they are not service revenue.
     // Reported separately rather than folded in, so neither number lies.
-    $creditSales = ['count' => 0, 'credits' => 0, 'revenue' => 0.0, 'recent' => []];
+    $creditSales = [
+        'count' => 0,
+        'credits' => 0,
+        'revenue' => 0.0,
+        'recent' => [],
+        // Day by day, so the card can show the shape of the sales rather than
+        // three totals and a receipt list. Only the selected period: the
+        // receipts below deliberately ignore it, the chart must not.
+        'daily' => [],
+    ];
     try {
         $row = $pdo->query(
             "SELECT COUNT(*)::int AS sale_count,
@@ -458,6 +467,17 @@ try {
             $creditSales['credits'] = (int)$row['credits'];
             $creditSales['revenue'] = (float)$row['revenue'];
         }
+
+        $creditSales['daily'] = $pdo->query(
+            "SELECT TO_CHAR(created_at::date, 'YYYY-MM-DD') AS day,
+                    COUNT(*)::int AS sale_count,
+                    COALESCE(SUM(credits), 0)::int AS credits,
+                    COALESCE(SUM(amount), 0)::float AS revenue
+             FROM appointment_payments
+             WHERE purpose = 'ai_credits' AND status = 'Captured' AND {$payWhere}
+             GROUP BY created_at::date
+             ORDER BY created_at::date"
+        )->fetchAll(PDO::FETCH_ASSOC);
 
         $creditSales['recent'] = $pdo->query(
             "SELECT ap.payment_id, ap.credits, ap.amount::float AS amount, ap.method,

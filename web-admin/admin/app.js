@@ -601,6 +601,12 @@ async function loadDashboard() {
  * get the room they need instead of every column being an equal share.
  */
 const COLUMN_WEIGHTS = {
+  // Haircut rank tables: a position number needs almost no room, the bar
+  // needs most of it.
+  rank: 0.3,
+  style: 1.6,
+  count: 1.4,
+  share: 0.6,
   full_name: 1.6,
   style_name: 1.4,
   service_name: 1.5,
@@ -2353,6 +2359,74 @@ function renderTrendChart(metrics) {
 }
 
 /**
+ * Previews sold per day, with what was collected for them.
+ *
+ * The card showed three totals and a list of receipts, which answers "how
+ * much" and never "when". Two scales on purpose: previews are a count and
+ * pesos are money, and sharing an axis would make one of them unreadable.
+ */
+function renderCreditSalesChart(daily) {
+  const canvas = document.getElementById("analytics-credit-chart");
+  const empty = document.getElementById("analytics-credit-chart-empty");
+  if (!canvas) return;
+
+  const rows = Array.isArray(daily) ? daily : [];
+  const wrap = canvas.parentElement;
+  if (!state.analyticsCharts) state.analyticsCharts = {};
+
+  if (typeof Chart === "undefined" || !rows.length) {
+    state.analyticsCharts.creditSales?.destroy?.();
+    state.analyticsCharts.creditSales = null;
+    if (wrap) wrap.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+
+  if (wrap) wrap.hidden = false;
+  if (empty) empty.hidden = true;
+
+  const labels = rows.map((row) => formatSettingsDate(row.day));
+  const options = chartDefaults();
+  // Pesos on the right, counts on the left, each with its own zero.
+  options.scales.y.title = { display: true, text: "Previews", color: CHART_COLORS.tick };
+  options.scales.y1 = {
+    position: "right",
+    beginAtZero: true,
+    ticks: { color: CHART_COLORS.tick },
+    grid: { drawOnChartArea: false },
+    title: { display: true, text: "Collected", color: CHART_COLORS.tick },
+  };
+
+  state.analyticsCharts.creditSales?.destroy?.();
+  state.analyticsCharts.creditSales = new Chart(canvas, {
+    data: {
+      labels,
+      datasets: [
+        {
+          type: "bar",
+          label: "Previews sold",
+          data: rows.map((row) => Number(row.credits || 0)),
+          backgroundColor: CHART_COLORS.infoBar,
+          borderRadius: 4,
+          yAxisID: "y",
+        },
+        {
+          type: "line",
+          label: "Collected",
+          data: rows.map((row) => Number(row.revenue || 0)),
+          borderColor: CHART_COLORS.gold,
+          backgroundColor: CHART_COLORS.goldSoft,
+          tension: 0.3,
+          pointRadius: 3,
+          yAxisID: "y1",
+        },
+      ],
+    },
+    options,
+  });
+}
+
+/**
  * Preview credit sales, and the receipts behind them.
  *
  * A customer could buy previews and the shop had no record of it anywhere a
@@ -2360,7 +2434,7 @@ function renderTrendChart(metrics) {
  * in admin_analytics.php skips them. This is the receipt list.
  */
 function renderAnalyticsCreditSales(metrics) {
-  const summary = document.getElementById("analytics-credit-sales");
+  const summary = document.getElementById("analytics-credit-kpis");
   const receipts = document.getElementById("analytics-credit-receipts");
   if (!summary || !receipts) return;
 
@@ -2370,12 +2444,15 @@ function renderAnalyticsCreditSales(metrics) {
   const revenue = Number(sales.revenue || 0);
   const rows = Array.isArray(sales.recent) ? sales.recent : [];
 
-  summary.innerHTML = [
-    '<div class="analytics-stack-item"><strong>Purchases this period</strong>' + count + "</div>",
-    '<div class="analytics-stack-item"><strong>Previews sold</strong>' + credits + "</div>",
-    '<div class="analytics-stack-item"><strong>Amount collected</strong>'
-      + formatPeso(revenue) + "</div>",
-  ].join("");
+  const perSale = count > 0 ? Math.round(credits / count) : 0;
+  summary.innerHTML = `
+    <div class="ops-pill"><div class="label">Purchases</div><div class="value">${count}</div></div>
+    <div class="ops-pill"><div class="label">Previews sold</div><div class="value">${credits}</div></div>
+    <div class="ops-pill"><div class="label">Collected</div><div class="value">${formatPeso(revenue)}</div></div>
+    <div class="ops-pill"><div class="label">Avg per purchase</div><div class="value">${perSale}</div></div>
+  `;
+
+  renderCreditSalesChart(sales.daily);
 
   if (!rows.length) {
     receipts.innerHTML = emptyStateMarkup(
@@ -2597,38 +2674,107 @@ function renderOperations(metrics) {
   `;
 }
 
-function renderCustomers(metrics) {
-  const el = document.getElementById("analytics-customers");
-  if (!el) return;
-  const c = metrics?.customers || {};
-  const favBarber = c.mostBookedBarber;
-  const styles = c.mostFavoritedHairstyles || [];
-  const bookedStyles = metrics?.ai?.mostBooked || [];
-  el.innerHTML = `
-    <div class="analytics-stack-item"><strong>New customers</strong>${Number(c.newCustomers || 0)}</div>
-    <div class="analytics-stack-item"><strong>Returning customers</strong>${Number(c.returningCustomers || 0)}</div>
-    <div class="analytics-stack-item"><strong>Total customers</strong>${Number(c.totalCustomers || 0)}</div>
-    <div class="analytics-stack-item">
-      <strong>Most booked barber</strong>
-      ${favBarber
-        ? `${escapeAnalyticsText(favBarber.barberName)} · ${Number(favBarber.bookingCount)} bookings`
-        : "Insufficient data"}
-      <div class="meta" style="margin-top:4px;">${escapeAnalyticsText(favBarber?.note || "Barber favorites are not stored.")}</div>
-    </div>
-    <div class="analytics-stack-item">
-      <strong>Most booked haircuts</strong>
-      ${bookedStyles.length
-        ? bookedStyles.slice(0, 5).map((s) => `${escapeAnalyticsText(s.style_name)} (${Number(s.booking_count)})`).join(", ")
-        : "No haircut bookings in this period."}
-      <div class="meta" style="margin-top:4px;">Excludes cancelled and no-show bookings.</div>
-    </div>
-    <div class="analytics-stack-item">
-      <strong>Most favorited hairstyles</strong>
-      ${styles.length
-        ? styles.slice(0, 5).map((s) => `${escapeAnalyticsText(s.style_name)} (${s.favorite_count})`).join(", ")
-        : "No favorites in this period."}
+/**
+ * A share bar behind a count, so a column of numbers can be read at a glance.
+ *
+ * The figures were printed as a sentence -- "Blowout Taper (12), French Crop
+ * (12), Curly Burst Fade (9)" -- which is data in the shape of prose: nothing
+ * lines up, nothing compares, and every count has to be read separately.
+ */
+function countBarCell(count, max) {
+  const value = Number(count || 0);
+  const width = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+
+  return `
+    <div class="count-bar">
+      <div class="count-bar-track"><span style="width:${width}%;"></span></div>
+      <strong>${value}</strong>
     </div>
   `;
+}
+
+/** A ranked table of haircuts, used for both bookings and favourites. */
+function renderHaircutRankTable(containerId, rows, countKey, countLabel, emptyTitle, emptyBody) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const list = Array.isArray(rows) ? rows.slice(0, 5) : [];
+  if (!list.length) {
+    container.innerHTML = emptyStateMarkup(emptyTitle, emptyBody);
+    return;
+  }
+
+  const max = list.reduce((top, row) => Math.max(top, Number(row[countKey] || 0)), 0);
+  const total = list.reduce((sum, row) => sum + Number(row[countKey] || 0), 0);
+
+  renderTable(
+    containerId,
+    [
+      { key: "rank", label: "#" },
+      { key: "style", label: "Haircut" },
+      { key: "count", label: countLabel },
+      { key: "share", label: "Share" },
+    ],
+    list.map((row, index) => ({
+      rank: String(index + 1),
+      style: escapeAnalyticsText(row.style_name || "Unnamed"),
+      count: countBarCell(row[countKey], max),
+      // Share of the top five, not of everything -- stated in the header so
+      // the number is not mistaken for a share of all bookings.
+      share: total > 0
+        ? `${Math.round((Number(row[countKey] || 0) / total) * 100)}%`
+        : "-",
+    })),
+  );
+}
+
+function renderCustomers(metrics) {
+  const kpis = document.getElementById("analytics-customer-kpis");
+  const barberEl = document.getElementById("analytics-customer-barber");
+  const c = metrics?.customers || {};
+
+  if (kpis) {
+    const total = Number(c.totalCustomers || 0);
+    const returning = Number(c.returningCustomers || 0);
+    const repeatRate = total > 0 ? Math.round((returning / total) * 100) : 0;
+    kpis.innerHTML = `
+      <div class="ops-pill"><div class="label">New customers</div><div class="value">${Number(c.newCustomers || 0)}</div></div>
+      <div class="ops-pill"><div class="label">Returning</div><div class="value">${returning}</div></div>
+      <div class="ops-pill"><div class="label">Total</div><div class="value">${total}</div></div>
+      <div class="ops-pill"><div class="label">Repeat rate</div><div class="value">${repeatRate}%</div></div>
+    `;
+  }
+
+  if (barberEl) {
+    const favBarber = c.mostBookedBarber;
+    barberEl.innerHTML = `
+      <div class="analytics-stack-item">
+        <strong>Most booked barber</strong>
+        ${favBarber
+          ? `${escapeAnalyticsText(favBarber.barberName)} · ${Number(favBarber.bookingCount)} bookings`
+          : "Insufficient data"}
+        <div class="meta" style="margin-top:4px;">${escapeAnalyticsText(favBarber?.note || "Barber favorites are not stored.")}</div>
+      </div>
+    `;
+  }
+
+  renderHaircutRankTable(
+    "analytics-customer-booked",
+    metrics?.ai?.mostBooked,
+    "booking_count",
+    "Bookings",
+    "No haircut bookings yet",
+    "Bookings in this period will be ranked here.",
+  );
+
+  renderHaircutRankTable(
+    "analytics-customer-favourites",
+    metrics?.customers?.mostFavoritedHairstyles,
+    "favorite_count",
+    "Saves",
+    "No favourites yet",
+    "Haircuts customers save will be ranked here.",
+  );
 }
 
 function renderAiBrief(summary, insightPayload) {
