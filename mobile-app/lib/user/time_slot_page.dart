@@ -51,6 +51,16 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   String? _error;
   List<Map<String, dynamic>> _slots = [];
   Map<String, dynamic>? _defaultService;
+
+  /// Every service the shop offers on this channel.
+  ///
+  /// The list was fetched, one entry picked from it, and the rest thrown
+  /// away -- so a shop could add Perm, see it saved, and never find a way for
+  /// a customer to book it. The services table, the booking endpoint and
+  /// appointment_details all supported more than one service already; only
+  /// this screen did not offer the choice.
+  List<Map<String, dynamic>> _services = const [];
+  bool _servicesLoading = true;
   bool _loadingWeatherAdvice = false;
   String? _weatherSummary;
   /// Hour-of-day (0-23) -> rain probability % / temperature C for the selected
@@ -350,6 +360,13 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
           .map((item) => Map<String, dynamic>.from(item as Map))
           .toList();
 
+      if (mounted) {
+        setState(() {
+          _services = services;
+          _servicesLoading = false;
+        });
+      }
+
       final selectedServiceId = UserSession.selectedServiceId;
       if (selectedServiceId != null) {
         for (final service in services) {
@@ -378,8 +395,199 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
       }
       UserSession.selectedServiceId = int.tryParse(haircutService['service_id']?.toString() ?? '');
     } catch (_) {
-      // ignore
+      if (mounted) {
+        setState(() => _servicesLoading = false);
+      }
     }
+  }
+
+  /// What the customer is booking, and what it costs.
+  ///
+  /// A single service renders as a line rather than a one-option dropdown:
+  /// asking someone to choose between one thing is noise.
+  Widget _buildServicePicker() {
+    if (_servicesLoading) {
+      return const SizedBox(
+        height: 44,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white38),
+          ),
+        ),
+      );
+    }
+    if (_services.isEmpty) return const SizedBox.shrink();
+
+    final selectedId = int.tryParse(
+      _defaultService?['service_id']?.toString() ?? '',
+    );
+
+    if (_services.length == 1) {
+      return _serviceSummary(_services.first);
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final service in _services) ...[
+          _serviceOption(service, isSelected: _serviceId(service) == selectedId),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  int _serviceId(Map<String, dynamic> service) =>
+      int.tryParse(service['service_id']?.toString() ?? '') ?? 0;
+
+  String _servicePrice(Map<String, dynamic> service) {
+    final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
+
+    return '\u20b1${price.toStringAsFixed(0)}';
+  }
+
+  /// The service's own duration, shown but not used for the slot.
+  ///
+  /// Every appointment occupies one hour: that is how availability, the
+  /// suggestion engine and the barber's schedule all count. Showing the real
+  /// figure keeps the price honest without quietly changing what a slot is.
+  String _serviceDuration(Map<String, dynamic> service) {
+    final minutes = int.tryParse(service['base_duration']?.toString() ?? '') ?? 0;
+
+    return minutes > 0 ? 'about $minutes min' : '';
+  }
+
+  Widget _serviceSummary(Map<String, dynamic> service) {
+    final duration = _serviceDuration(service);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  service['service_name']?.toString() ?? 'Service',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (duration.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Text(
+                    duration,
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Text(
+            _servicePrice(service),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _serviceOption(Map<String, dynamic> service, {required bool isSelected}) {
+    final duration = _serviceDuration(service);
+    final description = service['description']?.toString().trim() ?? '';
+
+    return Material(
+      color: isSelected ? const Color(0xFF1E1E1E) : const Color(0xFF141414),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          setState(() => _defaultService = service);
+          UserSession.selectedServiceId = _serviceId(service);
+        },
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected ? Colors.white : Colors.white12,
+              width: isSelected ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                isSelected
+                    ? Icons.radio_button_checked
+                    : Icons.radio_button_unchecked,
+                size: 18,
+                color: isSelected ? Colors.white : Colors.white38,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      service['service_name']?.toString() ?? 'Service',
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : Colors.white70,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    if (duration.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        duration,
+                        style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                _servicePrice(service),
+                style: TextStyle(
+                  color: isSelected ? Colors.white : Colors.white70,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -700,6 +908,18 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                   ],
                 ),
               ),
+            ],
+            // Rescheduling keeps the service the appointment already has;
+            // offering to change it here would be a different booking.
+            if (!_isRescheduleMode) ...[
+              const SizedBox(height: 24),
+              Text(
+                _services.length > 1 ? 'Choose a service' : 'Service',
+                style: const TextStyle(
+                    color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 8),
+              _buildServicePicker(),
             ],
             if (!_isRescheduleMode) ...[
               const SizedBox(height: 24),

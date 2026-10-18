@@ -43,6 +43,13 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   late Map<String, dynamic> _recommended;
   late List<Map<String, dynamic>> _alternatives;
 
+  /// The service this booking will be filed under, shown rather than assumed.
+  ///
+  /// This is the one-tap route to an appointment, so it picks a service by
+  /// itself. It used to pick silently: a shop could add Perm and no customer
+  /// coming through here would ever see it, let alone book it.
+  Map<String, dynamic>? _service;
+
   @override
   void initState() {
     super.initState();
@@ -52,6 +59,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
         .map((item) => Map<String, dynamic>.from(item))
         .toList();
     unawaited(_refreshSuggestionIfStale());
+    unawaited(_primeServiceForDisplay());
   }
 
   Future<void> _refreshSuggestionIfStale() async {
@@ -127,6 +135,167 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     _cachedServices = services;
     _cachedServicesAt = DateTime.now();
     return services;
+  }
+
+  /// Fills [_service] for the summary line, without blocking the page.
+  Future<void> _primeServiceForDisplay() async {
+    final service = await _loadDefaultService();
+    if (!mounted || service == null || service.isEmpty) return;
+    setState(() => _service = service);
+  }
+
+  /// Lets the customer change it without leaving the fast path.
+  Future<void> _pickService() async {
+    final services = await _fetchServices();
+    if (!mounted || services == null || services.length < 2) return;
+
+    final selectedId = UserSession.selectedServiceId;
+    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      backgroundColor: const Color(0xFF141414),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(18, 18, 18, 10),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Choose a service',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            for (final service in services)
+              ListTile(
+                title: Text(
+                  service['service_name']?.toString() ?? 'Service',
+                  style: const TextStyle(color: Colors.white, fontSize: 14.5),
+                ),
+                subtitle: Text(
+                  _serviceSubtitle(service),
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
+                ),
+                trailing: Text(
+                  _servicePrice(service),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                leading: Icon(
+                  int.tryParse(service['service_id']?.toString() ?? '') == selectedId
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Colors.white70,
+                  size: 20,
+                ),
+                onTap: () => Navigator.of(ctx).pop(service),
+              ),
+            const SizedBox(height: 10),
+          ],
+        ),
+      ),
+    );
+
+    if (!mounted || chosen == null) return;
+    setState(() => _service = chosen);
+    UserSession.selectedServiceId =
+        int.tryParse(chosen['service_id']?.toString() ?? '');
+  }
+
+  String _servicePrice(Map<String, dynamic> service) {
+    final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
+
+    return '\u20b1${price.toStringAsFixed(0)}';
+  }
+
+  /// The service's own duration, for information.
+  ///
+  /// Every appointment still occupies one hour -- that is how availability
+  /// and the barber's schedule count -- so this describes the work, not the
+  /// slot.
+  String _serviceSubtitle(Map<String, dynamic> service) {
+    final minutes = int.tryParse(service['base_duration']?.toString() ?? '') ?? 0;
+
+    return minutes > 0 ? 'about $minutes min' : '';
+  }
+
+  Widget _buildServiceLine() {
+    final service = _service;
+    if (service == null) return const SizedBox.shrink();
+
+    final subtitle = _serviceSubtitle(service);
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: Material(
+        color: const Color(0xFF141414),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _booking ? null : () => unawaited(_pickService()),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.content_cut, size: 17, color: Colors.white38),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        service['service_name']?.toString() ?? 'Service',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      if (subtitle.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle,
+                          style: const TextStyle(
+                              color: Colors.white38, fontSize: 11.5),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Text(
+                  _servicePrice(service),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  'Change',
+                  style: TextStyle(color: AppBrand.accent, fontSize: 12.5),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<Map<String, dynamic>?> _loadDefaultService() async {
@@ -635,6 +804,7 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                         style: TextStyle(color: Colors.orangeAccent, fontSize: 13),
                       ),
                     ),
+                  _buildServiceLine(),
                   const SizedBox(height: 18),
                   Row(
                     children: [
