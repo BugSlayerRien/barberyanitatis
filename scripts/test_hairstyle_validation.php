@@ -169,5 +169,39 @@ foreach (['api/admin_hairstyles.php', 'api/barber_hairstyles.php'] as $file) {
             && !str_contains($source, 'db_error_response_payload($e)'));
 }
 
+// --- a haircut cannot be created without a hair type -------------------------
+// Texture lives on the variants, not the style, and the Add form never asked
+// for one. A haircut saved without any was published, listed for every
+// customer regardless of their hair -- nothing to filter on -- and bookable by
+// none, because the booking attaches to a variant.
+$adminSource = (string)file_get_contents(__DIR__ . '/../api/admin_hairstyles.php');
+check('creating a haircut refuses an empty hair type list',
+    str_contains($adminSource, 'Pick at least one hair type this haircut suits.'));
+check('and only Straight, Wavy or Curly are accepted',
+    str_contains($adminSource, "['Straight', 'Wavy', 'Curly']"));
+check('creating a haircut writes its variants',
+    str_contains($adminSource, 'INSERT INTO hairstyle_variants'));
+check('one per face shape, as a barber submission does',
+    str_contains($adminSource, "foreach (['Oval', 'Round', 'Square'] as \$faceShape)"));
+
+$portalJs = (string)file_get_contents(__DIR__ . '/../web-admin/admin/app.js');
+check('the form asks for the hair types',
+    str_contains($portalJs, 'Which hair types does this suit?'));
+check('and refuses to save without one',
+    str_contains($portalJs, 'Pick at least one hair type this haircut suits.'));
+check('the question is asked on create, not on edit',
+    str_contains($portalJs, '${isEdit ? "" : `'));
+
+// Nothing in the live catalogue may be in the state this prevents.
+$orphans = $pdo->query(
+    'SELECT h.style_code FROM hairstyles h
+      WHERE h.is_active = TRUE
+        AND NOT EXISTS (SELECT 1 FROM hairstyle_variants v
+                        WHERE v.hairstyle_id = h.hairstyle_id)'
+)->fetchAll(PDO::FETCH_COLUMN);
+check('no published haircut is left without a variant'
+    . ($orphans === [] ? '' : ' (' . implode(', ', $orphans) . ')'),
+    $orphans === []);
+
 echo "\n{$checks} checks, {$failures} failures\n";
 exit($failures === 0 ? 0 : 1);

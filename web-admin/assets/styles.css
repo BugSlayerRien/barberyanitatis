@@ -2941,6 +2941,38 @@ table.table {
 
 /* A heading inside a card, so one card can hold several tables without them
    running together as one undifferentiated list. */
+/* Hair types on the Add haircut form. Asked for at creation because a haircut
+   with none is published, listed for every customer, and bookable by none. */
+.haircut-textures {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: var(--s-3);
+  margin: 0;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.haircut-textures legend {
+  padding: 0 6px;
+  font-size: var(--fs-label);
+  color: var(--text-subtle);
+}
+
+.haircut-texture-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  margin-bottom: 6px;
+}
+
+.haircut-texture-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+}
+
 .analytics-subhead {
   display: flex;
   align-items: baseline;

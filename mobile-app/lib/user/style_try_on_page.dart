@@ -70,6 +70,7 @@ class _StyleTryOnPageState extends State<StyleTryOnPage> {
 
   int get _effectiveLengthLevel => _lengthOverride ?? widget.hairLengthLevel;
 
+
   int get _variantId =>
       int.tryParse(widget.style['variantId']?.toString() ?? '') ??
       int.tryParse(widget.style['variantID']?.toString() ?? '') ??

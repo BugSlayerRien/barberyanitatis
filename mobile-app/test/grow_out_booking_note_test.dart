@@ -1,61 +1,63 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tatis_barbershop/user/widgets/style_length_warning.dart';
 
-/// The warning used to stop at the customer.
+/// A cut the customer's hair cannot carry yet is no longer bookable.
 ///
-/// They were shown "this cut usually needs longer hair", they tapped "Book it
-/// anyway", and the barber received an ordinary booking with no sign that the
-/// hair could not carry the cut. Defending that with "the barber will talk it
-/// through" assumed a conversation the system never started -- which is the
-/// gap the app exists to close.
+/// It used to be: they were warned, they tapped "Book it anyway", and the shop
+/// held an appointment for a haircut nobody could give that morning. The
+/// defence -- "the barber will talk it through" -- assumed a conversation the
+/// system never started, which is the gap the app exists to close.
 void main() {
-  group('growOutBookingNote', () {
-    test('names the haircut the customer actually wanted', () {
-      expect(growOutBookingNote('Modern Mullet'), contains('Modern Mullet'));
+  group('growOutCaption', () {
+    test('no longer tells the customer to ask their barber', () {
+      final caption = growOutCaption('Pineapple').toLowerCase();
+      expect(caption, isNot(contains('ask them')));
+      expect(caption, isNot(contains('how long it would take')));
     });
 
-    test('says it is a goal, not today\'s cut', () {
-      expect(growOutBookingNote('Wolf Cut').toLowerCase(),
-          contains('grow-out goal'));
+    // An estimate shipped briefly and was removed: mapping four coarse
+    // length levels to centimetres produced numbers wrong by months, which is
+    // worse than saying nothing.
+    test('promises no timeframe it cannot stand behind', () {
+      final caption = growOutCaption('Wolf Cut').toLowerCase();
+      expect(caption, contains('wolf cut'));
+      expect(caption, isNot(contains('months')));
+      expect(caption, isNot(contains('year')));
     });
 
-    test('tells the barber what to do today', () {
-      final note = growOutBookingNote('Two Block').toLowerCase();
-      expect(note, contains('closest version'));
-      expect(note, contains('today'));
-    });
-
-    test('asks them to answer the question the customer will have', () {
-      expect(growOutBookingNote('Pompadour').toLowerCase(), contains('grow'));
-    });
-
-    // It travels in special_instructions, which the barber's appointment
-    // detail renders as plain text in a 300-character field alongside the
-    // customer's own note.
-    test('fits beside a customer note without being truncated', () {
-      expect(growOutBookingNote('Curly Modern Mullet').length, lessThan(300));
-    });
-
-    test('is plain prose, not a code the barber has to decipher', () {
-      final note = growOutBookingNote('Pineapple');
-      expect(note.contains('{'), isFalse);
-      expect(note.contains('_'), isFalse);
-      expect(note.endsWith('.'), isTrue);
+    test('and never claims the cut is possible today', () {
+      expect(growOutCaption('Two Block').toLowerCase(),
+          contains('cannot be cut'));
     });
   });
 
-  group('the caption the customer sees', () {
-    test('agrees with what the barber is told', () {
-      // Both must name the same haircut, or the customer reads one promise on
-      // the preview and the barber another on the appointment.
-      expect(growOutCaption('Modern Mullet'), contains('Modern Mullet'));
-      expect(growOutBookingNote('Modern Mullet'), contains('Modern Mullet'));
+  group('styleNeedsMoreLength', () {
+    test('is what the booking block turns on', () {
+      expect(styleNeedsMoreLength({'min_length_level': 3}, 1), isTrue);
+      expect(styleNeedsMoreLength({'min_length_level': 1}, 1), isFalse);
+      expect(styleNeedsMoreLength({'minLengthLevel': 2}, 3), isFalse);
     });
 
-    test('and neither claims the cut can be given today', () {
-      expect(growOutCaption('Wolf Cut').toLowerCase(), contains('cannot'));
-      expect(growOutBookingNote('Wolf Cut').toLowerCase(),
-          isNot(contains('as shown')));
+    test('a style with no stated length is never blocked', () {
+      expect(styleNeedsMoreLength({'style_name': 'Buzz Cut'}, 0), isFalse);
+    });
+  });
+
+  group('the note the barber gets', () {
+    // The only route left to booking a cut that needs more length is to
+    // correct the scan by hand. The barber is the one who finds out which
+    // reading was right, so they are told that it was corrected.
+    test('says the customer overruled the scan', () {
+      final note = customerClaimedLengthNote('Modern Mullet').toLowerCase();
+      expect(note, contains('modern mullet'));
+      expect(note, contains('correct'));
+      expect(note, contains('check the length'));
+    });
+
+    test('is plain prose that fits beside the customer\'s own note', () {
+      final note = customerClaimedLengthNote('Curly Modern Mullet');
+      expect(note.length, lessThan(300));
+      expect(note.endsWith('.'), isTrue);
     });
   });
 }

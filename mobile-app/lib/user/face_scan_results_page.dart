@@ -727,6 +727,7 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
   bool _needsMoreLength(Map<String, dynamic> style) =>
       styleNeedsMoreLength(style, _effectiveLengthLevel);
 
+
   /// Accepts the customer's word over the scan's, and remembers it.
   ///
   /// Mirrors _applyHairTextureOverride: written into UserSession so it
@@ -1592,6 +1593,42 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       return;
     }
 
+    // Refused, not warned.
+    //
+    // The preview on screen is the cut once the hair has grown; booking it
+    // would hand the barber an appointment for a haircut they cannot perform
+    // that morning. "The customer chose it" is not an answer to that -- the
+    // shop still loses the slot and the customer still leaves disappointed.
+    //
+    // Honest only because there is a way out: the cut that grows into this one
+    // is bookable today, and a customer whose hair is longer than the scan
+    // read can correct it under Adjust hair below.
+    if (_needsMoreLength(selected)) {
+      final wantsAlternative = await blockedLongerHairBooking(
+        context,
+        _selectedStyleName,
+        canShowAlternatives: _achievableAlternative != null,
+      );
+      if (!mounted) return;
+      final alternative = _achievableAlternative;
+      if (wantsAlternative && alternative != null) {
+        setState(() {
+          _selected = alternative;
+          _expandedVariantId = _variantKey(alternative);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${alternative['style_name'] ?? 'This style'} is bookable today '
+              'and grows into the one you wanted.',
+            ),
+          ),
+        );
+      }
+
+      return;
+    }
+
     setState(() => _bookingInFlight = true);
 
     final userId = UserSession.userId;
@@ -1666,10 +1703,12 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
       }
       UserSession.selectedPreviewImages = previewUrls;
       UserSession.customerPreviewImages = previewUrls;
-      // Carried to the barber on the appointment, so the warning does not stop
-      // at the customer who dismissed it.
-      UserSession.growOutBookingNote = _previewIsGrowOutGoal
-          ? growOutBookingNote(_selectedStyleName)
+      // The only way to reach a booking for a style that needs more length is
+      // to have corrected the scan under Adjust hair. The barber is told that,
+      // because the measurement and the customer's word disagree and the
+      // barber is the one who finds out which was right.
+      UserSession.growOutBookingNote = _lengthOverride != null
+          ? customerClaimedLengthNote(_selectedStyleName)
           : null;
 
       unawaited(
@@ -2151,6 +2190,33 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
     );
   }
 
+  /// The four lengths the scan reports, in the customer's words.
+  static const _lengthOptions = <int, String>{
+    0: 'Very short',
+    1: 'Short',
+    2: 'Medium',
+    3: 'Long',
+  };
+
+  Widget _adjustmentChip({
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return ChoiceChip(
+      label: Text(label, style: const TextStyle(fontSize: 11)),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      selectedColor: Colors.white,
+      labelStyle: TextStyle(
+        color: selected ? Colors.black : Colors.white70,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+      ),
+      backgroundColor: const Color(0xFF1E1E1E),
+      side: const BorderSide(color: Colors.white24),
+    );
+  }
+
   Widget _buildHairTypeAdjustment() {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.white12),
@@ -2158,34 +2224,138 @@ class _FaceScanResultsPageState extends State<FaceScanResultsPage> {
         tilePadding: EdgeInsets.zero,
         childrenPadding: const EdgeInsets.only(bottom: 8),
         title: const Text(
-          'Adjust hair type',
+          'Adjust hair',
           style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.w600),
         ),
         iconColor: Colors.white54,
         collapsedIconColor: Colors.white38,
         children: [
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Hair type',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 6),
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: _textureOptions.map((texture) {
-              final selected = _hairTexture == texture;
-              return ChoiceChip(
-                label: Text(texture, style: const TextStyle(fontSize: 11)),
-                selected: selected,
-                onSelected: (_) => _applyHairTextureOverride(texture),
-                selectedColor: Colors.white,
-                labelStyle: TextStyle(
-                  color: selected ? Colors.black : Colors.white70,
-                  fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
-                ),
-                backgroundColor: const Color(0xFF1E1E1E),
-                side: const BorderSide(color: Colors.white24),
+              return _adjustmentChip(
+                label: texture,
+                selected: _hairTexture == texture,
+                onTap: () => _applyHairTextureOverride(texture),
               );
             }).toList(),
           ),
+          const SizedBox(height: 14),
+          // Length was read-only until now, which made the booking block a
+          // dead end for anyone the scan had measured wrong: the only way out
+          // was to generate a style and answer a modal. Length is the weakest
+          // signal in the scan -- the lowest hair pixel against the chin,
+          // defaulting to short whenever the measurement fails -- so the
+          // customer has to be able to correct it directly.
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Hair length',
+              style: TextStyle(color: Colors.white38, fontSize: 11),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: _lengthOptions.entries.map((entry) {
+              return _adjustmentChip(
+                label: entry.value,
+                selected: _effectiveLengthLevel == entry.key,
+                onTap: () => unawaited(_applyHairLengthOverride(entry.key)),
+              );
+            }).toList(),
+          ),
+          if (_lengthOverride != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'You set this. The scan read '
+                '${_lengthOptions[widget.hairLengthLevel] ?? 'short'}.',
+                style: const TextStyle(color: Colors.white38, fontSize: 10.5),
+              ),
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  /// Takes the customer's word on their own length, after checking they meant
+  /// it.
+  ///
+  /// It changes which haircuts are offered, which are warned about and which
+  /// can be booked at all, so it is not something to discover having tapped a
+  /// chip to see what it did.
+  Future<void> _applyHairLengthOverride(int level) async {
+    if (_effectiveLengthLevel == level) return;
+
+    final scanned = _lengthOptions[widget.hairLengthLevel] ?? 'short';
+    final chosen = _lengthOptions[level] ?? 'short';
+    final revert = level == widget.hairLengthLevel;
+
+    if (!revert) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: const Color(0xFF1A1A1A),
+          title: const Text(
+            'Change your hair length?',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+          ),
+          content: Text(
+            'The scan measured your hair as $scanned. Setting it to $chosen '
+            'changes which haircuts you are offered and which ones you can '
+            'book.\n\nOnly change this if the scan got it wrong — your '
+            'barber will see that you corrected it.',
+            style: const TextStyle(color: Colors.white70, height: 1.45),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('Keep $scanned',
+                  style: const TextStyle(color: Colors.white70)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.black,
+              ),
+              child: Text('Set to $chosen'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+
+    setState(() => _lengthOverride = revert ? null : level);
+
+    // Written into the session rather than this widget, so leaving the page
+    // and coming back does not quietly restore the reading they corrected.
+    UserSession.lastScan = {
+      ...?UserSession.lastScan,
+      'hairLengthLevel': _effectiveLengthLevel,
+      'hairLengthSource': revert ? 'scan' : 'customer',
+    };
+    UserSession.commitCompletedScan();
+
+    if (!mounted) return;
+    // The warnings, the grow-out labels and the transition suggestions are all
+    // derived from this, so the list has to be rebuilt rather than left
+    // showing answers to the old question.
+    _loadRecommendations();
   }
 
   Widget _sectionTitle(String title, {Widget? trailing}) {

@@ -21,6 +21,18 @@ bool styleNeedsMoreLength(Map<String, dynamic> style, int measuredLevel) {
   return min > measuredLevel;
 }
 
+// There is no growth estimate here, and there deliberately is not one.
+//
+// A version of this shipped briefly: it mapped the scan's four length levels
+// to centimetres and divided by an average growth rate. The numbers it
+// produced were wrong often enough to be worse than silence -- the levels are
+// a coarse reading of one photo, not a measurement, and growth rates differ by
+// more than the arithmetic allowed for. Telling someone "about 4 to 6 months"
+// and being wrong by half a year is not a service.
+//
+// If this comes back it needs a real measurement, not a level, and a figure
+// the shop stands behind.
+
 /// What the customer chose when told a style needs more hair than they have.
 enum LengthChoice {
   /// Backed out. Nothing is generated and nothing is spent.
@@ -158,7 +170,8 @@ Future<LengthChoice> confirmLongerHairStyle(
               icon: Icons.schedule_rounded,
               title: 'Show the grow-out look',
               detail: 'Uses one preview. The picture will have hair you do '
-                  'not have yet — it is the goal, not today.',
+                  'not have yet — it is the goal, not today, and it cannot '
+                  'be booked.',
               value: LengthChoice.growOutGoal,
               primary: true,
             ),
@@ -183,45 +196,58 @@ Future<LengthChoice> confirmLongerHairStyle(
 /// a generation, an unexpected haircut costs the appointment. The customer is
 /// still allowed to proceed -- the length measurement is the weakest signal in
 /// the scan, and the barber can talk it through on the day.
-Future<bool> confirmLongerHairBooking(
+/// Refuses a booking for a cut the customer's hair cannot carry yet.
+///
+/// This used to be "Book it anyway". The argument for allowing it was that the
+/// barber would talk it through at the chair -- which assumes a conversation
+/// the system never starts, and leaves the shop holding an appointment for a
+/// haircut nobody can give that day.
+///
+/// Refusing is only honest because there is somewhere to go: the cut that
+/// grows into this one is bookable today, and a customer whose hair really is
+/// longer than the scan read can say so and come straight back.
+///
+/// Returns true when the customer asked to see the cut that grows into this.
+Future<bool> blockedLongerHairBooking(
   BuildContext context,
-  String styleName,
-) async {
-  final proceed = await showDialog<bool>(
+  String styleName, {
+  bool canShowAlternatives = true,
+}) async {
+  final result = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       backgroundColor: const Color(0xFF1A1A1A),
       title: const Text(
-        'This cut usually needs longer hair',
+        'This cut cannot be booked yet',
         style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
       ),
       content: Text(
-        'Your scan measured less length than "$styleName" normally needs, so '
-        'this is a cut to grow towards rather than one for today.\n\n'
-        'You can still book it. Your barber will cut the closest version they '
-        'can on the day, and can tell you how long it would take to grow out '
-        'for the full look.',
+        'The preview you are looking at is "$styleName" once your hair has '
+        'grown out, not a cut your barber can give today.\n\n'
+        'Booking it would put your barber in front of a haircut they cannot '
+        'perform. Get the cut that grows into it instead — it is bookable '
+        'now, and it leads here.',
         style: const TextStyle(color: Colors.white70, height: 1.45),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(false),
-          child: const Text('Pick another',
-              style: TextStyle(color: Colors.white70)),
+          child: const Text('Close', style: TextStyle(color: Colors.white70)),
         ),
-        ElevatedButton(
-          onPressed: () => Navigator.of(ctx).pop(true),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.white,
-            foregroundColor: Colors.black,
+        if (canShowAlternatives)
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+            ),
+            child: const Text('Show me what to get now'),
           ),
-          child: const Text('Book it anyway'),
-        ),
       ],
     ),
   );
 
-  return proceed == true;
+  return result == true;
 }
 
 /// The amber badge that marks a preview as a goal rather than today's cut.
@@ -264,9 +290,15 @@ class GrowOutGoalBadge extends StatelessWidget {
 }
 
 /// The sentence that goes under a grow-out preview.
+///
+/// It used to end "ask them how long it would take", which handed the
+/// customer's question to the barber -- the thing the app exists to spare
+/// them. It does not answer it either: see the note at the top of this file
+/// on why the growth estimate was removed. It states what the picture is and
+/// stops there.
 String growOutCaption(String styleName) =>
-    'This is $styleName once your hair has grown out. Your barber cannot cut '
-    'it at your current length — ask them how long it would take.';
+    'This is $styleName once your hair has grown out. It cannot be cut at '
+    'your current length.';
 
 /// What the barber is told when a customer books a cut their hair is too short
 /// for, and what the customer is shown so they know it was said.
@@ -276,6 +308,11 @@ String growOutCaption(String styleName) =>
 /// Defending that with "the barber will talk it through" assumed a
 /// conversation the system never started -- which is the gap the app exists to
 /// close. Carried on the appointment instead, so neither side has to remember.
+String customerClaimedLengthNote(String styleName) =>
+    'The customer booked $styleName after correcting the scan: it measured '
+    'their hair shorter than this cut needs, and they said it is long enough. '
+    'Check the length before you start.';
+
 String growOutBookingNote(String styleName) =>
     'Booked as a grow-out goal: the customer wants $styleName, but their scan '
     'measured less length than it needs. Cut the closest version you can today '

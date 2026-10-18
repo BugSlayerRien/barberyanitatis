@@ -47,78 +47,42 @@ function ensure_barber_channel_column(PDO $pdo): void
         "barber_channel IN ('walk_in', 'appointment')"
     );
 
-    // Every endpoint that filters by channel already calls this, so it is the
-    // natural place to load the merge toggle once per request.
-    queue_merge_enabled($pdo);
-
     $initialized = true;
 }
 
 /**
- * Queue merge: show every barber in both the kiosk queue and the appointment
- * views, instead of splitting them by `barber_channel`.
+ * Always true: every barber works both queues.
  *
- * Read-side only, and deliberately so -- this flips what a query selects, it
- * does not rewrite any barber's channel, so turning it off restores the split
- * exactly. Pricing is untouched: walk-in and appointment keep their own
- * service rows and tiers (P100 / P500).
+ * The shop has four barbers. Splitting them into "walk-in only" and
+ * "appointment only" meant a customer could be shown a barber the booking
+ * then refused, and it took a barber off the board for half the shop's work
+ * for no gain at that size. The owner's decision: everyone is available for
+ * both, whatever the old toggle said.
  *
- * The flag is read once per request and cached, because
- * barber_channel_filter_sql() is called from about ten places per page.
+ * `barbers.barber_channel` is still stored and still editable -- it records
+ * where a barber mainly works, and the kiosk and the portal label them with
+ * it -- but nothing filters on it any more.
+ *
+ * Kept as a function rather than deleted because about ten call sites and the
+ * receptionist payload ask it, and a constant true is clearer than a
+ * find-and-replace across all of them. Pricing was never involved: walk-in and
+ * appointment keep their own service rows and tiers (P100 / P500).
  */
 function queue_merge_enabled(?PDO $pdo = null): bool
 {
-    static $cached = null;
-
-    if ($cached !== null) {
-        return $cached;
-    }
-    if ($pdo === null) {
-        // No connection to ask with yet: assume the split (current behaviour).
-        return false;
-    }
-
-    try {
-        $stmt = $pdo->prepare(
-            "SELECT setting_value FROM system_settings WHERE setting_key = 'queue_merge_enabled' LIMIT 1"
-        );
-        $stmt->execute();
-        $value = $stmt->fetchColumn();
-        $cached = $value !== false && in_array(strtolower(trim((string)$value)), ['1', 'true', 'yes', 'on'], true);
-    } catch (PDOException $e) {
-        // Settings table missing on a fresh database: keep the split.
-        $cached = false;
-    }
-
-    return $cached;
-}
-
-/** Test seam / explicit override for callers that already know the flag. */
-function queue_merge_set_for_request(bool $enabled): void
-{
-    queue_merge_reset();
-    $GLOBALS['__queue_merge_override'] = $enabled;
-}
-
-function queue_merge_reset(): void
-{
-    unset($GLOBALS['__queue_merge_override']);
+    return true;
 }
 
 function barber_channel_filter_sql(string $channel, string $column = 'barber_channel'): string
 {
-    if (isset($GLOBALS['__queue_merge_override'])) {
-        if ($GLOBALS['__queue_merge_override'] === true) {
-            return '';
-        }
-    } elseif (queue_merge_enabled()) {
-        return '';
-    }
+    // Nothing. Every barber is available in both queues; see
+    // queue_merge_enabled() above.
+    //
+    // Left in place rather than removed from its callers: the queries read
+    // naturally with it, and one function returning '' is a smaller change --
+    // and a reversible one -- than editing ten WHERE clauses. If the shop ever
+    // grows enough to want the split back, it comes back here.
+    unset($channel, $column);
 
-    $normalized = normalize_barber_channel($channel);
-    if ($normalized === null) {
-        return '';
-    }
-
-    return " AND {$column} = '" . str_replace("'", "''", $normalized) . "'";
+    return '';
 }

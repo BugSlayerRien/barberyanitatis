@@ -1861,6 +1861,26 @@ function openHaircutEditor(hairstyle, variants = []) {
     <label>Description
       <input class="input" id="hc-description" value="${escapeHaircutText(hairstyle?.description ?? "")}" />
     </label>
+    ${isEdit ? "" : `
+    <fieldset class="field-grow haircut-textures">
+      <legend>Which hair types does this suit?</legend>
+      <div class="haircut-texture-options">
+        ${["Straight", "Wavy", "Curly"]
+          .map((texture) => `
+            <label class="haircut-texture-option">
+              <input type="checkbox" class="hc-texture" value="${texture}" />
+              <span>${texture}</span>
+            </label>
+          `)
+          .join("")}
+      </div>
+      <span class="field-hint">Pick at least one. A haircut with no hair type
+        has no one to recommend it to: it would sit in the library for every
+        customer and be bookable by none, because the booking attaches to a
+        hair-type variant. Variants for each face shape are created for you,
+        and you can edit or add to them below after saving.</span>
+    </fieldset>
+    `}
     <label class="field-grow">AI preview prompt
       <textarea class="input" id="hc-ai-prompt" rows="3"
         placeholder="sides and back clipped short with a clean taper, three inches left on top, the back tapered to the nape with nothing over the collar">${escapeHaircutText(effectivePrompt)}</textarea>
@@ -1979,10 +1999,21 @@ async function saveHaircutEditor() {
     aiPrompt: document.getElementById("hc-ai-prompt")?.value?.trim() || "",
     aiMinLengthLevel: Number(document.getElementById("hc-ai-min-length")?.value ?? 1),
     transitionStyleCode: document.getElementById("hc-transition")?.value || "",
+    // Create only. On edit the variants are managed in their own section, and
+    // sending this would silently add duplicates.
+    hairTextures: Array.from(document.querySelectorAll(".hc-texture:checked"))
+      .map((el) => el.value),
   };
 
   if (!payload.styleName) {
     toast("Style name is required.");
+    return;
+  }
+
+  // Asked for here rather than discovered later in the readiness panel: a
+  // haircut saved without one is published, visible, and unbookable.
+  if (state.haircutEditor.mode === "create" && !payload.hairTextures.length) {
+    toast("Pick at least one hair type this haircut suits.", "error");
     return;
   }
 
@@ -2964,11 +2995,6 @@ function applySettingsPayload(data) {
   const emailEl = document.getElementById("setting-email");
   if (emailEl) emailEl.checked = settings.emailNotificationsEnabled === 1 || settings.emailNotificationsEnabled === true;
 
-  const queueMergeEl = document.getElementById("setting-queue-merge");
-  if (queueMergeEl) {
-    queueMergeEl.checked = settings.queueMergeEnabled === 1 || settings.queueMergeEnabled === true;
-  }
-
   const fromEmail = document.getElementById("setting-from-email");
   if (fromEmail) {
     fromEmail.value = settings.notificationFromEmail || "noreply@barberyatatis.local";
@@ -3714,7 +3740,6 @@ document.getElementById("settings-save")?.addEventListener("click", async (event
       const payload = {
         action: "update",
         emailNotificationsEnabled: document.getElementById("setting-email").checked ? 1 : 0,
-        queueMergeEnabled: document.getElementById("setting-queue-merge")?.checked ? 1 : 0,
         notificationFromEmail: document.getElementById("setting-from-email")?.value?.trim() || "",
       };
       const response = await fetchWithRetry(resolveApiUrl("admin_settings.php"), {

@@ -45,29 +45,27 @@ Future<void> launchBookingForStyle(
     return;
   }
 
-  // The length warning belongs on the booking path too, not only on the
-  // generate path. A customer could be told a cut needs longer hair, decline
-  // the preview, and book it anyway without ever being asked again -- and
-  // turn up at the chair expecting something the barber cannot cut today.
-  //
-  // Warned, not blocked: the measurement is the weakest signal in the scan,
-  // and a customer who knows their own hair may simply be right. The barber
-  // also sees the booking and can talk it through.
+  // Refused, not warned. Allowing it meant the shop held an appointment for a
+  // haircut nobody could give that day, and the only thing standing between
+  // the customer and that morning was a sentence they had already dismissed
+  // once on the generate screen.
   final measuredLevel =
       (UserSession.lastScan?['hairLengthLevel'] as num?)?.toInt() ?? 1;
   if (styleNeedsMoreLength(style, measuredLevel)) {
     final styleName = style['name']?.toString() ??
         style['style_name']?.toString() ??
         'This haircut';
-    final acceptLength = await confirmLongerHairBooking(context, styleName);
-    if (!acceptLength || !context.mounted) {
-      return;
-    }
-    // The barber is told, rather than left to discover it at the chair.
-    UserSession.growOutBookingNote = growOutBookingNote(styleName);
-  } else {
-    UserSession.growOutBookingNote = null;
+    await blockedLongerHairBooking(
+      context,
+      styleName,
+      // This page shows one haircut; it has no list to steer them into, so
+      // offering "show me what to get now" would lead nowhere.
+      canShowAlternatives: false,
+    );
+
+    return;
   }
+  UserSession.growOutBookingNote = null;
 
   final userId = UserSession.userId;
   if (userId == null) {

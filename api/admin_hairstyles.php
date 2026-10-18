@@ -225,6 +225,21 @@ try {
             }
             $styleCode = strtoupper(trim($styleCode));
         }
+        // One variant per face shape per hair type, exactly as a barber
+        // submission does. Without any, the style is published, listed for
+        // every customer regardless of their hair, and bookable by none --
+        // the booking attaches to a variant, and there is none to attach to.
+        $textures = array_values(array_unique(array_filter(array_map(
+            static fn($t): string => ucfirst(strtolower(trim((string)$t))),
+            (array)($input['hairTextures'] ?? [])
+        ), static fn(string $t): bool => in_array($t, ['Straight', 'Wavy', 'Curly'], true))));
+        if ($textures === []) {
+            json_response(
+                ['error' => 'Pick at least one hair type this haircut suits.'],
+                422
+            );
+        }
+
         $minLevel = max(0, min(3, (int)($input['aiMinLengthLevel'] ?? 1)));
         $transition =
             strtoupper(trim((string)($input['transitionStyleCode'] ?? ''))) ?: null;
@@ -271,9 +286,40 @@ try {
         // indistinguishable from the save not working.
         schema_cache_invalidate('overlay_library_catalog');
 
+        $newHairstyleID = (int)$stmt->fetchColumn();
+
+        // Photos come later, through the variant editor or the overlay upload.
+        // The library draws a placeholder until then, so an empty URL here
+        // costs visibility, not usability.
+        $variantStmt = $pdo->prepare(
+            'INSERT INTO hairstyle_variants (
+                hairstyle_id, face_shape, hair_texture, front_view_url, side_view_url,
+                back_view_url, barber_instructions, clipper_sizes, styling_products,
+                estimated_minutes, confidence_score
+             ) VALUES (
+                :hairstyle_id, :face_shape, :hair_texture, \'\', \'\', \'\',
+                :instructions, NULL, NULL, 40, 0.85
+             )'
+        );
+        $instructions = trim((string)($input['description'] ?? ''))
+            ?: trim((string)($input['aiPrompt'] ?? ''));
+        foreach (['Oval', 'Round', 'Square'] as $faceShape) {
+            foreach ($textures as $texture) {
+                $variantStmt->execute([
+                    ':hairstyle_id' => $newHairstyleID,
+                    ':face_shape' => $faceShape,
+                    ':hair_texture' => $texture,
+                    ':instructions' => $instructions,
+                ]);
+            }
+        }
+
+        schema_cache_invalidate('overlay_library_catalog');
+
         json_response([
             'message' => 'Hairstyle created',
-            'hairstyleID' => (int)$stmt->fetchColumn(),
+            'hairstyleID' => $newHairstyleID,
+            'variantsCreated' => count($textures) * 3,
         ]);
     }
 
