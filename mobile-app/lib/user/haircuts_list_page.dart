@@ -722,6 +722,23 @@ class _HaircutsListPageState extends State<HaircutsListPage> {
       'serviceId': int.tryParse(variant['service_id']?.toString() ?? '') ??
           int.tryParse(variant['serviceID']?.toString() ?? ''),
       'estimatedMinutes': int.tryParse(variant['estimated_minutes']?.toString() ?? ''),
+      // Carried, not dropped.
+      //
+      // The server attaches the shortest hair a cut works on to every library
+      // row, and this map threw it away -- so styleNeedsMoreLength() was
+      // handed a style with no stated length, decided there was nothing to
+      // warn about, and a short-haired customer could book Modern Mullet
+      // straight from the library with no warning at all. The scan was never
+      // the problem: the customer's length is in the session; it was the
+      // haircut's requirement that went missing.
+      'min_length_level': int.tryParse(variant['min_length_level']?.toString() ?? '') ??
+          int.tryParse(variant['minLengthLevel']?.toString() ?? ''),
+      // Needed with it: the cut that grows into this one, offered when the
+      // booking is refused.
+      'transition_style_code': variant['transition_style_code']?.toString() ??
+          variant['transitionStyleCode']?.toString(),
+      'style_code': variant['style_code']?.toString() ??
+          variant['styleCode']?.toString(),
     };
   }
 
