@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/hair_length.php';
 require_once __DIR__ . '/storage.php';
 require_once __DIR__ . '/customer_auth.php';
 require_once __DIR__ . '/slot_recommendation.php';
@@ -74,6 +75,7 @@ function fetch_profile_row(PDO $pdo, int $userID): ?array
             u.profile_image,
             u.created_at,
             up.hair_texture,
+            up.hair_length,
             COALESCE(ac.haircuts_done, 0) AS haircuts_done
         FROM users u
         LEFT JOIN user_profiles up ON up.user_id = u.user_id
@@ -104,6 +106,11 @@ function profile_payload_from_row(array $row): array
         'phone' => (string)($row['phone'] ?? ''),
         'gender' => (string)($row['gender'] ?? ''),
         'hairTexture' => (string)($row['hair_texture'] ?? ''),
+        // Already written by every scan; nothing read it back, so a customer
+        // who had not scanned in this app run was treated as short-haired by
+        // default even though their own profile knew better.
+        'hairLength' => (string)(normalize_hair_length($row['hair_length'] ?? null) ?? ''),
+        'hairLengthLevel' => hair_length_label_to_level($row['hair_length'] ?? null),
         'profileImage' => (string)($row['profile_image'] ?? ''),
         'accountAge' => format_account_age($accountAgeDays),
         'accountAgeDays' => $accountAgeDays,
@@ -144,6 +151,9 @@ try {
         $phone = trim((string)($data['phone'] ?? $row['phone'] ?? ''));
         $gender = normalize_gender($data['gender'] ?? $row['gender'] ?? '');
         $hairTexture = normalize_hair_texture($data['hairTexture'] ?? $data['hair_texture'] ?? $row['hair_texture'] ?? null);
+        $hairLength = normalize_hair_length(
+            $data['hairLength'] ?? $data['hair_length'] ?? $row['hair_length'] ?? null
+        );
         $profileImage = (string)($row['profile_image'] ?? '');
 
         $imageBase64 = trim((string)($data['profile_image_base64'] ?? $data['profileImageBase64'] ?? ''));
@@ -172,15 +182,20 @@ try {
             ':user_id' => $userID,
         ]);
 
+        // COALESCE on length, not on texture: an unrecognised length means
+        // "not sent", and a profile save that leaves the field alone must not
+        // wipe what the last scan measured.
         $upsertProfile = $pdo->prepare(
-            'INSERT INTO user_profiles (user_id, hair_texture, created_at)
-             VALUES (:user_id, :hair_texture, NOW())
+            'INSERT INTO user_profiles (user_id, hair_texture, hair_length, created_at)
+             VALUES (:user_id, :hair_texture, :hair_length, NOW())
              ON CONFLICT (user_id) DO UPDATE
-             SET hair_texture = EXCLUDED.hair_texture'
+             SET hair_texture = EXCLUDED.hair_texture,
+                 hair_length = COALESCE(EXCLUDED.hair_length, user_profiles.hair_length)'
         );
         $upsertProfile->execute([
             ':user_id' => $userID,
             ':hair_texture' => $hairTexture,
+            ':hair_length' => $hairLength,
         ]);
 
         $updated = fetch_profile_row($pdo, $userID);

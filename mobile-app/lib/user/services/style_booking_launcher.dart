@@ -49,8 +49,11 @@ Future<void> launchBookingForStyle(
   // haircut nobody could give that day, and the only thing standing between
   // the customer and that morning was a sentence they had already dismissed
   // once on the generate screen.
-  final measuredLevel =
-      (UserSession.lastScan?['hairLengthLevel'] as num?)?.toInt() ?? 1;
+  // This scan first, then what the profile knows, and only then "short".
+  // Length used to come from the scan alone, so a customer who had not
+  // scanned in this app run was judged short-haired and warned off every long
+  // style -- although their own profile had the answer all along.
+  final measuredLevel = UserSession.effectiveHairLengthLevel;
   if (styleNeedsMoreLength(style, measuredLevel)) {
     final styleName = style['name']?.toString() ??
         style['style_name']?.toString() ??

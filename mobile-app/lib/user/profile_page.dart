@@ -27,6 +27,13 @@ class _ProfilePageState extends State<ProfilePage> {
   static const _genderOptions = ['Male', 'Female', 'Prefer not to tell'];
   static const _hairTextureOptions = ['Straight', 'Wavy', 'Curly'];
 
+  /// In the catalogue's own words, in the order the scan levels run.
+  ///
+  /// Editable here for the same reason texture is: the scan can be wrong, and
+  /// a customer who has not scanned in this app run was otherwise treated as
+  /// short-haired and warned off every long style.
+  static const _hairLengthOptions = ['Very short', 'Short', 'Medium', 'Long'];
+
   bool _loading = true;
   String? _error;
   bool _saving = false;
@@ -37,6 +44,7 @@ class _ProfilePageState extends State<ProfilePage> {
   int _haircutsDone = 0;
   String _gender = '';
   String _hairTexture = '';
+  String _hairLength = '';
   Map<String, String?> _bookingPreferences = {};
   String _profileImageUrl = '';
   Uint8List? _profileImageBytes;
@@ -80,6 +88,29 @@ class _ProfilePageState extends State<ProfilePage> {
     return 'Prefer not to tell';
   }
 
+  /// Matches a stored label to one of [_hairLengthOptions], or '' when it is
+  /// not something this screen can show.
+  String _hairLengthForUi(String dbValue) {
+    final trimmed = dbValue.trim();
+    if (trimmed.isEmpty) return '';
+    for (final option in _hairLengthOptions) {
+      if (option.toLowerCase() == trimmed.toLowerCase()) {
+        return option;
+      }
+    }
+
+    return '';
+  }
+
+  /// The 0-3 level the length check compares against.
+  int? _hairLengthLevel(String label) {
+    final index = _hairLengthOptions.indexWhere(
+      (option) => option.toLowerCase() == label.trim().toLowerCase(),
+    );
+
+    return index < 0 ? null : index;
+  }
+
   String _hairTextureForUi(String dbValue) {
     final value = dbValue.trim();
     if (value.isEmpty) {
@@ -102,6 +133,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String gender,
     required String hairTexture,
     required String profileImageUrl,
+    String hairLength = '',
     Map<String, String?>? bookingPreferences,
     Uint8List? profileImageBytes,
   }) {
@@ -118,6 +150,7 @@ class _ProfilePageState extends State<ProfilePage> {
       _accountAge = accountAge.isNotEmpty ? accountAge : '—';
       _gender = _genderForUi(gender);
       _hairTexture = _hairTextureForUi(hairTexture);
+      _hairLength = _hairLengthForUi(hairLength);
       _haircutsDone = haircutsDone;
       if (bookingPreferences != null) {
         _bookingPreferences = bookingPreferences;
@@ -232,6 +265,7 @@ class _ProfilePageState extends State<ProfilePage> {
     required String phone,
     required String gender,
     required String hairTexture,
+    required String hairLength,
     String? profileImageBase64,
   }) async {
     final payload = <String, dynamic>{
@@ -241,6 +275,7 @@ class _ProfilePageState extends State<ProfilePage> {
       'phone': phone,
       'gender': gender,
       'hairTexture': hairTexture,
+      'hairLength': hairLength,
     };
     if (profileImageBase64 != null && profileImageBase64.isNotEmpty) {
       payload['profile_image_base64'] = profileImageBase64;
@@ -297,6 +332,7 @@ class _ProfilePageState extends State<ProfilePage> {
                 : int.tryParse('${profile['haircutsDone']}') ?? 0,
             gender: profile['gender']?.toString().trim() ?? '',
             hairTexture: profile['hairTexture']?.toString().trim() ?? '',
+            hairLength: profile['hairLength']?.toString().trim() ?? '',
             profileImageUrl: profile['profileImage']?.toString().trim() ?? '',
             bookingPreferences: _bookingPreferencesFromProfile(profile),
           );
@@ -433,6 +469,14 @@ class _ProfilePageState extends State<ProfilePage> {
                 onChanged: (value) => setState(() => _hairTexture = value ?? _hairTextureOptions.first),
               ),
               const SizedBox(height: 16),
+              _dropdownCard(
+                label: 'Hair Length',
+                value: _hairLength.isEmpty ? _hairLengthOptions[1] : _hairLength,
+                options: _hairLengthOptions,
+                onChanged: (value) =>
+                    setState(() => _hairLength = value ?? _hairLengthOptions[1]),
+              ),
+              const SizedBox(height: 16),
               _editCard('Mobile Number', _phoneController, hint: 'Enter mobile number'),
               const SizedBox(height: 16),
               _infoCard('Haircuts Done', _haircutsDone.toString()),
@@ -551,6 +595,8 @@ class _ProfilePageState extends State<ProfilePage> {
       final newGender = _gender.trim().isEmpty ? 'Prefer not to tell' : _gender.trim();
       final newHairTexture =
           _hairTexture.trim().isEmpty ? _hairTextureOptions.first : _hairTexture.trim();
+      final newHairLength =
+          _hairLength.trim().isEmpty ? _hairLengthOptions[1] : _hairLength.trim();
 
       if (newFullName.isEmpty) {
         throw StateError('Full name is required.');
@@ -573,10 +619,17 @@ class _ProfilePageState extends State<ProfilePage> {
           phone: newPhone,
           gender: newGender,
           hairTexture: newHairTexture,
+          hairLength: newHairLength,
           profileImageBase64: profileImageBase64,
         );
 
         UserSession.fullName = newFullName;
+        // Persisted the same way the phone is, so the length check has an
+        // answer on the next app run without waiting for a scan.
+        unawaited(UserSession.savePreferredHairTexture(newHairTexture));
+        unawaited(
+          UserSession.savePreferredHairLengthLevel(_hairLengthLevel(newHairLength)),
+        );
 
         if (!mounted) return;
         _applyProfileData(
@@ -589,6 +642,7 @@ class _ProfilePageState extends State<ProfilePage> {
               : _haircutsDone,
           gender: saved['gender']?.toString().trim() ?? newGender,
           hairTexture: saved['hairTexture']?.toString().trim() ?? newHairTexture,
+          hairLength: saved['hairLength']?.toString().trim() ?? newHairLength,
           profileImageUrl: saved['profileImage']?.toString().trim() ?? _profileImageUrl,
           bookingPreferences: _bookingPreferencesFromProfile(saved),
           profileImageBytes: newProfileImageBytes ?? _profileImageBytes,

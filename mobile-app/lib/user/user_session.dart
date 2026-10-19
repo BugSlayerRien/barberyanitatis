@@ -6,12 +6,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 class UserSession {
   static const String _userCalibrationKey = 'user_hair_calibration';
   static const String _preferredHairTextureKey = 'preferred_hair_texture';
+  static const String _preferredHairLengthKey = 'preferred_hair_length_level';
   static const String _lastRecommendedVariantsKey = 'last_recommended_variant_ids';
   static const String _profilePhoneKey = 'profile_phone';
 
   static int? userId;
   /// Straight, Wavy, or Curly — set during onboarding and editable in profile.
   static String? preferredHairTexture;
+
+  /// Hair length as a level: 0 very short, 1 short, 2 medium, 3 long.
+  ///
+  /// Texture survived without a scan and length did not, so a customer who had
+  /// not scanned in this app run was treated as short-haired by default and
+  /// warned off every long style. The scan already writes the length to
+  /// user_profiles; nothing read it back.
+  static int? preferredHairLengthLevel;
   static String? fullName;
   static String? email;
   /// Profile phone number. Used to decide whether a cancellation needs to ask
@@ -299,6 +308,48 @@ class UserSession {
     return phone;
   }
 
+  /// The length to judge a style against when no scan is loaded.
+  ///
+  /// Null means genuinely unknown, which the caller treats as short -- the
+  /// safe reading, since it warns rather than waves a customer through.
+  static Future<int?> loadPreferredHairLengthLevel() async {
+    if (preferredHairLengthLevel != null) {
+      return preferredHairLengthLevel;
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final stored = prefs.getInt(_preferredHairLengthKey);
+      if (stored != null && stored >= 0 && stored <= 3) {
+        preferredHairLengthLevel = stored;
+      }
+    } catch (_) {
+      // Storage is a convenience; memory still answers for this run.
+    }
+    return preferredHairLengthLevel;
+  }
+
+  static Future<void> savePreferredHairLengthLevel(int? level) async {
+    if (level == null || level < 0 || level > 3) {
+      return;
+    }
+    preferredHairLengthLevel = level;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_preferredHairLengthKey, level);
+    } catch (_) {
+      // As above.
+    }
+  }
+
+  /// The length the app should judge by: this scan first, then the profile.
+  ///
+  /// A scan is a measurement of today; the profile is the last thing known
+  /// about this customer. Either beats assuming short.
+  static int get effectiveHairLengthLevel =>
+      (lastScan?['hairLengthLevel'] as num?)?.toInt() ??
+      preferredHairLengthLevel ??
+      1;
+
   static Future<void> savePreferredHairTexture(String texture) async {
     final normalized = _normalizeHairTexture(texture);
     if (normalized == null) {
@@ -507,6 +558,7 @@ class UserSession {
     lastQuota = null;
     _completedScanSnapshot = null;
     preferredHairTexture = null;
+    preferredHairLengthLevel = null;
     _cachedUserCalibration = null;
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_preferredHairTextureKey);
