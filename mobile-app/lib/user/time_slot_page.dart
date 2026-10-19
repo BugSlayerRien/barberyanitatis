@@ -61,6 +61,14 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
   /// this screen did not offer the choice.
   List<Map<String, dynamic>> _services = const [];
   bool _servicesLoading = true;
+
+  /// Extra services ticked on top of the haircut, by service_id.
+  ///
+  /// A perm is something you have *as well as* a haircut, not instead of one.
+  /// The first version of this screen offered them as radio buttons, so
+  /// choosing Perm silently dropped the haircut from the booking -- the
+  /// customer paid P500, the barber saw no haircut, and nobody was told.
+  final Set<int> _selectedExtras = <int>{};
   bool _loadingWeatherAdvice = false;
   String? _weatherSummary;
   /// Hour-of-day (0-23) -> rain probability % / temperature C for the selected
@@ -407,8 +415,10 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
 
   /// What the customer is booking, and what it costs.
   ///
-  /// A single service renders as a line rather than a one-option dropdown:
-  /// asking someone to choose between one thing is noise.
+  /// The haircut is stated, not offered: it is why they are here, and every
+  /// appointment on this channel includes it. Anything else the shop sells --
+  /// a perm, a treatment -- is a tick-box on top, because those are things
+  /// you have *as well as* a haircut.
   Widget _buildServicePicker() {
     if (_servicesLoading) {
       return const SizedBox(
@@ -422,36 +432,200 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
         ),
       );
     }
-    if (_services.isEmpty) return const SizedBox.shrink();
 
-    final selectedId = int.tryParse(
-      _defaultService?['service_id']?.toString() ?? '',
-    );
+    final base = _baseService;
+    if (base == null) return const SizedBox.shrink();
 
-    // One service is not a choice.
-    //
-    // The shop's standard cut is the default -- Exclusive Haircut here,
-    // Regular Haircut on the kiosk -- and a radio list of exactly one item
-    // asks the customer to decide something already decided. The picker earns
-    // its place only when the shop offers something else as well, such as a
-    // perm.
-    if (_services.length == 1) {
-      return _serviceSummary(_services.first);
-    }
+    final extras = _extraServices;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (final service in _services) ...[
-          _serviceOption(service, isSelected: _serviceId(service) == selectedId),
+        _serviceSummary(base),
+        if (extras.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          const Text(
+            'Add to this booking (optional)',
+            style: TextStyle(
+                color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 8),
+          for (final service in extras) ...[
+            _serviceExtra(service),
+            const SizedBox(height: 8),
+          ],
+          _totalRow(),
         ],
       ],
     );
   }
 
+  /// The running total, shown only when something can change it.
+  Widget _totalRow() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          const Text(
+            'Total',
+            style: TextStyle(
+                color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+          ),
+          Text(
+            '\u20b1${_bookingTotal.toStringAsFixed(0)}',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One optional extra, added to the haircut rather than replacing it.
+  Widget _serviceExtra(Map<String, dynamic> service) {
+    final id = _serviceId(service);
+    final checked = _selectedExtras.contains(id);
+    final duration = _serviceDuration(service);
+    final description = service['description']?.toString().trim() ?? '';
+
+    return Material(
+      color: checked ? const Color(0xFF1E1E1E) : const Color(0xFF141414),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          setState(() {
+            if (checked) {
+              _selectedExtras.remove(id);
+            } else {
+              _selectedExtras.add(id);
+            }
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: checked ? Colors.white : Colors.white12,
+              width: checked ? 1.4 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                checked ? Icons.check_box : Icons.check_box_outline_blank,
+                size: 19,
+                color: checked ? Colors.white : Colors.white38,
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      service['service_name']?.toString() ?? 'Service',
+                      style: TextStyle(
+                        color: checked ? Colors.white : Colors.white70,
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                    if (duration.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        duration,
+                        style: const TextStyle(color: Colors.white38, fontSize: 11.5),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                '+${_servicePrice(service)}',
+                style: TextStyle(
+                  color: checked ? Colors.white : Colors.white70,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   int _serviceId(Map<String, dynamic> service) =>
       int.tryParse(service['service_id']?.toString() ?? '') ?? 0;
+
+  double _servicePriceValue(Map<String, dynamic> service) =>
+      double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
+
+  /// The haircut every booking on this channel includes.
+  ///
+  /// Exclusive Haircut in the app, Regular Haircut at the kiosk. It is the
+  /// job the customer came for, so it is stated rather than offered.
+  Map<String, dynamic>? get _baseService {
+    if (_services.isEmpty) return null;
+    for (final service in _services) {
+      if ((service['category']?.toString() ?? '').toLowerCase() == 'haircut') {
+        return service;
+      }
+    }
+
+    return _services.first;
+  }
+
+  /// Everything else the shop offers on this channel -- a perm, a treatment.
+  List<Map<String, dynamic>> get _extraServices {
+    final base = _baseService;
+    if (base == null) return const [];
+    final baseId = _serviceId(base);
+
+    return _services
+        .where((service) => _serviceId(service) != baseId)
+        .toList(growable: false);
+  }
+
+  /// Every service this booking will be filed under: the haircut, then extras.
+  List<int> get _bookingServiceIds {
+    final base = _baseService;
+    if (base == null) return const [];
+
+    return [_serviceId(base), ..._selectedExtras];
+  }
+
+  double get _bookingTotal {
+    final base = _baseService;
+    var total = base == null ? 0.0 : _servicePriceValue(base);
+    for (final service in _extraServices) {
+      if (_selectedExtras.contains(_serviceId(service))) {
+        total += _servicePriceValue(service);
+      }
+    }
+
+    return total;
+  }
 
   String _servicePrice(Map<String, dynamic> service) {
     final price = double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
@@ -513,90 +687,6 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _serviceOption(Map<String, dynamic> service, {required bool isSelected}) {
-    final duration = _serviceDuration(service);
-    final description = service['description']?.toString().trim() ?? '';
-
-    return Material(
-      color: isSelected ? const Color(0xFF1E1E1E) : const Color(0xFF141414),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () {
-          setState(() => _defaultService = service);
-          UserSession.selectedServiceId = _serviceId(service);
-        },
-        child: Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? Colors.white : Colors.white12,
-              width: isSelected ? 1.4 : 1,
-            ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                isSelected
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_unchecked,
-                size: 18,
-                color: isSelected ? Colors.white : Colors.white38,
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      service['service_name']?.toString() ?? 'Service',
-                      style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
-                        fontSize: 14.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    if (description.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                    if (duration.isNotEmpty) ...[
-                      const SizedBox(height: 3),
-                      Text(
-                        duration,
-                        style: const TextStyle(color: Colors.white38, fontSize: 11.5),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: 10),
-              Text(
-                _servicePrice(service),
-                style: TextStyle(
-                  color: isSelected ? Colors.white : Colors.white70,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -1066,15 +1156,19 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                         return;
                       }
 
-                      final serviceId = int.tryParse(_defaultService!['service_id']?.toString() ?? '') ?? 0;
-                      if (serviceId <= 0) {
+                      // The haircut plus whatever was ticked on top. The
+                      // endpoint writes one appointment_details row per entry
+                      // and prices each from the database, so a perm is added
+                      // to the haircut rather than replacing it.
+                      final serviceIds = _bookingServiceIds;
+                      if (serviceIds.isEmpty || serviceIds.first <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(content: Text('Invalid service configuration.')),
                         );
                         return;
                       }
 
-                      final price = double.tryParse(_defaultService!['base_price']?.toString() ?? '') ?? 0;
+                      final price = _bookingTotal;
 
                       late final Map<String, dynamic> bookingData;
                       try {
@@ -1085,7 +1179,7 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           'appointmentDate': _formatDate(_activeDate),
                           'startTime': startTime,
                           'endTime': endTime,
-                          'serviceIDs': [serviceId],
+                          'serviceIDs': serviceIds,
                           'variantID': UserSession.selectedVariantId,
                           'specialInstructions': _instructionsForBooking(),
                           ...FaceScanService.bookingPreviewPayload(),
@@ -1118,7 +1212,9 @@ class _TimeSlotPageState extends State<TimeSlotPage> {
                           userId: UserSession.userId!,
                           variantId: UserSession.selectedVariantId!,
                           appointmentId: appointmentId,
-                          serviceId: serviceId,
+                          // The funnel tracks the haircut; extras are not
+                          // what the recommendation led to.
+                          serviceId: serviceIds.first,
                           estimatedMinutes: duration,
                           frontViewUrl: UserSession.selectedPreviewImages?['frontViewUrl'],
                           sideViewUrl: UserSession.selectedPreviewImages?['sideViewUrl'],

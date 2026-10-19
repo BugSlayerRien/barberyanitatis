@@ -55,15 +55,26 @@ class _KioskBarberPageState extends State<KioskBarberPage> {
     try {
       final services = await KioskApi.loadServices();
       if (services.isNotEmpty) {
+        // The walk-in haircut is the base for every kiosk queue entry --
+        // Regular Haircut, the walk-in price tier. Taking the first walk-in
+        // row of any category would make an extra the base the day the shop
+        // adds one, so the haircut is asked for by name.
+        //
+        // No picker here on purpose: the kiosk sells one service today, and a
+        // list of one asks the customer to decide something already decided.
         Map<String, dynamic>? walkInService;
+        Map<String, dynamic>? firstWalkIn;
         for (final row in services) {
           final map = Map<String, dynamic>.from(row as Map);
           final channel = (map['service_channel']?.toString().toLowerCase() ?? '');
-          if (channel == 'walk_in') {
+          if (channel != 'walk_in') continue;
+          firstWalkIn ??= map;
+          if ((map['category']?.toString().toLowerCase() ?? '') == 'haircut') {
             walkInService = map;
             break;
           }
         }
+        walkInService ??= firstWalkIn;
         walkInService ??= Map<String, dynamic>.from(services.first as Map);
         _serviceId = int.tryParse('${walkInService['service_id']}');
         if (_serviceId != null && _serviceId! > 0) {

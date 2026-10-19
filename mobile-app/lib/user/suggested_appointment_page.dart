@@ -50,6 +50,15 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   /// coming through here would ever see it, let alone book it.
   Map<String, dynamic>? _service;
 
+  /// Everything the shop sells on this channel, so extras can be offered.
+  List<Map<String, dynamic>> _allServices = const [];
+
+  /// Extras ticked on top of the haircut, by service_id.
+  ///
+  /// A perm is had *as well as* a haircut. Offering them as alternatives
+  /// dropped the haircut from the booking without telling anyone.
+  final Set<int> _selectedExtras = <int>{};
+
   @override
   void initState() {
     super.initState();
@@ -142,77 +151,133 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
   /// Fills [_service] for the summary line, without blocking the page.
   Future<void> _primeServiceForDisplay() async {
     final service = await _loadDefaultService();
+    final services = await _fetchServices();
     if (!mounted || service == null || service.isEmpty) return;
-    setState(() => _service = service);
+    setState(() {
+      _service = service;
+      _allServices = services ?? const [];
+    });
   }
 
-  /// Lets the customer change it without leaving the fast path.
+  /// Lets the customer add an extra without leaving the fast path.
+  ///
+  /// The haircut is not in this sheet: it is included in every appointment on
+  /// this channel, so there is nothing to decide about it.
   Future<void> _pickService() async {
-    final services = await _fetchServices();
-    if (!mounted || services == null || services.length < 2) return;
+    final extras = _extraServices;
+    if (extras.isEmpty) return;
 
-    final selectedId = UserSession.selectedServiceId;
-    final chosen = await showModalBottomSheet<Map<String, dynamic>>(
+    await showModalBottomSheet<void>(
       context: context,
       backgroundColor: const Color(0xFF141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(18, 18, 18, 10),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Choose a service',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(18, 18, 18, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Add to this booking',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
-            ),
-            for (final service in services)
-              ListTile(
-                title: Text(
-                  service['service_name']?.toString() ?? 'Service',
-                  style: const TextStyle(color: Colors.white, fontSize: 14.5),
-                ),
-                subtitle: Text(
-                  _serviceSubtitle(service),
-                  style: const TextStyle(color: Colors.white38, fontSize: 12),
-                ),
-                trailing: Text(
-                  _servicePrice(service),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Your haircut is already included.',
+                    style: TextStyle(color: Colors.white38, fontSize: 12),
                   ),
                 ),
-                leading: Icon(
-                  int.tryParse(service['service_id']?.toString() ?? '') == selectedId
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: Colors.white70,
-                  size: 20,
-                ),
-                onTap: () => Navigator.of(ctx).pop(service),
               ),
-            const SizedBox(height: 10),
-          ],
+              for (final service in extras)
+                CheckboxListTile(
+                  value: _selectedExtras.contains(_serviceId(service)),
+                  onChanged: (ticked) {
+                    final id = _serviceId(service);
+                    setState(() {
+                      if (ticked == true) {
+                        _selectedExtras.add(id);
+                      } else {
+                        _selectedExtras.remove(id);
+                      }
+                    });
+                    setSheetState(() {});
+                  },
+                  controlAffinity: ListTileControlAffinity.leading,
+                  checkColor: Colors.black,
+                  activeColor: Colors.white,
+                  title: Text(
+                    service['service_name']?.toString() ?? 'Service',
+                    style: const TextStyle(color: Colors.white, fontSize: 14.5),
+                  ),
+                  subtitle: Text(
+                    _serviceSubtitle(service),
+                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                  ),
+                  secondary: Text(
+                    '+${_servicePrice(service)}',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 10),
+            ],
+          ),
         ),
       ),
     );
+  }
 
-    if (!mounted || chosen == null) return;
-    setState(() => _service = chosen);
-    UserSession.selectedServiceId =
-        int.tryParse(chosen['service_id']?.toString() ?? '');
+  int _serviceId(Map<String, dynamic> service) =>
+      int.tryParse(service['service_id']?.toString() ?? '') ?? 0;
+
+  double _servicePriceValue(Map<String, dynamic> service) =>
+      double.tryParse(service['base_price']?.toString() ?? '') ?? 0;
+
+  /// Everything that is not the haircut.
+  List<Map<String, dynamic>> get _extraServices {
+    final base = _service;
+    if (base == null) return const [];
+    final baseId = _serviceId(base);
+
+    return _allServices
+        .where((service) => _serviceId(service) != baseId)
+        .toList(growable: false);
+  }
+
+  List<int> get _bookingServiceIds {
+    final base = _service;
+    if (base == null) return const [];
+
+    return [_serviceId(base), ..._selectedExtras];
+  }
+
+  double get _bookingTotal {
+    final base = _service;
+    var total = base == null ? 0.0 : _servicePriceValue(base);
+    for (final service in _extraServices) {
+      if (_selectedExtras.contains(_serviceId(service))) {
+        total += _servicePriceValue(service);
+      }
+    }
+
+    return total;
   }
 
   String _servicePrice(Map<String, dynamic> service) {
@@ -237,6 +302,11 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
     if (service == null) return const SizedBox.shrink();
 
     final subtitle = _serviceSubtitle(service);
+    final extras = _extraServices;
+    final chosen = extras
+        .where((e) => _selectedExtras.contains(_serviceId(e)))
+        .map((e) => e['service_name']?.toString() ?? 'Extra')
+        .toList();
 
     return Padding(
       padding: const EdgeInsets.only(top: 14),
@@ -268,7 +338,14 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                      if (subtitle.isNotEmpty) ...[
+                      if (chosen.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'with ${chosen.join(', ')}',
+                          style: const TextStyle(
+                              color: AppBrand.accent, fontSize: 11.5),
+                        ),
+                      ] else if (subtitle.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
                           subtitle,
@@ -280,18 +357,20 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
                   ),
                 ),
                 Text(
-                  _servicePrice(service),
+                  '\u20b1${_bookingTotal.toStringAsFixed(0)}',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14.5,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Change',
-                  style: TextStyle(color: AppBrand.accent, fontSize: 12.5),
-                ),
+                if (extras.isNotEmpty) ...[
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Add',
+                    style: TextStyle(color: AppBrand.accent, fontSize: 12.5),
+                  ),
+                ],
               ],
             ),
           ),
@@ -418,7 +497,9 @@ class _SuggestedAppointmentPageState extends State<SuggestedAppointmentPage> {
             'appointmentDate': appointmentDate,
             'startTime': startTime,
             'endTime': endTime,
-            'serviceIDs': [serviceId],
+            // Haircut plus any extras ticked; the endpoint prices each
+            // from the database and writes one detail row per service.
+            'serviceIDs': _bookingServiceIds,
             'variantID': UserSession.selectedVariantId,
             // This screen has no note field, but a grow-out booking still has
             // to reach the barber: it is the fastest route from the warning to
